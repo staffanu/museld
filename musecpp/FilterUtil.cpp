@@ -2,7 +2,6 @@
 // Created by staffanu on 4/10/23.
 //
 
-#include <math.h>
 #include <numeric>
 #include <cassert>
 #include "MuseTypes.h"
@@ -39,14 +38,12 @@ void FilterUtil::ConvertSampleRate2to3(size_t input_size, DecoderInt const *inpu
             //cout << "(" << l << "," << (3 * l - hiFreqIx + s_N2to3) << ")";
         }
         //cout << endl;
-        if (s < 0)
-            s = 0;
-        output[i] = (uint32_t)(s * 3);
+        output[i] = (DecoderInt)clamp((int)(s * 3), 0, 255);
     }
 }
 
-array<array<double, FilterUtil::s_diamond_filter_width>, FilterUtil::s_diamond_filter_height>
-FilterUtil::s_diamond_filter = []() constexpr{
+array<array<int8_t, FilterUtil::s_diamond_filter_width>, FilterUtil::s_diamond_filter_height>
+FilterUtil::s_diamond_filter = []() constexpr {
     array<array<double, FilterUtil::s_diamond_filter_width>, FilterUtil::s_diamond_filter_height> arr = {
             -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
             0.000205, 0.000474, -0.005036, -0.012591, 0.010491, -0.012591, -0.005036, 0.000474, 0.000205,
@@ -61,5 +58,11 @@ FilterUtil::s_diamond_filter = []() constexpr{
         return accumulate(rhs.cbegin(), rhs.cend(), lhs);
     });
     assert(fabs(sum - 1.0) < 1e-5);
-    return arr;
+
+    array<array<int8_t, FilterUtil::s_diamond_filter_width>, FilterUtil::s_diamond_filter_height> filter{};
+    for (int i = 0; i < FilterUtil::s_diamond_filter_height; i++)
+        for (int j = 0; j < FilterUtil::s_diamond_filter_width; j++)
+            filter[i][j] = (int8_t)(arr[i][j] * 256);
+
+    return filter;
 }();

@@ -19,7 +19,7 @@ void print_max_and_avg(string header, DecoderInt const *data, size_t length) {
         sum += data[i];
         m = max(m, data[i]);
     }
-    cout << header << ": max: " << m << ", avg: " << (sum / length) << endl;
+    cout << header << ": max: " << (int)m << ", avg: " << (sum / length) << endl;
 }
 
 void VideoDecoder::DecodeSingleField(FieldBufferView &field, Mat &field_out) {
@@ -36,24 +36,20 @@ void VideoDecoder::DecodeSingleField(FieldBufferView &field, Mat &field_out) {
         int phase = (inter_frame_phase + row + 1) % 2; // notice row is even when line no is odd (row 0 is really line 47/609)
         for (int col = 0; col < MUSE_Y_BUF_WIDTH; col++) {
             interpolated32[row][col * 2 + phase] = frame_buffer_Y(row, col);
-            interpolated32[row][col * 2 + 1 - phase] = 0;
+            // interpolated32[row][col * 2 + 1 - phase] = 0;
         }
     }
 
-    DecoderInt filtered_interpolated32[MUSE_Y_BUF_HEIGHT][MUSE_Y_BUF_WIDTH * 2];
-    FilterUtil::FilterImageDiamond(interpolated32, filtered_interpolated32);
+    FilterUtil::FilterImageDiamond(inter_frame_phase, interpolated32);
 
-//    print_max_and_avg("interpolated32", interpolated32[0], MUSE_Y_BUF_HEIGHT * MUSE_Y_BUF_WIDTH * 2);
-//    print_max_and_avg("filtered_interpolated32", filtered_interpolated32[0], MUSE_Y_BUF_HEIGHT * MUSE_Y_BUF_WIDTH * 2);
-
-    DecoderInt output[MUSE_Y_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH * 3];
-    memset(output, 0, MUSE_Y_BUF_HEIGHT * 2 * MUSE_Y_BUF_WIDTH * 3 * sizeof(DecoderInt));
+    print_max_and_avg("interpolated32", interpolated32[0], MUSE_Y_BUF_HEIGHT * MUSE_Y_BUF_WIDTH * 2);
 
     // convert sample rate from 32.4 MHz to 48.6 MHz
     for (int row = 0; row < MUSE_Y_BUF_HEIGHT; row++)
-        FilterUtil::ConvertSampleRate2to3(MUSE_Y_BUF_WIDTH * 2, filtered_interpolated32[row], output[2 * row + 1 - field_parity]);
+        FilterUtil::ConvertSampleRate2to3(MUSE_Y_BUF_WIDTH * 2, interpolated32[row],
+                                          &field_out.data[(2 * row + 1 - field_parity) * MUSE_Y_BUF_WIDTH * 3]);
 
-//    print_max_and_avg("output", output[0], MUSE_Y_BUF_HEIGHT * 2 * MUSE_Y_BUF_WIDTH * 3);
+    // print_max_and_avg("48 MHz", field_out.data, MUSE_Y_BUF_HEIGHT * 2 * MUSE_Y_BUF_WIDTH * 3);
 
     // probably not the best interpolation of missing lines but looks more or less ok
     for (int row = 0; row < MUSE_Y_BUF_HEIGHT; row++) {
@@ -61,13 +57,11 @@ void VideoDecoder::DecodeSingleField(FieldBufferView &field, Mat &field_out) {
         for (int col = 0; col < MUSE_Y_BUF_WIDTH * 3; col++) {
             int row_above = max(empty_row - 1, 0);
             int row_below = min(empty_row + 1, MUSE_Y_BUF_HEIGHT * 2 - 1);
-            output[empty_row][col] = (output[row_above][col] + output[row_below][col]) / 2;
+            field_out.data[empty_row * MUSE_Y_BUF_WIDTH * 3 + col] =
+                    (field_out.data[row_above * MUSE_Y_BUF_WIDTH * 3 + col] +
+                    field_out.data[row_below * MUSE_Y_BUF_WIDTH * 3 + col]) / 2;
         }
     }
 
-//    print_max_and_avg("output", output[0], MUSE_Y_BUF_HEIGHT * 2 * MUSE_Y_BUF_WIDTH * 3);
-
-    for (int row = 0; row < MUSE_Y_BUF_HEIGHT * 2; row++)
-        for (int col = 0; col < MUSE_Y_BUF_WIDTH * 3; col++)
-            field_out.data[row * 3 * MUSE_Y_BUF_WIDTH + col] = output[row][col] / MUSE_MULT;
+    // print_max_and_avg("Output", field_out.data, MUSE_Y_BUF_HEIGHT * 2 * MUSE_Y_BUF_WIDTH * 3);
 }
