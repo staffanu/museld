@@ -32,20 +32,20 @@ void FilterUtil::FilterImageDiamond(DecoderInt const (&input)[height][width], De
     constexpr int H = s_diamond_filter_height / 2;
     constexpr int W = s_diamond_filter_width / 2;
 
-    double filter[s_diamond_filter_height][s_diamond_filter_width];
+    int8_t filter[s_diamond_filter_height][s_diamond_filter_width];
     for (int i = 0; i < s_diamond_filter_height; i++)
         for (int j = 0; j < s_diamond_filter_width; j++)
-            filter[i][j] = s_diamond_filter[i][j];
+            filter[i][j] = (int8_t)(s_diamond_filter[i][j] * 256);
 
     for (int row = 0; row < height; row++)
         for (int col = 0; col < width; col++) {
-            double s = 0;
-            for (int i = -W; i <= W; i++)
-                for (int j = -H; j <= H; j++)
-                    if (row + i >= 0 && row + i < height && col + j >= 0 && col + j < width)
-                        s += input[row + i][col + j] * filter[i + W][j + H];
-            s = std::clamp(s, 0.0, 255.99 * MUSE_MULT);
-            output[row][col] = (DecoderInt)(s * 2);
+            int16_t s = 0;
+            for (int i = -H; i <= H; i++)
+                for (int j = -W; j <= W; j++)
+                    if (row + i >= 0 && row + i < height && col + j >= 0 && col + j < width) {
+                        s += (int16_t)input[row + i][col + j] * filter[i + H][j + W];
+                    }
+            output[row][col] = (DecoderInt)(std::clamp(s / 256 * 2, 0, 256 * MUSE_MULT - 1));
         }
 }
 

@@ -18,12 +18,13 @@
 using namespace Eigen;
 using namespace std;
 
-bool read_shorts_big_endian_to_buffer(ifstream &input, DecoderInt *out, int n, pair<double, double> eq) {
-    input.read(reinterpret_cast<char *>(out), n * 2);
+bool read_shorts_big_endian_to_buffer(ifstream &input, uint16_t *input_buffer, DecoderInt *out, int n, pair<double, double> eq) {
+    input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(uint16_t));
     for (int i = 0; i < n; i++) {
-        uint16_t v = ntohs(out[i]);
-        uint16_t equalized_v = min((uint16_t)((v - eq.second) / eq.first), (uint16_t)(256 * MUSE_INPUT_MULT - 1));
-        out[i] = (DecoderInt)(equalized_v * MUSE_MULT / MUSE_INPUT_MULT);
+        uint16_t v = ntohs(input_buffer[i]);
+        uint16_t equalized_v = (DecoderInt)clamp(((double)v / MUSE_INPUT_MULT * MUSE_MULT - eq.second) / eq.first,
+                                                 0.0, 255.99 * MUSE_MULT);
+        out[i] = equalized_v;
     }
     return input.good();
 }
@@ -31,9 +32,9 @@ bool read_shorts_big_endian_to_buffer(ifstream &input, DecoderInt *out, int n, p
 pair<int, pair<double, double>> compute_initial_skip(string_view filename) {
     ifstream input(static_cast<string>(filename).c_str(), ios::binary | ios::in);
     input.exceptions(ifstream::badbit);
-    vector<DecoderInt> buffer(480 * 1125 * sizeof(DecoderInt)); // two frames of data
-    read_shorts_big_endian_to_buffer(input, buffer.data(), 480 * 1125 * 2, pair(1.0, 0.0));
-    buffer.resize(480 * 1125 * sizeof(DecoderInt));
+    uint16_t input_buffer[480 * 1125 * 2 * sizeof(uint16_t)];
+    vector<DecoderInt> buffer(480 * 1125 * 2); // two frames of data
+    read_shorts_big_endian_to_buffer(input, input_buffer, buffer.data(), 480 * 1125 * 2, pair(1.0, 0.0));
 
     auto sorted(buffer);
     sort(sorted.begin(), sorted.end());
@@ -103,11 +104,12 @@ void process_file(string_view filename) {
 
     ifstream input(static_cast<string>(filename).c_str(), ios::binary | ios::in);
     input.exceptions(ifstream::badbit);
+    uint16_t input_buffer[480 * 1125 * sizeof(uint16_t)];
 
     {
         vector<DecoderInt> skip_buffer(samples_to_skip);
         cout << "Skipping " << samples_to_skip << " initial samples" << endl;
-        read_shorts_big_endian_to_buffer(input, skip_buffer.data(), samples_to_skip, pair(1.0, 0.0));
+        read_shorts_big_endian_to_buffer(input, input_buffer, skip_buffer.data(), samples_to_skip, pair(1.0, 0.0));
     }
 
     auto video_decoder = VideoDecoder();
@@ -119,7 +121,7 @@ void process_file(string_view filename) {
     auto t0 = chrono::high_resolution_clock::now();
     DecoderInt *frame_mem;
     while (frame_mem = new DecoderInt[1125 * 480],
-            read_shorts_big_endian_to_buffer(input, frame_mem, 480 * 1125, eq)) {
+            read_shorts_big_endian_to_buffer(input, input_buffer, frame_mem, 480 * 1125, eq)) {
         auto *frame_buffer = new FrameBuffer(++frameNo, frame_mem);
 
         // Update control data from the previous fields

@@ -15,8 +15,8 @@
 #define MUSE_INPUT_MULT 4
 
 // the decoder itself works on the same type as the input currently
-typedef uint16_t DecoderInt;
-#define MUSE_MULT 4
+typedef uint8_t DecoderInt;
+#define MUSE_MULT 1
 typedef Eigen::Array<DecoderInt, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> FrameMatrix;
 typedef Eigen::Map<FrameMatrix, Eigen::Unaligned, Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic>> MappedFrameMatrix;
 
