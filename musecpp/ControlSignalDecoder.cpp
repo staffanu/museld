@@ -33,9 +33,9 @@ ControlSignalDecoder::ControlSignalDecoder(const MappedFrameMatrix &data) {
         for (int col = 7; col < 87; col += 16) { // start of each encoded 4 bit group
             Vector<int, 8> bits;
             for (int bit_ix = 0; bit_ix < 8; bit_ix++) {
-                DecoderInt d1 = data(row, col + 2 * bit_ix);
-                DecoderInt d2 = data(row, col + 2 * bit_ix + 1);
-                bits[bit_ix] = d1 + d2 > 256 * MUSE_MULT ? 1 : 0;
+                uint8_t d1 = data(row, col + 2 * bit_ix);
+                uint8_t d2 = data(row, col + 2 * bit_ix + 1);
+                bits[bit_ix] = d1 + d2 > 256 ? 1 : 0;
             }
 
             Vector4i syndrome = (s_H * bits).unaryExpr([](const int &x) { return x % 2; });
