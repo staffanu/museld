@@ -11,15 +11,15 @@
 class FilterUtil {
 public:
     // output size is 3 * input_size / 2
-    static void ConvertSampleRate2to3(size_t input_size, DecoderInt const *input, DecoderInt *output);
+    static void ConvertSampleRate2to3(size_t input_size, uint8_t const *input, uint8_t *output);
 
     // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
     template <size_t height, size_t width>
-    static void FilterImageDiamond(int phase, DecoderInt (&buffer)[height][width]);
+    static void FilterImageDiamond(int phase, uint8_t (&buffer)[height][width]);
 
 private:
     static constexpr int s_N2to3 = 9; // total 2 * 9 + 1 = 19 coefficients
-    static std::array<double, FilterUtil::s_N2to3 * 2 + 1> s_filter_2to3;
+    static std::array<int8_t, FilterUtil::s_N2to3 * 2 + 1> s_filter_2to3;
 
     static constexpr int s_diamond_filter_height = 7;
     static constexpr int s_diamond_filter_width = 9;
@@ -27,7 +27,7 @@ private:
 };
 
 template<size_t height, size_t width>
-void FilterUtil::FilterImageDiamond(int phase, DecoderInt (&buffer)[height][width]) {
+void FilterUtil::FilterImageDiamond(int phase, uint8_t (&buffer)[height][width]) {
     constexpr int H = s_diamond_filter_height / 2;
     constexpr int W = s_diamond_filter_width / 2;
 
@@ -40,12 +40,12 @@ void FilterUtil::FilterImageDiamond(int phase, DecoderInt (&buffer)[height][widt
             int i_max = std::min(H, (int)height - row - 1);
             for (int i = i_start; i <= i_max; i++) {
                 int j_start = i % 2 == 0 ? -W_odd : -W;
-                int j_max = std::min(W, (int) width - col - 1);
+                int j_max = std::min(W, (int)width - col - 1);
                 for (int j = j_start; j <= j_max; j += 2)
                     if (col + j >= 0)
-                        s += (int16_t) buffer[row + i][col + j] * s_diamond_filter[i + H][j + W];
+                        s += (int16_t)(buffer[row + i][col + j] * s_diamond_filter[i + H][j + W]);
             }
-            buffer[row][col] = (DecoderInt)(std::clamp(s / 256 * 2, 0, 256 * MUSE_MULT - 1));
+            buffer[row][col] = (uint8_t)(std::clamp(s / 256 * 2, 0, 255));
         }
 }
 

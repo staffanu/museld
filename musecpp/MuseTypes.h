@@ -10,19 +10,15 @@
 #include "Eigen/Dense"
 
 // input file currently uses shorts in the range 0...1023
-// If MUSE_MULT and MUSE_INPUT_MULT are different we compensate after performing eq on the input
-// (transforming it to the proper range).
 #define MUSE_INPUT_MULT 4
 
-// the decoder itself works on the same type as the input currently
-typedef uint8_t DecoderInt;
-#define MUSE_MULT 1
-typedef Eigen::Array<DecoderInt, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> FrameMatrix;
+typedef Eigen::Array<uint8_t, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> FrameMatrix;
 typedef Eigen::Map<FrameMatrix, Eigen::Unaligned, Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic>> MappedFrameMatrix;
 
 #define FRAME_STRIDE Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic>(480, 1)
-#define MUSE_Y_BUF_HEIGHT 516
+#define MUSE_BUF_HEIGHT 516
 #define MUSE_Y_BUF_WIDTH 374
+#define MUSE_C_BUF_WIDTH 94
 
 namespace std
 {

@@ -9,7 +9,7 @@
 
 using namespace std;
 
-array<double, FilterUtil::s_N2to3 * 2 + 1> FilterUtil::s_filter_2to3 = []() constexpr {
+array<int8_t, FilterUtil::s_N2to3 * 2 + 1> FilterUtil::s_filter_2to3 = []() constexpr {
     array<double, FilterUtil::s_N2to3 * 2 + 1> arr = {
             // cutoff 0.25, transition 0.05, sampling freq 1, Rectangular: 19 coeffs (25 non-zero).  Looks +/- 9 samples in each direction
             0.034286805542972851, -0.000000000000000019, -0.044083035698107946, 0.000000000000000019, 0.061716249977351118,-0.000000000000000019, -0.102860416628918538,
@@ -17,10 +17,15 @@ array<double, FilterUtil::s_N2to3 * 2 + 1> FilterUtil::s_filter_2to3 = []() cons
             0.061716249977351118, 0.000000000000000019, -0.044083035698107946, -0.000000000000000019, 0.034286805542972851
     };
     assert(fabs(accumulate(arr.cbegin(), arr.cend(), 0.0) - 1.0) < 1e-10);
-    return arr;
+    assert(all_of(arr.cbegin(), arr.cend(), [](double d) -> bool { return fabs(d) < 0.5; }));
+
+    array<int8_t, FilterUtil::s_N2to3 * 2 + 1> filter{};
+    for (int i = 0; i < arr.size(); i++)
+        filter[i] = (int8_t)(arr[i] * 256);
+    return filter;
 }();
 
-void FilterUtil::ConvertSampleRate2to3(size_t input_size, DecoderInt const *input, DecoderInt *output) {
+void FilterUtil::ConvertSampleRate2to3(size_t input_size, uint8_t const *input, uint8_t *output) {
     assert(input_size % 2 == 0);
     // Convert to 3/2 of the input sample rate by inserting two zeros between samples to up-sample 3x,
     // low-pass filter at 0.5 times the new Nyquist rate and then select every 2nd sample
@@ -28,17 +33,16 @@ void FilterUtil::ConvertSampleRate2to3(size_t input_size, DecoderInt const *inpu
     // We do not represent the up-sampled signal explicitly, and also do not represent the entire filter output
     // since we only need every 2nd sample
 
-    for (int i = 0; i < input_size * 3 / 2; i++) {
+    for (int hiFreqIx = 0; hiFreqIx < input_size * 3; hiFreqIx +=2) {
         //cout << "Output index: " << i << ": ";
-        int hiFreqIx = i * 2; // index of the output in the hi frequency lattice
-        double s = 0;
-        for (int l = (hiFreqIx - s_N2to3 + 2) / 3; l <= (hiFreqIx + s_N2to3) / 3 ; l++) {
-            DecoderInt v = l >= 0 && l < input_size ? input[l] : 128 * MUSE_MULT;
-            s += s_filter_2to3[3 * l - hiFreqIx + s_N2to3] * v;
+        int32_t s = 0;
+        for (int l = (hiFreqIx - s_N2to3 + 2) / 3; l <= (hiFreqIx + s_N2to3) / 3; l++) {
+            uint8_t v = l >= 0 && l < input_size ? input[l] : 128;
+            s += v * s_filter_2to3[3 * l - hiFreqIx + s_N2to3];
             //cout << "(" << l << "," << (3 * l - hiFreqIx + s_N2to3) << ")";
         }
         //cout << endl;
-        output[i] = (DecoderInt)clamp((int)(s * 3), 0, 255);
+        output[hiFreqIx / 2] = (uint8_t)clamp(s * 3 / 256, 0, 255);
     }
 }
 

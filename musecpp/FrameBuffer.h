@@ -13,19 +13,23 @@
 
 class FrameBuffer {
 public:
-    FrameBuffer(int frame_no, DecoderInt *data);
+    FrameBuffer(int frame_no, uint8_t *data);
     ~FrameBuffer();
 
-    DecoderInt *data();
+    uint8_t *data();
     std::pair<double, double> estimate_eq();
     void ApplyInverseTransmissionGamma();
     FieldBufferView &get_field(int parity);
 
 private:
-    int _frame_no;
-    DecoderInt *_data;
-    Eigen::Map<FrameMatrix> _frame_mem;
-    std::vector<FieldBufferView> _fields;
+    static std::pair<double, double> linear_regression(std::vector<std::pair<double, double>> const &values);
+    static std::array<uint8_t, 256> m_inv_gamma_Y;
+    static std::array<uint8_t, 256> m_inv_gamma_C;
+
+    int m_frame_no;
+    uint8_t *m_data;
+    Eigen::Map<FrameMatrix> m_frame_mem;
+    std::vector<FieldBufferView> m_fields;
 };
 
 #endif //MUSECPP_FRAMEBUFFER_H

@@ -18,12 +18,12 @@
 using namespace Eigen;
 using namespace std;
 
-bool read_shorts_big_endian_to_buffer(ifstream &input, uint16_t *input_buffer, DecoderInt *out, int n, pair<double, double> eq) {
+bool read_shorts_big_endian_to_buffer(ifstream &input, uint16_t *input_buffer, uint8_t *out, size_t n, pair<double, double> eq) {
     input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(uint16_t));
     for (int i = 0; i < n; i++) {
         uint16_t v = ntohs(input_buffer[i]);
-        uint16_t equalized_v = (DecoderInt)clamp(((double)v / MUSE_INPUT_MULT * MUSE_MULT - eq.second) / eq.first,
-                                                 0.0, 255.99 * MUSE_MULT);
+        uint16_t equalized_v = (uint8_t)clamp(((double)v / MUSE_INPUT_MULT - eq.second) / eq.first,
+                                                 0.0, 255.0);
         out[i] = equalized_v;
     }
     return input.good();
@@ -33,19 +33,19 @@ pair<int, pair<double, double>> compute_initial_skip(string_view filename) {
     ifstream input(static_cast<string>(filename).c_str(), ios::binary | ios::in);
     input.exceptions(ifstream::badbit);
     uint16_t input_buffer[480 * 1125 * 2 * sizeof(uint16_t)];
-    vector<DecoderInt> buffer(480 * 1125 * 2); // two frames of data
+    vector<uint8_t> buffer(480 * 1125 * 2); // two frames of data
     read_shorts_big_endian_to_buffer(input, input_buffer, buffer.data(), 480 * 1125 * 2, pair(1.0, 0.0));
 
     auto sorted(buffer);
     sort(sorted.begin(), sorted.end());
     auto y1 = (int)sorted[500];
     auto y2 = (int)sorted[480 * 1125 * 2 - 500];
-    pair<double, double> eq = {(y2 - y1) / (MUSE_MULT * (239.0 - 16.0)), y1 - MUSE_MULT * 16.0};
+    pair<double, double> eq = {(y2 - y1) / (239.0 - 16.0), y1 - 16.0};
     cout << "Initial eq: " << eq.first << ", " << eq.second << endl;
 
     auto equalized(buffer);
-    for (DecoderInt &it: equalized)
-        it = (DecoderInt)(((double) it - eq.second) / eq.first);
+    for (uint8_t &it: equalized)
+        it = (uint8_t)(((double) it - eq.second) / eq.first);
 
     // checks if the line starting at off has a positive or a negative sync
     auto isSyncGood = [&equalized](int off, bool expectedPositive) {
@@ -107,7 +107,7 @@ void process_file(string_view filename) {
     uint16_t input_buffer[480 * 1125 * sizeof(uint16_t)];
 
     {
-        vector<DecoderInt> skip_buffer(samples_to_skip);
+        vector<uint8_t> skip_buffer(samples_to_skip);
         cout << "Skipping " << samples_to_skip << " initial samples" << endl;
         read_shorts_big_endian_to_buffer(input, input_buffer, skip_buffer.data(), samples_to_skip, pair(1.0, 0.0));
     }
@@ -119,8 +119,8 @@ void process_file(string_view filename) {
 
     int frameNo = 0;
     auto t0 = chrono::high_resolution_clock::now();
-    DecoderInt *frame_mem;
-    while (frame_mem = new DecoderInt[1125 * 480],
+    uint8_t *frame_mem;
+    while (frame_mem = new uint8_t[1125 * 480],
             read_shorts_big_endian_to_buffer(input, input_buffer, frame_mem, 480 * 1125, eq)) {
         auto *frame_buffer = new FrameBuffer(++frameNo, frame_mem);
 
@@ -143,11 +143,12 @@ void process_file(string_view filename) {
         }
 
         auto eq_estimate = frame_buffer->estimate_eq();
-        //eq = { eq.first * 0.9 + eq_estimate.first * 0.1, eq.second * 0.9 + eq_estimate.second * 0.1 };
+        eq = { eq.first * 0.9 + eq_estimate.first * 0.1, eq.second * 0.9 + eq_estimate.second * 0.1 };
+        cout << "eq: " << eq.first << ", " << eq.second << endl;
 
         frame_buffer->ApplyInverseTransmissionGamma();
 
-        cv::Mat fieldMat(MUSE_Y_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3, CV_8U);
+        cv::Mat fieldMat(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3, CV_8U);
 
         auto view0 = frame_buffers.front()->get_field(0);
         auto view1 = frame_buffers.front()->get_field(1);
