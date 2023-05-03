@@ -58,11 +58,6 @@ void VideoDecoder::DecodeSingleField(FieldBufferView &field, Mat &field_out) {
     DecodeSingleFieldC(field, field_C_r, field_C_b);
 
     CombineYandRB(field_Y, field_C_r, field_C_b, field_out);
-//    for (int row = 0; row < MUSE_BUF_HEIGHT * 2; row++) {
-//        for (int col = 0; col < MUSE_Y_BUF_WIDTH * 3; col++) {
-//            field_out.data[row * MUSE_Y_BUF_WIDTH * 3 + col] = field_Y[row][col];
-//        }
-//    }
 }
 
 void VideoDecoder::DecodeSingleFieldY(FieldBufferView &field,
@@ -112,8 +107,8 @@ void VideoDecoder::DecodeSingleFieldC(FieldBufferView &field,
 
     uint8_t intermediate_r[MUSE_BUF_HEIGHT][MUSE_Y_BUF_WIDTH];
     uint8_t intermediate_b[MUSE_BUF_HEIGHT][MUSE_Y_BUF_WIDTH];
-    memset(intermediate_r, 128, sizeof(intermediate_r));
-    memset(intermediate_b, 128, sizeof(intermediate_b));
+    memset(intermediate_r, 0, sizeof(intermediate_r));
+    memset(intermediate_b, 0, sizeof(intermediate_b));
 
     for (int row = 0; row < MUSE_BUF_HEIGHT; row++) {
         int line = row + 43 + field_parity * 562; // line no as defined in MUSE; we could remove the second term since it is always even
@@ -128,8 +123,8 @@ void VideoDecoder::DecodeSingleFieldC(FieldBufferView &field,
     //int size = 1;
     //show_buffer(0, MUSE_Y_BUF_WIDTH / size, 0, MUSE_BUF_HEIGHT / size, intermediate_r, intermediate_b);
 
-    FilterUtil::FilterImage(FilterUtil::s_color_filter, intermediate_r, out_r, 128, 8);
-    FilterUtil::FilterImage(FilterUtil::s_color_filter, intermediate_b, out_b, 128, 8);
+    FilterUtil::FilterImage2(FilterUtil::s_color_filter, intermediate_r, out_r, 128, 8);
+    FilterUtil::FilterImage2(FilterUtil::s_color_filter, intermediate_b, out_b, 128, 8);
 
     //show_buffer(0, MUSE_Y_BUF_WIDTH / size, 0, MUSE_BUF_HEIGHT / size, out_r, out_b);
 }

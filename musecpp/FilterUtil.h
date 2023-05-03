@@ -7,6 +7,9 @@
 
 #include <cstdint>
 #include <array>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
+#include <iostream>
 
 class FilterUtil {
 public:
@@ -19,6 +22,13 @@ public:
 
     template<size_t filter_height, size_t filter_width, size_t height, size_t width>
     static void FilterImage(
+            std::array<std::array<int8_t, filter_width>, filter_height> filter,
+            const uint8_t (&in)[height][width],
+            uint8_t (&out)[height][width],
+            uint8_t value_offset, // the value of "zero" -- used so that pixels at the edges are not biased
+            uint16_t multiplier);
+    template<size_t filter_height, size_t filter_width, size_t height, size_t width>
+    static void FilterImage2(
             std::array<std::array<int8_t, filter_width>, filter_height> filter,
             const uint8_t (&in)[height][width],
             uint8_t (&out)[height][width],
@@ -83,6 +93,28 @@ void FilterUtil::FilterImage(
             }
             out[row][col] = (uint8_t)(std::clamp(s * multiplier / 256 + value_offset, 0, 255));
         }
+}
+
+template<size_t filter_height, size_t filter_width, size_t height, size_t width>
+void FilterUtil::FilterImage2(
+        std::array<std::array<int8_t, filter_width>, filter_height> filter,
+        const uint8_t (&in)[height][width],
+        uint8_t (&out)[height][width],
+        uint8_t value_offset,
+        uint16_t multiplier) {
+    cv::Mat byte_kernel(FilterUtil::s_color_filter_height, FilterUtil::s_color_filter_width,
+                       CV_8UC1, FilterUtil::s_color_filter.data());
+    cv::Mat kernel;
+    byte_kernel.convertTo(kernel, CV_16FC1, multiplier / 256.0, 0);
+    cv::Mat input(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH, CV_8UC1, (uint8_t *)in);
+    cv::Mat out_mat;
+    filter2D(input, out_mat, -1, kernel, cv::Point(-1, -1), 0, cv::BORDER_REPLICATE);
+
+    for (int row = 0; row < MUSE_BUF_HEIGHT; row++) {
+        auto *mat_row = out_mat.ptr(row);
+        for (int col = 0; col < MUSE_Y_BUF_WIDTH; col++)
+            out[row][col] = mat_row[col];
+    }
 }
 
 #endif //MUSECPP_FILTERUTIL_H
