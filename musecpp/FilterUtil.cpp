@@ -33,7 +33,7 @@ void FilterUtil::ConvertSampleRate2to3(size_t input_size, uint8_t const *input, 
     // We do not represent the up-sampled signal explicitly, and also do not represent the entire filter output
     // since we only need every 2nd sample
 
-    for (int hiFreqIx = 0; hiFreqIx < input_size * 3; hiFreqIx +=2) {
+    for (int hiFreqIx = 0; hiFreqIx < input_size * 3; hiFreqIx += 2) {
         //cout << "Output index: " << i << ": ";
         int32_t s = 0;
         for (int l = (hiFreqIx - s_N2to3 + 2) / 3; l <= (hiFreqIx + s_N2to3) / 3; l++) {
@@ -66,6 +66,29 @@ FilterUtil::s_diamond_filter = []() constexpr {
     array<array<int8_t, FilterUtil::s_diamond_filter_width>, FilterUtil::s_diamond_filter_height> filter{};
     for (int i = 0; i < FilterUtil::s_diamond_filter_height; i++)
         for (int j = 0; j < FilterUtil::s_diamond_filter_width; j++)
+            filter[i][j] = (int8_t)(arr[i][j] * 256);
+
+    return filter;
+}();
+
+array<array<int8_t, FilterUtil::s_color_filter_width>, FilterUtil::s_color_filter_height>
+        FilterUtil::s_color_filter = []() constexpr {
+    array<array<double, FilterUtil::s_color_filter_width>, FilterUtil::s_color_filter_height> arr = {
+            0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
+            0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
+            0.008117, 0.021787, 0.054789, 0.087791, 0.101461, 0.087791, 0.054789, 0.021787, 0.008117,
+            0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
+            0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
+    };
+
+    double sum = accumulate(arr.cbegin(), arr.cend(), 0.0, [](double lhs, const auto &rhs) {
+        return accumulate(rhs.cbegin(), rhs.cend(), lhs);
+    });
+    assert(fabs(sum - 1.0) < 1e-5);
+
+    array<array<int8_t, FilterUtil::s_color_filter_width>, FilterUtil::s_color_filter_height> filter{};
+    for (int i = 0; i < FilterUtil::s_color_filter_height; i++)
+        for (int j = 0; j < FilterUtil::s_color_filter_width; j++)
             filter[i][j] = (int8_t)(arr[i][j] * 256);
 
     return filter;

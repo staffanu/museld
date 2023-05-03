@@ -112,7 +112,6 @@ void process_file(string_view filename) {
         read_shorts_big_endian_to_buffer(input, input_buffer, skip_buffer.data(), samples_to_skip, pair(1.0, 0.0));
     }
 
-    auto video_decoder = VideoDecoder();
     auto audio_decoder = AudioDecoder();
 
     deque<FrameBuffer *> frame_buffers;
@@ -148,17 +147,17 @@ void process_file(string_view filename) {
 
         frame_buffer->ApplyInverseTransmissionGamma();
 
-        cv::Mat fieldMat(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3, CV_8U);
+        cv::Mat fieldMat(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3, CV_8UC3);
 
         auto view0 = frame_buffers.front()->get_field(0);
         auto view1 = frame_buffers.front()->get_field(1);
 
-        video_decoder.DecodeSingleField(view0, fieldMat);
+        VideoDecoder::DecodeSingleField(view0, fieldMat);
         cout << "Field 0 display" << endl;
         cv::imshow("MUSE", fieldMat);
         cv::waitKey(1);
 
-        video_decoder.DecodeSingleField(view1, fieldMat);
+        VideoDecoder::DecodeSingleField(view1, fieldMat);
         cout << "Field 1 display" << endl;
         cv::imshow("MUSE", fieldMat);
         cv::waitKey(1);
@@ -169,6 +168,11 @@ void process_file(string_view filename) {
         auto t1 = chrono::high_resolution_clock::now();
         long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
         cout << "Elapsed time " << time_us / 1000 << " ms; " << (time_us / 1000 / frameNo) << " ms/frame" << endl;
+    }
+
+    while (!frame_buffers.empty()) {
+        delete frame_buffers.back();
+        frame_buffers.pop_back();
     }
 }
 
