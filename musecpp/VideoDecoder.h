@@ -30,9 +30,20 @@ private:
 
 template<typename T>
 MuseBuffer<T> VideoDecoder::CreateMuseBuffer(unsigned int height, unsigned int width) {
-    // the initial data isn't used -- move to the MuseBuffer constructor
+    kp::Tensor::TensorDataTypes dataType;
+    if (std::is_same<T, float>::value)
+        dataType = kp::Tensor::TensorDataTypes::eFloat;
+    else if (std::is_same<T, int32_t>::value)
+        dataType = kp::Tensor::TensorDataTypes::eInt;
+    else if (std::is_same<T, uint32_t>::value)
+        dataType = kp::Tensor::TensorDataTypes::eUnsignedInt;
+    else
+        throw std::runtime_error("Unknown type T");
+
+    // the initial data isn't used
     auto *data = new T[height * width];
-    auto buffer = MuseBuffer(height, width, data);
+    auto tensor = Shaders::GetManager().tensor(data, height * width, sizeof(T), dataType, kp::Tensor::TensorTypes::eDevice);
+    auto buffer = MuseBuffer<T>(height, width, tensor);
     delete[] data;
     return buffer;
 }

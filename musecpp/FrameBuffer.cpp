@@ -6,6 +6,7 @@
 #include <numeric>
 #include "FrameBuffer.h"
 #include "FieldBufferView.h"
+#include "Shaders.h"
 
 using namespace std;
 

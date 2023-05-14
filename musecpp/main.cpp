@@ -124,7 +124,9 @@ void process_file(string_view filename) {
     float *frame_mem;
     while (frame_mem = new float[1125 * 480],
             read_shorts_big_endian_to_buffer(input, input_buffer, frame_mem, 480 * 1125, eq)) {
-        auto muse_buffer = make_shared<MuseBuffer<float>>(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH, frame_mem);
+        auto frame_tensor = Shaders::GetManager().tensor(frame_mem, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH,
+                                                         sizeof(float), kp::Tensor::TensorDataTypes::eFloat);
+        auto muse_buffer = make_shared<MuseBuffer<float>>(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH, frame_tensor);
         delete[] frame_mem;
         auto *frame_buffer = new FrameBuffer(++frameNo, muse_buffer);
 
