@@ -17,15 +17,8 @@ public:
     cv::Mat DecodeSingleField(FieldBufferView &field);
 
 private:
-    void DecodeSingleFieldY(FieldBufferView &field, MuseBuffer<float> &out);
-    void DecodeSingleFieldC(
-            FieldBufferView &field,
-            MuseBuffer<float> &out_r,
-            MuseBuffer<float> &out_b);
-
     template<typename T> static MuseBuffer<T> CreateMuseBuffer(unsigned int height, unsigned int width);
 
-    MuseBuffer<float> m_frame_in_buffer;
     MuseBuffer<float> m_interpolated32_buffer;
     MuseBuffer<float> m_field_Y_buffer;
     MuseBuffer<float> m_field_C_r_buffer;

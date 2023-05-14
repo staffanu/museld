@@ -22,6 +22,8 @@ public:
 
     // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
     void ApplyTransmissionGamma(MuseBuffer<float> &buffer);
+    void CopyYForInterpolation(MuseBuffer<float> &frame, MuseBuffer<float> &output,
+                               unsigned int field_parity, unsigned int frame_phase_y);
     void FilterImageDiamond(int phase, MuseBuffer<float> &buffer);
     void FilterImage(unsigned int filter_height, unsigned int filter_width,
                      std::shared_ptr<kp::Tensor> &filter,
@@ -46,6 +48,8 @@ private:
 
     std::vector<uint32_t> m_apply_transmission_gamma_y_spirv;
     std::vector<uint32_t> m_apply_transmission_gamma_c_spirv;
+    std::vector<uint32_t> m_copy_y_for_interpolation_spirv;
+    std::vector<uint32_t> m_copy_c_for_interpolation_spirv;
     std::vector<uint32_t> m_diamond_spirv;
     std::vector<uint32_t> m_filter_image_spirv;
     std::vector<uint32_t> m_convert_2_to_3_spirv;

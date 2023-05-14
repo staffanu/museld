@@ -42,6 +42,7 @@ Shaders::Shaders()
     m_filter_image_spirv = CompileSource("../../musecpp/shaders/filter_image.comp");
     m_apply_transmission_gamma_y_spirv = CompileSource("../../musecpp/shaders/apply_transmission_gamma_y.comp");
     m_apply_transmission_gamma_c_spirv = CompileSource("../../musecpp/shaders/apply_transmission_gamma_c.comp");
+    m_copy_y_for_interpolation_spirv = CompileSource("../../musecpp/shaders/copy_y_for_interpolation.comp");
     m_convert_2_to_3_spirv = CompileSource("../../musecpp/shaders/convert_horiz_sample_rate_2_to_3.comp");
     m_fill_empty_lines_spirv = CompileSource("../../musecpp/shaders/fill_empty_lines.comp");
     m_combine_y_and_rb_spirv = CompileSource("../../musecpp/shaders/combine_y_and_rb.comp");
@@ -92,6 +93,21 @@ void Shaders::ApplyTransmissionGamma(MuseBuffer<float> &buffer) {
             ->record<kp::OpAlgoDispatch>(algo_y)
             ->record<kp::OpAlgoDispatch>(algo_c)
             ->record<kp::OpTensorSyncLocal>({buffer.tensor()})
+            ->eval();
+}
+
+void Shaders::CopyYForInterpolation(MuseBuffer<float> &frame, MuseBuffer<float> &output,
+                                    unsigned int field_parity, unsigned int frame_phase_y) {
+    std::shared_ptr<kp::Algorithm> algo =
+            m_mgr.algorithm({frame.tensor(), output.tensor()},
+                            m_copy_y_for_interpolation_spirv, kp::Workgroup({MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT}),
+                            {}, {0, 0});
+    m_mgr.sequence()
+            ->record<kp::OpTensorSyncDevice>({frame.tensor()})
+            ->record<kp::OpAlgoDispatch>(
+                    algo,
+                    std::vector{field_parity, frame_phase_y})
+            ->record<kp::OpTensorSyncLocal>({output.tensor()})
             ->eval();
 }
 
@@ -189,3 +205,4 @@ void Shaders::DecodeC(MuseBuffer<float> &input_frame, MuseBuffer<float> &C_r_dat
             ->record<kp::OpTensorSyncLocal>({C_r_data.tensor(), C_b_data.tensor()})
             ->eval();
 }
+

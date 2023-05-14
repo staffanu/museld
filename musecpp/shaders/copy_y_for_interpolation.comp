@@ -1,0 +1,41 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// ranging from (0, 0) to (MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT).
+// The input buffer is assumed to be the complete 1125x480
+// MUSE frame.
+
+#define MUSE_BUF_HEIGHT 516
+#define MUSE_TOTAL_WIDTH 480
+#define MUSE_Y_BUF_WIDTH 374
+
+layout (local_size_x = 4) in;
+layout (local_size_y = 4) in;
+
+layout(push_constant) uniform PushConstants {
+    uint field_parity;
+    uint frame_phase_y;
+};
+
+layout(set = 0, binding = 0) buffer frame_data_buffer {
+    float frame_data[];
+};
+
+layout(set = 0, binding = 1) buffer output_data_buffer {
+    float output_data[];
+};
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= MUSE_BUF_HEIGHT || col >= MUSE_Y_BUF_WIDTH)
+        return;
+
+    uint v_offset = field_parity == 0 ? 46 : 608;
+    uint phase = (frame_phase_y + row + 1) % 2; // notice row is even when line no is odd (row 0 is really line 47/609)
+
+    float v = frame_data[(row + v_offset) * MUSE_TOTAL_WIDTH + col + 106];
+
+    output_data[row * MUSE_Y_BUF_WIDTH * 2 + col * 2 + phase] = v;
+}
