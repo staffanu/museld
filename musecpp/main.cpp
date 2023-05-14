@@ -1,4 +1,5 @@
 #include <iostream>
+#include <memory>
 #include <vector>
 #include <filesystem>
 #include <fstream>
@@ -9,43 +10,43 @@
 // #include <vlc/vlc.h>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
-#include "Eigen/Dense"
 #include "MuseTypes.h"
 #include "FrameBuffer.h"
 #include "VideoDecoder.h"
 #include "AudioDecoder.h"
+#include "Shaders.h"
 
 using namespace Eigen;
 using namespace std;
 
-bool read_shorts_big_endian_to_buffer(ifstream &input, uint16_t *input_buffer, uint8_t *out, size_t n, pair<double, double> eq) {
+bool read_shorts_big_endian_to_buffer(ifstream &input, uint16_t *input_buffer, float *out, size_t n, pair<float, float> eq) {
     input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(uint16_t));
     for (int i = 0; i < n; i++) {
         uint16_t v = ntohs(input_buffer[i]);
-        uint16_t equalized_v = (uint8_t)clamp(((double)v / MUSE_INPUT_MULT - eq.second) / eq.first,
-                                                 0.0, 255.0);
+        float equalized_v = clamp(((float)v / MUSE_INPUT_MULT - eq.second) / eq.first,
+                                                 0.0f, 255.0f);
         out[i] = equalized_v;
     }
     return input.good();
 }
 
-pair<int, pair<double, double>> compute_initial_skip(string_view filename) {
+pair<int, pair<float, float>> compute_initial_skip(string_view filename) {
     ifstream input(static_cast<string>(filename).c_str(), ios::binary | ios::in);
     input.exceptions(ifstream::badbit);
     uint16_t input_buffer[480 * 1125 * 2 * sizeof(uint16_t)];
-    vector<uint8_t> buffer(480 * 1125 * 2); // two frames of data
+    vector<float> buffer(480 * 1125 * 2); // two frames of data
     read_shorts_big_endian_to_buffer(input, input_buffer, buffer.data(), 480 * 1125 * 2, pair(1.0, 0.0));
 
     auto sorted(buffer);
     sort(sorted.begin(), sorted.end());
-    auto y1 = (int)sorted[500];
-    auto y2 = (int)sorted[480 * 1125 * 2 - 500];
-    pair<double, double> eq = {(y2 - y1) / (239.0 - 16.0), y1 - 16.0};
+    auto y1 = sorted[500];
+    auto y2 = sorted[480 * 1125 * 2 - 500];
+    pair<float, float> eq = {(y2 - y1) / (239.0f - 16.0f), y1 - 16.0f};
     cout << "Initial eq: " << eq.first << ", " << eq.second << endl;
 
     auto equalized(buffer);
-    for (uint8_t &it: equalized)
-        it = (uint8_t)(((double) it - eq.second) / eq.first);
+    for (float &it: equalized)
+        it = ((it - eq.second) / eq.first);
 
     // checks if the line starting at off has a positive or a negative sync
     auto isSyncGood = [&equalized](int off, bool expectedPositive) {
@@ -107,21 +108,25 @@ void process_file(string_view filename) {
     uint16_t input_buffer[480 * 1125 * sizeof(uint16_t)];
 
     {
-        vector<uint8_t> skip_buffer(samples_to_skip);
+        vector<float> skip_buffer(samples_to_skip);
         cout << "Skipping " << samples_to_skip << " initial samples" << endl;
         read_shorts_big_endian_to_buffer(input, input_buffer, skip_buffer.data(), samples_to_skip, pair(1.0, 0.0));
     }
 
+    Shaders::CreateInstance();
+    auto video_decoder = VideoDecoder();
     auto audio_decoder = AudioDecoder();
 
     deque<FrameBuffer *> frame_buffers;
 
     int frameNo = 0;
     auto t0 = chrono::high_resolution_clock::now();
-    uint8_t *frame_mem;
-    while (frame_mem = new uint8_t[1125 * 480],
+    float *frame_mem;
+    while (frame_mem = new float[1125 * 480],
             read_shorts_big_endian_to_buffer(input, input_buffer, frame_mem, 480 * 1125, eq)) {
-        auto *frame_buffer = new FrameBuffer(++frameNo, frame_mem);
+        auto muse_buffer = make_shared<MuseBuffer<float>>(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH, frame_mem);
+        delete[] frame_mem;
+        auto *frame_buffer = new FrameBuffer(++frameNo, muse_buffer);
 
         // Update control data from the previous fields
         if (!frame_buffers.empty()) {
@@ -147,17 +152,15 @@ void process_file(string_view filename) {
 
         frame_buffer->ApplyInverseTransmissionGamma();
 
-        cv::Mat fieldMat(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3, CV_8UC3);
-
         auto view0 = frame_buffers.front()->get_field(0);
         auto view1 = frame_buffers.front()->get_field(1);
 
-        VideoDecoder::DecodeSingleField(view0, fieldMat);
+        auto fieldMat = video_decoder.DecodeSingleField(view0);
         cout << "Field 0 display" << endl;
         cv::imshow("MUSE", fieldMat);
         cv::waitKey(1);
 
-        VideoDecoder::DecodeSingleField(view1, fieldMat);
+        fieldMat = video_decoder.DecodeSingleField(view1);
         cout << "Field 1 display" << endl;
         cv::imshow("MUSE", fieldMat);
         cv::waitKey(1);

@@ -9,13 +9,28 @@
 #include <optional>
 #include "Eigen/Dense"
 #include "MuseTypes.h"
+#include "MuseSubBuffer.h"
+
+namespace std
+{
+    template<> struct less<Eigen::Vector<int, 4>> {
+        bool operator()(Eigen::Vector<int, 4> const &a, Eigen::Vector<int, 4> const &b) const {
+            assert(a.size() == b.size());
+            for (Eigen::Index i = 0; i < a.size(); ++i) {
+                if (a[i] < b[i]) return true;
+                if (a[i] > b[i]) return false;
+            }
+            return false;
+        }
+    };
+}
 
 enum MotionInformation {
     Normal, CompleteStillPicture, SlightlyInMotion, SceneChange, Motion
 };
 
 struct ControlSignalDecoder {
-    explicit ControlSignalDecoder(MappedFrameMatrix const &data);
+    explicit ControlSignalDecoder(MuseSubBuffer const &data);
     std::optional<int> field_subsampling_phase_Y;
     std::optional<int> horizontal_motion_vector;
     std::optional<int> vertical_motion_vector;

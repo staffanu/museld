@@ -26,15 +26,15 @@ map<Vector4i, int> ControlSignalDecoder::s_H_column_index = [] {
     return ix;
 }();
 
-ControlSignalDecoder::ControlSignalDecoder(const MappedFrameMatrix &data) {
+ControlSignalDecoder::ControlSignalDecoder(const MuseSubBuffer &data) {
     auto groups = vector<pair<Vector4i, bool>>();
     groups.reserve(25);
     for (int row = 0; row < 5; row++) {
         for (int col = 7; col < 87; col += 16) { // start of each encoded 4 bit group
             Vector<int, 8> bits;
             for (int bit_ix = 0; bit_ix < 8; bit_ix++) {
-                uint8_t d1 = data(row, col + 2 * bit_ix);
-                uint8_t d2 = data(row, col + 2 * bit_ix + 1);
+                uint8_t d1 = data[row][col + 2 * bit_ix];
+                uint8_t d2 = data[row][col + 2 * bit_ix + 1];
                 bits[bit_ix] = d1 + d2 > 256 ? 1 : 0;
             }
 

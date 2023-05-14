@@ -3,17 +3,15 @@ project(musecpp)
 
 set(CMAKE_CXX_STANDARD 17)
 
-#list(APPEND CMAKE_MODULE_PATH, "/home/staffanu/work/ldaudio/musecpp")
-#message("CMAKE_MODULE_PATH: " ${CMAKE_MODULE_PATH})
-#find_package(LIBVLC REQUIRED)
-
-#include(${CMAKE_SOURCE_DIR}/FindLIBVLC.cmake)
-#list(APPEND CMAKE_LIBRARY_PATH ${LIBVLC_LIBRARY})
-#message("CMAKE_LIBRARY_PATH: " ${CMAKE_LIBRARY_PATH})
-
 find_package(OpenCV REQUIRED)
-INCLUDE_DIRECTORIES( ${OpenCV_INCLUDE_DIRS} )
+include_directories(${OpenCV_INCLUDE_DIRS})
 #LINK_DIRECTORIES( ${OpenCV_LIB_DIRS} )
+
+set(KOMPUTE_OPT_LOG_LEVEL "Warn")
+add_subdirectory(../../kompute/ ${CMAKE_CURRENT_BINARY_DIR}/kompute_build)
+include_directories(${kompute_SOURCE_DIR}/src/include)
+include_directories(${kompute_SOURCE_DIR}/build/src/shaders/glsl)
+#list(APPEND CMAKE_PREFIX_PATH "${kompute_SOURCE_DIR}/cmake")
 
 add_executable(musecpp
         main.cpp
@@ -21,6 +19,14 @@ add_executable(musecpp
         FieldBufferView.cpp FieldBufferView.h
         VideoDecoder.cpp VideoDecoder.h
         AudioDecoder.cpp AudioDecoder.h
-        FilterUtil.cpp FilterUtil.h
-        MuseTypes.h ControlSignalDecoder.cpp ControlSignalDecoder.h)
-target_link_libraries(musecpp PRIVATE ${OpenCV_LIBS}) # libvlc.so)
+        #FilterUtil.cpp FilterUtil.h
+        ControlSignalDecoder.cpp ControlSignalDecoder.h
+        Shaders.cpp Shaders.h
+        MuseBuffer.h
+        MuseSubBuffer.cpp MuseSubBuffer.h
+        )
+target_link_libraries(musecpp
+        PRIVATE ${OpenCV_LIBS}
+        PRIVATE kompute
+#        PRIVATE ${kompute_LIBS}
+        )

@@ -1,0 +1,61 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// from (0, 0) to (source_height, source_width * 3 / 2)
+
+layout(push_constant) uniform PushConstants {
+    float filter_height_f;
+    float filter_width_f;
+    float image_height_f;
+    float image_width_f;
+    float border_value;
+    float multiplier;
+};
+
+layout (local_size_x = 4) in;
+layout (local_size_y = 4) in;
+
+layout(set = 0, binding = 0) buffer image_filter_buffer {
+    float image_filter[];
+};
+
+layout(set = 0, binding = 1) buffer source_buffer {
+    float source[];
+};
+
+layout(set = 0, binding = 2) buffer dest_buffer {
+    float dest[];
+};
+
+// Convert to 3/2 of the input sample rate by inserting two zeros between samples to up-sample 3x,
+// low-pass filter at 0.5 times the new Nyquist rate and then select every 2nd sample
+
+// We do not represent the up-sampled signal explicitly, and also do not represent the entire filter output
+// since we only need every 2nd sample
+
+void main() {
+    int row = int(gl_GlobalInvocationID.y);
+    int col = int(gl_GlobalInvocationID.x);
+    int image_height = int(image_height_f);
+    int image_width = int(image_width_f);
+    int filter_height = int(filter_height_f);
+    int filter_width = int(filter_width_f);
+
+    if (row >= image_height || col >= image_width)
+        return;
+
+    int H = filter_height / 2;
+    int W = filter_width / 2;
+
+    float s = 0;
+    for (int i = -H; i <= H; i++) {
+        int read_row = row + i;
+        for (int j = -W; j <= W; j ++) {
+            int read_col = col + j;
+            float v = read_row >= 0 && read_row < image_height && read_col >= 0 && read_col < image_width ?
+                source[read_row * image_width + read_col] : border_value;
+            s += v * image_filter[(i + H) * filter_width + j + W];
+        }
+    }
+    dest[row * image_width + col] = clamp(s * multiplier, 0, 255);
+}

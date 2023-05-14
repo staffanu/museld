@@ -8,6 +8,6 @@ AudioDecoder::AudioDecoder() {
 
 }
 
-void AudioDecoder::decode_field(const MappedFrameMatrix &data) {
+void AudioDecoder::decode_field(const MuseSubBuffer &data) {
 
 }

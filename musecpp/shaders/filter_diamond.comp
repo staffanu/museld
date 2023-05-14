@@ -1,0 +1,49 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// from (0, 0) to (frame_buffer_width / 2, frame_buffer_height)
+
+layout(push_constant) uniform PushConstants {
+    uint filter_height;
+    uint filter_width;
+    uint frame_buffer_height;
+    uint frame_buffer_width;
+    uint phase;
+};
+
+layout (local_size_x = 4) in;
+layout (local_size_y = 4) in;
+
+layout(set = 0, binding = 0) buffer filter_input {
+    float diamond_filter[];
+};
+
+layout(set = 0, binding = 1) buffer framebuffer_inout {
+    float frame_buffer[];
+};
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint invocation_x = gl_GlobalInvocationID.x;
+    uint col = (phase + row) % 2 + invocation_x * 2;
+
+    if (row >= frame_buffer_height || col >= frame_buffer_width)
+        return;
+
+    uint H = filter_height / 2;
+    uint W = filter_width / 2;
+    uint W_odd =  (W - 1) / 2 * 2 + 1;// rounded down to odd value
+
+    float s = 0;
+    int i_start = -int(min(H, row));
+    int i_max = int(min(H, frame_buffer_height - row - 1));
+    for (int i = i_start; i <= i_max; i++) {
+        int j_start = i % 2 == 0 ? -int(W_odd) : -int(W);
+        int j_max = int(min(W, frame_buffer_width - col - 1));
+        for (int j = j_start; j <= j_max; j += 2)
+            if (col + j >= 0)
+                s += frame_buffer[(row + i) * frame_buffer_width + col + j] *
+                    diamond_filter[(i + H) * filter_width + j + W];
+    }
+    frame_buffer[row * frame_buffer_width + col] = (clamp(s * 2, 0, 255));
+}

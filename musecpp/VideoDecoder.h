@@ -7,25 +7,41 @@
 
 #include <opencv2/core/mat.hpp>
 #include "FieldBufferView.h"
+#include "Shaders.h"
+#include "MuseBuffer.h"
 
 class VideoDecoder {
 public:
     VideoDecoder();
-    static void DecodeSingleField(FieldBufferView &field, cv::Mat &field_out);
+
+    cv::Mat DecodeSingleField(FieldBufferView &field);
 
 private:
-    static void DecodeSingleFieldY(
+    void DecodeSingleFieldY(FieldBufferView &field, MuseBuffer<float> &out);
+    void DecodeSingleFieldC(
             FieldBufferView &field,
-            uint8_t (&out)[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH * 3]);
-    static void DecodeSingleFieldC(
-            FieldBufferView &field,
-            uint8_t (&out_r)[MUSE_BUF_HEIGHT][MUSE_Y_BUF_WIDTH],
-            uint8_t (&out_b)[MUSE_BUF_HEIGHT][MUSE_Y_BUF_WIDTH]);
-    static void CombineYandRB(
-            const uint8_t (&field_Y)[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH * 3],
-            const uint8_t (&field_C_r)[MUSE_BUF_HEIGHT][MUSE_Y_BUF_WIDTH],
-            const uint8_t (&field_C_b)[MUSE_BUF_HEIGHT][MUSE_Y_BUF_WIDTH],
-            cv::Mat &out_rgb);
+            MuseBuffer<float> &out_r,
+            MuseBuffer<float> &out_b);
+
+    template<typename T> static MuseBuffer<T> CreateMuseBuffer(unsigned int height, unsigned int width);
+
+    MuseBuffer<float> m_frame_in_buffer;
+    MuseBuffer<float> m_interpolated32_buffer;
+    MuseBuffer<float> m_field_Y_buffer;
+    MuseBuffer<float> m_field_C_r_buffer;
+    MuseBuffer<float> m_field_C_b_buffer;
+    MuseBuffer<float> m_intermediate_r_buffer;
+    MuseBuffer<float> m_intermediate_b_buffer;
+    MuseBuffer<uint32_t> m_frame_out_buffer;
 };
+
+template<typename T>
+MuseBuffer<T> VideoDecoder::CreateMuseBuffer(unsigned int height, unsigned int width) {
+    // the initial data isn't used -- move to the MuseBuffer constructor
+    auto *data = new T[height * width];
+    auto buffer = MuseBuffer(height, width, data);
+    delete[] data;
+    return buffer;
+}
 
 #endif //MUSECPP_VIDEODECODER_H

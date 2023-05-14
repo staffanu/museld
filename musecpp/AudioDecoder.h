@@ -11,7 +11,7 @@
 class AudioDecoder {
 public:
     AudioDecoder();
-    void decode_field(MappedFrameMatrix const &data);
+    void decode_field(MuseSubBuffer const &data);
 };
 
 

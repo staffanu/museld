@@ -1,0 +1,49 @@
+#version 450
+
+#extension GL_EXT_shader_atomic_float: enable
+
+// This shader should be invoked with global invocation ids
+// from (0, 0) to (image_width, image_height)
+
+layout(push_constant) uniform PushConstants {
+    uint image_height;
+    uint image_width;
+    uint color_width; // this is a bit larger than image_width / 4 since image_width is not divisible by 4
+};
+
+layout (local_size_x = 4) in;
+layout (local_size_y = 4) in;
+
+layout(set = 0, binding = 0) buffer y_data_buffer {
+    float y_data[];
+};
+
+layout(set = 0, binding = 1) buffer r_data_buffer {
+    float r_data[];
+};
+
+layout(set = 0, binding = 2) buffer b_data_buffer {
+    float b_data[];
+};
+
+layout(set = 0, binding = 3) buffer frame_out_buffer {
+    uint frame_out[];
+};
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= image_height || col >= image_width)
+        return;
+
+    float YM = y_data[row * image_width + col];
+    float RmYM = r_data[(row / 2) * color_width + col / 3] - 128.0f;
+    float BmYM = b_data[(row / 2) * color_width + col / 3] - 128.0f;
+
+    int g = clamp(int(YM - BmYM / 4 - RmYM / 2), 0, 255);
+    int b = clamp(int(YM + BmYM + BmYM / 4), 0, 255);
+    int r = clamp(int(YM + RmYM), 0, 255);
+
+    frame_out[row * image_width + col] = (r << 16) | (g << 8) | (b);
+}
