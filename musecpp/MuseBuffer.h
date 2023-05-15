@@ -13,7 +13,10 @@
 template<typename T>
 class MuseBuffer {
 public:
-    MuseBuffer(unsigned int height, unsigned int width, std::shared_ptr<kp::Tensor> &tensor);
+    MuseBuffer(unsigned int height, unsigned int width, std::shared_ptr<kp::Tensor> const &tensor)
+    : m_height(height), m_width(width), m_tensor(tensor) {
+    }
+
 
     unsigned int width() {
         return m_width;
@@ -50,10 +53,5 @@ private:
     unsigned int m_width;
     std::shared_ptr<kp::Tensor> m_tensor;
 };
-
-template<typename T>
-MuseBuffer<T>::MuseBuffer(unsigned int height, unsigned int width, std::shared_ptr<kp::Tensor> &tensor)
-: m_height(height), m_width(width), m_tensor(tensor) {
-}
 
 #endif //MUSECPP_MUSEBUFFER_H

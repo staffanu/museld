@@ -19,6 +19,8 @@ public:
     // parameter is that we call this from the main loop after creating the FrameBuffer.
     void ProcessControlData(MuseSubBuffer const &control_data);
 
+    std::shared_ptr<kp::Tensor> tensor();
+
     MuseSubBuffer control_data_buffer() const;
     MuseSubBuffer frame_buffer_Y() const;
     MuseSubBuffer frame_buffer_C() const;

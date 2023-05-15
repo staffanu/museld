@@ -73,10 +73,8 @@ private:
     MuseBuffer<float> m_intermediate_r_buffer;
     MuseBuffer<float> m_intermediate_b_buffer;
     MuseBuffer<uint32_t> m_frame_out_buffer;
- 
-    const unsigned int m_diamond_filter_height = 7;
-    const unsigned int m_diamond_filter_width = 9;
-    std::shared_ptr<kp::Tensor> m_diamond_filter_tensor;
+
+    MuseBuffer<float> m_diamond_filter_buffer;
 
     std::shared_ptr<kp::Tensor> m_filter_2_to_3_tensor;
 };

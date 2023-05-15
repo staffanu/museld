@@ -8,6 +8,7 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 #LINK_DIRECTORIES( ${OpenCV_LIB_DIRS} )
 
 set(KOMPUTE_OPT_LOG_LEVEL "Warn")
+set(KOMPUTE_OPT_DISABLE_VK_DEBUG_LAYERS ON)
 add_subdirectory(../../kompute/ ${CMAKE_CURRENT_BINARY_DIR}/kompute_build)
 include_directories(${kompute_SOURCE_DIR}/src/include)
 include_directories(${kompute_SOURCE_DIR}/build/src/shaders/glsl)
@@ -17,7 +18,6 @@ add_executable(musecpp
         main.cpp
         FrameBuffer.cpp FrameBuffer.h
         FieldBufferView.cpp FieldBufferView.h
-        VideoDecoder.cpp VideoDecoder.h
         AudioDecoder.cpp AudioDecoder.h
         #FilterUtil.cpp FilterUtil.h
         ControlSignalDecoder.cpp ControlSignalDecoder.h
