@@ -12,7 +12,6 @@
 #include <opencv2/highgui.hpp>
 #include "MuseTypes.h"
 #include "FrameBuffer.h"
-#include "VideoDecoder.h"
 #include "AudioDecoder.h"
 #include "Shaders.h"
 
@@ -114,7 +113,7 @@ void process_file(string_view filename) {
     }
 
     Shaders::CreateInstance();
-    auto video_decoder = VideoDecoder();
+    Shaders &shaders = Shaders::GetInstance();
     auto audio_decoder = AudioDecoder();
 
     deque<FrameBuffer *> frame_buffers;
@@ -157,12 +156,12 @@ void process_file(string_view filename) {
         auto view0 = frame_buffers.front()->get_field(0);
         auto view1 = frame_buffers.front()->get_field(1);
 
-        auto fieldMat = video_decoder.DecodeSingleField(view0);
+        auto fieldMat = shaders.DecodeSingleField(view0);
         cout << "Field 0 display" << endl;
         cv::imshow("MUSE", fieldMat);
         cv::waitKey(1);
 
-        fieldMat = video_decoder.DecodeSingleField(view1);
+        fieldMat = shaders.DecodeSingleField(view1);
         cout << "Field 1 display" << endl;
         cv::imshow("MUSE", fieldMat);
         cv::waitKey(1);

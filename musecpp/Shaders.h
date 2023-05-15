@@ -9,19 +9,31 @@
 #include <string>
 #include <vector>
 #include <csignal>
+#include <opencv2/core/mat.hpp>
 #include "kompute/Kompute.hpp"
-
-template<typename T> class MuseBuffer;
+#include "FieldBufferView.h"
+#include "MuseBuffer.h"
 
 class Shaders {
 public:
+    Shaders(Shaders &other) = delete;
+    void operator=(const Shaders &) = delete;
     static void CreateInstance();
     static Shaders &GetInstance();
     static kp::Manager &GetManager();
     static std::vector<uint32_t>CompileSource(const std::string &filename);
 
-    // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
     void ApplyTransmissionGamma(MuseBuffer<float> &buffer);
+    cv::Mat DecodeSingleField(FieldBufferView &field);
+
+private:
+    Shaders();
+
+    static Shaders *s_singleton;
+
+    template<typename T> MuseBuffer<T> CreateMuseBuffer(unsigned int height, unsigned int width);
+
+    // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
     void CopyYForInterpolation(MuseBuffer<float> &frame, MuseBuffer<float> &output,
                                unsigned int field_parity, unsigned int frame_phase_y);
     void FilterImageDiamond(int phase, MuseBuffer<float> &buffer);
@@ -36,15 +48,10 @@ public:
                        MuseBuffer<float> &C_b_data, MuseBuffer<uint32_t> &out_rgb);
     void DecodeC(MuseBuffer<float> &input_frame, MuseBuffer<float> &C_r_data,
                  MuseBuffer<float> &C_b_data, int frame_phase_c, int field_parity);
+
     static constexpr int s_color_filter_height = 5;
     static constexpr int s_color_filter_width = 9;
     std::shared_ptr<kp::Tensor> m_color_filter_tensor;
-private:
-    Shaders();
-    Shaders(Shaders &other) = delete;
-    void operator=(const Shaders &) = delete;
-
-    static Shaders *s_singleton;
 
     std::vector<uint32_t> m_apply_transmission_gamma_y_spirv;
     std::vector<uint32_t> m_apply_transmission_gamma_c_spirv;
@@ -56,8 +63,17 @@ private:
     std::vector<uint32_t> m_fill_empty_lines_spirv;
     std::vector<uint32_t> m_combine_y_and_rb_spirv;
     std::vector<uint32_t> m_decode_c_spirv;
+
     kp::Manager m_mgr;
 
+    MuseBuffer<float> m_interpolated32_buffer;
+    MuseBuffer<float> m_field_Y_buffer;
+    MuseBuffer<float> m_field_C_r_buffer;
+    MuseBuffer<float> m_field_C_b_buffer;
+    MuseBuffer<float> m_intermediate_r_buffer;
+    MuseBuffer<float> m_intermediate_b_buffer;
+    MuseBuffer<uint32_t> m_frame_out_buffer;
+ 
     const unsigned int m_diamond_filter_height = 7;
     const unsigned int m_diamond_filter_width = 9;
     std::shared_ptr<kp::Tensor> m_diamond_filter_tensor;
