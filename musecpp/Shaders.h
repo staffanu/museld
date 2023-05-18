@@ -24,7 +24,8 @@ public:
     static std::vector<uint32_t>CompileSource(const std::string &filename);
 
     void ApplyTransmissionGamma(MuseBuffer<float> &buffer);
-    cv::Mat DecodeSingleField(FieldBufferView &field);
+    cv::Mat DecodeIntraField(FieldBufferView &field);
+    std::optional<cv::Mat> DecodeInterFrame(std::vector<std::reference_wrapper<FieldBufferView>> fields);
 
 private:
     Shaders();
@@ -34,24 +35,35 @@ private:
     template<typename T> MuseBuffer<T> CreateMuseBuffer(unsigned int height, unsigned int width);
 
     // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
-    void CopyYForInterpolation(MuseBuffer<float> &frame, MuseBuffer<float> &output,
-                               unsigned int field_parity, unsigned int frame_phase_y);
-    void FilterImageDiamond(int phase, MuseBuffer<float> &buffer);
-    void FilterImage(unsigned int filter_height, unsigned int filter_width,
+    void CopyYForInterpolation(std::shared_ptr<kp::Sequence> const &sq,
+            MuseBuffer<float> &frame, MuseBuffer<float> &output,
+            unsigned int field_parity, unsigned int frame_phase_y);
+    void FilterImageDiamond(std::shared_ptr<kp::Sequence> const &sq,
+                            int phase, MuseBuffer<float> &buffer);
+    void FilterImage(std::shared_ptr<kp::Sequence> const &sq,
+                     unsigned int filter_height, unsigned int filter_width,
                      std::shared_ptr<kp::Tensor> &filter,
                      MuseBuffer<float> &source, MuseBuffer<float> &dest,
                      float border_value, float multiplier);
-    void ConvertHorizSampleRate2to3(MuseBuffer<float> &source, MuseBuffer<float> &dest,
-                                    unsigned int output_start_row, unsigned int output_row_step_size);
-    void FillEmptyLines(MuseBuffer<float> &buffer, int phase);
-    void CombineYandRB(MuseBuffer<float> &Y_data, MuseBuffer<float> &C_r_data,
+    void ConvertHorizSampleRate2to3(std::shared_ptr<kp::Sequence> const &sq,
+                                    MuseBuffer<float> &source, MuseBuffer<float> &dest,
+                                    unsigned int output_start_row);
+    void ConvertHorizSampleRate4to3(std::shared_ptr<kp::Sequence> const &sq,
+                                    MuseBuffer<float> &source, MuseBuffer<float> &dest,
+                                    unsigned int output_start_row, unsigned int output_start_col);
+    void FillEmptyLines(std::shared_ptr<kp::Sequence> const &sq,
+                        MuseBuffer<float> &buffer, int phase);
+    void CombineYandRB(std::shared_ptr<kp::Sequence> const &sq,
+                       MuseBuffer<float> &Y_data, MuseBuffer<float> &C_r_data,
                        MuseBuffer<float> &C_b_data, MuseBuffer<uint32_t> &out_rgb);
-    void DecodeC(MuseBuffer<float> &input_frame, MuseBuffer<float> &C_r_data,
+    void DecodeC(std::shared_ptr<kp::Sequence> const &sq,
+                 MuseBuffer<float> &input_frame, MuseBuffer<float> &C_r_data,
                  MuseBuffer<float> &C_b_data, int frame_phase_c, int field_parity);
 
-    static constexpr int s_color_filter_height = 5;
-    static constexpr int s_color_filter_width = 9;
-    std::shared_ptr<kp::Tensor> m_color_filter_tensor;
+    void MakeFieldFromConsecutiveFrames(std::shared_ptr<kp::Sequence> const &sq,
+                                        FieldBufferView &field_a, unsigned int field_a_frame_phase_y,
+                                        FieldBufferView &field_b, unsigned int field_b_frame_phase_y,
+                                        unsigned int fields_parity, unsigned int fields_phases);
 
     std::vector<uint32_t> m_apply_transmission_gamma_y_spirv;
     std::vector<uint32_t> m_apply_transmission_gamma_c_spirv;
@@ -59,7 +71,7 @@ private:
     std::vector<uint32_t> m_copy_c_for_interpolation_spirv;
     std::vector<uint32_t> m_diamond_spirv;
     std::vector<uint32_t> m_filter_image_spirv;
-    std::vector<uint32_t> m_convert_2_to_3_spirv;
+    std::vector<uint32_t> m_convert_horiz_sample_rate_spirv;
     std::vector<uint32_t> m_fill_empty_lines_spirv;
     std::vector<uint32_t> m_combine_y_and_rb_spirv;
     std::vector<uint32_t> m_decode_c_spirv;
@@ -75,8 +87,12 @@ private:
     MuseBuffer<uint32_t> m_frame_out_buffer;
 
     MuseBuffer<float> m_diamond_filter_buffer;
+    static constexpr int s_color_filter_height = 5;
+    static constexpr int s_color_filter_width = 9;
+    std::shared_ptr<kp::Tensor> m_color_filter_tensor;
 
     std::shared_ptr<kp::Tensor> m_filter_2_to_3_tensor;
+    std::shared_ptr<kp::Tensor> m_filter_4_to_3_tensor;
 };
 
 #endif //MUSECPP_SHADERS_H

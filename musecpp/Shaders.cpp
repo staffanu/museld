@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <fstream>
 #include <iostream>
+#include <opencv2/highgui.hpp>
 #include "MuseTypes.h"
 #include "MuseBuffer.h"
 #include "Shaders.h"
@@ -36,6 +37,28 @@ std::vector<uint32_t> Shaders::CompileSource(const std::string &filename) {
     return {(uint32_t*)buffer.data(), (uint32_t*)(buffer.data() + buffer.size())};
 }
 
+void show_buffer(int y_min, int x_min, int height, int width, const MuseBuffer<float> &buffer) {
+    cv::Mat mat(height, width, CV_32FC1);
+    for (int row = y_min; row < y_min + height; row++) {
+        auto *mat_row = mat.ptr<float>(row - y_min);
+        for (int col = x_min; col < x_min + width; col++) {
+            mat_row[col - x_min] = buffer[row][col] / 255.0f;
+        }
+    }
+    cv::namedWindow("MUSE", cv::WINDOW_NORMAL);
+    cv::resizeWindow("MUSE", 16 * 100, 9 * 100);
+    cv::imshow("MUSE", mat);
+
+    for (int row = 0; row < 4; row++) {
+        for (int col = 0; col < 10; col++) {
+            cout << buffer[row][col] << " ";
+        }
+        cout << endl;
+    }
+
+    cv::waitKey(0);
+}
+
 Shaders::Shaders()
 : m_mgr(kp::Manager(0, {}, { "VK_EXT_shader_atomic_float" })),
   m_interpolated32_buffer(Shaders::CreateMuseBuffer<float>(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
@@ -61,7 +84,7 @@ Shaders::Shaders()
     m_apply_transmission_gamma_y_spirv = CompileSource("../../musecpp/shaders/apply_transmission_gamma_y.comp");
     m_apply_transmission_gamma_c_spirv = CompileSource("../../musecpp/shaders/apply_transmission_gamma_c.comp");
     m_copy_y_for_interpolation_spirv = CompileSource("../../musecpp/shaders/copy_y_for_interpolation.comp");
-    m_convert_2_to_3_spirv = CompileSource("../../musecpp/shaders/convert_horiz_sample_rate_2_to_3.comp");
+    m_convert_horiz_sample_rate_spirv = CompileSource("../../musecpp/shaders/convert_horiz_sample_rate.comp");
     m_fill_empty_lines_spirv = CompileSource("../../musecpp/shaders/fill_empty_lines.comp");
     m_combine_y_and_rb_spirv = CompileSource("../../musecpp/shaders/combine_y_and_rb.comp");
     m_decode_c_spirv = CompileSource("../../musecpp/shaders/decode_c.comp");
@@ -81,6 +104,14 @@ Shaders::Shaders()
                     0.034286805542972851, -0.000000000000000019, -0.044083035698107946, 0.000000000000000019, 0.061716249977351118,-0.000000000000000019, -0.102860416628918538,
                     0.000000000000000019, 0.308581249886755615, 0.484718293839893788, 0.308581249886755615, 0.000000000000000019, -0.102860416628918538, -0.000000000000000019,
                     0.061716249977351118, 0.000000000000000019, -0.044083035698107946, -0.000000000000000019, 0.034286805542972851
+            });
+    m_filter_4_to_3_tensor = m_mgr.tensor(
+            {
+                    // cutoff 0.125, transition 0.03, sampling freq 1, Rectangular: 31 coeffs (25 non-zero).  Looks +/- 15 samples in each direction
+                    -0.015752415092402161, -0.023868513282649006, -0.018175863568156325, 0.000000000000000010, 0.021480566035093858, 0.033415918595708603, 0.026254025154003564, -0.000000000000000010,
+                    -0.033755175198004597, -0.055693197659514346, -0.047257245277206421, 0.000000000000000010, 0.078762075462010708, 0.167079592978543023, 0.236286226386032083, 0.262448010933081788,
+                    0.236286226386032083, 0.167079592978543023, 0.078762075462010708, 0.000000000000000010, -0.047257245277206421, -0.055693197659514346, -0.033755175198004597, -0.000000000000000010,
+                    0.026254025154003564, 0.033415918595708603, 0.021480566035093858, 0.000000000000000010, -0.018175863568156325, -0.023868513282649006, -0.015752415092402161
             });
 }
 
@@ -104,7 +135,7 @@ MuseBuffer<T> Shaders::CreateMuseBuffer(unsigned int height, unsigned int width)
     return buffer;
 }
 
-cv::Mat Shaders::DecodeSingleField(FieldBufferView &field) {
+cv::Mat Shaders::DecodeIntraField(FieldBufferView &field) {
     cout << "Decoding frame " << field.m_frame_no << " field " << field.m_field_parity << endl;
 
     int field_parity = field.m_field_parity;
@@ -114,106 +145,25 @@ cv::Mat Shaders::DecodeSingleField(FieldBufferView &field) {
                         field.m_control.value().frame_subsampling_phase_C.value_or(0) : 0;
     // int field_phase = field.m_control.value().field_subsampling_phase_Y.value_or(0);
 
-//    CopyYForInterpolation(*field.m_data, m_interpolated32_buffer, field_parity, frame_phase_y);
-//    FilterImageDiamond(frame_phase_y, m_interpolated32_buffer);
-//    ConvertHorizSampleRate2to3(m_interpolated32_buffer, m_field_Y_buffer, 1 - field_parity, 2);
-//    FillEmptyLines(m_field_Y_buffer, field_parity);
-//
-//    DecodeC(*field.m_data, m_intermediate_r_buffer, m_intermediate_b_buffer,
-//                    frame_phase_c, field_parity);
-//    FilterImage(
-//            Shaders::s_color_filter_height, Shaders::s_color_filter_width,
-//            m_color_filter_tensor, m_intermediate_r_buffer, m_field_C_r_buffer, 128.0 / 8, 8);
-//    FilterImage(
-//            Shaders::s_color_filter_height, Shaders::s_color_filter_width,
-//            m_color_filter_tensor, m_intermediate_b_buffer, m_field_C_b_buffer, 128.0 / 8, 8);
-//
-//    CombineYandRB(m_field_Y_buffer, m_field_C_r_buffer, m_field_C_b_buffer, m_frame_out_buffer);
+    auto sq = m_mgr.sequence();
 
-    std::shared_ptr<kp::Algorithm> copy_y_for_interpolation_algo =
-            m_mgr.algorithm({field.tensor(), m_interpolated32_buffer.tensor()},
-                            m_copy_y_for_interpolation_spirv, kp::Workgroup({MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT}),
-                            {}, {0, 0});
-    std::shared_ptr<kp::Algorithm> diamond_algo =
-            m_mgr.algorithm({m_diamond_filter_buffer.tensor(), m_interpolated32_buffer.tensor()},
-                            m_diamond_spirv, kp::Workgroup({m_interpolated32_buffer.width(), m_interpolated32_buffer.height()}),
-                            {}, {0, 0, 0, 0, 0});
-    std::shared_ptr<kp::Algorithm> convert_2_to_3_algo =
-            m_mgr.algorithm({m_filter_2_to_3_tensor, m_interpolated32_buffer.tensor(), m_field_Y_buffer.tensor()},
-                            m_convert_2_to_3_spirv, kp::Workgroup({m_field_Y_buffer.width(), m_field_Y_buffer.height() / 2}),
-                            {}, {0.0, 0.0, 0.0, 0.0, 0.0});
-    std::shared_ptr<kp::Algorithm> fill_empty_lines_algo =
-            m_mgr.algorithm({m_field_Y_buffer.tensor()},
-                            m_fill_empty_lines_spirv, kp::Workgroup({m_field_Y_buffer.width(), m_field_Y_buffer.height() / 2}),
-                            {}, {0.0, 0.0, 0.0});
-    std::shared_ptr<kp::Algorithm> decode_c_algo =
-            m_mgr.algorithm({field.tensor(), m_intermediate_r_buffer.tensor(), m_intermediate_b_buffer.tensor()},
-                            m_decode_c_spirv, kp::Workgroup({m_intermediate_r_buffer.width(), m_intermediate_r_buffer.height()}),
-                            {}, {0, 0});
-    std::shared_ptr<kp::Algorithm> filter_color_r_algo =
-            m_mgr.algorithm({m_color_filter_tensor, m_intermediate_r_buffer.tensor(), m_field_C_r_buffer.tensor()},
-                            m_filter_image_spirv, kp::Workgroup({m_intermediate_r_buffer.width(), m_intermediate_r_buffer.height()}),
-                            {}, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
-    std::shared_ptr<kp::Algorithm> filter_color_b_algo =
-            m_mgr.algorithm({m_color_filter_tensor, m_intermediate_b_buffer.tensor(), m_field_C_b_buffer.tensor()},
-                            m_filter_image_spirv, kp::Workgroup({m_intermediate_b_buffer.width(), m_intermediate_b_buffer.height()}),
-                            {}, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
-    std::shared_ptr<kp::Algorithm> combine_y_and_rb_algo =
-            m_mgr.algorithm({m_field_Y_buffer.tensor(), m_field_C_r_buffer.tensor(), m_field_C_b_buffer.tensor(), m_frame_out_buffer.tensor()},
-                            m_combine_y_and_rb_spirv, kp::Workgroup({m_field_Y_buffer.width(), m_field_Y_buffer.height()}),
-                            {}, {0, 0, 0});
+    CopyYForInterpolation(sq, *field.m_data, m_interpolated32_buffer, field_parity, frame_phase_y);
+    FilterImageDiamond(sq, frame_phase_y, m_interpolated32_buffer);
+    ConvertHorizSampleRate2to3(sq, m_interpolated32_buffer, m_field_Y_buffer, 1 - field_parity);
+    FillEmptyLines(sq, m_field_Y_buffer, field_parity);
 
-    // There is really no reason to do SyncLocal / SyncDevice below -- they could be replaced with the appropriate
-    // memory barriers.
-    m_mgr.sequence()
-            ->record<kp::OpTensorSyncDevice>({field.tensor()})
-            ->record<kp::OpAlgoDispatch>(
-                    copy_y_for_interpolation_algo,
-                    std::vector{field_parity, frame_phase_y})
-            ->record<kp::OpTensorSyncLocal>({m_interpolated32_buffer.tensor()})
+    DecodeC(sq, *field.m_data, m_intermediate_r_buffer, m_intermediate_b_buffer,
+                    frame_phase_c, field_parity);
+    FilterImage(
+            sq, Shaders::s_color_filter_height, Shaders::s_color_filter_width,
+            m_color_filter_tensor, m_intermediate_r_buffer, m_field_C_r_buffer, 128.0 / 8, 8);
+    FilterImage(
+            sq, Shaders::s_color_filter_height, Shaders::s_color_filter_width,
+            m_color_filter_tensor, m_intermediate_b_buffer, m_field_C_b_buffer, 128.0 / 8, 8);
 
-            ->record<kp::OpTensorSyncDevice>({m_diamond_filter_buffer.tensor(), m_interpolated32_buffer.tensor()})
-            ->record<kp::OpAlgoDispatch>(
-                    diamond_algo,
-                    std::vector{m_diamond_filter_buffer.height(), m_diamond_filter_buffer.width(), m_interpolated32_buffer.height(), m_interpolated32_buffer.width(), (unsigned)frame_phase_y})
-            ->record<kp::OpTensorSyncLocal>({m_interpolated32_buffer.tensor()})
+    CombineYandRB(sq, m_field_Y_buffer, m_field_C_r_buffer, m_field_C_b_buffer, m_frame_out_buffer);
 
-            ->record<kp::OpTensorSyncDevice>({m_filter_2_to_3_tensor, m_interpolated32_buffer.tensor()})
-            ->record<kp::OpAlgoDispatch>(
-                    convert_2_to_3_algo,
-                    std::vector{m_filter_2_to_3_tensor->size(), m_interpolated32_buffer.height(), m_interpolated32_buffer.width(), 1u - field_parity, 2u})
-            ->record<kp::OpTensorSyncLocal>({m_field_Y_buffer.tensor()})
-
-            ->record<kp::OpTensorSyncDevice>({m_field_Y_buffer.tensor()})
-            ->record<kp::OpAlgoDispatch>(
-                    fill_empty_lines_algo,
-                    std::vector{m_field_Y_buffer.height(), m_field_Y_buffer.width(), (unsigned)field_parity})
-            ->record<kp::OpTensorSyncLocal>({m_field_Y_buffer.tensor()})
-
-            ->record<kp::OpTensorSyncDevice>({field.tensor()})
-            ->record<kp::OpAlgoDispatch>(
-                    decode_c_algo,
-                    std::vector{frame_phase_c, field_parity})
-            ->record<kp::OpTensorSyncLocal>({m_intermediate_r_buffer.tensor(), m_intermediate_b_buffer.tensor()})
-
-            ->record<kp::OpTensorSyncDevice>({m_color_filter_tensor, m_intermediate_r_buffer.tensor()})
-            ->record<kp::OpAlgoDispatch>(
-                    filter_color_r_algo,
-                    std::vector{(float)Shaders::s_color_filter_height, (float)Shaders::s_color_filter_width, (float)m_intermediate_r_buffer.height(), (float)m_intermediate_r_buffer.width(), 128.0f / 8.0f, 8.0f})
-            ->record<kp::OpTensorSyncLocal>({m_field_C_r_buffer.tensor()})
-
-            ->record<kp::OpTensorSyncDevice>({m_color_filter_tensor, m_intermediate_b_buffer.tensor()})
-            ->record<kp::OpAlgoDispatch>(
-                    filter_color_b_algo,
-                    std::vector{(float)Shaders::s_color_filter_height, (float)Shaders::s_color_filter_width, (float)m_intermediate_b_buffer.height(), (float)m_intermediate_b_buffer.width(), 128.0f / 8.0f, 8.0f})
-            ->record<kp::OpTensorSyncLocal>({m_field_C_b_buffer.tensor()})
-
-            ->record<kp::OpTensorSyncDevice>({m_field_Y_buffer.tensor(), m_field_C_r_buffer.tensor(), m_field_C_b_buffer.tensor()})
-            ->record<kp::OpAlgoDispatch>(
-                    combine_y_and_rb_algo,
-                    std::vector{m_field_Y_buffer.height(), m_field_Y_buffer.width(), m_field_C_r_buffer.width()})
-            ->record<kp::OpTensorSyncLocal>({m_frame_out_buffer.tensor()})
-            ->eval();
+    sq->eval();
 
     return { vector<int>{ MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3}, CV_8UC4, m_frame_out_buffer.data() };
 }
@@ -237,36 +187,35 @@ void Shaders::ApplyTransmissionGamma(MuseBuffer<float> &buffer) {
             ->eval();
 }
 
-void Shaders::CopyYForInterpolation(MuseBuffer<float> &frame, MuseBuffer<float> &output,
-                                    unsigned int field_parity, unsigned int frame_phase_y) {
+void Shaders::CopyYForInterpolation(shared_ptr<kp::Sequence> const &sq,
+        MuseBuffer<float> &frame, MuseBuffer<float> &output,
+        unsigned int field_parity, unsigned int frame_phase_y) {
     std::shared_ptr<kp::Algorithm> copy_y_for_interpolation_algo =
             m_mgr.algorithm({frame.tensor(), output.tensor()},
                             m_copy_y_for_interpolation_spirv, kp::Workgroup({MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT}),
                             {}, {0, 0});
-    m_mgr.sequence()
-            ->record<kp::OpTensorSyncDevice>({frame.tensor()})
+    sq->record<kp::OpTensorSyncDevice>({frame.tensor(), output.tensor()}) // FIXME: output doesn't have to be synced
             ->record<kp::OpAlgoDispatch>(
                     copy_y_for_interpolation_algo,
                     std::vector{field_parity, frame_phase_y})
-            ->record<kp::OpTensorSyncLocal>({output.tensor()})
-            ->eval();
+            ->record<kp::OpTensorSyncLocal>({output.tensor()});
 }
 
-void Shaders::FilterImageDiamond(int phase, MuseBuffer<float> &buffer) {
+void Shaders::FilterImageDiamond(std::shared_ptr<kp::Sequence> const &sq,
+                                 int phase, MuseBuffer<float> &buffer) {
     std::shared_ptr<kp::Algorithm> diamond_algo =
             m_mgr.algorithm({m_diamond_filter_buffer.tensor(), buffer.tensor()},
                             m_diamond_spirv, kp::Workgroup({buffer.width(), buffer.height()}),
                             {}, {0.0, 0.0, 0.0, 0.0, 0.0});
-    m_mgr.sequence()
-            ->record<kp::OpTensorSyncDevice>({m_diamond_filter_buffer.tensor(), buffer.tensor()})
+    sq->record<kp::OpTensorSyncDevice>({m_diamond_filter_buffer.tensor(), buffer.tensor()})
             ->record<kp::OpAlgoDispatch>(
                     diamond_algo,
                     std::vector{m_diamond_filter_buffer.height(), m_diamond_filter_buffer.width(), buffer.height(), buffer.width(), (unsigned)phase})
-            ->record<kp::OpTensorSyncLocal>({buffer.tensor()})
-            ->eval();
+            ->record<kp::OpTensorSyncLocal>({buffer.tensor()});
 }
 
-void Shaders::FilterImage(unsigned int filter_height, unsigned int filter_width, std::shared_ptr<kp::Tensor> &filter,
+void Shaders::FilterImage(std::shared_ptr<kp::Sequence> const &sq,
+                          unsigned int filter_height, unsigned int filter_width, std::shared_ptr<kp::Tensor> &filter,
                           MuseBuffer<float> &source, MuseBuffer<float> &dest,
                           float border_value, float multiplier) {
     assert(source.height() == dest.height());
@@ -276,74 +225,162 @@ void Shaders::FilterImage(unsigned int filter_height, unsigned int filter_width,
             m_mgr.algorithm({filter, source.tensor(), dest.tensor()},
                             m_filter_image_spirv, kp::Workgroup({source.width(), source.height()}),
                             {}, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
-    m_mgr.sequence()
-            ->record<kp::OpTensorSyncDevice>({filter, source.tensor()})
+    sq->record<kp::OpTensorSyncDevice>({filter, source.tensor()})
             ->record<kp::OpAlgoDispatch>(
                     filter_image_algo,
                     std::vector{(float)filter_height, (float)filter_width, (float)source.height(), (float)source.width(), border_value, multiplier})
-            ->record<kp::OpTensorSyncLocal>({dest.tensor()})
-            ->eval();
+            ->record<kp::OpTensorSyncLocal>({dest.tensor()});
 }
 
-void Shaders::ConvertHorizSampleRate2to3(MuseBuffer<float> &source, MuseBuffer<float> &dest,
-                                         unsigned int output_start_row, unsigned int output_row_step_size) {
+void Shaders::ConvertHorizSampleRate2to3(std::shared_ptr<kp::Sequence> const &sq,
+                                         MuseBuffer<float> &source, MuseBuffer<float> &dest,
+                                         unsigned int output_start_row) {
     assert(source.width() * 3 == dest.width() * 2);
-    assert(source.height() * output_row_step_size == dest.height());
+    assert(source.height() * 2 == dest.height());
 
     std::shared_ptr<kp::Algorithm> convert_2_to_3_algo =
             m_mgr.algorithm({m_filter_2_to_3_tensor, source.tensor(), dest.tensor()},
-                            m_convert_2_to_3_spirv, kp::Workgroup({dest.width(), dest.height() / output_row_step_size}),
-                            {}, {0.0, 0.0, 0.0, 0.0, 0.0});
-    m_mgr.sequence()
-            ->record<kp::OpTensorSyncDevice>({m_filter_2_to_3_tensor, source.tensor()})
+                            m_convert_horiz_sample_rate_spirv, kp::Workgroup({dest.width(), dest.height() / 2}),
+                            {}, {0, 0, 0, 0, 0, 0, 0, 0, 0});
+    sq->record<kp::OpTensorSyncDevice>({m_filter_2_to_3_tensor, source.tensor()})
             ->record<kp::OpAlgoDispatch>(
                     convert_2_to_3_algo,
-                    std::vector{m_filter_2_to_3_tensor->size(), source.height(), source.width(), output_start_row, output_row_step_size})
-            ->record<kp::OpTensorSyncLocal>({dest.tensor()})
-            ->eval();
+                    std::vector{m_filter_2_to_3_tensor->size(), 3u, 2u, source.height(), source.width(), output_start_row, 2u, 0u, 1u})
+            ->record<kp::OpTensorSyncLocal>({dest.tensor()});
 }
 
-void Shaders::FillEmptyLines(MuseBuffer<float> &buffer, int phase) {
+void Shaders::ConvertHorizSampleRate4to3(std::shared_ptr<kp::Sequence> const &sq,
+                                         MuseBuffer<float> &source, MuseBuffer<float> &dest,
+                                         unsigned int output_start_row, unsigned int output_start_col) {
+    assert(source.width() * 3 == dest.width() * 2);
+    assert(source.height() * 2 == dest.height());
+
+    std::shared_ptr<kp::Algorithm> convert_4_to_3_algo =
+            m_mgr.algorithm({m_filter_4_to_3_tensor, source.tensor(), dest.tensor()},
+                            m_convert_horiz_sample_rate_spirv, kp::Workgroup({dest.width(), dest.height() / 2}),
+                            {}, {0, 0, 0, 0, 0, 0, 0, 0, 0});
+    sq->record<kp::OpTensorSyncDevice>({m_filter_4_to_3_tensor, source.tensor()})
+            ->record<kp::OpAlgoDispatch>(
+                    convert_4_to_3_algo,
+                    std::vector{m_filter_4_to_3_tensor->size(), 3u, 4u, source.height(), source.width(), output_start_row, 2u, output_start_col, 2u})
+            ->record<kp::OpTensorSyncLocal>({dest.tensor()});
+}
+
+void Shaders::FillEmptyLines(std::shared_ptr<kp::Sequence> const &sq, MuseBuffer<float> &buffer, int phase) {
     std::shared_ptr<kp::Algorithm> fill_empty_lines_algo =
             m_mgr.algorithm({buffer.tensor()},
                             m_fill_empty_lines_spirv, kp::Workgroup({buffer.width(), buffer.height() / 2}),
                             {}, {0.0, 0.0, 0.0});
-    m_mgr.sequence()
-            ->record<kp::OpTensorSyncDevice>({buffer.tensor()})
+    sq->record<kp::OpTensorSyncDevice>({buffer.tensor()})
             ->record<kp::OpAlgoDispatch>(
                     fill_empty_lines_algo,
                     std::vector{buffer.height(), buffer.width(), (unsigned)phase})
-            ->record<kp::OpTensorSyncLocal>({buffer.tensor()})
-            ->eval();
+            ->record<kp::OpTensorSyncLocal>({buffer.tensor()});
 }
 
-void Shaders::CombineYandRB(MuseBuffer<float> &Y_data, MuseBuffer<float> &C_r_data,
+void Shaders::CombineYandRB(std::shared_ptr<kp::Sequence> const &sq,
+                            MuseBuffer<float> &Y_data, MuseBuffer<float> &C_r_data,
                             MuseBuffer<float> &C_b_data, MuseBuffer<uint32_t> &out_rgb) {
     std::shared_ptr<kp::Algorithm> combine_y_and_rb_algo =
             m_mgr.algorithm({Y_data.tensor(), C_r_data.tensor(), C_b_data.tensor(), out_rgb.tensor()},
                             m_combine_y_and_rb_spirv, kp::Workgroup({Y_data.width(), Y_data.height()}),
                             {}, {0, 0, 0});
-    m_mgr.sequence()
-            ->record<kp::OpTensorSyncDevice>({Y_data.tensor(), C_r_data.tensor(), C_b_data.tensor()})
+    sq->record<kp::OpTensorSyncDevice>({Y_data.tensor(), C_r_data.tensor(), C_b_data.tensor()})
             ->record<kp::OpAlgoDispatch>(
                     combine_y_and_rb_algo,
                     std::vector{Y_data.height(), Y_data.width(), C_r_data.width()})
-            ->record<kp::OpTensorSyncLocal>({out_rgb.tensor()})
-            ->eval();
+            ->record<kp::OpTensorSyncLocal>({out_rgb.tensor()});
 }
 
-void Shaders::DecodeC(MuseBuffer<float> &input_frame, MuseBuffer<float> &C_r_data,
+void Shaders::DecodeC(std::shared_ptr<kp::Sequence> const &sq,
+                      MuseBuffer<float> &input_frame, MuseBuffer<float> &C_r_data,
                       MuseBuffer<float> &C_b_data, int frame_phase_c, int field_parity) {
     std::shared_ptr<kp::Algorithm> decode_c_algo =
             m_mgr.algorithm({input_frame.tensor(), C_r_data.tensor(), C_b_data.tensor()},
                             m_decode_c_spirv, kp::Workgroup({C_r_data.width(), C_r_data.height()}),
                             {}, {0, 0});
-    m_mgr.sequence()
-            ->record<kp::OpTensorSyncDevice>({input_frame.tensor()})
+    sq->record<kp::OpTensorSyncDevice>({input_frame.tensor()})
             ->record<kp::OpAlgoDispatch>(
                     decode_c_algo,
                     std::vector{frame_phase_c, field_parity})
-            ->record<kp::OpTensorSyncLocal>({C_r_data.tensor(), C_b_data.tensor()})
-            ->eval();
+            ->record<kp::OpTensorSyncLocal>({C_r_data.tensor(), C_b_data.tensor()});
 }
 
+// There are 4 fields in the vector.  Index 0 is the newest.
+optional<cv::Mat> Shaders::DecodeInterFrame(vector<reference_wrapper<FieldBufferView>> fields) {
+    assert(fields.size() == 4);
+    if (!all_of(fields.cbegin(), fields.cend(),
+               [](const reference_wrapper<FieldBufferView> f) -> bool {
+                   return f.get().m_control.has_value() &&
+                           f.get().m_control.value().field_subsampling_phase_Y.has_value() &&
+                           f.get().m_control.value().frame_subsampling_phase_Y.has_value() &&
+                           f.get().m_control.value().frame_subsampling_phase_C.has_value();
+               })) {
+        cout << "Unknown phases for inter frame interpolation" << endl;
+        return nullopt;
+    }
+
+    vector<int> field_parities = vector<int> {
+            fields[0].get().m_field_parity,
+            fields[1].get().m_field_parity,
+            fields[2].get().m_field_parity,
+            fields[3].get().m_field_parity };
+    vector<int> frame_phases_y = vector<int> {
+            fields[0].get().m_control.value().frame_subsampling_phase_Y.value(),
+            fields[1].get().m_control.value().frame_subsampling_phase_Y.value(),
+            fields[2].get().m_control.value().frame_subsampling_phase_Y.value(),
+            fields[3].get().m_control.value().frame_subsampling_phase_Y.value() };
+    vector<int> field_phases_y = vector<int> {
+            fields[0].get().m_control.value().field_subsampling_phase_Y.value(),
+            fields[1].get().m_control.value().field_subsampling_phase_Y.value(),
+            fields[2].get().m_control.value().field_subsampling_phase_Y.value(),
+            fields[3].get().m_control.value().field_subsampling_phase_Y.value() };
+    vector<int> frame_phases_c = vector<int> {
+            fields[0].get().m_control.value().frame_subsampling_phase_C.value(),
+            fields[1].get().m_control.value().frame_subsampling_phase_C.value(),
+            fields[2].get().m_control.value().frame_subsampling_phase_C.value(),
+            fields[3].get().m_control.value().frame_subsampling_phase_C.value() };
+
+    assert (field_parities[0] == field_parities[2] && field_parities[1] == field_parities[3] && field_parities[0] != field_parities[1]);
+    assert (field_phases_y[0] == field_phases_y[2] && field_phases_y[1] == field_phases_y[3] && field_phases_y[0] != field_phases_y[1]);
+    assert (frame_phases_y[0] != frame_phases_y[2] && frame_phases_y[1] != frame_phases_y[3]);
+
+    auto sq = m_mgr.sequence();
+
+    memset(m_field_Y_buffer.data(), 0, m_field_Y_buffer.byte_size());
+    sq->record<kp::OpTensorSyncDevice>({m_field_Y_buffer.tensor()});
+    MakeFieldFromConsecutiveFrames(sq, fields[0], frame_phases_y[0], fields[2], frame_phases_y[2], field_parities[0], field_phases_y[0]);
+    MakeFieldFromConsecutiveFrames(sq, fields[1], frame_phases_y[1], fields[3], frame_phases_y[3], field_parities[1], field_phases_y[1]);
+    FilterImageDiamond(sq, 1 ^ field_parities[0] ^ field_phases_y[0], m_field_Y_buffer);
+
+    // Will just use the color from the last field for now
+    DecodeC(sq, *fields[0].get().m_data, m_intermediate_r_buffer, m_intermediate_b_buffer,
+            frame_phases_c[0], field_parities[0]);
+    FilterImage(
+            sq, Shaders::s_color_filter_height, Shaders::s_color_filter_width,
+            m_color_filter_tensor, m_intermediate_r_buffer, m_field_C_r_buffer, 128.0 / 8, 8);
+    FilterImage(
+            sq, Shaders::s_color_filter_height, Shaders::s_color_filter_width,
+            m_color_filter_tensor, m_intermediate_b_buffer, m_field_C_b_buffer, 128.0 / 8, 8);
+
+    for (int i = 0; i < MUSE_BUF_HEIGHT; i++)
+        for (int j = 0; j < MUSE_Y_BUF_WIDTH; j++) {
+            m_field_C_r_buffer[i][j] = m_field_C_b_buffer[i][j] = 128.0f;
+        }
+    sq->eval();
+
+    CombineYandRB(sq, m_field_Y_buffer, m_field_C_r_buffer, m_field_C_b_buffer, m_frame_out_buffer);
+
+    sq->eval();
+
+    return optional(cv::Mat(vector<int>{ MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3}, CV_8UC4, m_frame_out_buffer.data()));
+}
+
+void Shaders::MakeFieldFromConsecutiveFrames(std::shared_ptr<kp::Sequence> const &sq,
+                                             FieldBufferView &field_a, unsigned int field_a_frame_phase_y,
+                                             FieldBufferView &field_b, unsigned int field_b_frame_phase_y,
+                                             unsigned int fields_parity, unsigned int fields_phases) {
+    CopyYForInterpolation(sq, *field_a.m_data, m_interpolated32_buffer, fields_parity, field_a_frame_phase_y);
+    CopyYForInterpolation(sq, *field_b.m_data, m_interpolated32_buffer, fields_parity, field_b_frame_phase_y);
+    ConvertHorizSampleRate4to3(sq, m_interpolated32_buffer, m_field_Y_buffer, 1 - fields_parity, 1 - fields_phases);
+}

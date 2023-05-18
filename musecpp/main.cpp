@@ -12,29 +12,38 @@
 #include <opencv2/highgui.hpp>
 #include "MuseTypes.h"
 #include "FrameBuffer.h"
+#include "FieldBufferView.h"
 #include "AudioDecoder.h"
 #include "Shaders.h"
 
 using namespace Eigen;
 using namespace std;
 
-bool read_shorts_big_endian_to_buffer(ifstream &input, uint16_t *input_buffer, float *out, size_t n, pair<float, float> eq) {
-    input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(uint16_t));
+// big enough for floats or shorts, two frames total
+static uint16_t input_buffer[480 * 1125 * 2 * sizeof(uint32_t)];
+
+bool read_big_endian_to_buffer(ifstream &input, bool read_floats, float *out, size_t n, pair<float, float> eq) {
+    input.read(reinterpret_cast<char *>(input_buffer), n * (read_floats? sizeof(uint32_t) : sizeof(uint16_t)));
     for (int i = 0; i < n; i++) {
-        uint16_t v = ntohs(input_buffer[i]);
-        float equalized_v = clamp(((float)v / MUSE_INPUT_MULT - eq.second) / eq.first,
-                                                 0.0f, 255.0f);
+        float v;
+        if (read_floats) {
+            uint32_t v_long = ntohl(((uint32_t *)input_buffer)[i]);
+            v = *reinterpret_cast<float *>(&v_long) / MUSE_FLOAT_INPUT_MULT;
+        } else {
+            v = (float)ntohs(input_buffer[i]) / MUSE_SHORT_INPUT_MULT;
+        }
+
+        float equalized_v = clamp((v - eq.second) / eq.first, 0.0f, 255.0f);
         out[i] = equalized_v;
     }
     return input.good();
 }
 
-pair<int, pair<float, float>> compute_initial_skip(string_view filename) {
+pair<int, pair<float, float>> compute_initial_skip(string_view filename, bool read_floats) {
     ifstream input(static_cast<string>(filename).c_str(), ios::binary | ios::in);
     input.exceptions(ifstream::badbit);
-    uint16_t input_buffer[480 * 1125 * 2 * sizeof(uint16_t)];
     vector<float> buffer(480 * 1125 * 2); // two frames of data
-    read_shorts_big_endian_to_buffer(input, input_buffer, buffer.data(), 480 * 1125 * 2, pair(1.0, 0.0));
+    read_big_endian_to_buffer(input, read_floats, buffer.data(), 480 * 1125 * 2, pair(1.0, 0.0));
 
     auto sorted(buffer);
     sort(sorted.begin(), sorted.end());
@@ -99,17 +108,16 @@ pair<int, pair<float, float>> compute_initial_skip(string_view filename) {
     return { bestLineOffset * 480 + bestPixelOffset, eq };
 }
 
-void process_file(string_view filename) {
-    auto [ samples_to_skip, eq ] = compute_initial_skip(filename);
+void process_file(string_view filename, bool read_floats) {
+    auto [ samples_to_skip, eq ] = compute_initial_skip(filename, read_floats);
 
     ifstream input(static_cast<string>(filename).c_str(), ios::binary | ios::in);
     input.exceptions(ifstream::badbit);
-    uint16_t input_buffer[480 * 1125 * sizeof(uint16_t)];
 
     {
         vector<float> skip_buffer(samples_to_skip);
         cout << "Skipping " << samples_to_skip << " initial samples" << endl;
-        read_shorts_big_endian_to_buffer(input, input_buffer, skip_buffer.data(), samples_to_skip, pair(1.0, 0.0));
+        read_big_endian_to_buffer(input, read_floats, skip_buffer.data(), samples_to_skip, pair(1.0, 0.0));
     }
 
     Shaders::CreateInstance();
@@ -122,7 +130,7 @@ void process_file(string_view filename) {
     auto t0 = chrono::high_resolution_clock::now();
     float *frame_mem;
     while (frame_mem = new float[1125 * 480],
-            read_shorts_big_endian_to_buffer(input, input_buffer, frame_mem, 480 * 1125, eq)) {
+            read_big_endian_to_buffer(input, read_floats, frame_mem, 480 * 1125, eq)) {
         auto frame_tensor = Shaders::GetManager().tensor(frame_mem, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH,
                                                          sizeof(float), kp::Tensor::TensorDataTypes::eFloat);
         auto muse_buffer = make_shared<MuseBuffer<float>>(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH, frame_tensor);
@@ -147,24 +155,54 @@ void process_file(string_view filename) {
             frame_buffers.pop_back();
         }
 
-        auto eq_estimate = frame_buffer->estimate_eq();
+        auto eq_estimate = frame_buffer->estimate_eq(eq);
         eq = { eq.first * 0.9 + eq_estimate.first * 0.1, eq.second * 0.9 + eq_estimate.second * 0.1 };
         cout << "eq: " << eq.first << ", " << eq.second << endl;
 
         frame_buffer->ApplyInverseTransmissionGamma();
 
+#if false
         auto view0 = frame_buffers.front()->get_field(0);
         auto view1 = frame_buffers.front()->get_field(1);
 
-        auto fieldMat = shaders.DecodeSingleField(view0);
+        auto fieldMat = shaders.DecodeIntraField(view0);
         cout << "Field 0 display" << endl;
         cv::imshow("MUSE", fieldMat);
         cv::waitKey(1);
 
-        fieldMat = shaders.DecodeSingleField(view1);
+        fieldMat = shaders.DecodeIntraField(view1);
         cout << "Field 1 display" << endl;
         cv::imshow("MUSE", fieldMat);
         cv::waitKey(1);
+#else
+        if (frame_buffers.size() >= 3) {
+            auto fields0 = vector<reference_wrapper<FieldBufferView>> {
+                frame_buffers[0]->get_field(0),
+                frame_buffers[1]->get_field(1),
+                frame_buffers[1]->get_field(0),
+                frame_buffers[2]->get_field(1)};
+            auto fieldMat = shaders.DecodeInterFrame(fields0);
+            if (fieldMat.has_value()) {
+                cout << "Field 0 inter frame interpolated display" << endl;
+                cv::imshow("MUSE", fieldMat.value());
+                cv::waitKey(1);
+            } else
+                cout << "Field 0 inter frame interpolation failed!" << endl;
+
+            auto fields1 = vector<reference_wrapper<FieldBufferView>> {
+                frame_buffers[0]->get_field(1),
+                frame_buffers[0]->get_field(0),
+                frame_buffers[1]->get_field(1),
+                frame_buffers[1]->get_field(0)};
+            fieldMat = shaders.DecodeInterFrame(fields1);
+            if (fieldMat.has_value()) {
+                cout << "Field 1 inter frame interpolated display" << endl;
+                cv::imshow("MUSE", fieldMat.value());
+                cv::waitKey(1);
+            } else
+                cout << "Field 1 inter frame interpolation failed!" << endl;
+        }
+#endif
 
         audio_decoder.decode_field(frame_buffer->get_field(0).audio_buffer());
         audio_decoder.decode_field(frame_buffer->get_field(1).audio_buffer());
@@ -182,16 +220,22 @@ void process_file(string_view filename) {
 
 int main(int argc, char *argv[]) {
     try {
+        bool read_floats = false;
         const vector<string_view> args(argv + 1, argv + argc);
         for (auto it = args.cbegin(), end = args.cend(); it != end; ++it) {
-            if (!filesystem::exists(*it)) {
-                throw runtime_error("File not found: " + string(*it));
+            if (*it == "-f")
+                read_floats = true;
+            else if (*it == "-s")
+                read_floats = false;
+            else {
+                if (!filesystem::exists(*it))
+                    throw runtime_error("File not found: " + string(*it));
+                process_file(*it, read_floats);
             }
-            process_file(*it);
         }
     } catch (const exception &x) {
         cerr << "musecpp: " << x.what() << '\n';
-        cerr << "usage: musecpp <input_file> ...\n";
+        cerr << "usage: musecpp [-f] [-s] <input_file> ...\n";
         return EXIT_FAILURE;
     }
 
