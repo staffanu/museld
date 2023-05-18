@@ -16,7 +16,7 @@ public:
     FrameBuffer(int frame_no, std::shared_ptr<MuseBuffer<float>> const &data);
 
     std::shared_ptr<MuseBuffer<float>> data();
-    std::pair<float, float> estimate_eq();
+    std::pair<float, float> estimate_eq(std::pair<float, float> const &current_eq);
     void ApplyInverseTransmissionGamma();
     FieldBufferView &get_field(int parity);
 

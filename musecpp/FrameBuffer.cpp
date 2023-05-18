@@ -21,16 +21,22 @@ std::shared_ptr<MuseBuffer<float>> FrameBuffer::data() {
     return m_data;
 }
 
-pair<float, float> FrameBuffer::estimate_eq() {
+pair<float, float> FrameBuffer::estimate_eq(pair<float, float> const &current_eq) {
+    // FIXME: this is very inefficient but was a quick fix -- refactor!
+    auto undo_eq = [current_eq](float v) -> float {
+        return v * current_eq.first + current_eq.second;
+    };
+
     float line_1_high_sum = 0;
     float line_2_low_sum = 0;
     for (int i = 19; i < 259; i++) {
-        line_1_high_sum += (*m_data)[0][i];
-        line_2_low_sum += (*m_data)[1][i];
+        line_1_high_sum += undo_eq((*m_data)[0][i]);
+        line_2_low_sum += undo_eq((*m_data)[1][i]);
     }
     float blanking_sum =  0;
-    for (int i = 128; i < 384; i++)
-        blanking_sum += (*m_data)[1124][i];
+    for (int i = 127; i < 383; i++) {
+        blanking_sum += undo_eq((*m_data)[562][i]) + undo_eq((*m_data)[1124][i]);
+    }
 
     float avg_high = line_1_high_sum / 240.0f;
     float avg_low = line_2_low_sum / 240.0f;
