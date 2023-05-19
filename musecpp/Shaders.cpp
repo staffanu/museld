@@ -70,7 +70,23 @@ Shaders::Shaders()
                   -0.000724, -0.002093, -0.022435, 0.024072, 0.164560, 0.024072, -0.022435, -0.002093, -0.000724,
                   0.000205, 0.000474, -0.005036, -0.012591, 0.010491, -0.012591, -0.005036, 0.000474, 0.000205,
                   -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
-          })))
+          }))),
+  m_color_filter_single_field_buffer(MuseBuffer<float>(5, 9, m_mgr.tensor(
+          {
+                  0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
+                  0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
+                  0.008117, 0.021787, 0.054789, 0.087791, 0.101461, 0.087791, 0.054789, 0.021787, 0.008117,
+                  0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
+                  0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
+          }))),
+  m_color_filter_inter_frame_buffer(MuseBuffer<float>(5, 5, m_mgr.tensor(
+        {
+                0.000158, 0.007330, 0.020738, 0.007330, 0.000158,
+                0.001069, 0.049475, 0.139983, 0.049475, 0.001069,
+                0.001980, 0.091620, 0.259228, 0.091620, 0.001980,
+                0.001069, 0.049475, 0.139983, 0.049475, 0.001069,
+                0.000158, 0.007330, 0.020738, 0.007330, 0.000158,
+        })))
 {
     m_diamond_spirv = CompileSource("../../musecpp/shaders/filter_diamond.comp");
     m_filter_image_spirv = CompileSource("../../musecpp/shaders/filter_image.comp");
@@ -81,15 +97,6 @@ Shaders::Shaders()
     m_fill_empty_lines_spirv = CompileSource("../../musecpp/shaders/fill_empty_lines.comp");
     m_combine_y_and_rb_spirv = CompileSource("../../musecpp/shaders/combine_y_and_rb.comp");
     m_decode_c_spirv = CompileSource("../../musecpp/shaders/decode_c.comp");
-
-    m_color_filter_tensor = m_mgr.tensor(
-            {
-                    0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
-                    0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
-                    0.008117, 0.021787, 0.054789, 0.087791, 0.101461, 0.087791, 0.054789, 0.021787, 0.008117,
-                    0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
-                    0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
-            });
 
     m_filter_2_to_3_tensor = m_mgr.tensor(
             {
@@ -142,19 +149,15 @@ cv::Mat Shaders::DecodeIntraField(FieldBufferView &field) {
 
     auto sq = m_mgr.sequence();
 
-    CopyYForInterpolation(sq, *field.m_data, m_interpolated32_buffer, field_parity, frame_phase_y);
+    CopyYForInterpolation(sq, *field.m_data, m_interpolated32_buffer, field_parity, frame_phase_y, true);
     FilterImageDiamond(sq, frame_phase_y, m_interpolated32_buffer);
     ConvertHorizSampleRate2to3(sq, m_interpolated32_buffer, m_field_Y_buffer, 1 - field_parity);
     FillEmptyLines(sq, m_field_Y_buffer, field_parity);
 
     DecodeC(sq, *field.m_data, m_intermediate_r_buffer, m_intermediate_b_buffer,
-                    frame_phase_c, field_parity);
-    FilterImage(
-            sq, Shaders::s_color_filter_height, Shaders::s_color_filter_width,
-            m_color_filter_tensor, m_intermediate_r_buffer, m_field_C_r_buffer, 128.0 / 8, 8);
-    FilterImage(
-            sq, Shaders::s_color_filter_height, Shaders::s_color_filter_width,
-            m_color_filter_tensor, m_intermediate_b_buffer, m_field_C_b_buffer, 128.0 / 8, 8);
+                    frame_phase_c, field_parity, true);
+    FilterImage(sq, m_color_filter_single_field_buffer, m_intermediate_r_buffer, m_field_C_r_buffer, 128.0 / 8, 8);
+    FilterImage(sq, m_color_filter_single_field_buffer, m_intermediate_b_buffer, m_field_C_b_buffer, 128.0 / 8, 8);
 
     CombineYandRB(sq, m_field_Y_buffer, m_field_C_r_buffer, m_field_C_b_buffer, m_frame_out_buffer);
 
@@ -184,15 +187,15 @@ void Shaders::ApplyTransmissionGamma(MuseBuffer<float> &buffer) {
 
 void Shaders::CopyYForInterpolation(shared_ptr<kp::Sequence> const &sq,
         MuseBuffer<float> &frame, MuseBuffer<float> &output,
-        unsigned int field_parity, unsigned int frame_phase_y) {
+        unsigned int field_parity, unsigned int frame_phase_y, bool zero_non_copied_entries) {
     std::shared_ptr<kp::Algorithm> copy_y_for_interpolation_algo =
             m_mgr.algorithm({frame.tensor(), output.tensor()},
                             m_copy_y_for_interpolation_spirv, kp::Workgroup({MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT}),
-                            {}, {0, 0});
+                            {}, {0, 0, 0});
     sq->record<kp::OpTensorSyncDevice>({frame.tensor(), output.tensor()}) // FIXME: output doesn't have to be synced
             ->record<kp::OpAlgoDispatch>(
                     copy_y_for_interpolation_algo,
-                    std::vector{field_parity, frame_phase_y})
+                    std::vector{field_parity, frame_phase_y, zero_non_copied_entries ? 1u : 0u})
             ->record<kp::OpTensorSyncLocal>({output.tensor()});
 }
 
@@ -210,20 +213,20 @@ void Shaders::FilterImageDiamond(std::shared_ptr<kp::Sequence> const &sq,
 }
 
 void Shaders::FilterImage(std::shared_ptr<kp::Sequence> const &sq,
-                          unsigned int filter_height, unsigned int filter_width, std::shared_ptr<kp::Tensor> &filter,
+                          MuseBuffer<float> &filter,
                           MuseBuffer<float> &source, MuseBuffer<float> &dest,
                           float border_value, float multiplier) {
     assert(source.height() == dest.height());
     assert(source.width() == dest.width());
 
     std::shared_ptr<kp::Algorithm> filter_image_algo =
-            m_mgr.algorithm({filter, source.tensor(), dest.tensor()},
+            m_mgr.algorithm({filter.tensor(), source.tensor(), dest.tensor()},
                             m_filter_image_spirv, kp::Workgroup({source.width(), source.height()}),
                             {}, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
-    sq->record<kp::OpTensorSyncDevice>({filter, source.tensor()})
+    sq->record<kp::OpTensorSyncDevice>({filter.tensor(), source.tensor()})
             ->record<kp::OpAlgoDispatch>(
                     filter_image_algo,
-                    std::vector{(float)filter_height, (float)filter_width, (float)source.height(), (float)source.width(), border_value, multiplier})
+                    std::vector{(float)filter.height(), (float)filter.width(), (float)source.height(), (float)source.width(), border_value, multiplier})
             ->record<kp::OpTensorSyncLocal>({dest.tensor()});
 }
 
@@ -288,16 +291,19 @@ void Shaders::CombineYandRB(std::shared_ptr<kp::Sequence> const &sq,
 }
 
 void Shaders::DecodeC(std::shared_ptr<kp::Sequence> const &sq,
-                      MuseBuffer<float> &input_frame, MuseBuffer<float> &C_r_data,
-                      MuseBuffer<float> &C_b_data, int frame_phase_c, int field_parity) {
+                      MuseBuffer<float> &input_frame,
+                      MuseBuffer<float> &C_r_data, MuseBuffer<float> &C_b_data,
+                      int frame_phase_c, int field_parity, bool zero_non_sample_points) {
     std::shared_ptr<kp::Algorithm> decode_c_algo =
             m_mgr.algorithm({input_frame.tensor(), C_r_data.tensor(), C_b_data.tensor()},
                             m_decode_c_spirv, kp::Workgroup({C_r_data.width(), C_r_data.height()}),
-                            {}, {0, 0});
+                            {}, {0, 0, 0});
+    // The output tensors are also inputs since the shader modifies their data.
+    // We do not need to sync them, however, since they are not written by the CPU.
     sq->record<kp::OpTensorSyncDevice>({input_frame.tensor()})
             ->record<kp::OpAlgoDispatch>(
                     decode_c_algo,
-                    std::vector{frame_phase_c, field_parity})
+                    std::vector{frame_phase_c, field_parity, zero_non_sample_points ? 1 : 0})
             ->record<kp::OpTensorSyncLocal>({C_r_data.tensor(), C_b_data.tensor()});
 }
 
@@ -348,25 +354,25 @@ optional<cv::Mat> Shaders::DecodeInterFrame(vector<reference_wrapper<FieldBuffer
     MakeFieldFromConsecutiveFrames(sq, fields[1], frame_phases_y[1], fields[3], frame_phases_y[3], field_parities[1], field_phases_y[1]);
     FilterImageDiamond(sq, 1 ^ field_parities[0] ^ field_phases_y[0], m_field_Y_buffer);
 
-    // Will just use the color from the last field for now
-    DecodeC(sq, *fields[0].get().m_data, m_intermediate_r_buffer, m_intermediate_b_buffer,
-            frame_phases_c[0], field_parities[0]);
-    FilterImage(
-            sq, Shaders::s_color_filter_height, Shaders::s_color_filter_width,
-            m_color_filter_tensor, m_intermediate_r_buffer, m_field_C_r_buffer, 128.0 / 8, 8);
-    FilterImage(
-            sq, Shaders::s_color_filter_height, Shaders::s_color_filter_width,
-            m_color_filter_tensor, m_intermediate_b_buffer, m_field_C_b_buffer, 128.0 / 8, 8);
-
-    for (int i = 0; i < MUSE_BUF_HEIGHT; i++)
-        for (int j = 0; j < MUSE_Y_BUF_WIDTH; j++) {
-            m_field_C_r_buffer[i][j] = m_field_C_b_buffer[i][j] = 128.0f;
-        }
-    sq->eval();
+    for (int i = 0; i < 4; i++)
+        DecodeC(sq, *fields[i].get().m_data, m_intermediate_r_buffer, m_intermediate_b_buffer,
+                frame_phases_c[i], field_parities[i], i == 0);
+    // TODO: this filter is made for single frame color data -- we could use a higher frequency filter
+    FilterImage(sq, m_color_filter_inter_frame_buffer, m_intermediate_r_buffer, m_field_C_r_buffer, 128.0 / 2, 2);
+    FilterImage(sq, m_color_filter_inter_frame_buffer, m_intermediate_b_buffer, m_field_C_b_buffer, 128.0 / 2, 2);
 
     CombineYandRB(sq, m_field_Y_buffer, m_field_C_r_buffer, m_field_C_b_buffer, m_frame_out_buffer);
 
     sq->eval();
+
+//    size_t steps[1] = { MUSE_Y_BUF_WIDTH * 12 };
+//    cv::Mat mat(vector<int>{ 120, 280 }, CV_8UC4,
+//                m_frame_out_buffer.data() + MUSE_Y_BUF_WIDTH * 3 * 330,
+//                steps);
+//    cv::namedWindow("MUSE", cv::WINDOW_NORMAL);
+//    cv::resizeWindow("MUSE", 16 * 100, 9 * 100);
+//    cv::imshow("MUSE", mat);
+//    cv::waitKey(0);
 
     return optional(cv::Mat(vector<int>{ MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3}, CV_8UC4, m_frame_out_buffer.data()));
 }
@@ -375,7 +381,7 @@ void Shaders::MakeFieldFromConsecutiveFrames(std::shared_ptr<kp::Sequence> const
                                              FieldBufferView &field_a, unsigned int field_a_frame_phase_y,
                                              FieldBufferView &field_b, unsigned int field_b_frame_phase_y,
                                              unsigned int fields_parity, unsigned int fields_phases) {
-    CopyYForInterpolation(sq, *field_a.m_data, m_interpolated32_buffer, fields_parity, field_a_frame_phase_y);
-    CopyYForInterpolation(sq, *field_b.m_data, m_interpolated32_buffer, fields_parity, field_b_frame_phase_y);
+    CopyYForInterpolation(sq, *field_a.m_data, m_interpolated32_buffer, fields_parity, field_a_frame_phase_y, false);
+    CopyYForInterpolation(sq, *field_b.m_data, m_interpolated32_buffer, fields_parity, field_b_frame_phase_y, false);
     ConvertHorizSampleRate4to3(sq, m_interpolated32_buffer, m_field_Y_buffer, 1 - fields_parity, 1 - fields_phases);
 }

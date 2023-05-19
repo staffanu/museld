@@ -12,6 +12,7 @@
 layout(push_constant) uniform PushConstants {
     uint frame_phase_c;
     uint field_parity;
+    uint zero_non_sample_points;
 };
 
 layout (local_size_x = 4) in;
@@ -37,7 +38,13 @@ void main() {
         return;
 
     uint line = row + 43 + field_parity * 562; // starts at 1
-    uint offset = (frame_phase_c + line + 1) % 2 * 2 + field_parity;
+    uint line_div_2_odd = (line / 2) % 2;
+    uint offset = (line_div_2_odd == frame_phase_c ? 0 : 2) + field_parity;
+
+    if (zero_non_sample_points != 0) {
+        r_data[row * MUSE_Y_BUF_WIDTH + col] = 0;
+        b_data[row * MUSE_Y_BUF_WIDTH + col] = 0;
+    }
 
     if (col % 4 == offset) {
         float v = input_frame[(line - 1) * MUSE_TOTAL_WIDTH + MUSE_C_OFFSET + col / 4];
@@ -45,13 +52,8 @@ void main() {
         bool is_red = line % 2 == 1;
         if (is_red) {
             r_data[row * MUSE_Y_BUF_WIDTH + col] = v;
-            b_data[row * MUSE_Y_BUF_WIDTH + col] = 0;
         } else {
-            r_data[row * MUSE_Y_BUF_WIDTH + col] = 0;
             b_data[row * MUSE_Y_BUF_WIDTH + col] = v;
         }
-    } else {
-        r_data[row * MUSE_Y_BUF_WIDTH + col] = 0;
-        b_data[row * MUSE_Y_BUF_WIDTH + col] = 0;
     }
 }

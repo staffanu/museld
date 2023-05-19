@@ -37,12 +37,11 @@ private:
     // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
     void CopyYForInterpolation(std::shared_ptr<kp::Sequence> const &sq,
             MuseBuffer<float> &frame, MuseBuffer<float> &output,
-            unsigned int field_parity, unsigned int frame_phase_y);
+            unsigned int field_parity, unsigned int frame_phase_y, bool zero_non_copied_entries);
     void FilterImageDiamond(std::shared_ptr<kp::Sequence> const &sq,
                             int phase, MuseBuffer<float> &buffer);
     void FilterImage(std::shared_ptr<kp::Sequence> const &sq,
-                     unsigned int filter_height, unsigned int filter_width,
-                     std::shared_ptr<kp::Tensor> &filter,
+                     MuseBuffer<float> &filter,
                      MuseBuffer<float> &source, MuseBuffer<float> &dest,
                      float border_value, float multiplier);
     void ConvertHorizSampleRate2to3(std::shared_ptr<kp::Sequence> const &sq,
@@ -57,8 +56,9 @@ private:
                        MuseBuffer<float> &Y_data, MuseBuffer<float> &C_r_data,
                        MuseBuffer<float> &C_b_data, MuseBuffer<uint32_t> &out_rgb);
     void DecodeC(std::shared_ptr<kp::Sequence> const &sq,
-                 MuseBuffer<float> &input_frame, MuseBuffer<float> &C_r_data,
-                 MuseBuffer<float> &C_b_data, int frame_phase_c, int field_parity);
+                 MuseBuffer<float> &input_frame,
+                 MuseBuffer<float> &C_r_data, MuseBuffer<float> &C_b_data,
+                 int frame_phase_c, int field_parity, bool zero_non_sample_points);
 
     void MakeFieldFromConsecutiveFrames(std::shared_ptr<kp::Sequence> const &sq,
                                         FieldBufferView &field_a, unsigned int field_a_frame_phase_y,
@@ -87,9 +87,8 @@ private:
     MuseBuffer<uint32_t> m_frame_out_buffer;
 
     MuseBuffer<float> m_diamond_filter_buffer;
-    static constexpr int s_color_filter_height = 5;
-    static constexpr int s_color_filter_width = 9;
-    std::shared_ptr<kp::Tensor> m_color_filter_tensor;
+    MuseBuffer<float> m_color_filter_single_field_buffer;
+    MuseBuffer<float> m_color_filter_inter_frame_buffer;
 
     std::shared_ptr<kp::Tensor> m_filter_2_to_3_tensor;
     std::shared_ptr<kp::Tensor> m_filter_4_to_3_tensor;
