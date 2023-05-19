@@ -22,8 +22,6 @@ public:
     std::shared_ptr<kp::Tensor> tensor();
 
     MuseSubBuffer control_data_buffer() const;
-    MuseSubBuffer frame_buffer_Y() const;
-    MuseSubBuffer frame_buffer_C() const;
     MuseSubBuffer audio_buffer() const;
 
     int m_frame_no;
