@@ -31,6 +31,7 @@ enum MotionInformation {
 
 struct ControlSignalDecoder {
     explicit ControlSignalDecoder(MuseSubBuffer const &data);
+    void print_control_data();
     std::optional<int> field_subsampling_phase_Y;
     std::optional<int> horizontal_motion_vector;
     std::optional<int> vertical_motion_vector;

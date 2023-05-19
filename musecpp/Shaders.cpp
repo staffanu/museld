@@ -137,6 +137,8 @@ MuseBuffer<T> Shaders::CreateMuseBuffer(unsigned int height, unsigned int width)
 
 cv::Mat Shaders::DecodeIntraField(FieldBufferView &field) {
     cout << "Decoding frame " << field.m_frame_no << " field " << field.m_field_parity << endl;
+    if (field.m_control.has_value())
+        field.m_control.value().print_control_data();
 
     int field_parity = field.m_field_parity;
     int frame_phase_y = field.m_control.has_value() ?

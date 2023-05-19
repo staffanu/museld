@@ -84,9 +84,9 @@ ControlSignalDecoder::ControlSignalDecoder(const MuseSubBuffer &data) {
             }
         }
     }
-    for (int i = 0; i < 32; i++)
-        cout << (result[i].second ? result[i].first ? "1" : "0" : "*");
-    cout << "  ";
+//    for (int i = 0; i < 32; i++)
+//        cout << (result[i].second ? result[i].first ? "1" : "0" : "*");
+//    cout << "  ";
 
     auto vector_index_to_bit_opt = [](const vector<pair<bool, bool>> v, int i) -> optional<int> {
         return v[i].second ? optional(v[i].first) : nullopt;
@@ -139,9 +139,12 @@ ControlSignalDecoder::ControlSignalDecoder(const MuseSubBuffer &data) {
         motion_information = nullopt;
         motion_extent = nullopt;
     }
+}
 
+void ControlSignalDecoder::print_control_data() {
     cout << "phases (fieldY frameY frameC) = "
-    << field_subsampling_phase_Y << frame_subsampling_phase_Y << frame_subsampling_phase_C
-    << ", hVector=" << horizontal_motion_vector << ", vVector=" << vertical_motion_vector
-    << ", motion=" << motion_information << ", extent=" << motion_extent << endl;
+         << field_subsampling_phase_Y << frame_subsampling_phase_Y << frame_subsampling_phase_C
+         << ", hVector=" << horizontal_motion_vector << ", vVector=" << vertical_motion_vector
+         << ", motion=" << motion_information << ", extent=" << motion_extent << endl;
+
 }
