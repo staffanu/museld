@@ -49,13 +49,6 @@ void show_buffer(int y_min, int x_min, int height, int width, const MuseBuffer<f
     cv::resizeWindow("MUSE", 16 * 100, 9 * 100);
     cv::imshow("MUSE", mat);
 
-    for (int row = 0; row < 4; row++) {
-        for (int col = 0; col < 10; col++) {
-            cout << buffer[row][col] << " ";
-        }
-        cout << endl;
-    }
-
     cv::waitKey(0);
 }
 

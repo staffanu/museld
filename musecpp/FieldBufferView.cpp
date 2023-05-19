@@ -28,14 +28,6 @@ MuseSubBuffer FieldBufferView::control_data_buffer() const {
     return {m_data, m_field_parity == 0 ? 558u : 1120u, 12, 5, 94 };
 }
 
-MuseSubBuffer FieldBufferView::frame_buffer_Y() const {
-    return {m_data, m_field_parity == 0 ? 46u : 608u, 106, MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH };
-}
-
-MuseSubBuffer FieldBufferView::frame_buffer_C() const {
-    return {m_data, m_field_parity == 0 ? 42u : 604u, 11, MUSE_BUF_HEIGHT, MUSE_C_BUF_WIDTH };
-}
-
 MuseSubBuffer FieldBufferView::audio_buffer() const {
     return {m_data, m_field_parity ? 2u : 564u, 11, 44, 469 };
 }
