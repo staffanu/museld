@@ -6,11 +6,11 @@
 // This shader should be invoked with global invocation ids
 // from (0, 0) to (MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)
 
-//layout(push_constant) uniform PushConstants {
-//    uint frame_phase_c;
-//    uint field_parity;
-//    uint zero_non_sample_points;
-//};
+layout(push_constant) uniform PushConstants {
+    // both set to 1 makes no sense
+    uint force_field_only;
+    uint force_inter_frame_only;
+};
 
 layout (local_size_x = 4) in;
 layout (local_size_y = 4) in;
@@ -61,7 +61,10 @@ void main() {
     float RmYM_inter_frame = inter_frame_r[(row / 2) * MUSE_Y_BUF_WIDTH + col / 3] - 128.0f;
     float BmYM_inter_frame = inter_frame_b[(row / 2) * MUSE_Y_BUF_WIDTH + col / 3] - 128.0f;
 
-    float movement = movement_data[row * MUSE_Y_BUF_WIDTH * 3 + col];
+    float movement = force_field_only != 0 ?
+        1.0f : force_inter_frame_only != 0 ?
+            0.0f : movement_data[row * MUSE_Y_BUF_WIDTH * 3 + col];
+
     float YM = YM_field * movement + YM_inter_frame * (1 - movement);
     float BmYM = BmYM_field * movement + BmYM_inter_frame * (1 - movement);
     float RmYM = RmYM_field * movement + RmYM_inter_frame * (1 - movement);

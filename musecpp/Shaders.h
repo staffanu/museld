@@ -24,10 +24,9 @@ public:
     static std::vector<uint32_t>CompileSource(const std::string &filename);
 
     void ApplyTransmissionGamma(MuseBuffer<float> &buffer);
-    cv::Mat DecodeIntraField(FieldBufferView &field);
-    std::optional<cv::Mat> DecodeInterFrame(std::vector<std::reference_wrapper<FieldBufferView>> const &fields);
-    std::optional<cv::Mat> DetectMotion(std::vector<std::reference_wrapper<FieldBufferView>> const &fields);
-    std::optional<cv::Mat> CombineStillAndMovingParts();
+    void DecodeIntraField(FieldBufferView &field);
+    bool DecodeInterFrameAndDetectMotion(std::vector<std::reference_wrapper<FieldBufferView>> const &fields);
+    cv::Mat CombineStillAndMovingParts(bool force_field_only, bool force_inter_frame_only);
 private:
     Shaders();
 
@@ -45,19 +44,8 @@ private:
                      MuseBuffer<float> &filter,
                      MuseBuffer<float> &source, MuseBuffer<float> &dest,
                      float border_value, float multiplier);
-    void ConvertHorizSampleRate2to3(std::shared_ptr<kp::Sequence> const &sq,
-                                    MuseBuffer<float> &source, MuseBuffer<float> &dest,
-                                    unsigned int output_start_row);
-    void ConvertHorizSampleRate4to3(std::shared_ptr<kp::Sequence> const &sq,
-                                    MuseBuffer<float> &source, MuseBuffer<float> &dest,
-                                    unsigned int output_start_row, unsigned int output_start_col);
     void ConvertHorizSampleRate4to1(std::shared_ptr<kp::Sequence> const &sq,
                                     MuseBuffer<float> &source, MuseBuffer<float> &dest);
-    void FillEmptyLines(std::shared_ptr<kp::Sequence> const &sq,
-                        MuseBuffer<float> &buffer, int phase);
-    void CombineYandRB(std::shared_ptr<kp::Sequence> const &sq,
-                       MuseBuffer<float> &Y_data, MuseBuffer<float> &C_r_data,
-                       MuseBuffer<float> &C_b_data, MuseBuffer<uint32_t> &out_rgb);
     void DecodeC(std::shared_ptr<kp::Sequence> const &sq,
                  MuseBuffer<float> &input_frame,
                  MuseBuffer<float> &C_r_data, MuseBuffer<float> &C_b_data,
@@ -68,6 +56,8 @@ private:
                                         FieldBufferView &field_b, unsigned int field_b_frame_phase_y,
                                         unsigned int fields_parity, unsigned int fields_phases);
 
+    kp::Manager m_mgr;
+
     std::vector<uint32_t> m_apply_transmission_gamma_y_spirv;
     std::vector<uint32_t> m_apply_transmission_gamma_c_spirv;
     std::vector<uint32_t> m_copy_y_for_interpolation_spirv;
@@ -75,12 +65,13 @@ private:
     std::vector<uint32_t> m_filter_image_spirv;
     std::vector<uint32_t> m_convert_horiz_sample_rate_spirv;
     std::vector<uint32_t> m_fill_empty_lines_spirv;
-    std::vector<uint32_t> m_combine_y_and_rb_spirv;
     std::vector<uint32_t> m_decode_c_spirv;
     std::vector<uint32_t> m_detect_motion_spirv;
     std::vector<uint32_t> m_combine_still_and_moving_spirv;
 
-    kp::Manager m_mgr;
+    std::shared_ptr<kp::Algorithm> m_fill_empty_lines_algo;
+    std::shared_ptr<kp::Algorithm> m_convert_2_to_3_algo;
+    std::shared_ptr<kp::Algorithm> m_convert_4_to_3_algo;
 
     // temporary data used by the single field decoder and inter-frame interpolation
     MuseBuffer<float> m_interpolated32_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH * 2
