@@ -161,49 +161,74 @@ void process_file(string_view filename, bool read_floats) {
 
         frame_buffer->ApplyInverseTransmissionGamma();
 
-#define WAITKEY_ARG 1
-#if false
+#define WAITKEY_ARG 0
         auto view0 = frame_buffers.front()->get_field(0);
         auto view1 = frame_buffers.front()->get_field(1);
+
+        if (frame_buffers.size() >= 3) {
+        cv::namedWindow("MUSE", cv::WINDOW_NORMAL | cv::WINDOW_FREERATIO);
+        cv::resizeWindow("MUSE", 16 * 100, 9 * 100);
 
         auto fieldMat = shaders.DecodeIntraField(view0);
         cout << "Field 0 display" << endl;
         cv::imshow("MUSE", fieldMat);
         cv::waitKey(WAITKEY_ARG);
 
-        fieldMat = shaders.DecodeIntraField(view1);
+            auto fields0 = vector<reference_wrapper<FieldBufferView>>{
+                    frame_buffers[0]->get_field(0),
+                    frame_buffers[1]->get_field(1),
+                    frame_buffers[1]->get_field(0),
+                    frame_buffers[2]->get_field(1),
+                    frame_buffers[2]->get_field(0)};
+            auto interFrameMat = shaders.DecodeInterFrame(fields0);
+            if (interFrameMat.has_value()) {
+                cout << "Field 0 inter frame interpolated display" << endl;
+                cv::imshow("MUSE", interFrameMat.value());
+                cv::waitKey(WAITKEY_ARG);
+
+                auto movementMat = shaders.DetectMotion(fields0);
+                if (movementMat.has_value()) {
+//                  cv::imshow("MUSE", movementMat.value());
+//                  cv::waitKey(0);
+                    auto combinedResult = shaders.CombineStillAndMovingParts();
+                    cout << "Field 0 combined display" << endl;
+                    cv::imshow("MUSE", combinedResult.value());
+                    cv::waitKey(WAITKEY_ARG);
+                }
+            } else
+                cout << "Field 0 inter frame interpolation failed!" << endl;
+        }
+
+        if (frame_buffers.size() >= 3) {
+        auto fieldMat = shaders.DecodeIntraField(view1);
         cout << "Field 1 display" << endl;
         cv::imshow("MUSE", fieldMat);
         cv::waitKey(WAITKEY_ARG);
-#else
-        if (frame_buffers.size() >= 3) {
-            auto fields0 = vector<reference_wrapper<FieldBufferView>> {
-                frame_buffers[0]->get_field(0),
-                frame_buffers[1]->get_field(1),
-                frame_buffers[1]->get_field(0),
-                frame_buffers[2]->get_field(1)};
-            auto fieldMat = shaders.DecodeInterFrame(fields0);
-            if (fieldMat.has_value()) {
-                cout << "Field 0 inter frame interpolated display" << endl;
-                cv::imshow("MUSE", fieldMat.value());
-                cv::waitKey(WAITKEY_ARG);
-            } else
-                cout << "Field 0 inter frame interpolation failed!" << endl;
 
-            auto fields1 = vector<reference_wrapper<FieldBufferView>> {
-                frame_buffers[0]->get_field(1),
-                frame_buffers[0]->get_field(0),
-                frame_buffers[1]->get_field(1),
-                frame_buffers[1]->get_field(0)};
-            fieldMat = shaders.DecodeInterFrame(fields1);
-            if (fieldMat.has_value()) {
+            auto fields1 = vector<reference_wrapper<FieldBufferView>>{
+                    frame_buffers[0]->get_field(1),
+                    frame_buffers[0]->get_field(0),
+                    frame_buffers[1]->get_field(1),
+                    frame_buffers[1]->get_field(0),
+                    frame_buffers[2]->get_field(1)};
+            auto interFrameMat = shaders.DecodeInterFrame(fields1);
+            if (interFrameMat.has_value()) {
                 cout << "Field 1 inter frame interpolated display" << endl;
-                cv::imshow("MUSE", fieldMat.value());
+                cv::imshow("MUSE", interFrameMat.value());
                 cv::waitKey(WAITKEY_ARG);
+
+                auto movementMat = shaders.DetectMotion(fields1);
+                if (movementMat.has_value()) {
+//                  cv::imshow("MUSE", movementMat.value());
+//                  cv::waitKey(0);
+                    auto combinedResult = shaders.CombineStillAndMovingParts();
+                    cout << "Field 1 combined display" << endl;
+                    cv::imshow("MUSE", combinedResult.value());
+                    cv::waitKey(WAITKEY_ARG);
+                }
             } else
                 cout << "Field 1 inter frame interpolation failed!" << endl;
         }
-#endif
 
         audio_decoder.decode_field(frame_buffer->get_field(0).audio_buffer());
         audio_decoder.decode_field(frame_buffer->get_field(1).audio_buffer());

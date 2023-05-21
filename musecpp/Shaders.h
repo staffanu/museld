@@ -25,8 +25,9 @@ public:
 
     void ApplyTransmissionGamma(MuseBuffer<float> &buffer);
     cv::Mat DecodeIntraField(FieldBufferView &field);
-    std::optional<cv::Mat> DecodeInterFrame(std::vector<std::reference_wrapper<FieldBufferView>> fields);
-
+    std::optional<cv::Mat> DecodeInterFrame(std::vector<std::reference_wrapper<FieldBufferView>> const &fields);
+    std::optional<cv::Mat> DetectMotion(std::vector<std::reference_wrapper<FieldBufferView>> const &fields);
+    std::optional<cv::Mat> CombineStillAndMovingParts();
 private:
     Shaders();
 
@@ -50,6 +51,8 @@ private:
     void ConvertHorizSampleRate4to3(std::shared_ptr<kp::Sequence> const &sq,
                                     MuseBuffer<float> &source, MuseBuffer<float> &dest,
                                     unsigned int output_start_row, unsigned int output_start_col);
+    void ConvertHorizSampleRate4to1(std::shared_ptr<kp::Sequence> const &sq,
+                                    MuseBuffer<float> &source, MuseBuffer<float> &dest);
     void FillEmptyLines(std::shared_ptr<kp::Sequence> const &sq,
                         MuseBuffer<float> &buffer, int phase);
     void CombineYandRB(std::shared_ptr<kp::Sequence> const &sq,
@@ -68,30 +71,46 @@ private:
     std::vector<uint32_t> m_apply_transmission_gamma_y_spirv;
     std::vector<uint32_t> m_apply_transmission_gamma_c_spirv;
     std::vector<uint32_t> m_copy_y_for_interpolation_spirv;
-    std::vector<uint32_t> m_copy_c_for_interpolation_spirv;
     std::vector<uint32_t> m_diamond_spirv;
     std::vector<uint32_t> m_filter_image_spirv;
     std::vector<uint32_t> m_convert_horiz_sample_rate_spirv;
     std::vector<uint32_t> m_fill_empty_lines_spirv;
     std::vector<uint32_t> m_combine_y_and_rb_spirv;
     std::vector<uint32_t> m_decode_c_spirv;
+    std::vector<uint32_t> m_detect_motion_spirv;
+    std::vector<uint32_t> m_combine_still_and_moving_spirv;
 
     kp::Manager m_mgr;
 
-    MuseBuffer<float> m_interpolated32_buffer;
-    MuseBuffer<float> m_field_Y_buffer;
-    MuseBuffer<float> m_field_C_r_buffer;
-    MuseBuffer<float> m_field_C_b_buffer;
+    // temporary data used by the single field decoder and inter-frame interpolation
+    MuseBuffer<float> m_interpolated32_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH * 2
     MuseBuffer<float> m_intermediate_r_buffer;
     MuseBuffer<float> m_intermediate_b_buffer;
+
+    // output from single field decoder -- when combining the two results
+    MuseBuffer<float> m_field_Y_buffer;
+    MuseBuffer<float> m_field_r_buffer;
+    MuseBuffer<float> m_field_b_buffer;
+
+    // output from inter-frame interpolation
+    MuseBuffer<float> m_inter_frame_Y_buffer;
+    MuseBuffer<float> m_inter_frame_r_buffer;
+    MuseBuffer<float> m_inter_frame_b_buffer;
+
+    MuseBuffer<float> m_movement_field_buffers[3]; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH / 2
+    MuseBuffer<float> m_movement_buffer;
+
+    // used for final result
     MuseBuffer<uint32_t> m_frame_out_buffer;
 
+    // filter definitions
     MuseBuffer<float> m_diamond_filter_buffer;
     MuseBuffer<float> m_color_filter_single_field_buffer;
     MuseBuffer<float> m_color_filter_inter_frame_buffer;
 
     std::shared_ptr<kp::Tensor> m_filter_2_to_3_tensor;
     std::shared_ptr<kp::Tensor> m_filter_4_to_3_tensor;
+    std::shared_ptr<kp::Tensor> m_filter_4_to_1_tensor;
 };
 
 #endif //MUSECPP_SHADERS_H

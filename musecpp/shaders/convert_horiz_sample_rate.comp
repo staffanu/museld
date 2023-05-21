@@ -13,6 +13,7 @@ layout(push_constant) uniform PushConstants {
     uint dest_row_step_size;
     uint dest_start_col;
     uint dest_col_step_size;
+    uint multiplier;
 };
 
 layout (local_size_x = 4) in;
@@ -57,5 +58,5 @@ void main() {
         float v = l >= 0 && l < source_width ? source[source_row * source_width + l] : 128;
         s += v * fir_filter[upsample_factor * l - hiFreqIx + N];
     }
-    dest[dest_row * dest_width + dest_col] = clamp(s * upsample_factor, 0, 255);
+    dest[dest_row * dest_width + dest_col] = clamp(s * upsample_factor * multiplier, 0, 255);
 }
