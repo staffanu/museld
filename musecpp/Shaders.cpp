@@ -51,7 +51,7 @@ void show_buffer(int y_min, int x_min, int height, int width, int x_scale, const
 }
 
 Shaders::Shaders()
-: m_mgr(kp::Manager(0, {}, { "VK_EXT_shader_atomic_float" })),
+: m_mgr(kp::Manager(0, {}, {})),
   m_interpolated32_buffer(Shaders::CreateMuseBuffer<float>(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
   m_intermediate_r_buffer(Shaders::CreateMuseBuffer<float>(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_intermediate_b_buffer(Shaders::CreateMuseBuffer<float>(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
@@ -383,7 +383,7 @@ void Shaders::MakeFieldFromConsecutiveFrames(std::shared_ptr<kp::Sequence> const
                     std::vector{m_filter_4_to_3_tensor->size(), 3u, 4u, m_interpolated32_buffer.height(), m_interpolated32_buffer.width(), uint(1 - fields_parity), 2u, uint(1 - fields_phases), 2u, 1u});
 }
 
-cv::Mat Shaders::CombineStillAndMovingParts(bool force_field_only, bool force_inter_frame_only) {
+cv::Mat Shaders::CombineStillAndMovingParts(bool force_field_only, bool force_inter_frame_only, bool output_bgr) {
     auto sq = m_mgr.sequence();
 
     std::shared_ptr<kp::Algorithm> combine_still_and_moving_algo =
@@ -392,10 +392,10 @@ cv::Mat Shaders::CombineStillAndMovingParts(bool force_field_only, bool force_in
                              m_inter_frame_r_buffer.tensor(), m_inter_frame_b_buffer.tensor(),
                              m_movement_buffer.tensor(), m_frame_out_buffer.tensor()},
                             m_combine_still_and_moving_spirv, kp::Workgroup({m_frame_out_buffer.width(), m_frame_out_buffer.height()}),
-                            {}, {0, 0});
+                            {}, {0, 0, 0});
 
     sq->record<kp::OpAlgoDispatch>(combine_still_and_moving_algo,
-                                   vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u})
+                                   vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u, output_bgr ? 1u : 0u})
             ->record<kp::OpTensorSyncLocal>({m_frame_out_buffer.tensor()});
 
     sq->eval();

@@ -26,7 +26,7 @@ public:
     void ApplyTransmissionGamma(MuseBuffer<float> &buffer);
     void DecodeIntraField(FieldBufferView &field);
     bool DecodeInterFrameAndDetectMotion(std::vector<std::reference_wrapper<FieldBufferView>> const &fields);
-    cv::Mat CombineStillAndMovingParts(bool force_field_only, bool force_inter_frame_only);
+    cv::Mat CombineStillAndMovingParts(bool force_field_only, bool force_inter_frame_only, bool output_bgr);
 private:
     Shaders();
 

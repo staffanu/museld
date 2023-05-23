@@ -10,6 +10,7 @@ layout(push_constant) uniform PushConstants {
     // both set to 1 makes no sense
     uint force_field_only;
     uint force_inter_frame_only;
+    uint output_bgr;
 };
 
 layout (local_size_x = 4) in;
@@ -73,5 +74,6 @@ void main() {
     int b = clamp(int(YM + BmYM + BmYM / 4), 0, 255);
     int r = clamp(int(YM + RmYM), 0, 255);
 
-    frame_out[row * MUSE_Y_BUF_WIDTH * 3 + col] = (r << 16) | (g << 8) | (b);
+    frame_out[row * MUSE_Y_BUF_WIDTH * 3 + col] =
+        output_bgr != 0 ? (0xff << 24) | (b << 16) | (g << 8) | (r) : (0xff << 24) | (r << 16) | (g << 8) | (b);
 }
