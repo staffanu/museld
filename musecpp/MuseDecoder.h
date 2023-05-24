@@ -15,7 +15,7 @@
 
 class MuseDecoder {
 public:
-    MuseDecoder(const std::string_view &filename, bool read_floats);
+    MuseDecoder(const std::string_view &filename, bool read_floats, Shaders &shaders);
     ~MuseDecoder();
     bool Initialize();
     std::optional<cv::Mat> Next(bool output_bgr);

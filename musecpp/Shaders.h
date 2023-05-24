@@ -16,22 +16,18 @@
 
 class Shaders {
 public:
-    Shaders(Shaders &other) = delete;
-    void operator=(const Shaders &) = delete;
-    static void CreateInstance();
-    static Shaders &GetInstance();
-    static kp::Manager &GetManager();
     static std::vector<uint32_t>CompileSource(const std::string &filename);
 
+    Shaders();
+    Shaders(Shaders &other) = delete;
+    void operator=(const Shaders &) = delete;
+
+    kp::Manager &manager();
     void ApplyTransmissionGamma(MuseBuffer<float> &buffer);
     void DecodeIntraField(FieldBufferView &field);
     bool DecodeInterFrameAndDetectMotion(std::vector<std::reference_wrapper<FieldBufferView>> const &fields);
     cv::Mat CombineStillAndMovingParts(bool force_field_only, bool force_inter_frame_only, bool output_bgr);
 private:
-    Shaders();
-
-    static Shaders *s_singleton;
-
     template<typename T> MuseBuffer<T> CreateMuseBuffer(unsigned int height, unsigned int width);
 
     // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed

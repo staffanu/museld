@@ -11,9 +11,8 @@
 using namespace std;
 
 void process_file(string_view filename, bool read_floats, bool use_gtk) {
-
-    Shaders::CreateInstance();
-    auto decoder = MuseDecoder(filename, read_floats);
+    Shaders shaders;
+    auto decoder = MuseDecoder(filename, read_floats, shaders);
     decoder.Initialize();
 
     if (use_gtk) {

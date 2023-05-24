@@ -12,11 +12,11 @@
 
 using namespace std;
 
-MuseDecoder::MuseDecoder(const std::string_view &filename, bool read_floats)
+MuseDecoder::MuseDecoder(const std::string_view &filename, bool read_floats, Shaders &shaders)
 : m_filename(filename),
   m_read_floats(read_floats),
   m_input_buffer((uint16_t *)malloc(480 * 1125 * 2 * sizeof(float))), // big enough for floats or shorts, two frames total
-  m_shaders(Shaders::GetInstance()) {
+  m_shaders(shaders) {
 }
 
 MuseDecoder::~MuseDecoder() {
@@ -53,8 +53,8 @@ std::optional<cv::Mat> MuseDecoder::Next(bool output_bgr) {
         auto *frame_mem = new float[1125 * 480];
         if (!read_big_endian_to_buffer(m_input, frame_mem, 480 * 1125, m_eq))
             return nullopt;
-        auto frame_tensor = Shaders::GetManager().tensor(frame_mem, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH,
-                                                         sizeof(float), kp::Tensor::TensorDataTypes::eFloat);
+        auto frame_tensor = m_shaders.manager().tensor(frame_mem, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH,
+                                                     sizeof(float), kp::Tensor::TensorDataTypes::eFloat);
         auto muse_buffer = make_shared<MuseBuffer<float>>(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH, frame_tensor);
         delete[] frame_mem;
         auto *frame_buffer = new FrameBuffer(++m_frame_no, muse_buffer);
@@ -81,7 +81,7 @@ std::optional<cv::Mat> MuseDecoder::Next(bool output_bgr) {
         m_eq = {m_eq.first * 0.9 + eq_estimate.first * 0.1, m_eq.second * 0.9 + eq_estimate.second * 0.1};
         cout << "eq: " << m_eq.first << ", " << m_eq.second << endl;
 
-        frame_buffer->ApplyInverseTransmissionGamma();
+        m_shaders.ApplyTransmissionGamma(*frame_buffer->data());
     }
 
     optional<cv::Mat> resultMat = nullopt;

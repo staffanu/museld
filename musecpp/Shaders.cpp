@@ -12,21 +12,6 @@
 
 using namespace std;
 
-Shaders *Shaders::s_singleton = nullptr;
-
-void Shaders::CreateInstance() {
-    assert(s_singleton == nullptr);
-    s_singleton = new Shaders();
-};
-
-Shaders &Shaders::GetInstance() {
-    return *s_singleton;
-}
-
-kp::Manager &Shaders::GetManager() {
-    return s_singleton->m_mgr;
-}
-
 std::vector<uint32_t> Shaders::CompileSource(const std::string &filename) {
     auto command = string("glslangValidator -V " + filename + " -o " + filename + ".spv");
     cout << "command: " << command << endl;
@@ -142,6 +127,10 @@ Shaders::Shaders()
             {m_filter_4_to_3_tensor, m_interpolated32_buffer.tensor(), m_inter_frame_Y_buffer.tensor()},
             m_convert_horiz_sample_rate_spirv, kp::Workgroup({m_inter_frame_Y_buffer.width(), m_inter_frame_Y_buffer.height() / 2}),
             {}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+}
+
+kp::Manager &Shaders::manager() {
+    return m_mgr;
 }
 
 template<typename T>

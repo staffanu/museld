@@ -61,10 +61,6 @@ pair<float, float> FrameBuffer::linear_regression(vector<pair<float, float>> con
     return {a, b};
 }
 
-void FrameBuffer::ApplyInverseTransmissionGamma() {
-    Shaders::GetInstance().ApplyTransmissionGamma(*m_data);
-}
-
 FieldBufferView &FrameBuffer::get_field(int parity) {
     return m_fields[parity];
 }
