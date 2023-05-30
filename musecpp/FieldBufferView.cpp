@@ -20,7 +20,7 @@ void FieldBufferView::ProcessControlData(MuseSubBuffer const &control_data) {
     m_control = optional(ControlSignalDecoder(control_data));
 }
 
-std::shared_ptr<kp::Tensor> FieldBufferView::tensor() {
+std::shared_ptr<musevk::Tensor> FieldBufferView::tensor() {
     return m_data->tensor();
 }
 

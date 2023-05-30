@@ -3,47 +3,42 @@
 #include <filesystem>
 #include <algorithm>
 #include <deque>
-#include <gtkmm.h>
-#include "MuseWindow.h"
 #include "Shaders.h"
 #include "MuseDecoder.h"
+#include "VulkanManager.h"
 
 using namespace std;
 
-void process_file(string_view filename, bool read_floats, bool use_gtk) {
-    Shaders shaders;
-    auto decoder = MuseDecoder(filename, read_floats, shaders);
-    decoder.Initialize();
+void process_file(string filename, bool read_floats) {
+    VulkanManager app;
+    app.initWindow();
+    app.initVulkan();
+    {
+        auto resources = app.resources();
+        Shaders shaders(resources);
+        auto decoder = MuseDecoder(filename, read_floats, shaders);
+        decoder.Initialize();
 
-    if (use_gtk) {
-        auto gtkApp = Gtk::Application::create("se.musecpp");
-        MuseWindow museWindow(3 * MUSE_Y_BUF_WIDTH, 2 * MUSE_BUF_HEIGHT, decoder);
-        gtkApp->run(museWindow);
-    } else {
-        optional<cv::Mat> optMat;
-        while ((optMat = decoder.Next(false)).has_value()) {
-            cv::imshow("MUSE", optMat.value());
-            cv::waitKey(1);
-        }
+        do {
+            decoder.Next();
+        } while (app.drawNextFrame(shaders.result_tensor()));
     }
+    app.cleanup();
 }
 
 int main(int argc, char *argv[]) {
     try {
         bool read_floats = false;
-        bool use_gtk = false;
-        const vector<string_view> args(argv + 1, argv + argc);
+        const vector<string> args(argv + 1, argv + argc);
         for (auto it = args.cbegin(), end = args.cend(); it != end; ++it) {
             if (*it == "-f")
                 read_floats = true;
             else if (*it == "-s")
                 read_floats = false;
-            else if (*it == "-g")
-                use_gtk = true;
             else {
                 if (!filesystem::exists(*it))
                     throw runtime_error("File not found: " + string(*it));
-                process_file(*it, read_floats, use_gtk);
+                process_file(*it, read_floats);
             }
         }
     } catch (const exception &x) {

@@ -7,21 +7,22 @@
 
 #include <string>
 #include <optional>
-#include <opencv2/core/mat.hpp>
 #include <deque>
+#include <fstream>
 #include "Shaders.h"
-#include "FrameBuffer.h"
 #include "AudioDecoder.h"
+
+class FrameBuffer;
 
 class MuseDecoder {
 public:
-    MuseDecoder(const std::string_view &filename, bool read_floats, Shaders &shaders);
+    MuseDecoder(const std::string &filename, bool read_floats, Shaders &shaders);
     ~MuseDecoder();
     bool Initialize();
-    std::optional<cv::Mat> Next(bool output_bgr);
+    bool Next();
 
 private:
-    std::string_view m_filename;
+    std::string m_filename;
     bool m_read_floats;
     std::ifstream m_input;
     std::pair<float, float> m_eq;

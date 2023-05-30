@@ -11,8 +11,7 @@
 using namespace std;
 
 FrameBuffer::FrameBuffer(int frame_no, std::shared_ptr<MuseBuffer<float>> const &data)
-: m_frame_no(frame_no),
-  m_data(data),
+: m_data(data),
   m_fields({FieldBufferView(frame_no, data, 0), FieldBufferView(frame_no, data, 1) })
 {
 }
@@ -42,7 +41,7 @@ pair<float, float> FrameBuffer::estimate_eq(pair<float, float> const &current_eq
     float avg_low = line_2_low_sum / 240.0f;
     float avg_blanking = blanking_sum / 512.0f;
     vector<pair<float, float>> v = {{16.0f , avg_low}, {128.0f, avg_blanking }, {239.0f, avg_high }};
-    auto eq = linear_regression(v);
+    auto eq = FrameBuffer::linear_regression(v);
     return eq;
 }
 

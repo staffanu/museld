@@ -9,10 +9,11 @@
 #include <chrono>
 #include "MuseTypes.h"
 #include "MuseDecoder.h"
+#include "FrameBuffer.h"
 
 using namespace std;
 
-MuseDecoder::MuseDecoder(const std::string_view &filename, bool read_floats, Shaders &shaders)
+MuseDecoder::MuseDecoder(const string &filename, bool read_floats, Shaders &shaders)
 : m_filename(filename),
   m_read_floats(read_floats),
   m_input_buffer((uint16_t *)malloc(480 * 1125 * 2 * sizeof(float))), // big enough for floats or shorts, two frames total
@@ -47,14 +48,13 @@ bool MuseDecoder::Initialize() {
     return true;
 }
 
-std::optional<cv::Mat> MuseDecoder::Next(bool output_bgr) {
+bool MuseDecoder::Next() {
     auto t0 = chrono::high_resolution_clock::now();
     if (m_field_index == 0) {
         auto *frame_mem = new float[1125 * 480];
         if (!read_big_endian_to_buffer(m_input, frame_mem, 480 * 1125, m_eq))
-            return nullopt;
-        auto frame_tensor = m_shaders.manager().tensor(frame_mem, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH,
-                                                     sizeof(float), kp::Tensor::TensorDataTypes::eFloat);
+            return false;
+        auto frame_tensor = m_shaders.resources().tensor(frame_mem, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float));
         auto muse_buffer = make_shared<MuseBuffer<float>>(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH, frame_tensor);
         delete[] frame_mem;
         auto *frame_buffer = new FrameBuffer(++m_frame_no, muse_buffer);
@@ -84,15 +84,8 @@ std::optional<cv::Mat> MuseDecoder::Next(bool output_bgr) {
         m_shaders.ApplyTransmissionGamma(*frame_buffer->data());
     }
 
-    optional<cv::Mat> resultMat = nullopt;
-#define DISPLAY_INTERMEDIATE_RESULTS 0
+    bool inter_frame_ok = false;
     m_shaders.DecodeIntraField(m_frame_buffers[0]->get_field(m_field_index));
-#if DISPLAY_INTERMEDIATE_RESULTS
-    auto fieldMat = shaders.CombineStillAndMovingParts(true, false);
-    cout << "Field " << field_index << " display" << endl;
-    cv::imshow("MUSE", fieldMat);
-    cv::waitKey(WAITKEY_ARG);
-#endif
     if (m_frame_buffers.size() >= 3) {
         auto fields = vector<reference_wrapper<FieldBufferView>>{
                 m_frame_buffers[0]->get_field(m_field_index),
@@ -102,20 +95,15 @@ std::optional<cv::Mat> MuseDecoder::Next(bool output_bgr) {
                 m_frame_buffers[2]->get_field(m_field_index)};
 
         if (m_shaders.DecodeInterFrameAndDetectMotion(fields)) {
-#if DISPLAY_INTERMEDIATE_RESULTS
-            auto interFrameMat = shaders.CombineStillAndMovingParts(false, true);
-            cout << "Field " << field_index << " inter-frame interpolated display" << endl;
-            cv::imshow("MUSE", interFrameMat);
-            cv::waitKey(WAITKEY_ARG);
-#endif
-            resultMat = m_shaders.CombineStillAndMovingParts(false, false, output_bgr);
+            inter_frame_ok = true;
+            m_shaders.CombineStillAndMovingParts(false, false);
             cout << "Field " << m_field_index << " inter-frame interpolation success" << endl;
         } else {
             cout << "Field " << m_field_index << " inter-frame interpolation failed!" << endl;
         }
     }
-    if (!resultMat.has_value()) {
-        resultMat = m_shaders.CombineStillAndMovingParts(true, false, output_bgr);
+    if (!inter_frame_ok) {
+        m_shaders.CombineStillAndMovingParts(true, false);
         cout << "Field " << m_field_index << " using intra-field interpolation" << endl;
     }
 
@@ -128,7 +116,7 @@ std::optional<cv::Mat> MuseDecoder::Next(bool output_bgr) {
 
     m_field_index = (m_field_index + 1) % 2;
 
-    return resultMat;
+    return true;
 }
 
 bool MuseDecoder::read_big_endian_to_buffer(ifstream &input, float *out, size_t n, pair<float, float> eq) {

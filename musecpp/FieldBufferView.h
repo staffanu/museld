@@ -10,6 +10,7 @@
 #include "ControlSignalDecoder.h"
 #include "MuseBuffer.h"
 #include "MuseSubBuffer.h"
+#include "VulkanResources.h"
 
 class FieldBufferView {
 public:
@@ -19,7 +20,7 @@ public:
     // parameter is that we call this from the main loop after creating the FrameBuffer.
     void ProcessControlData(MuseSubBuffer const &control_data);
 
-    std::shared_ptr<kp::Tensor> tensor();
+    std::shared_ptr<musevk::Tensor> tensor();
 
     MuseSubBuffer control_data_buffer() const;
     MuseSubBuffer audio_buffer() const;

@@ -5,8 +5,7 @@
 #ifndef MUSECPP_AUDIODECODER_H
 #define MUSECPP_AUDIODECODER_H
 
-
-#include "FieldBufferView.h"
+class MuseSubBuffer;
 
 class AudioDecoder {
 public:

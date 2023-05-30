@@ -22,7 +22,6 @@ public:
 private:
     static std::pair<float, float> linear_regression(std::vector<std::pair<float, float>> const &values);
 
-    int m_frame_no;
     std::shared_ptr<MuseBuffer<float>> m_data;
     std::vector<FieldBufferView> m_fields;
 };

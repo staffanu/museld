@@ -5,54 +5,56 @@
 #ifndef MUSECPP_SHADERS_H
 #define MUSECPP_SHADERS_H
 
-
 #include <string>
 #include <vector>
 #include <csignal>
-#include <opencv2/core/mat.hpp>
-#include "kompute/Kompute.hpp"
-#include "FieldBufferView.h"
 #include "MuseBuffer.h"
+#include "VulkanResources.h"
+
+class FieldBufferView;
 
 class Shaders {
 public:
     static std::vector<uint32_t>CompileSource(const std::string &filename);
 
-    Shaders();
+    Shaders(musevk::VulkanResources &resources);
     Shaders(Shaders &other) = delete;
     void operator=(const Shaders &) = delete;
 
-    kp::Manager &manager();
+    musevk::VulkanResources &resources() {
+        return m_vulkan_resources;
+    };
     void ApplyTransmissionGamma(MuseBuffer<float> &buffer);
     void DecodeIntraField(FieldBufferView &field);
     bool DecodeInterFrameAndDetectMotion(std::vector<std::reference_wrapper<FieldBufferView>> const &fields);
-    cv::Mat CombineStillAndMovingParts(bool force_field_only, bool force_inter_frame_only, bool output_bgr);
+    void CombineStillAndMovingParts(bool force_field_only, bool force_inter_frame_only);
+    musevk::Tensor &result_tensor();
 private:
     template<typename T> MuseBuffer<T> CreateMuseBuffer(unsigned int height, unsigned int width);
 
     // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
-    void CopyYForInterpolation(std::shared_ptr<kp::Sequence> const &sq,
+    void CopyYForInterpolation(std::shared_ptr<musevk::Sequence> const &sq,
             MuseBuffer<float> &frame, MuseBuffer<float> &output,
             unsigned int field_parity, unsigned int frame_phase_y, bool zero_non_copied_entries);
-    void FilterImageDiamond(std::shared_ptr<kp::Sequence> const &sq,
+    void FilterImageDiamond(std::shared_ptr<musevk::Sequence> const &sq,
                             int phase, MuseBuffer<float> &buffer);
-    void FilterImage(std::shared_ptr<kp::Sequence> const &sq,
+    void FilterImage(std::shared_ptr<musevk::Sequence> const &sq,
                      MuseBuffer<float> &filter,
                      MuseBuffer<float> &source, MuseBuffer<float> &dest,
                      float border_value, float multiplier);
-    void ConvertHorizSampleRate4to1(std::shared_ptr<kp::Sequence> const &sq,
+    void ConvertHorizSampleRate4to1(std::shared_ptr<musevk::Sequence> const &sq,
                                     MuseBuffer<float> &source, MuseBuffer<float> &dest);
-    void DecodeC(std::shared_ptr<kp::Sequence> const &sq,
+    void DecodeC(std::shared_ptr<musevk::Sequence> const &sq,
                  MuseBuffer<float> &input_frame,
                  MuseBuffer<float> &C_r_data, MuseBuffer<float> &C_b_data,
                  int frame_phase_c, int field_parity, bool zero_non_sample_points);
 
-    void MakeFieldFromConsecutiveFrames(std::shared_ptr<kp::Sequence> const &sq,
+    void MakeFieldFromConsecutiveFrames(std::shared_ptr<musevk::Sequence> const &sq,
                                         FieldBufferView &field_a, unsigned int field_a_frame_phase_y,
                                         FieldBufferView &field_b, unsigned int field_b_frame_phase_y,
                                         unsigned int fields_parity, unsigned int fields_phases);
 
-    kp::Manager m_mgr;
+    musevk::VulkanResources &m_vulkan_resources;
 
     std::vector<uint32_t> m_apply_transmission_gamma_y_spirv;
     std::vector<uint32_t> m_apply_transmission_gamma_c_spirv;
@@ -65,9 +67,9 @@ private:
     std::vector<uint32_t> m_detect_motion_spirv;
     std::vector<uint32_t> m_combine_still_and_moving_spirv;
 
-    std::shared_ptr<kp::Algorithm> m_fill_empty_lines_algo;
-    std::shared_ptr<kp::Algorithm> m_convert_2_to_3_algo;
-    std::shared_ptr<kp::Algorithm> m_convert_4_to_3_algo;
+    std::shared_ptr<musevk::Algorithm> m_fill_empty_lines_algo;
+    std::shared_ptr<musevk::Algorithm> m_convert_2_to_3_algo;
+    std::shared_ptr<musevk::Algorithm> m_convert_4_to_3_algo;
 
     // temporary data used by the single field decoder and inter-frame interpolation
     MuseBuffer<float> m_interpolated32_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH * 2
@@ -95,9 +97,9 @@ private:
     MuseBuffer<float> m_color_filter_single_field_buffer;
     MuseBuffer<float> m_color_filter_inter_frame_buffer;
 
-    std::shared_ptr<kp::Tensor> m_filter_2_to_3_tensor;
-    std::shared_ptr<kp::Tensor> m_filter_4_to_3_tensor;
-    std::shared_ptr<kp::Tensor> m_filter_4_to_1_tensor;
+    std::shared_ptr<musevk::Tensor> m_filter_2_to_3_tensor;
+    std::shared_ptr<musevk::Tensor> m_filter_4_to_3_tensor;
+    std::shared_ptr<musevk::Tensor> m_filter_4_to_1_tensor;
 };
 
 #endif //MUSECPP_SHADERS_H

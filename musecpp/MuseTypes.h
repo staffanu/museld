@@ -7,7 +7,7 @@
 
 #include <cstdint>
 #include <optional>
-#include "kompute/Kompute.hpp"
+#include <ostream>
 
 // input file currently uses shorts in the range 0...1023
 #define MUSE_SHORT_INPUT_MULT 4

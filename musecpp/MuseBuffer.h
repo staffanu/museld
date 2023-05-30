@@ -7,13 +7,13 @@
 
 #include <cstddef>
 #include <type_traits>
-#include <kompute/Kompute.hpp>
 #include <iostream>
+#include "VulkanResources.h"
 
 template<typename T>
 class MuseBuffer {
 public:
-    MuseBuffer(unsigned int height, unsigned int width, std::shared_ptr<kp::Tensor> const &tensor)
+    MuseBuffer(unsigned int height, unsigned int width, std::shared_ptr<musevk::Tensor> const &tensor)
     : m_height(height), m_width(width), m_tensor(tensor) {
         assert(tensor->size() == height * width);
     }
@@ -27,7 +27,7 @@ public:
         return m_height;
     }
 
-    std::shared_ptr<kp::Tensor> tensor() {
+    std::shared_ptr<musevk::Tensor> tensor() {
         return m_tensor;
     }
 
@@ -52,7 +52,7 @@ public:
 private:
     unsigned int m_height;
     unsigned int m_width;
-    std::shared_ptr<kp::Tensor> m_tensor;
+    std::shared_ptr<musevk::Tensor> m_tensor;
 };
 
 #endif //MUSECPP_MUSEBUFFER_H
