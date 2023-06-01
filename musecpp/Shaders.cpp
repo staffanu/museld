@@ -119,19 +119,20 @@ Shaders::Shaders(musevk::VulkanResources &resources)
             });
 
     m_fill_empty_lines_algo = m_vulkan_resources.ComputeShader(
-            {m_field_Y_buffer.tensor()},
+            {m_field_Y_buffer.tensor()}, sizeof(uint32_t) * 3,
             m_fill_empty_lines_spirv, musevk::Workgroup({m_field_Y_buffer.width(), m_field_Y_buffer.height() / 2}));
     m_convert_2_to_3_algo = m_vulkan_resources.ComputeShader(
-            {m_filter_2_to_3_tensor, m_interpolated32_buffer.tensor(), m_field_Y_buffer.tensor()},
+            {m_filter_2_to_3_tensor, m_interpolated32_buffer.tensor(), m_field_Y_buffer.tensor()}, sizeof(uint32_t) * 10,
             m_convert_horiz_sample_rate_spirv, musevk::Workgroup({m_field_Y_buffer.width(), m_field_Y_buffer.height() / 2}));
     m_convert_4_to_3_algo = m_vulkan_resources.ComputeShader(
-            {m_filter_4_to_3_tensor, m_interpolated32_buffer.tensor(), m_inter_frame_Y_buffer.tensor()},
+            {m_filter_4_to_3_tensor, m_interpolated32_buffer.tensor(), m_inter_frame_Y_buffer.tensor()}, sizeof(uint32_t) * 10,
             m_convert_horiz_sample_rate_spirv, musevk::Workgroup({m_inter_frame_Y_buffer.width(), m_inter_frame_Y_buffer.height() / 2}));
     m_combine_still_and_moving_algo = m_vulkan_resources.ComputeShader(
             {m_field_Y_buffer.tensor(), m_field_r_buffer.tensor(),
              m_field_b_buffer.tensor(), m_inter_frame_Y_buffer.tensor(),
              m_inter_frame_r_buffer.tensor(), m_inter_frame_b_buffer.tensor(),
              m_movement_buffer.tensor(), m_frame_out_buffer.tensor()},
+            sizeof(uint32_t) * 2,
             m_combine_still_and_moving_spirv, musevk::Workgroup({m_frame_out_buffer.width(), m_frame_out_buffer.height()}));
 
     auto sq = resources.sequence();
@@ -155,11 +156,11 @@ MuseBuffer<T> Shaders::CreateMuseBuffer(unsigned int height, unsigned int width)
 
 void Shaders::ApplyTransmissionGamma(musevk::Sequence &sq, MuseBuffer<float> &buffer) {
     auto apply_transmission_gamma_y_algo =
-            m_vulkan_resources.ComputeShader({buffer.tensor()},
+            m_vulkan_resources.ComputeShader({buffer.tensor()}, 0,
                             m_apply_transmission_gamma_y_spirv,
                             musevk::Workgroup({MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT}));
     auto apply_transmission_gamma_c_algo =
-            m_vulkan_resources.ComputeShader({buffer.tensor()},
+            m_vulkan_resources.ComputeShader({buffer.tensor()}, 0,
                             m_apply_transmission_gamma_c_spirv,
                             musevk::Workgroup({MUSE_C_BUF_WIDTH, MUSE_BUF_HEIGHT}));
     sq.recordSyncDevice(buffer.tensor());
@@ -198,8 +199,9 @@ void Shaders::CopyYForInterpolation(musevk::Sequence &sq,
         MuseBuffer<float> &frame, MuseBuffer<float> &output,
         unsigned int field_parity, unsigned int frame_phase_y, bool zero_non_copied_entries) {
     auto copy_y_for_interpolation_algo =
-            m_vulkan_resources.ComputeShader({frame.tensor(), output.tensor()},
-                            m_copy_y_for_interpolation_spirv, musevk::Workgroup({MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT}));
+            m_vulkan_resources.ComputeShader(
+                    {frame.tensor(), output.tensor()}, sizeof(uint32_t) * 3,
+                    m_copy_y_for_interpolation_spirv, musevk::Workgroup({MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT}));
     sq.recordComputeShader(
             copy_y_for_interpolation_algo,
             std::vector{field_parity, frame_phase_y, zero_non_copied_entries ? 1u : 0u});
@@ -208,8 +210,9 @@ void Shaders::CopyYForInterpolation(musevk::Sequence &sq,
 void Shaders::FilterImageDiamond(musevk::Sequence &sq,
                                  int phase, MuseBuffer<float> &buffer) {
     auto diamond_algo =
-            m_vulkan_resources.ComputeShader({m_diamond_filter_buffer.tensor(), buffer.tensor()},
-                            m_diamond_spirv, musevk::Workgroup({buffer.width(), buffer.height()}));
+            m_vulkan_resources.ComputeShader(
+                    {m_diamond_filter_buffer.tensor(), buffer.tensor()}, sizeof(uint32_t) * 5,
+                    m_diamond_spirv, musevk::Workgroup({buffer.width(), buffer.height()}));
     sq.recordComputeShader(
             diamond_algo,
             std::vector{m_diamond_filter_buffer.height(), m_diamond_filter_buffer.width(), buffer.height(), buffer.width(), (unsigned)phase});
@@ -223,8 +226,9 @@ void Shaders::FilterImage(musevk::Sequence &sq,
     assert(source.width() == dest.width());
 
     auto filter_image_algo =
-            m_vulkan_resources.ComputeShader({filter.tensor(), source.tensor(), dest.tensor()},
-                                         m_filter_image_spirv, musevk::Workgroup({source.width(), source.height()}));
+            m_vulkan_resources.ComputeShader(
+                    {filter.tensor(), source.tensor(), dest.tensor()}, sizeof(float) * 6,
+                    m_filter_image_spirv, musevk::Workgroup({source.width(), source.height()}));
     sq.recordSyncDevice(filter.tensor());
     sq.recordComputeShader(
             filter_image_algo,
@@ -238,9 +242,10 @@ void Shaders::ConvertHorizSampleRate4to1(musevk::Sequence &sq,
     assert(source.height() == dest.height());
 
     auto convert_4_to_3_algo =
-            m_vulkan_resources.ComputeShader({m_filter_4_to_1_tensor, source.tensor(), dest.tensor()},
-                                         m_convert_horiz_sample_rate_spirv,
-                                         musevk::Workgroup({dest.width(), dest.height() / 2}));
+            m_vulkan_resources.ComputeShader(
+                    {m_filter_4_to_1_tensor, source.tensor(), dest.tensor()}, sizeof(uint32_t) * 10,
+                    m_convert_horiz_sample_rate_spirv,
+                    musevk::Workgroup({dest.width(), dest.height() / 2}));
     sq.recordComputeShader(
             convert_4_to_3_algo,
             std::vector{m_filter_4_to_1_tensor->size(), 1u, 4u, source.height(), source.width(), 0u, 1u, 0u, 1u, 2u});
@@ -251,8 +256,9 @@ void Shaders::DecodeC(musevk::Sequence &sq,
                       MuseBuffer<float> &C_r_data, MuseBuffer<float> &C_b_data,
                       int frame_phase_c, int field_parity, bool zero_non_sample_points) {
     auto decode_c_algo =
-            m_vulkan_resources.ComputeShader({input_frame.tensor(), C_r_data.tensor(), C_b_data.tensor()},
-                            m_decode_c_spirv, musevk::Workgroup({C_r_data.width(), C_r_data.height()}));
+            m_vulkan_resources.ComputeShader(
+                    {input_frame.tensor(), C_r_data.tensor(), C_b_data.tensor()}, sizeof(uint32_t) * 3,
+                    m_decode_c_spirv, musevk::Workgroup({C_r_data.width(), C_r_data.height()}));
     // The output tensors are also inputs since the shader modifies their data.
     // We do not need to sync them, however, since they are not written by the CPU.
     sq.recordComputeShader(
@@ -319,9 +325,10 @@ bool Shaders::DecodeInterFrameAndDetectMotion(musevk::Sequence &sq, vector<refer
     }
 
     auto detect_motion_algo =
-            m_vulkan_resources.ComputeShader({m_movement_field_buffers[0].tensor(), m_movement_field_buffers[1].tensor(),
-                             m_movement_field_buffers[2].tensor(), m_movement_buffer.tensor()},
-                            m_detect_motion_spirv, musevk::Workgroup({m_movement_buffer.width(), m_movement_buffer.height()}));
+            m_vulkan_resources.ComputeShader(
+                    {m_movement_field_buffers[0].tensor(), m_movement_field_buffers[1].tensor(),
+                     m_movement_field_buffers[2].tensor(), m_movement_buffer.tensor()}, 0,
+                     m_detect_motion_spirv, musevk::Workgroup({m_movement_buffer.width(), m_movement_buffer.height()}));
     sq.recordComputeShader(detect_motion_algo, {});
 
     return true;

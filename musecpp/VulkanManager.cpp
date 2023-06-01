@@ -6,6 +6,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.hpp>
+#include <limits>
 #include "VulkanManager.h"
 #include "MuseDecoder.h"
 #include "MuseTypes.h"
@@ -68,7 +69,7 @@ bool VulkanManager::DrawNextFrame(musevk::Tensor &tensor) {
     presentInfo.pSwapchains = swapChains;
     presentInfo.pImageIndices = &imageIndex;
     presentInfo.pResults = nullptr; // Optional
-    m_present_queue.presentKHR(presentInfo);
+    auto result = m_present_queue.presentKHR(presentInfo);
 
     return true;
 }

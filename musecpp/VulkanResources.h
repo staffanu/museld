@@ -9,12 +9,7 @@
 #include <vulkan/vulkan.hpp>
 #include <memory>
 #include <iostream>
-#include <fmt/format.h>
 #include "ComputeShader.h"
-
-#define KP_LOG_DEBUG(...)
-#define KP_LOG_INFO(...)
-#define KP_LOG_WARN(...) std::cout << "WARN " << fmt::format(__VA_ARGS__) << std::endl;
 
 namespace musevk {
     class Sequence {
@@ -115,14 +110,6 @@ namespace musevk {
             m_ComputeShaders.push_back(compute_shader);
             m_operation_count++;
             this->begin();
-            uint32_t mPushConstantsDataTypeMemorySize = 0;
-            uint32_t mPushConstantsSize = 0;
-            std::vector<float> push_constants;
-            for (auto &pc: pushConstants) {
-                auto *p = reinterpret_cast<const float *>(&pc);
-                push_constants.emplace_back(*p);
-            }
-
             for (const std::shared_ptr<Tensor> &tensor: compute_shader->getTensors()) {
                 tensor->recordPrimaryBufferMemoryBarrier(
                         m_command_buffer,
@@ -132,25 +119,16 @@ namespace musevk {
                         vk::PipelineStageFlagBits::eComputeShader);
             }
 
-            if (!push_constants.empty()) {
-                compute_shader->setPushConstants(push_constants);
-            }
-
             compute_shader->recordBindCore(m_command_buffer);
-            compute_shader->recordBindPush(m_command_buffer);
+            compute_shader->recordBindPush(m_command_buffer, pushConstants);
             compute_shader->recordDispatch(m_command_buffer);
         }
 
         void evalAsync() {
-            if (this->isRecording()) {
+            if (m_recording)
                 this->end();
-            }
-
-            if (this->mIsRunning)
-                throw std::runtime_error(
-                        "Sequence evalAsync called when an eval async was called without successful wait");
-
-            this->mIsRunning = true;
+            assert(!m_is_running);
+            m_is_running = true;
 
             vk::SubmitInfo submitInfo(m_wait_semaphores, m_wait_dst_stage_masks, m_command_buffer);
             m_fence = m_device.createFence(vk::FenceCreateInfo());
@@ -158,17 +136,16 @@ namespace musevk {
         }
 
         void evalAwait() {
-            assert(mIsRunning);
+            assert(m_is_running);
             auto result = m_device.waitForFences(m_fence, VK_TRUE, UINT64_MAX);
             assert(result != vk::Result::eTimeout);
             m_device.destroy(m_fence);
-            mIsRunning = false;
+            m_is_running = false;
         }
 
         void clear() {
-            if (this->isRecording()) {
+            if (m_recording)
                 this->end();
-            }
         }
 
         std::vector<std::uint64_t> getTimestamps() {
@@ -189,19 +166,13 @@ namespace musevk {
         }
 
         void begin() {
-            if (this->isRecording()) {
-                KP_LOG_DEBUG("Kompute Sequence begin called when already recording");
+            if (m_recording) {
                 return;
             }
 
-            if (this->isRunning()) {
-                throw std::runtime_error(
-                        "Kompute Sequence begin called when sequence still running");
-            }
-
-            KP_LOG_INFO("Kompute Sequence command now started recording");
+            assert(!m_is_running);
             this->m_command_buffer.begin(vk::CommandBufferBeginInfo());
-            this->mRecording = true;
+            this->m_recording = true;
 
             // latch the first timestamp before any commands are submitted
             if (mFreeTimetampQueryPool)
@@ -212,27 +183,10 @@ namespace musevk {
         }
 
         void end() {
-            if (this->isRunning()) {
-                throw std::runtime_error(
-                        "Kompute Sequence begin called when sequence still running");
-            }
-
-            if (!this->isRecording()) {
-                KP_LOG_WARN("Kompute Sequence end called when not recording");
-                return;
-            } else {
-                KP_LOG_INFO("Kompute Sequence command recording END");
-                this->m_command_buffer.end();
-                this->mRecording = false;
-            }
-        }
-
-        bool isRecording() const {
-            return this->mRecording;
-        }
-
-        bool isRunning() const {
-            return this->mIsRunning;
+            assert(!m_is_running);
+            assert(m_recording);
+            m_command_buffer.end();
+            m_recording = false;
         }
 
         ~Sequence() {
@@ -261,8 +215,8 @@ namespace musevk {
         std::vector<vk::Semaphore> m_wait_semaphores;
         std::vector<vk::PipelineStageFlags> m_wait_dst_stage_masks;
 
-        bool mRecording = false;
-        bool mIsRunning = false;
+        bool m_recording = false;
+        bool m_is_running = false;
 
         void createCommandPool() {
             vk::CommandPoolCreateInfo commandPoolInfo(vk::CommandPoolCreateFlags(), m_queue_index);
@@ -337,9 +291,11 @@ namespace musevk {
         template<typename S = float>
         std::shared_ptr<ComputeShader> ComputeShader(
                 const std::vector<std::shared_ptr<Tensor>> &tensors,
+                int32_t push_constants_size,
                 const std::vector<uint32_t> &spirv,
                 const Workgroup &workgroup) {
-            return std::make_shared<musevk::ComputeShader>(m_device, tensors, spirv, workgroup);
+            return std::make_shared<musevk::ComputeShader>(
+                    m_device, tensors, push_constants_size, spirv, workgroup);
         }
 
     private:

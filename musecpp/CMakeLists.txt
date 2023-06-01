@@ -4,12 +4,11 @@ project(musecpp)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(OpenCV REQUIRED)
-include_directories(${OpenCV_INCLUDE_DIRS})
+#find_package(OpenCV REQUIRED)
+#include_directories(${OpenCV_INCLUDE_DIRS})
 
 find_package(glfw3 3.3 REQUIRED)
 find_package(Vulkan REQUIRED)
-find_package(fmt)
 
 add_executable(musecpp
         main.cpp
@@ -27,8 +26,7 @@ add_executable(musecpp
         VulkanBuffer.cpp VulkanBuffer.h
         )
 target_link_libraries(musecpp
-        PRIVATE ${OpenCV_LIBS}
+#        PRIVATE ${OpenCV_LIBS}
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
-        PRIVATE fmt::fmt
         )
