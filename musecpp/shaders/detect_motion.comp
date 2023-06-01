@@ -1,0 +1,55 @@
+#version 450
+
+#define MUSE_BUF_HEIGHT 516
+#define MUSE_Y_BUF_WIDTH 374
+#define MUSE_MOTION_FIELD_BUF_WIDTH (374/2)
+
+// This shader should be invoked with global invocation ids
+// from (0, 0) to (MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT)
+
+//layout(push_constant) uniform PushConstants {
+//    uint frame_phase_c;
+//    uint field_parity;
+//    uint zero_non_sample_points;
+//};
+
+layout (local_size_x = 4) in;
+layout (local_size_y = 4) in;
+
+layout(set = 0, binding = 0) buffer movement_field0_buffer {
+    float movement_field0[];
+};
+
+layout(set = 0, binding = 1) buffer movement_field1_buffer {
+    float movement_field1[];
+};
+
+layout(set = 0, binding = 2) buffer movement_field2_buffer {
+    float movement_field2[];
+};
+
+layout(set = 0, binding = 3) buffer movement_out_buffer {
+    float movement_out[];
+};
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= MUSE_BUF_HEIGHT * 2 || col >= MUSE_Y_BUF_WIDTH * 3)
+        return;
+
+    uint movement_row = row / 2;
+    uint movement_col = col / 6;
+
+    float maximum = 0;
+    for (int i = -1; i <= 1; i++)
+        for (int j = -1; j <= 1; j++) {
+            uint ix = (movement_row + i) * MUSE_MOTION_FIELD_BUF_WIDTH + movement_col + j;
+            maximum = max(maximum, abs(movement_field0[ix] - movement_field1[ix]));
+            maximum = max(maximum, abs(movement_field0[ix] - movement_field2[ix]));
+        }
+    float m = maximum < 5 ? 0 : maximum > 25 ? 1 : maximum / 25;
+
+    movement_out[row * MUSE_Y_BUF_WIDTH * 3 + col] = m;
+}
