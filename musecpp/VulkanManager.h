@@ -15,11 +15,11 @@ class VulkanManager {
 public:
     VulkanManager();
     VulkanManager(VulkanManager &other) = delete;
-    void initWindow();
-    void initVulkan();
+    void InitWindow();
+    void InitVulkan();
     musevk::VulkanResources resources();
-    bool drawNextFrame(musevk::Tensor &tensor);
-    void cleanup();
+    bool DrawNextFrame(musevk::Tensor &tensor);
+    void Cleanup();
 
 private:
     const uint32_t WIDTH = MUSE_Y_BUF_WIDTH * 3;
@@ -36,28 +36,28 @@ private:
     const bool enableValidationLayers = true;
 #endif
 
-    GLFWwindow *window;
-    VkInstance instance;
-    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    VkDevice logicalDevice;
-    VkSurfaceKHR surface;
-    VkQueue graphicsQueue;
-    VkQueue presentQueue;
-    VkQueue computeQueue;
-    VkSwapchainKHR swapChain;
-    std::vector<VkImage> swapChainImages;
-    VkFormat swapChainImageFormat;
-    VkExtent2D swapChainExtent;
-    VkSemaphore imageAvailableSemaphore;
-    VkSemaphore renderFinishedSemaphore;
-    VkFence inFlightFence;
+    GLFWwindow *m_window;
+    vk::Instance m_instance;
+    vk::PhysicalDevice m_physical_device;
+    vk::Device m_logical_device;
+    vk::SurfaceKHR m_surface;
+    vk::Queue m_graphics_queue;
+    vk::Queue m_present_queue;
+    vk::Queue m_compute_queue;
+    vk::SwapchainKHR m_swapChain;
+    std::vector<vk::Image> swapChainImages;
+    vk::Format m_swap_chain_image_format;
+    vk::Extent2D swap_chain_extent;
+    vk::Semaphore m_image_available_semaphore;
+    vk::Semaphore m_render_finished_semaphore;
+    vk::Fence m_in_flight_fence;
 
     void createInstance();
     bool checkValidationLayerSupport();
     void createSurface();
     void pickPhysicalDevice();
-    bool isDeviceSuitable(VkPhysicalDevice device);
-    bool checkDeviceExtensionSupport(VkPhysicalDevice device);
+    bool isDeviceSuitable(vk::PhysicalDevice &device);
+    bool checkDeviceExtensionSupport(vk::PhysicalDevice &device);
 
     struct QueueFamilyIndices {
         std::optional<uint32_t> graphicsAndComputeFamily;
@@ -66,19 +66,19 @@ private:
             return graphicsAndComputeFamily.has_value() && presentFamily.has_value();
         }
     };
-    QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
+    QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice &device);
 
     void createLogicalDevice();
 
     struct SwapChainSupportDetails {
-        VkSurfaceCapabilitiesKHR capabilities;
-        std::vector<VkSurfaceFormatKHR> formats;
-        std::vector<VkPresentModeKHR> presentModes;
+        vk::SurfaceCapabilitiesKHR capabilities;
+        std::vector<vk::SurfaceFormatKHR> formats;
+        std::vector<vk::PresentModeKHR> presentModes;
     };
-    SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device);
-    VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
-    VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
-    VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
+    SwapChainSupportDetails querySwapChainSupport(vk::PhysicalDevice &device);
+    vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
+    vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes);
+    vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities);
     void createSwapChain();
     void createSyncObjects();
 };

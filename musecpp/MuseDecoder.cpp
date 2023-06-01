@@ -50,12 +50,13 @@ bool MuseDecoder::Initialize() {
 
 bool MuseDecoder::Next() {
     auto t0 = chrono::high_resolution_clock::now();
+    auto sq = m_shaders.resources().sequence();
     if (m_field_index == 0) {
         auto *frame_mem = new float[1125 * 480];
         if (!read_big_endian_to_buffer(m_input, frame_mem, 480 * 1125, m_eq))
             return false;
         auto frame_tensor = m_shaders.resources().tensor(frame_mem, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float));
-        auto muse_buffer = make_shared<MuseBuffer<float>>(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH, frame_tensor);
+        auto muse_buffer = std::make_shared<MuseBuffer<float>>(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH, frame_tensor);
         delete[] frame_mem;
         auto *frame_buffer = new FrameBuffer(++m_frame_no, muse_buffer);
 
@@ -81,11 +82,11 @@ bool MuseDecoder::Next() {
         m_eq = {m_eq.first * 0.9 + eq_estimate.first * 0.1, m_eq.second * 0.9 + eq_estimate.second * 0.1};
         cout << "eq: " << m_eq.first << ", " << m_eq.second << endl;
 
-        m_shaders.ApplyTransmissionGamma(*frame_buffer->data());
+        m_shaders.ApplyTransmissionGamma(*sq, *frame_buffer->data());
     }
 
     bool inter_frame_ok = false;
-    m_shaders.DecodeIntraField(m_frame_buffers[0]->get_field(m_field_index));
+    m_shaders.DecodeIntraField(*sq, m_frame_buffers[0]->get_field(m_field_index));
     if (m_frame_buffers.size() >= 3) {
         auto fields = vector<reference_wrapper<FieldBufferView>>{
                 m_frame_buffers[0]->get_field(m_field_index),
@@ -94,20 +95,23 @@ bool MuseDecoder::Next() {
                 m_frame_buffers[2 - m_field_index]->get_field(1 - m_field_index),
                 m_frame_buffers[2]->get_field(m_field_index)};
 
-        if (m_shaders.DecodeInterFrameAndDetectMotion(fields)) {
+        if (m_shaders.DecodeInterFrameAndDetectMotion(*sq, fields)) {
             inter_frame_ok = true;
-            m_shaders.CombineStillAndMovingParts(false, false);
+            m_shaders.CombineStillAndMovingParts(*sq, false, false);
             cout << "Field " << m_field_index << " inter-frame interpolation success" << endl;
         } else {
             cout << "Field " << m_field_index << " inter-frame interpolation failed!" << endl;
         }
     }
     if (!inter_frame_ok) {
-        m_shaders.CombineStillAndMovingParts(true, false);
+        m_shaders.CombineStillAndMovingParts(*sq, true, false);
         cout << "Field " << m_field_index << " using intra-field interpolation" << endl;
     }
+    sq->evalAsync();
 
     m_audio_decoder.decode_field(m_frame_buffers[0]->get_field(m_field_index).audio_buffer());
+
+    sq->evalAwait();
 
     auto t1 = chrono::high_resolution_clock::now();
     long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();

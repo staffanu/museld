@@ -13,11 +13,10 @@
 template<typename T>
 class MuseBuffer {
 public:
-    MuseBuffer(unsigned int height, unsigned int width, std::shared_ptr<musevk::Tensor> const &tensor)
-    : m_height(height), m_width(width), m_tensor(tensor) {
+    MuseBuffer(unsigned int height, unsigned int width, std::shared_ptr<musevk::Tensor> tensor)
+            : m_height(height), m_width(width), m_tensor(tensor) {
         assert(tensor->size() == height * width);
     }
-
 
     unsigned int width() {
         return m_width;

@@ -22,7 +22,10 @@ add_executable(musecpp
         MuseSubBuffer.cpp MuseSubBuffer.h
         MuseDecoder.cpp MuseDecoder.h
         VulkanManager.cpp VulkanManager.h
-        VulkanResources.cpp VulkanResources.h)
+        VulkanResources.cpp VulkanResources.h
+        ComputeShader.cpp ComputeShader.h
+        VulkanBuffer.cpp VulkanBuffer.h
+        )
 target_link_libraries(musecpp
         PRIVATE ${OpenCV_LIBS}
         PRIVATE glfw

@@ -11,8 +11,8 @@ using namespace std;
 
 void process_file(string filename, bool read_floats) {
     VulkanManager app;
-    app.initWindow();
-    app.initVulkan();
+    app.InitWindow();
+    app.InitVulkan();
     {
         auto resources = app.resources();
         Shaders shaders(resources);
@@ -20,10 +20,11 @@ void process_file(string filename, bool read_floats) {
         decoder.Initialize();
 
         do {
-            decoder.Next();
-        } while (app.drawNextFrame(shaders.result_tensor()));
+            if (!decoder.Next())
+                break;
+        } while (app.DrawNextFrame(*shaders.result_tensor()));
     }
-    app.cleanup();
+    app.Cleanup();
 }
 
 int main(int argc, char *argv[]) {
