@@ -11,12 +11,7 @@
   </component>
   <component name="CMakeRunConfigurationManager">
     <generated>
-      <config projectName="musecpp" targetName="kp_shader" />
-      <config projectName="musecpp" targetName="fmt" />
-      <config projectName="musecpp" targetName="uninstall" />
       <config projectName="musecpp" targetName="musecpp" />
-      <config projectName="musecpp" targetName="kompute" />
-      <config projectName="musecpp" targetName="kp_logger" />
     </generated>
   </component>
   <component name="CMakeSettings" AUTO_RELOAD="true">
@@ -27,23 +22,21 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="1e2545e1-9145-490c-92e1-e30d81c8cf46" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/../../kompute/cmake/check_vulkan_version.cmake" beforeDir="false" afterPath="$PROJECT_DIR$/../../kompute/cmake/check_vulkan_version.cmake" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../ac3ice/ac3ice_sbt.project" beforeDir="false" afterPath="$PROJECT_DIR$/../ac3ice/ac3ice_sbt.project" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/AudioDecoder.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/AudioDecoder.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/AudioDecoder.h" beforeDir="false" afterPath="$PROJECT_DIR$/AudioDecoder.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ControlSignalDecoder.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/ControlSignalDecoder.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ControlSignalDecoder.h" beforeDir="false" afterPath="$PROJECT_DIR$/ControlSignalDecoder.h" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/FieldBufferView.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/FieldBufferView.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/FieldBufferView.h" beforeDir="false" afterPath="$PROJECT_DIR$/FieldBufferView.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/FilterUtil.cpp" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/FilterUtil.h" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/FrameBuffer.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/FrameBuffer.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/FrameBuffer.h" beforeDir="false" afterPath="$PROJECT_DIR$/FrameBuffer.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/MuseTypes.h" beforeDir="false" afterPath="$PROJECT_DIR$/MuseTypes.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/VideoDecoder.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/VideoDecoder.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/VideoDecoder.h" beforeDir="false" afterPath="$PROJECT_DIR$/VideoDecoder.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/main.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/MuseDecoder.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/MuseDecoder.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/MuseDecoder.h" beforeDir="false" afterPath="$PROJECT_DIR$/MuseDecoder.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/MuseSubBuffer.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/MuseSubBuffer.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/MuseSubBuffer.h" beforeDir="false" afterPath="$PROJECT_DIR$/MuseSubBuffer.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Shaders.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Shaders.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Shaders.h" beforeDir="false" afterPath="$PROJECT_DIR$/Shaders.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shaders/detect_motion.comp" beforeDir="false" afterPath="$PROJECT_DIR$/shaders/detect_motion.comp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../scala/.idea/.gitignore" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/../scala/src/main/scala/ac3/QpskDecoder.scala" beforeDir="false" afterPath="$PROJECT_DIR$/../scala/src/main/scala/ac3/QpskDecoder.scala" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../scala/src/main/scala/ac3/SymbolConversion.scala" beforeDir="false" afterPath="$PROJECT_DIR$/../scala/src/main/scala/ac3/SymbolConversion.scala" afterDir="false" />
@@ -66,6 +59,9 @@
   <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:Debug" />
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/.." />
+  </component>
+  <component name="HighlightingSettingsPerFile">
+    <setting file="file:///usr/include/c++/12/bits/shared_ptr.h" root0="SKIP_INSPECTION" />
   </component>
   <component name="MarkdownSettingsMigration">
     <option name="stateVersion" value="1" />
@@ -100,7 +96,7 @@
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;CMakeSettings&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;Errors&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
@@ -116,27 +112,7 @@
     </key>
   </component>
   <component name="RunManager" selected="CMake Application.musecpp">
-    <configuration default="true" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true">
-      <method v="2">
-        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="fmt" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="musecpp" TARGET_NAME="fmt" CONFIG_NAME="Debug">
-      <method v="2">
-        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="kompute" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="musecpp" TARGET_NAME="kompute" CONFIG_NAME="Debug">
-      <method v="2">
-        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="kp_logger" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="musecpp" TARGET_NAME="kp_logger" CONFIG_NAME="Debug">
-      <method v="2">
-        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="kp_shader" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="musecpp" TARGET_NAME="kp_shader" CONFIG_NAME="Debug">
+    <configuration name="musecpp testpicture" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="-f test-picture.bin" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" WORKING_DIR="file://../../data/muse" PASS_PARENT_ENVS_2="true" PROJECT_NAME="musecpp" TARGET_NAME="musecpp" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="musecpp" RUN_TARGET_NAME="musecpp">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
@@ -146,18 +122,9 @@
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="uninstall" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="musecpp" TARGET_NAME="uninstall" CONFIG_NAME="Debug">
-      <method v="2">
-        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
-      </method>
-    </configuration>
     <list>
       <item itemvalue="CMake Application.musecpp" />
-      <item itemvalue="CMake Application.fmt" />
-      <item itemvalue="CMake Application.uninstall" />
-      <item itemvalue="CMake Application.kompute" />
-      <item itemvalue="CMake Application.kp_logger" />
-      <item itemvalue="CMake Application.kp_shader" />
+      <item itemvalue="CMake Application.musecpp testpicture" />
     </list>
   </component>
   <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
@@ -174,7 +141,10 @@
       <workItem from="1682495320478" duration="67556000" />
       <workItem from="1683368139008" duration="2141000" />
       <workItem from="1683401650026" duration="49458000" />
-      <workItem from="1684080391790" duration="2647000" />
+      <workItem from="1684080391790" duration="8161000" />
+      <workItem from="1685385843729" duration="312000" />
+      <workItem from="1685386163882" duration="47114000" />
+      <workItem from="1685656496571" duration="6438000" />
     </task>
     <servers />
   </component>
@@ -197,7 +167,7 @@
     </breakpoint-manager>
     <watches-manager>
       <configuration name="CMakeRunConfiguration">
-        <watch expression="m_intermediate_b_buffer[0][0]" language="ObjectiveC" />
+        <watch expression="data[0 * 480 + 7] / 4" language="ObjectiveC" />
       </configuration>
     </watches-manager>
   </component>
