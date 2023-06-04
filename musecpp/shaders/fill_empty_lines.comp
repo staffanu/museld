@@ -3,14 +3,13 @@
 // This shader should be invoked with global invocation ids
 // from (0, 0) to (source_width, source_height / 2)
 
+#include "muse.h"
+
 layout(push_constant) uniform PushConstants {
     uint height;
     uint width;
     uint parity;
 };
-
-layout (local_size_x = 4) in;
-layout (local_size_y = 4) in;
 
 layout(set = 0, binding = 0) buffer frame_buffer {
     float frame[];

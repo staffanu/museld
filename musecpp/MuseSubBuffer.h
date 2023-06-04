@@ -10,24 +10,24 @@
 
 class MuseSubBuffer {
 public:
-    MuseSubBuffer(std::shared_ptr<MuseBuffer<float>> const &data,
+    MuseSubBuffer(MuseBuffer &data,
                   unsigned int y_offset, unsigned int x_offset,
                   unsigned int height, unsigned int width);
 
     const float *operator [](size_t row) const
     {
         assert(row < m_height);
-        return m_data->tensor()->data<float>() + (row + m_y_offset) * MUSE_TOTAL_WIDTH + m_x_offset;
+        return m_data.getVulkanBuffer()->data<float>() + (row + m_y_offset) * MUSE_TOTAL_WIDTH + m_x_offset;
     }
 
     float *operator [](size_t row)
     {
         assert(row < m_height);
-        return m_data->tensor()->data<float>() + (row + m_y_offset) * MUSE_TOTAL_WIDTH + m_x_offset;
+        return m_data.getVulkanBuffer()->data<float>() + (row + m_y_offset) * MUSE_TOTAL_WIDTH + m_x_offset;
     }
 
 private:
-    std::shared_ptr<MuseBuffer<float>> const m_data;
+    MuseBuffer &m_data;
     unsigned int m_y_offset;
     unsigned int m_x_offset;
     unsigned int m_height;

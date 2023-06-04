@@ -10,24 +10,34 @@
 using namespace std;
 
 FieldBufferView::FieldBufferView(
-        int frame_no, std::shared_ptr<MuseBuffer<float>> const &data, int field_parity)
+        int frame_no, MuseBuffer &data, int field_parity)
 : m_frame_no(frame_no),
   m_data(data),
-  m_field_parity(field_parity) {
+  m_field_parity(field_parity),
+  m_control(nullopt),
+  m_prev_field(nullptr) {
 }
 
-void FieldBufferView::ProcessControlData(MuseSubBuffer const &control_data) {
-    m_control = optional(ControlSignalDecoder(control_data));
+void FieldBufferView::set_frame_no(int frame_no) {
+    m_frame_no = frame_no;
 }
 
-std::shared_ptr<musevk::Tensor> FieldBufferView::tensor() {
-    return m_data->tensor();
+void FieldBufferView::set_prev_field(FieldBufferView *prev_field) {
+    m_prev_field = prev_field;
 }
 
-MuseSubBuffer FieldBufferView::control_data_buffer() const {
-    return {m_data, m_field_parity == 0 ? 558u : 1120u, 12, 5, 94 };
+void FieldBufferView::ProcessControlData(uint16_t const *control_data, std::pair<float, float> const &eq) {
+    m_control = optional(ControlSignalDecoder(control_data, eq));
+}
+
+shared_ptr<musevk::VulkanBuffer> FieldBufferView::getVulkanBuffer() {
+    return m_data.getVulkanBuffer();
 }
 
 MuseSubBuffer FieldBufferView::audio_buffer() const {
     return {m_data, m_field_parity ? 2u : 564u, 11, 44, 469 };
+}
+
+optional<ControlSignalDecoder> const &FieldBufferView::control_data() {
+    return m_prev_field->m_control;
 }

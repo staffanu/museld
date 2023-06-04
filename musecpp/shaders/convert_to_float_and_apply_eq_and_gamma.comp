@@ -1,0 +1,74 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// ranging from (0, 0) to (MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT).
+// The input is an array of uint, but it consists of 16 bit shorts,
+// So we do some bit manipulation to extract the correct part.
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    float eq1;
+    float eq2;
+};
+
+layout(set = 0, binding = 0) buffer frame_in_buffer {
+    uint frame_in[];
+};
+
+layout(set = 0, binding = 1) buffer frame_out_buffer {
+    float frame_out[];
+};
+
+#define SWAP_BYTES(a) (((a & 0xffu) << 8) | ((a & 0xff00u) >> 8))
+
+const float min_value = 16;
+const float max_value = 239;
+const float value_range = 224;
+
+float inverse_gamma_y(float y) {
+    float normalized = (max(min_value, min(max_value, y)) - min_value) / value_range;
+    float x = (0.6 * normalized + 0.4) * normalized;
+    return x * value_range + min_value;
+}
+
+const float a = -48.0/11.0;
+const float b = 67.0/33.0;
+const float c = -1.0/132.0;
+
+float inverse_gamma_c(float v) {
+    float sign = v < 128 ? -1.0 : 1.0;
+    float v_magnitude = abs(v - 128.0);
+    float y = min(112.0, v_magnitude) / 112.0;
+    float x = y < 5.0 / 72.0 ?
+    0.6 * y :
+    y < 47 / 33 / 8 ?
+    -b / (2 * a) - sqrt(b * b / (4 * a * a) - (c - y) / a) :
+    33 / 31 * (y - 2 / 33);
+    return 128 + x * sign * 112;
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= MUSE_TOTAL_HEIGHT || col >= MUSE_TOTAL_WIDTH)
+        return;
+
+    uint uint32_value = frame_in[row * MUSE_TOTAL_WIDTH / 2 + col / 2];
+    uint uint16_value = col % 2 == 1 ?
+        SWAP_BYTES(uint32_value >> 16) :
+        SWAP_BYTES(uint32_value & 0xffffu);
+
+    float equalized = clamp((float(uint16_value) / MUSE_INPUT_MULT - eq2) / eq1, 0.0f, 255.0f);
+
+    if ((row >= 46 && row < 46 + MUSE_BUF_HEIGHT || (row >= 46 + 562 && row < 46 + 562 + MUSE_BUF_HEIGHT))
+        && col >= 106 && col < 106 + MUSE_Y_BUF_WIDTH) {
+        equalized = inverse_gamma_y(equalized);
+    } else if ((row >= 42 && row < 42 + MUSE_BUF_HEIGHT || (row >= 42 + 562 && row < 42 + 562 + MUSE_BUF_HEIGHT))
+        && col >= 11 && col < 11 + MUSE_C_BUF_WIDTH) {
+        equalized = inverse_gamma_c(equalized);
+    }
+
+    frame_out[row * MUSE_TOTAL_WIDTH + col] = equalized;
+}

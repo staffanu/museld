@@ -12,18 +12,18 @@ find_package(Vulkan REQUIRED)
 
 add_executable(musecpp
         main.cpp
+        MuseBuffer.h
+        MuseSubBuffer.cpp MuseSubBuffer.h
         FrameBuffer.cpp FrameBuffer.h
         FieldBufferView.cpp FieldBufferView.h
         AudioDecoder.cpp AudioDecoder.h
         ControlSignalDecoder.cpp ControlSignalDecoder.h
         Shaders.cpp Shaders.h
-        MuseBuffer.h
-        MuseSubBuffer.cpp MuseSubBuffer.h
         MuseDecoder.cpp MuseDecoder.h
-        VulkanManager.cpp VulkanManager.h
-        VulkanResources.cpp VulkanResources.h
-        ComputeShader.cpp ComputeShader.h
-        VulkanBuffer.cpp VulkanBuffer.h
+        musevk/VulkanManager.cpp musevk/VulkanManager.h
+        musevk/CommandQueue.cpp musevk/CommandQueue.h
+        musevk/ComputeShader.cpp musevk/ComputeShader.h
+        musevk/VulkanBuffer.cpp musevk/VulkanBuffer.h
         )
 target_link_libraries(musecpp
 #        PRIVATE ${OpenCV_LIBS}

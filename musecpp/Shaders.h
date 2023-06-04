@@ -9,69 +9,64 @@
 #include <vector>
 #include <csignal>
 #include "MuseBuffer.h"
-#include "VulkanResources.h"
+#include "musevk/CommandQueue.h"
 
+namespace musevk {
+    class VulkanManager;
+}
 class FieldBufferView;
 
 class Shaders {
 public:
-    static std::vector<uint32_t> CompileSource(const std::string &filename);
+    static std::vector<uint32_t> compileSource(const std::string &filename);
 
-    Shaders(musevk::VulkanResources &resources);
+    Shaders(musevk::VulkanManager &manager);
 
     Shaders(Shaders &other) = delete;
-
     void operator=(const Shaders &) = delete;
 
-    musevk::VulkanResources &resources() {
-        return m_vulkan_resources;
-    };
+    MuseBuffer createMuseBuffer(unsigned int height, unsigned int width, bool allow_transfers = false);
 
-    void ApplyTransmissionGamma(musevk::Sequence &sq, MuseBuffer<float> &buffer);
+    void convertToFloatAndApplyEqAndGamma(musevk::CommandQueue &sq,
+                                          std::shared_ptr<musevk::VulkanBuffer> input, MuseBuffer &buffer,
+                                          std::pair<float, float> const &eq);
 
-    void DecodeIntraField(musevk::Sequence &sq, FieldBufferView &field);
+    void decodeIntraField(musevk::CommandQueue &sq, FieldBufferView &field);
 
-    bool DecodeInterFrameAndDetectMotion(musevk::Sequence &sq,
-                                         std::vector<std::reference_wrapper<FieldBufferView>> const &fields);
+    bool decodeInterFrameAndDetectMotion(musevk::CommandQueue &sq,
+                                         const std::vector<std::reference_wrapper<FieldBufferView>> &fields);
 
-    void CombineStillAndMovingParts(musevk::Sequence &sq, bool force_field_only, bool force_inter_frame_only);
+    void combineStillAndMovingParts(musevk::CommandQueue &sq, bool force_field_only, bool force_inter_frame_only);
 
-    std::shared_ptr<musevk::Tensor> result_tensor();
+    std::shared_ptr<musevk::VulkanBuffer> getResultBuffer();
 
 private:
-    template<typename T>
-    MuseBuffer<T> CreateMuseBuffer(unsigned int height, unsigned int width);
-
     // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
-    void CopyYForInterpolation(musevk::Sequence &sq,
-                               MuseBuffer<float> &frame, MuseBuffer<float> &output,
+    void copyYForInterpolation(musevk::CommandQueue &sq, int descriptor_set_index,
+                               MuseBuffer &frame, MuseBuffer &output,
                                unsigned int field_parity, unsigned int frame_phase_y, bool zero_non_copied_entries);
 
-    void FilterImageDiamond(musevk::Sequence &sq,
-                            int phase, MuseBuffer<float> &buffer);
+    void filterImageDiamond(musevk::CommandQueue &sq, int descriptor_set_index,
+                            int phase, MuseBuffer &buffer);
 
-    void FilterImage(musevk::Sequence &sq,
-                     MuseBuffer<float> &filter,
-                     MuseBuffer<float> &source, MuseBuffer<float> &dest,
+    void filterImage(musevk::CommandQueue &sq, int descriptor_set_index,
+                     MuseBuffer &filter,
+                     MuseBuffer &source, MuseBuffer &dest,
                      float border_value, float multiplier);
 
-    void ConvertHorizSampleRate4to1(musevk::Sequence &sq,
-                                    MuseBuffer<float> &source, MuseBuffer<float> &dest);
-
-    void DecodeC(musevk::Sequence &sq,
-                 MuseBuffer<float> &input_frame,
-                 MuseBuffer<float> &C_r_data, MuseBuffer<float> &C_b_data,
+    void decodeC(musevk::CommandQueue &sq, int descriptor_set_index,
+                 MuseBuffer &input_frame,
                  int frame_phase_c, int field_parity, bool zero_non_sample_points);
 
-    void MakeFieldFromConsecutiveFrames(musevk::Sequence &sq,
+    void makeFieldFromConsecutiveFrames(musevk::CommandQueue &sq,
+                                        int copy_y_descriptor_set_first_index,
                                         FieldBufferView &field_a, unsigned int field_a_frame_phase_y,
                                         FieldBufferView &field_b, unsigned int field_b_frame_phase_y,
                                         unsigned int fields_parity, unsigned int fields_phases);
 
-    musevk::VulkanResources &m_vulkan_resources;
+    musevk::VulkanManager &m_vulkan_manager;
 
-    std::vector<uint32_t> m_apply_transmission_gamma_y_spirv;
-    std::vector<uint32_t> m_apply_transmission_gamma_c_spirv;
+    std::vector<uint32_t> m_convert_to_float_and_apply_eq_and_gamma_spriv;
     std::vector<uint32_t> m_copy_y_for_interpolation_spirv;
     std::vector<uint32_t> m_diamond_spirv;
     std::vector<uint32_t> m_filter_image_spirv;
@@ -81,40 +76,47 @@ private:
     std::vector<uint32_t> m_detect_motion_spirv;
     std::vector<uint32_t> m_combine_still_and_moving_spirv;
 
+    std::shared_ptr<musevk::ComputeShader> m_convert_to_float_and_apply_eq_and_gamma_algo;
+    std::shared_ptr<musevk::ComputeShader> m_copy_y_for_interpolation_algo;
+    std::shared_ptr<musevk::ComputeShader> m_diamond_algo;
+    std::shared_ptr<musevk::ComputeShader> m_filter_image_algo;
     std::shared_ptr<musevk::ComputeShader> m_fill_empty_lines_algo;
-    std::shared_ptr<musevk::ComputeShader> m_convert_2_to_3_algo;
-    std::shared_ptr<musevk::ComputeShader> m_convert_4_to_3_algo;
+    std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_algo;
+    std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_4_to_3_algo;
+    std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_2_to_3_algo;
+    std::shared_ptr<musevk::ComputeShader> m_decode_c_algo;
+    std::shared_ptr<musevk::ComputeShader> m_detect_motion_algo;
     std::shared_ptr<musevk::ComputeShader> m_combine_still_and_moving_algo;
 
     // temporary data used by the single field decoder and inter-frame interpolation
-    MuseBuffer<float> m_interpolated32_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH * 2
-    MuseBuffer<float> m_intermediate_r_buffer;
-    MuseBuffer<float> m_intermediate_b_buffer;
+    MuseBuffer m_interpolated32_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH * 2
+    MuseBuffer m_intermediate_r_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
+    MuseBuffer m_intermediate_b_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
 
     // output from single field decoder -- when combining the two results
-    MuseBuffer<float> m_field_Y_buffer;
-    MuseBuffer<float> m_field_r_buffer;
-    MuseBuffer<float> m_field_b_buffer;
+    MuseBuffer m_field_Y_buffer;
+    MuseBuffer m_field_r_buffer;
+    MuseBuffer m_field_b_buffer;
 
     // output from inter-frame interpolation
-    MuseBuffer<float> m_inter_frame_Y_buffer;
-    MuseBuffer<float> m_inter_frame_r_buffer;
-    MuseBuffer<float> m_inter_frame_b_buffer;
+    MuseBuffer m_inter_frame_Y_buffer; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
+    MuseBuffer m_inter_frame_r_buffer;
+    MuseBuffer m_inter_frame_b_buffer;
 
-    MuseBuffer<float> m_movement_field_buffers[3]; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH / 2
-    MuseBuffer<float> m_movement_buffer;
+    MuseBuffer m_movement_field_buffers[3]; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH / 2
+    MuseBuffer m_movement_buffer;
 
     // used for final result
-    MuseBuffer<uint32_t> m_frame_out_buffer;
+    MuseBuffer m_frame_out_buffer;
 
     // filter definitions
-    MuseBuffer<float> m_diamond_filter_buffer;
-    MuseBuffer<float> m_color_filter_single_field_buffer;
-    MuseBuffer<float> m_color_filter_inter_frame_buffer;
+    MuseBuffer m_diamond_filter_buffer;
+    MuseBuffer m_color_filter_single_field_buffer;
+    MuseBuffer m_color_filter_inter_frame_buffer;
 
-    std::shared_ptr<musevk::Tensor> m_filter_2_to_3_tensor;
-    std::shared_ptr<musevk::Tensor> m_filter_4_to_3_tensor;
-    std::shared_ptr<musevk::Tensor> m_filter_4_to_1_tensor;
+    std::shared_ptr<musevk::VulkanBuffer> m_filter_2_to_3_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_filter_4_to_3_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_filter_4_to_1_buffer;
 };
 
 #endif //MUSECPP_SHADERS_H

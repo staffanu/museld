@@ -3,6 +3,8 @@
 // This shader should be invoked with global invocation ids
 // from (0, 0) to (frame_buffer_width / 2, frame_buffer_height)
 
+#include "muse.h"
+
 layout(push_constant) uniform PushConstants {
     uint filter_height;
     uint filter_width;
@@ -10,9 +12,6 @@ layout(push_constant) uniform PushConstants {
     uint frame_buffer_width;
     uint phase;
 };
-
-layout (local_size_x = 4) in;
-layout (local_size_y = 4) in;
 
 layout(set = 0, binding = 0) buffer filter_input {
     float diamond_filter[];

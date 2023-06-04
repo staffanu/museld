@@ -5,12 +5,7 @@
 // The input buffer is assumed to be the complete 1125x480
 // MUSE frame.
 
-#define MUSE_BUF_HEIGHT 516
-#define MUSE_TOTAL_WIDTH 480
-#define MUSE_Y_BUF_WIDTH 374
-
-layout (local_size_x = 4) in;
-layout (local_size_y = 4) in;
+#include "muse.h"
 
 layout(push_constant) uniform PushConstants {
     uint field_parity;

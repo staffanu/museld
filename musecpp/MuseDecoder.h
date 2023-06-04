@@ -16,25 +16,27 @@ class FrameBuffer;
 
 class MuseDecoder {
 public:
-    MuseDecoder(const std::string &filename, bool read_floats, Shaders &shaders);
+    MuseDecoder(const std::string &filename, Shaders &shaders,
+                musevk::VulkanManager &manager);
     ~MuseDecoder();
     bool Initialize();
     bool Next();
 
 private:
     std::string m_filename;
-    bool m_read_floats;
+    Shaders &m_shaders;
+    musevk::VulkanManager &m_manager;
     std::ifstream m_input;
     std::pair<float, float> m_eq;
-    uint16_t *m_input_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_input_vulkan_buffer;
     int m_frame_no;
     int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field
     long m_total_elapsed_time_us;
-    Shaders &m_shaders;
     AudioDecoder m_audio_decoder;
     std::deque<FrameBuffer *> m_frame_buffers;
 
-    bool read_big_endian_to_buffer(std::ifstream &input, float *out, size_t n, std::pair<float, float> eq);
+    bool read_big_endian_to_buffer(std::ifstream &input, float *out, size_t n);
+    bool read_shorts(std::ifstream &input, uint16_t *out, size_t n);
     std::pair<int, std::pair<float, float>> compute_initial_skip();
 };
 

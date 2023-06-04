@@ -10,14 +10,15 @@
 #include "MuseTypes.h"
 #include "MuseDecoder.h"
 #include "FrameBuffer.h"
+#include "musevk/VulkanManager.h"
 
 using namespace std;
 
-MuseDecoder::MuseDecoder(const string &filename, bool read_floats, Shaders &shaders)
+MuseDecoder::MuseDecoder(
+        const string &filename, Shaders &shaders, musevk::VulkanManager &manager)
 : m_filename(filename),
-  m_read_floats(read_floats),
-  m_input_buffer((uint16_t *)malloc(480 * 1125 * 2 * sizeof(float))), // big enough for floats or shorts, two frames total
-  m_shaders(shaders) {
+  m_shaders(shaders),
+  m_manager(manager) {
 }
 
 MuseDecoder::~MuseDecoder() {
@@ -25,7 +26,6 @@ MuseDecoder::~MuseDecoder() {
         delete m_frame_buffers.back();
         m_frame_buffers.pop_back();
     }
-    delete m_input_buffer;
 }
 
 bool MuseDecoder::Initialize() {
@@ -36,10 +36,23 @@ bool MuseDecoder::Initialize() {
     m_input.exceptions(ifstream::badbit);
 
     {
-        vector<float> skip_buffer(samples_to_skip);
+        vector<uint16_t> skip_buffer(samples_to_skip);
         cout << "Skipping " << samples_to_skip << " initial samples" << endl;
-        read_big_endian_to_buffer(m_input, skip_buffer.data(), samples_to_skip, pair(1.0, 0.0));
+        read_shorts(m_input, skip_buffer.data(), samples_to_skip);
     }
+
+    m_input_vulkan_buffer = m_manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH,sizeof(uint16_t), true, true);
+
+    // Always keep the three latest frames (required for motion detection) -- pretend we have three already
+    for (int i = 0; i < 3; i++)
+        m_frame_buffers.push_back(new FrameBuffer(-i,
+                                                  m_shaders.createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)));
+
+    for (int i = 0; i < 3; i++)
+        for (int parity = 0; parity <= 1; parity++) {
+            m_frame_buffers[i]->get_field(parity).set_prev_field(
+                    &m_frame_buffers[parity == 1 ? i : (i + 1) % 3]->get_field(1 - parity));
+        }
 
     m_frame_no = 0;
     m_field_index = 0;
@@ -50,67 +63,45 @@ bool MuseDecoder::Initialize() {
 
 bool MuseDecoder::Next() {
     auto t0 = chrono::high_resolution_clock::now();
-    auto sq = m_shaders.resources().sequence();
+    auto sq = m_manager.sequence();
     if (m_field_index == 0) {
-        auto *frame_mem = new float[1125 * 480];
-        if (!read_big_endian_to_buffer(m_input, frame_mem, 480 * 1125, m_eq))
-            return false;
-        auto frame_tensor = m_shaders.resources().tensor(frame_mem, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float));
-        auto muse_buffer = std::make_shared<MuseBuffer<float>>(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH, frame_tensor);
-        delete[] frame_mem;
-        auto *frame_buffer = new FrameBuffer(++m_frame_no, muse_buffer);
-
-        // Update control data from the previous fields
-        if (!m_frame_buffers.empty()) {
-            auto prev_frame = m_frame_buffers.front();
-            auto prev_control_data = prev_frame->get_field(1).control_data_buffer();
-            frame_buffer->get_field(0).ProcessControlData(prev_control_data);
-        }
-        {
-            auto field0_control_data = frame_buffer->get_field(0).control_data_buffer();
-            frame_buffer->get_field(1).ProcessControlData(field0_control_data);
-        }
-
-        // Keep the three latest frames (required for motion detection)
+        auto frame_buffer = m_frame_buffers.back();
+        frame_buffer->set_frame_no(++m_frame_no);
+        m_frame_buffers.pop_back();
         m_frame_buffers.push_front(frame_buffer);
-        if (m_frame_buffers.size() > 3) {
-            delete m_frame_buffers.back();
-            m_frame_buffers.pop_back();
-        }
 
-        auto eq_estimate = frame_buffer->estimate_eq(m_eq);
+        if (!read_shorts(m_input, m_input_vulkan_buffer->data<uint16_t>(), 480 * 1125))
+            return false;
+        //sq->enqueueSyncDevice(m_input_vulkan_buffer);
+
+        auto eq_estimate = FrameBuffer::EstimateEq(m_input_vulkan_buffer->data<uint16_t>());
         m_eq = {m_eq.first * 0.9 + eq_estimate.first * 0.1, m_eq.second * 0.9 + eq_estimate.second * 0.1};
         cout << "eq: " << m_eq.first << ", " << m_eq.second << endl;
 
-        m_shaders.ApplyTransmissionGamma(*sq, *frame_buffer->data());
+        frame_buffer->ProcessControlData(m_input_vulkan_buffer->data<uint16_t>(), m_eq);
+
+        m_shaders.convertToFloatAndApplyEqAndGamma(*sq, m_input_vulkan_buffer, frame_buffer->data(), m_eq);
     }
 
-    bool inter_frame_ok = false;
-    m_shaders.DecodeIntraField(*sq, m_frame_buffers[0]->get_field(m_field_index));
-    if (m_frame_buffers.size() >= 3) {
-        auto fields = vector<reference_wrapper<FieldBufferView>>{
-                m_frame_buffers[0]->get_field(m_field_index),
-                m_frame_buffers[1 - m_field_index]->get_field(1 - m_field_index),
-                m_frame_buffers[1]->get_field(m_field_index),
-                m_frame_buffers[2 - m_field_index]->get_field(1 - m_field_index),
-                m_frame_buffers[2]->get_field(m_field_index)};
+    m_shaders.decodeIntraField(*sq, m_frame_buffers[0]->get_field(m_field_index));
+    auto fields = vector<reference_wrapper<FieldBufferView>>{
+            m_frame_buffers[0]->get_field(m_field_index),
+            m_frame_buffers[1 - m_field_index]->get_field(1 - m_field_index),
+            m_frame_buffers[1]->get_field(m_field_index),
+            m_frame_buffers[2 - m_field_index]->get_field(1 - m_field_index),
+            m_frame_buffers[2]->get_field(m_field_index)};
 
-        if (m_shaders.DecodeInterFrameAndDetectMotion(*sq, fields)) {
-            inter_frame_ok = true;
-            m_shaders.CombineStillAndMovingParts(*sq, false, false);
-            cout << "Field " << m_field_index << " inter-frame interpolation success" << endl;
-        } else {
-            cout << "Field " << m_field_index << " inter-frame interpolation failed!" << endl;
-        }
-    }
-    if (!inter_frame_ok) {
-        m_shaders.CombineStillAndMovingParts(*sq, true, false);
-        cout << "Field " << m_field_index << " using intra-field interpolation" << endl;
+    if (m_shaders.decodeInterFrameAndDetectMotion(*sq, fields)) {
+        cout << "Field " << m_field_index << " inter-frame interpolation success" << endl;
+        m_shaders.combineStillAndMovingParts(*sq, false, false);
+    } else {
+        cout << "Field " << m_field_index << " inter-frame interpolation failed -- using intra-field interpolation" << endl;
+        m_shaders.combineStillAndMovingParts(*sq, true, false);
     }
     sq->evalAsync();
 
+    // FIXME: the frame buffer is not synched local here!
     m_audio_decoder.decode_field(m_frame_buffers[0]->get_field(m_field_index).audio_buffer());
-
     sq->evalAwait();
 
     auto t1 = chrono::high_resolution_clock::now();
@@ -123,20 +114,17 @@ bool MuseDecoder::Next() {
     return true;
 }
 
-bool MuseDecoder::read_big_endian_to_buffer(ifstream &input, float *out, size_t n, pair<float, float> eq) {
-    input.read(reinterpret_cast<char *>(m_input_buffer), n * (m_read_floats ? sizeof(uint32_t) : sizeof(uint16_t)));
+bool MuseDecoder::read_big_endian_to_buffer(ifstream &input, float *out, size_t n) {
+    uint16_t *input_buffer = (uint16_t *)malloc(480 * 1125 * 2 * sizeof(float));
+    input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(uint16_t));
     for (int i = 0; i < n; i++) {
-        float v;
-        if (m_read_floats) {
-            uint32_t v_long = ntohl(((uint32_t *)m_input_buffer)[i]);
-            v = *reinterpret_cast<float *>(&v_long) / MUSE_FLOAT_INPUT_MULT;
-        } else {
-            v = (float)ntohs(m_input_buffer[i]) / MUSE_SHORT_INPUT_MULT;
-        }
-
-        float equalized_v = clamp((v - eq.second) / eq.first, 0.0f, 255.0f);
-        out[i] = equalized_v;
+        out[i] = (float)ntohs(input_buffer[i]) / MUSE_SHORT_INPUT_MULT;
     }
+    return input.good();
+}
+
+bool MuseDecoder::read_shorts(ifstream &input, uint16_t *out, size_t n) {
+    input.read(reinterpret_cast<char *>(out), n * sizeof(uint16_t));
     return input.good();
 }
 
@@ -144,7 +132,7 @@ pair<int, pair<float, float>> MuseDecoder::compute_initial_skip() {
     ifstream input(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
     input.exceptions(ifstream::badbit);
     vector<float> buffer(480 * 1125 * 2); // two frames of data
-    read_big_endian_to_buffer(input, buffer.data(), 480 * 1125 * 2, pair(1.0, 0.0));
+    read_big_endian_to_buffer(input, buffer.data(), 480 * 1125 * 2);
 
     auto sorted(buffer);
     sort(sorted.begin(), sorted.end());

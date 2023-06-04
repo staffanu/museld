@@ -3,6 +3,8 @@
 // This shader should be invoked with global invocation ids
 // from (0, 0) to (source_height, source_width * 3 / 2)
 
+#include "muse.h"
+
 layout(push_constant) uniform PushConstants {
     float filter_height_f;
     float filter_width_f;
@@ -11,9 +13,6 @@ layout(push_constant) uniform PushConstants {
     float border_value;
     float multiplier;
 };
-
-layout (local_size_x = 4) in;
-layout (local_size_y = 4) in;
 
 layout(set = 0, binding = 0) buffer image_filter_buffer {
     float image_filter[];

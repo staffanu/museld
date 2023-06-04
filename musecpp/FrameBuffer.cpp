@@ -4,48 +4,52 @@
 
 #include <algorithm>
 #include <numeric>
+#include <utility>
+#include <netinet/in.h>
 #include "FrameBuffer.h"
 #include "FieldBufferView.h"
 #include "Shaders.h"
 
 using namespace std;
 
-FrameBuffer::FrameBuffer(int frame_no, std::shared_ptr<MuseBuffer<float>> const &data)
-: m_data(data),
-  m_fields({FieldBufferView(frame_no, data, 0), FieldBufferView(frame_no, data, 1) })
-{
+FrameBuffer::FrameBuffer(int frame_no, MuseBuffer data)
+: m_frame_no(frame_no),
+  m_data(std::move(data)),
+  m_fields({FieldBufferView(frame_no, m_data, 0), FieldBufferView(frame_no, m_data, 1) }) {
 }
 
-std::shared_ptr<MuseBuffer<float>> FrameBuffer::data() {
+void FrameBuffer::set_frame_no(int frame_no) {
+    m_frame_no = frame_no;
+    m_fields[0].set_frame_no(frame_no);
+    m_fields[1].set_frame_no(frame_no);
+}
+
+MuseBuffer &FrameBuffer::data() {
     return m_data;
 }
 
-pair<float, float> FrameBuffer::estimate_eq(pair<float, float> const &current_eq) {
-    // FIXME: this is very inefficient but was a quick fix -- refactor!
-    auto undo_eq = [current_eq](float v) -> float {
-        return v * current_eq.first + current_eq.second;
-    };
-
-    float line_1_high_sum = 0;
-    float line_2_low_sum = 0;
+std::pair<float, float> FrameBuffer::EstimateEq(uint16_t const *data) {
+    int line_1_high_sum = 0;
+    int line_2_low_sum = 0;
     for (int i = 19; i < 259; i++) {
-        line_1_high_sum += undo_eq((*m_data)[0][i]);
-        line_2_low_sum += undo_eq((*m_data)[1][i]);
+        line_1_high_sum += ntohs(data[0 * MUSE_TOTAL_WIDTH + i]);
+        line_2_low_sum += ntohs(data[1 * MUSE_TOTAL_WIDTH + i]);
     }
-    float blanking_sum =  0;
+    int blanking_sum =  0;
     for (int i = 127; i < 383; i++) {
-        blanking_sum += undo_eq((*m_data)[562][i]) + undo_eq((*m_data)[1124][i]);
+        blanking_sum += ntohs(data[562 * MUSE_TOTAL_WIDTH + i]) +
+                ntohs(data[1124 * MUSE_TOTAL_WIDTH + i]);
     }
 
-    float avg_high = line_1_high_sum / 240.0f;
-    float avg_low = line_2_low_sum / 240.0f;
-    float avg_blanking = blanking_sum / 512.0f;
+    float avg_high = (float)line_1_high_sum / MUSE_SHORT_INPUT_MULT / 240.0f;
+    float avg_low = (float)line_2_low_sum / MUSE_SHORT_INPUT_MULT/ 240.0f;
+    float avg_blanking = (float)blanking_sum / MUSE_SHORT_INPUT_MULT / 512.0f;
     vector<pair<float, float>> v = {{16.0f , avg_low}, {128.0f, avg_blanking }, {239.0f, avg_high }};
-    auto eq = FrameBuffer::linear_regression(v);
+    auto eq = FrameBuffer::LinearRegression(v);
     return eq;
 }
 
-pair<float, float> FrameBuffer::linear_regression(vector<pair<float, float>> const &values) {
+pair<float, float> FrameBuffer::LinearRegression(vector<pair<float, float>> const &values) {
     float sum_x = accumulate(values.begin(), values.end(), 0.0f,
                               [](float acc, pair<float, float> v) { return acc + v.first; });
     float sum_y = accumulate(values.begin(), values.end(), 0.0f,
@@ -62,4 +66,9 @@ pair<float, float> FrameBuffer::linear_regression(vector<pair<float, float>> con
 
 FieldBufferView &FrameBuffer::get_field(int parity) {
     return m_fields[parity];
+}
+
+void FrameBuffer::ProcessControlData(uint16_t const *frame_data, std::pair<float, float> const &eq) {
+    m_fields[0].ProcessControlData(frame_data + 558 * MUSE_TOTAL_WIDTH + 12, eq);
+    m_fields[1].ProcessControlData(frame_data + 1120 * MUSE_TOTAL_WIDTH + 12, eq);
 }

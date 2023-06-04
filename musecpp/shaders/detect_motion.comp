@@ -1,20 +1,9 @@
 #version 450
 
-#define MUSE_BUF_HEIGHT 516
-#define MUSE_Y_BUF_WIDTH 374
-#define MUSE_MOTION_FIELD_BUF_WIDTH (374/2)
+#include "muse.h"
 
 // This shader should be invoked with global invocation ids
-// from (0, 0) to (MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT)
-
-//layout(push_constant) uniform PushConstants {
-//    uint frame_phase_c;
-//    uint field_parity;
-//    uint zero_non_sample_points;
-//};
-
-layout (local_size_x = 4) in;
-layout (local_size_y = 4) in;
+// from (0, 0) to (MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)
 
 layout(set = 0, binding = 0) buffer movement_field0_buffer {
     float movement_field0[];

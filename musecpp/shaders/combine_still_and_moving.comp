@@ -1,7 +1,6 @@
 #version 450
 
-#define MUSE_BUF_HEIGHT 516
-#define MUSE_Y_BUF_WIDTH 374
+#include "muse.h"
 
 // This shader should be invoked with global invocation ids
 // from (0, 0) to (MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)
@@ -11,9 +10,6 @@ layout(push_constant) uniform PushConstants {
     uint force_field_only;
     uint force_inter_frame_only;
 };
-
-layout (local_size_x = 4) in;
-layout (local_size_y = 4) in;
 
 layout(set = 0, binding = 0) buffer field_Y_buffer {
     float field_y[];

@@ -4,6 +4,7 @@
 
 #include <map>
 #include <iostream>
+#include <netinet/in.h>
 #include "Eigen/Dense"
 #include "MuseTypes.h"
 #include "ControlSignalDecoder.h"
@@ -26,15 +27,15 @@ map<Vector4i, int> ControlSignalDecoder::s_H_column_index = [] {
     return ix;
 }();
 
-ControlSignalDecoder::ControlSignalDecoder(const MuseSubBuffer &data) {
+ControlSignalDecoder::ControlSignalDecoder(uint16_t const *data, std::pair<float, float> const &eq) {
     auto groups = vector<pair<Vector4i, bool>>();
     groups.reserve(25);
     for (int row = 0; row < 5; row++) {
         for (int col = 7; col < 87; col += 16) { // start of each encoded 4 bit group
             Vector<int, 8> bits;
             for (int bit_ix = 0; bit_ix < 8; bit_ix++) {
-                uint8_t d1 = data[row][col + 2 * bit_ix];
-                uint8_t d2 = data[row][col + 2 * bit_ix + 1];
+                uint8_t d1 = (uint8_t)clamp(((float)ntohs(data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix]) / MUSE_SHORT_INPUT_MULT - eq.second) / eq.first, 0.0f, 255.0f);
+                uint8_t d2 = (uint8_t)clamp(((float)ntohs(data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix + 1]) / MUSE_SHORT_INPUT_MULT - eq.second) / eq.first, 0.0f, 255.0f);
                 bits[bit_ix] = d1 + d2 > 256 ? 1 : 0;
             }
 
@@ -141,7 +142,7 @@ ControlSignalDecoder::ControlSignalDecoder(const MuseSubBuffer &data) {
     }
 }
 
-void ControlSignalDecoder::print_control_data() {
+void ControlSignalDecoder::print_control_data() const {
     cout << "phases (fieldY frameY frameC) = "
          << field_subsampling_phase_Y << frame_subsampling_phase_Y << frame_subsampling_phase_C
          << ", hVector=" << horizontal_motion_vector << ", vVector=" << vertical_motion_vector
