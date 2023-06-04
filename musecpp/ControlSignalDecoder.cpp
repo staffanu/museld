@@ -2,55 +2,59 @@
 // Created by staffanu on 4/19/23.
 //
 
-#include <map>
 #include <iostream>
 #include <netinet/in.h>
-#include "Eigen/Dense"
 #include "MuseTypes.h"
 #include "ControlSignalDecoder.h"
 
 using namespace std;
-using namespace Eigen;
 
-Matrix<int, 4, 8> ControlSignalDecoder::s_H = []{
-        return (Matrix<int, 4, 8>() <<
-                1, 1, 1, 0, 1, 0, 0, 0,
-                0, 1, 1, 1, 0, 1, 0, 0,
-                1, 1, 0, 1, 0, 0, 1, 0,
-                1, 0, 1, 1, 0, 0, 0, 1).finished();
+array<array<int, 8>, 4> ControlSignalDecoder::s_H = [] {
+    return array<array<int, 8>, 4>{
+            1, 1, 1, 0, 1, 0, 0, 0,
+            0, 1, 1, 1, 0, 1, 0, 0,
+            1, 1, 0, 1, 0, 0, 1, 0,
+            1, 0, 1, 1, 0, 0, 0, 1};
 }();
 
-map<Vector4i, int> ControlSignalDecoder::s_H_column_index = [] {
-    auto ix = map<Vector4i, int>();
-    for (int i = 0; i < 8; i++)
-        ix[ControlSignalDecoder::s_H.col(i)] = i;
+map<array<int, 4>, int> ControlSignalDecoder::s_H_column_index = [] {
+    auto ix = map<array<int, 4>, int>();
+    for (int col_ix = 0; col_ix < 8; col_ix++) {
+        std::array<int, 4> column{};
+        for (int i = 0; i < 4; i++)
+            column[i] = s_H[i][col_ix];
+        ix[column] = col_ix;
+    }
     return ix;
 }();
 
 ControlSignalDecoder::ControlSignalDecoder(uint16_t const *data, std::pair<float, float> const &eq) {
-    auto groups = vector<pair<Vector4i, bool>>();
+    auto groups = vector<pair<array<int, 4>, bool>>();
     groups.reserve(25);
     for (int row = 0; row < 5; row++) {
         for (int col = 7; col < 87; col += 16) { // start of each encoded 4 bit group
-            Vector<int, 8> bits;
+            array<int, 8> bits{};
             for (int bit_ix = 0; bit_ix < 8; bit_ix++) {
                 uint8_t d1 = (uint8_t)clamp(((float)ntohs(data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix]) / MUSE_SHORT_INPUT_MULT - eq.second) / eq.first, 0.0f, 255.0f);
                 uint8_t d2 = (uint8_t)clamp(((float)ntohs(data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix + 1]) / MUSE_SHORT_INPUT_MULT - eq.second) / eq.first, 0.0f, 255.0f);
                 bits[bit_ix] = d1 + d2 > 256 ? 1 : 0;
             }
 
-            Vector4i syndrome = (s_H * bits).unaryExpr([](const int &x) { return x % 2; });
+            array<int, 4> syndrome = multiply(s_H, bits);
             bool is_ok = false;
-            if (syndrome.isZero()) { // no errors
+            if (is_zero(syndrome)) { // no errors
                 is_ok = true;
             } else {
                 auto error_pos = s_H_column_index.find(syndrome);
                 if (error_pos != s_H_column_index.cend()) {
-                    bits(error_pos->second) ^= 1;
+                    bits[error_pos->second] ^= 1;
                     is_ok = true;
                 }
             }
-            groups.emplace_back(pair(bits.head(4), is_ok));
+            std::array<int, 4> first_4{};
+            for (int i = 0; i < 4; i++)
+                first_4[i] = bits[i];
+            groups.emplace_back(first_4, is_ok);
         }
     }
     assert(groups.size() == 25);
@@ -58,7 +62,7 @@ ControlSignalDecoder::ControlSignalDecoder(uint16_t const *data, std::pair<float
     vector<pair<bool, bool>> result; // pair is (bit value, valid flag)
     result.reserve(32);
     for (int group_ix = 0; group_ix < 8; group_ix++) {
-        auto result_freqs = map<Vector4i, int>();
+        auto result_freqs = map<array<int, 4>, int>();
         for (int i = 0; i < 3; i++) {
             auto g = groups[group_ix + i * 8];
             if (g.second)
@@ -74,7 +78,7 @@ ControlSignalDecoder::ControlSignalDecoder(uint16_t const *data, std::pair<float
         } else {
             auto max_freq = find_if(
                     result_freqs.cbegin(), result_freqs.cend(),
-                    [](const pair<Vector4i, int> &t) -> bool { return t.second == 2; });
+                    [](const pair<array<int, 4>, int> &t) -> bool { return t.second == 2; });
             if (max_freq == result_freqs.end()) {
                 for (int i = 0; i < 4; i++)
                     result.emplace_back(false, false);
@@ -148,4 +152,22 @@ void ControlSignalDecoder::print_control_data() const {
          << ", hVector=" << horizontal_motion_vector << ", vVector=" << vertical_motion_vector
          << ", motion=" << motion_information << ", extent=" << motion_extent << endl;
 
+}
+
+std::array<int, 4> ControlSignalDecoder::multiply(std::array<std::array<int, 8>, 4> m, std::array<int, 8> v) {
+    std::array<int, 4> result{};
+    for (int i = 0; i < 4; i++) {
+        int sum = 0;
+        for (int j = 0; j < 8; j++)
+            sum += m[i][j] * v[j];
+        result[i] = sum % 2;
+    }
+    return result;
+}
+
+bool ControlSignalDecoder::is_zero(std::array<int, 4> a) {
+    for (int i = 0; i < 4; i++)
+        if (a[i] != 0)
+            return false;
+    return true;
 }

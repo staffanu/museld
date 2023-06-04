@@ -7,23 +7,8 @@
 
 #include <map>
 #include <optional>
-#include "Eigen/Dense"
 #include "MuseTypes.h"
 #include "MuseSubBuffer.h"
-
-namespace std
-{
-    template<> struct less<Eigen::Vector<int, 4>> {
-        bool operator()(Eigen::Vector<int, 4> const &a, Eigen::Vector<int, 4> const &b) const {
-            assert(a.size() == b.size());
-            for (Eigen::Index i = 0; i < a.size(); ++i) {
-                if (a[i] < b[i]) return true;
-                if (a[i] > b[i]) return false;
-            }
-            return false;
-        }
-    };
-}
 
 enum MotionInformation {
     Normal, CompleteStillPicture, SlightlyInMotion, SceneChange, Motion
@@ -41,8 +26,11 @@ struct ControlSignalDecoder {
     std::optional<int> motion_extent;
 
 private:
-    static Eigen::Matrix<int, 4, 8> s_H;
-    static std::map<Eigen::Vector4i, int> s_H_column_index;
+    static std::array<std::array<int, 8>, 4> s_H;
+    static std::map<std::array<int, 4>, int> s_H_column_index;
+
+    static std::array<int, 4> multiply(std::array<std::array<int, 8>, 4> m, std::array<int, 8> v);
+    static bool is_zero(std::array<int, 4> a);
 };
 
 
