@@ -2,13 +2,11 @@
 // Created by staffanu on 4/9/23.
 //
 
-#include <algorithm>
 #include <numeric>
 #include <utility>
 #include <netinet/in.h>
 #include "FrameBuffer.h"
 #include "FieldBufferView.h"
-#include "Shaders.h"
 
 using namespace std;
 

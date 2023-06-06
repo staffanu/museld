@@ -43,6 +43,37 @@ namespace musevk {
                 std::vector<vk::PipelineStageFlags> wait_dst_stage_masks = {},
                 uint32_t totalTimestamps = 0);
     private:
+        void createInstance();
+        bool checkValidationLayerSupport();
+        void createSurface();
+        void pickPhysicalDevice();
+        bool isDeviceSuitable(vk::PhysicalDevice &device);
+        bool checkDeviceFeaturesSupport(vk::PhysicalDevice &device);
+        bool checkDeviceExtensionSupport(vk::PhysicalDevice &device);
+
+        struct QueueFamilyIndices {
+            std::optional<uint32_t> graphicsAndComputeFamily;
+            std::optional<uint32_t> presentFamily;
+
+            bool isComplete() const {
+                return graphicsAndComputeFamily.has_value() && presentFamily.has_value();
+            }
+        };
+        QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice &device);
+        void createLogicalDevice();
+
+        struct SwapChainSupportDetails {
+            vk::SurfaceCapabilitiesKHR capabilities;
+            std::vector<vk::SurfaceFormatKHR> formats;
+            std::vector<vk::PresentModeKHR> presentModes;
+        };
+        SwapChainSupportDetails querySwapChainSupport(vk::PhysicalDevice &device);
+        vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR> &availableFormats);
+        vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes);
+        vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities);
+        void createSwapChain();
+        void createSyncObjects();
+
         const std::vector<const char *> c_validation_layers = {
                 "VK_LAYER_KHRONOS_validation"
         };
@@ -78,37 +109,6 @@ namespace musevk {
         vk::Semaphore m_image_available_semaphore;
         vk::Semaphore m_render_finished_semaphore;
         vk::Fence m_in_flight_fence;
-
-        void createInstance();
-        bool checkValidationLayerSupport();
-        void createSurface();
-        void pickPhysicalDevice();
-        bool isDeviceSuitable(vk::PhysicalDevice &device);
-        bool checkDeviceFeaturesSupport(vk::PhysicalDevice &device);
-        bool checkDeviceExtensionSupport(vk::PhysicalDevice &device);
-
-        struct QueueFamilyIndices {
-            std::optional<uint32_t> graphicsAndComputeFamily;
-            std::optional<uint32_t> presentFamily;
-
-            bool isComplete() const {
-                return graphicsAndComputeFamily.has_value() && presentFamily.has_value();
-            }
-        };
-        QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice &device);
-        void createLogicalDevice();
-
-        struct SwapChainSupportDetails {
-            vk::SurfaceCapabilitiesKHR capabilities;
-            std::vector<vk::SurfaceFormatKHR> formats;
-            std::vector<vk::PresentModeKHR> presentModes;
-        };
-        SwapChainSupportDetails querySwapChainSupport(vk::PhysicalDevice &device);
-        vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR> &availableFormats);
-        vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes);
-        vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities);
-        void createSwapChain();
-        void createSyncObjects();
     };
 }
 

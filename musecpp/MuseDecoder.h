@@ -11,13 +11,14 @@
 #include <fstream>
 #include "Shaders.h"
 #include "AudioDecoder.h"
+#include "musevk/TimestampStatistics.h"
 
 class FrameBuffer;
 
 class MuseDecoder {
 public:
     MuseDecoder(const std::string &filename, Shaders &shaders,
-                musevk::VulkanManager &manager);
+                musevk::VulkanManager &manager, bool benchmark_shaders);
     ~MuseDecoder();
     bool Initialize();
     bool Next();
@@ -31,6 +32,7 @@ private:
     std::shared_ptr<musevk::VulkanBuffer> m_input_vulkan_buffer;
     std::shared_ptr<musevk::CommandQueue>  m_command_queue;
     const bool m_benchmark_shaders;
+    musevk::TimestampStatistics m_timestamp_statistics;
     int m_frame_no;
     int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field
     long m_total_elapsed_time_us;

@@ -24,7 +24,7 @@ add_executable(musecpp
         musevk/CommandQueue.cpp musevk/CommandQueue.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h
         musevk/VulkanBuffer.cpp musevk/VulkanBuffer.h
-        )
+        musevk/TimestampStatistics.cpp musevk/TimestampStatistics.h)
 target_link_libraries(musecpp
 #        PRIVATE ${OpenCV_LIBS}
         PRIVATE glfw

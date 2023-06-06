@@ -13,13 +13,20 @@ void process_file(string filename) {
     app.initVulkan();
     {
         Shaders shaders(app);
-        auto decoder = MuseDecoder(filename, shaders, app);
+        auto decoder = MuseDecoder(filename, shaders, app, true);
         decoder.Initialize();
-
+        auto t0 = chrono::high_resolution_clock::now();
+        int field_count = 0;
         do {
             if (!decoder.Next())
                 break;
+            field_count++;
         } while (app.drawNextFrame(*shaders.getResultBuffer(), app));
+        auto t1 = chrono::high_resolution_clock::now();
+        long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
+        cout << "Avg " << (time_us / 1000 / field_count) << " ms/field"
+            << " (" << 1000000000 / time_us * field_count / 1000 << " fields/s)" << endl;
+
     }
     app.cleanup();
 }

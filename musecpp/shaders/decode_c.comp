@@ -12,15 +12,15 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(set = 0, binding = 0) buffer input_frame_buffer {
-    float16_t input_frame[];
+    float16_t input_frame[][MUSE_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 1) buffer r_data_buffer {
-    float16_t r_data[];
+    float16_t r_data[][MUSE_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 2) buffer b_data_buffer {
-    float16_t b_data[];
+    float16_t b_data[][MUSE_Y_BUF_WIDTH];
 };
 
 void main() {
@@ -31,22 +31,22 @@ void main() {
         return;
 
     uint line = row + 43 + field_parity * 562; // starts at 1
-    uint line_div_2_odd = (line / 2) % 2;
+    uint line_div_2_odd = (line >> 1) & 1u;
     uint offset = (line_div_2_odd == frame_phase_c ? 0 : 2) + field_parity;
 
     if (zero_non_sample_points != 0) {
-        r_data[row * MUSE_Y_BUF_WIDTH + col] = 0.hf;
-        b_data[row * MUSE_Y_BUF_WIDTH + col] = 0.hf;
+        r_data[row][col] = 0.hf;
+        b_data[row][col] = 0.hf;
     }
 
-    if (col % 4 == offset) {
-        float16_t v = input_frame[(line - 1) * MUSE_TOTAL_WIDTH + MUSE_C_OFFSET + col / 4];
+    if ((col & 3u) == offset) {
+        float16_t v = input_frame[(line - 1)][MUSE_C_OFFSET + (col >> 2)];
 
-        bool is_red = line % 2 == 1;
+        bool is_red = (line & 1u) == 1;
         if (is_red) {
-            r_data[row * MUSE_Y_BUF_WIDTH + col] = v;
+            r_data[row][col] = v;
         } else {
-            b_data[row * MUSE_Y_BUF_WIDTH + col] = v;
+            b_data[row][col] = v;
         }
     }
 }

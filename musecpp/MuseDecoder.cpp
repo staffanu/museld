@@ -15,12 +15,12 @@
 using namespace std;
 
 MuseDecoder::MuseDecoder(
-        const string &filename, Shaders &shaders, musevk::VulkanManager &manager)
+        const string &filename, Shaders &shaders, musevk::VulkanManager &manager, bool benchmark_shaders)
 : m_filename(filename),
   m_shaders(shaders),
   m_manager(manager),
-  m_benchmark_shaders(false),
-  m_command_queue(m_manager.createCommandQueue({}, {}, m_benchmark_shaders ? 40 : 0)) {
+  m_benchmark_shaders(benchmark_shaders),
+  m_command_queue(m_manager.createCommandQueue({}, {}, benchmark_shaders ? 40 : 0)) {
 }
 
 MuseDecoder::~MuseDecoder() {
@@ -71,8 +71,10 @@ bool MuseDecoder::Next() {
         m_frame_buffers.pop_back();
         m_frame_buffers.push_front(frame_buffer);
 
-        if (!read_shorts(m_input, m_input_vulkan_buffer->data<uint16_t>(), 480 * 1125))
+        if (!read_shorts(m_input, m_input_vulkan_buffer->data<uint16_t>(), 480 * 1125)) {
+            m_timestamp_statistics.print_stats();
             return false;
+        }
 
         auto eq_estimate = FrameBuffer::EstimateEq(m_input_vulkan_buffer->data<uint16_t>());
         m_eq = {m_eq.first * 0.9 + eq_estimate.first * 0.1, m_eq.second * 0.9 + eq_estimate.second * 0.1};
@@ -104,15 +106,8 @@ bool MuseDecoder::Next() {
     m_audio_decoder.decode_field(m_frame_buffers[0]->get_field(m_field_index).audio_buffer());
     m_command_queue->evalAwait();
 
-    if (m_benchmark_shaders) {
-        auto timestamps = m_command_queue->getTimestamps();
-        for (int i = 0; i < timestamps.size(); i++) {
-            cout << "Timestamp " << timestamps[i].first << ": " << timestamps[i].second;
-            if (i > 0)
-                cout << " (" << timestamps[i].second - timestamps[i - 1].second << ")";
-            cout << endl;
-        }
-    }
+    if (m_benchmark_shaders)
+        m_timestamp_statistics.add_timestamps(m_command_queue->getTimestamps());
 
     auto t1 = chrono::high_resolution_clock::now();
     long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
