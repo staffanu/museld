@@ -14,7 +14,7 @@
 using namespace std;
 
 std::vector<uint32_t> Shaders::compileSource(const std::string &filename) {
-    auto command = string("glslc " + filename + " -o " + filename + ".spv");
+    auto command = string("glslc -Werror -O " + filename + " -o " + filename + ".spv");
     cout << "command: " << command << endl;
     if (system(command.c_str()))
         throw std::runtime_error("Error running glslc command");
@@ -56,7 +56,7 @@ Shaders::Shaders(musevk::VulkanManager &manager)
           Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH / 2),
   },
   m_movement_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3)),
-  m_frame_out_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3, true)),
+  m_frame_out_buffer(Shaders::createMuseUintBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3, true)),
   m_diamond_filter_buffer(MuseBuffer(7, 9, m_vulkan_manager.createDeviceBuffer(
           {
                   -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
@@ -82,7 +82,41 @@ Shaders::Shaders(musevk::VulkanManager &manager)
                   0.001980, 0.091620, 0.259228, 0.091620, 0.001980,
                   0.001069, 0.049475, 0.139983, 0.049475, 0.001069,
                   0.000158, 0.007330, 0.020738, 0.007330, 0.000158,
-          })))
+          }))),
+  m_filter_2_to_3_buffer(m_vulkan_manager.createDeviceBuffer(
+          {
+                  // cutoff 0.25, transition 0.05, sampling freq 1, Rectangular: 19 coeffs (25 non-zero).  Looks +/- 9 samples in each direction
+                  0.034286805542972851, -0.000000000000000019, -0.044083035698107946, 0.000000000000000019,
+                  0.061716249977351118, -0.000000000000000019, -0.102860416628918538,
+                  0.000000000000000019, 0.308581249886755615, 0.484718293839893788, 0.308581249886755615,
+                  0.000000000000000019, -0.102860416628918538, -0.000000000000000019,
+                  0.061716249977351118, 0.000000000000000019, -0.044083035698107946, -0.000000000000000019,
+                  0.034286805542972851
+          })),
+  m_filter_4_to_3_buffer(m_vulkan_manager.createDeviceBuffer(
+          {
+                  // cutoff 0.125, transition 0.03, sampling freq 1, Rectangular: 31 coeffs (25 non-zero).  Looks +/- 15 samples in each direction
+                  -0.015752415092402161, -0.023868513282649006, -0.018175863568156325, 0.000000000000000010,
+                  0.021480566035093858, 0.033415918595708603, 0.026254025154003564, -0.000000000000000010,
+                  -0.033755175198004597, -0.055693197659514346, -0.047257245277206421, 0.000000000000000010,
+                  0.078762075462010708, 0.167079592978543023, 0.236286226386032083, 0.262448010933081788,
+                  0.236286226386032083, 0.167079592978543023, 0.078762075462010708, 0.000000000000000010,
+                  -0.047257245277206421, -0.055693197659514346, -0.033755175198004597, -0.000000000000000010,
+                  0.026254025154003564, 0.033415918595708603, 0.021480566035093858, 0.000000000000000010,
+                  -0.018175863568156325, -0.023868513282649006, -0.015752415092402161
+          })),
+  m_filter_4_to_1_buffer(m_vulkan_manager.createDeviceBuffer(
+          {
+                  // cutoff 0.125, transition 0.03, sampling freq 1, Rectangular: 31 coeffs (25 non-zero).  Looks +/- 15 samples in each direction
+                  -0.015752415092402161, -0.023868513282649006, -0.018175863568156325, 0.000000000000000010,
+                  0.021480566035093858, 0.033415918595708603, 0.026254025154003564, -0.000000000000000010,
+                  -0.033755175198004597, -0.055693197659514346, -0.047257245277206421, 0.000000000000000010,
+                  0.078762075462010708, 0.167079592978543023, 0.236286226386032083, 0.262448010933081788,
+                  0.236286226386032083, 0.167079592978543023, 0.078762075462010708, 0.000000000000000010,
+                  -0.047257245277206421, -0.055693197659514346, -0.033755175198004597, -0.000000000000000010,
+                  0.026254025154003564, 0.033415918595708603, 0.021480566035093858, 0.000000000000000010,
+                  -0.018175863568156325, -0.023868513282649006, -0.015752415092402161
+          }))
 {
     m_convert_to_float_and_apply_eq_and_gamma_spriv = compileSource(
             "../../musecpp/shaders/convert_to_float_and_apply_eq_and_gamma.comp");
@@ -95,78 +129,54 @@ Shaders::Shaders(musevk::VulkanManager &manager)
     m_detect_motion_spirv = compileSource("../../musecpp/shaders/detect_motion.comp");
     m_combine_still_and_moving_spirv = compileSource("../../musecpp/shaders/combine_still_and_moving.comp");
 
-    m_filter_2_to_3_buffer = m_vulkan_manager.createDeviceBuffer(
-            {
-                    // cutoff 0.25, transition 0.05, sampling freq 1, Rectangular: 19 coeffs (25 non-zero).  Looks +/- 9 samples in each direction
-                    0.034286805542972851, -0.000000000000000019, -0.044083035698107946, 0.000000000000000019,
-                    0.061716249977351118, -0.000000000000000019, -0.102860416628918538,
-                    0.000000000000000019, 0.308581249886755615, 0.484718293839893788, 0.308581249886755615,
-                    0.000000000000000019, -0.102860416628918538, -0.000000000000000019,
-                    0.061716249977351118, 0.000000000000000019, -0.044083035698107946, -0.000000000000000019,
-                    0.034286805542972851
-            });
-    m_filter_4_to_3_buffer = m_vulkan_manager.createDeviceBuffer(
-            {
-                    // cutoff 0.125, transition 0.03, sampling freq 1, Rectangular: 31 coeffs (25 non-zero).  Looks +/- 15 samples in each direction
-                    -0.015752415092402161, -0.023868513282649006, -0.018175863568156325, 0.000000000000000010,
-                    0.021480566035093858, 0.033415918595708603, 0.026254025154003564, -0.000000000000000010,
-                    -0.033755175198004597, -0.055693197659514346, -0.047257245277206421, 0.000000000000000010,
-                    0.078762075462010708, 0.167079592978543023, 0.236286226386032083, 0.262448010933081788,
-                    0.236286226386032083, 0.167079592978543023, 0.078762075462010708, 0.000000000000000010,
-                    -0.047257245277206421, -0.055693197659514346, -0.033755175198004597, -0.000000000000000010,
-                    0.026254025154003564, 0.033415918595708603, 0.021480566035093858, 0.000000000000000010,
-                    -0.018175863568156325, -0.023868513282649006, -0.015752415092402161
-            });
-    m_filter_4_to_1_buffer = m_vulkan_manager.createDeviceBuffer(
-            {
-                    // cutoff 0.125, transition 0.03, sampling freq 1, Rectangular: 31 coeffs (25 non-zero).  Looks +/- 15 samples in each direction
-                    -0.015752415092402161, -0.023868513282649006, -0.018175863568156325, 0.000000000000000010,
-                    0.021480566035093858, 0.033415918595708603, 0.026254025154003564, -0.000000000000000010,
-                    -0.033755175198004597, -0.055693197659514346, -0.047257245277206421, 0.000000000000000010,
-                    0.078762075462010708, 0.167079592978543023, 0.236286226386032083, 0.262448010933081788,
-                    0.236286226386032083, 0.167079592978543023, 0.078762075462010708, 0.000000000000000010,
-                    -0.047257245277206421, -0.055693197659514346, -0.033755175198004597, -0.000000000000000010,
-                    0.026254025154003564, 0.033415918595708603, 0.021480566035093858, 0.000000000000000010,
-                    -0.018175863568156325, -0.023868513282649006, -0.015752415092402161
-            });
-
     m_convert_to_float_and_apply_eq_and_gamma_algo = m_vulkan_manager.createComputeShader(
+            "convert_to_float_and_apply_eq_and_gamma",
             {nullptr, nullptr}, sizeof(float) * 2,
             m_convert_to_float_and_apply_eq_and_gamma_spriv, musevk::Workgroup(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT));
     m_copy_y_for_interpolation_algo = m_vulkan_manager.createComputeShader(
+            "copy_y_for_interpolation",
             {nullptr, nullptr}, sizeof(uint32_t) * 3,
             m_copy_y_for_interpolation_spirv, musevk::Workgroup(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT), 8);
     m_diamond_algo = m_vulkan_manager.createComputeShader(
+            "diamond",
             {nullptr, nullptr}, sizeof(uint32_t) * 5,
             m_diamond_spirv, musevk::Workgroup(0), 2);
     m_filter_image_algo = m_vulkan_manager.createComputeShader(
+            "filter_image",
             {nullptr, nullptr, nullptr}, sizeof(float) * 6,
             m_filter_image_spirv, musevk::Workgroup(0), 4);
     m_fill_empty_lines_algo = m_vulkan_manager.createComputeShader(
+            "fill_empty_lines",
             {m_field_Y_buffer.getVulkanBuffer()}, sizeof(uint32_t) * 3,
             m_fill_empty_lines_spirv, musevk::Workgroup(m_field_Y_buffer.width(), m_field_Y_buffer.height() / 2));
     m_convert_sample_rate_algo = m_vulkan_manager.createComputeShader(
+            "convert_sample_rate",
             {nullptr, nullptr, nullptr}, sizeof(uint32_t) * 10,
             m_convert_horiz_sample_rate_spirv,
             musevk::Workgroup(m_interpolated32_buffer.width() / 4, m_interpolated32_buffer.height() / 2), 3);
     m_convert_sample_rate_4_to_3_algo = m_vulkan_manager.createComputeShader(
+            "convert_sample_rate_4_to_3",
             {m_filter_4_to_3_buffer, m_interpolated32_buffer.getVulkanBuffer(),
              m_inter_frame_Y_buffer.getVulkanBuffer()}, sizeof(uint32_t) * 10,
             m_convert_horiz_sample_rate_spirv,
             musevk::Workgroup(m_inter_frame_Y_buffer.width(), m_inter_frame_Y_buffer.height() / 2));
     m_convert_sample_rate_2_to_3_algo = m_vulkan_manager.createComputeShader(
+            "convert_sample_rate_2_to_3",
             {m_filter_2_to_3_buffer, m_interpolated32_buffer.getVulkanBuffer(), m_field_Y_buffer.getVulkanBuffer()},
             sizeof(uint32_t) * 10,
             m_convert_horiz_sample_rate_spirv,
             musevk::Workgroup(m_field_Y_buffer.width(), m_field_Y_buffer.height() / 2));
     m_decode_c_algo = m_vulkan_manager.createComputeShader(
+            "decode_c",
             {nullptr, nullptr, nullptr}, sizeof(uint32_t) * 3,
             m_decode_c_spirv, musevk::Workgroup(m_intermediate_r_buffer.width(), m_intermediate_r_buffer.height()), 5);
     m_detect_motion_algo = m_vulkan_manager.createComputeShader(
+            "detect_motion",
             {m_movement_field_buffers[0].getVulkanBuffer(), m_movement_field_buffers[1].getVulkanBuffer(),
              m_movement_field_buffers[2].getVulkanBuffer(), m_movement_buffer.getVulkanBuffer()}, 0,
             m_detect_motion_spirv, musevk::Workgroup(m_movement_buffer.width(), m_movement_buffer.height()));
     m_combine_still_and_moving_algo = m_vulkan_manager.createComputeShader(
+            "combine_still_and_moving",
             {m_field_Y_buffer.getVulkanBuffer(), m_field_r_buffer.getVulkanBuffer(),
              m_field_b_buffer.getVulkanBuffer(), m_inter_frame_Y_buffer.getVulkanBuffer(),
              m_inter_frame_r_buffer.getVulkanBuffer(), m_inter_frame_b_buffer.getVulkanBuffer(),
@@ -174,20 +184,16 @@ Shaders::Shaders(musevk::VulkanManager &manager)
             sizeof(uint32_t) * 2,
             m_combine_still_and_moving_spirv,
             musevk::Workgroup(m_frame_out_buffer.width(), m_frame_out_buffer.height()));
-
-//    auto sq = m_vulkan_manager.sequence();
-//    sq->enqueueSyncDevice(m_filter_2_to_3_buffer);
-//    sq->enqueueSyncDevice(m_filter_4_to_1_buffer);
-//    sq->enqueueSyncDevice(m_filter_4_to_3_buffer);
-//    sq->enqueueSyncDevice(m_diamond_filter_buffer.getVulkanBuffer());
-//    sq->enqueueSyncDevice(m_color_filter_inter_frame_buffer.getVulkanBuffer());
-//    sq->enqueueSyncDevice(m_color_filter_single_field_buffer.getVulkanBuffer());
-//    sq->evalAsync();
-//    sq->evalAwait();
 }
 
 MuseBuffer Shaders::createMuseBuffer(unsigned int height, unsigned int width, bool allow_transfers) {
-    auto vulkan_buffer = m_vulkan_manager.createBuffer(height * width, sizeof(float), false, allow_transfers);
+    auto vulkan_buffer = m_vulkan_manager.createBuffer(height * width, 2 /* sizeof(float16) */, false, allow_transfers);
+    auto buffer = MuseBuffer(height, width, std::move(vulkan_buffer));
+    return buffer;
+}
+
+MuseBuffer Shaders::createMuseUintBuffer(unsigned int height, unsigned int width, bool allow_transfers) {
+    auto vulkan_buffer = m_vulkan_manager.createBuffer(height * width, sizeof(uint32_t), false, allow_transfers);
     auto buffer = MuseBuffer(height, width, std::move(vulkan_buffer));
     return buffer;
 }

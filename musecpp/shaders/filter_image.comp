@@ -10,20 +10,20 @@ layout(push_constant) uniform PushConstants {
     float filter_width_f;
     float image_height_f;
     float image_width_f;
-    float border_value;
-    float multiplier;
+    float border_value_f;
+    float multiplier_f;
 };
 
 layout(set = 0, binding = 0) buffer image_filter_buffer {
-    float image_filter[];
+    float16_t image_filter[];
 };
 
 layout(set = 0, binding = 1) buffer source_buffer {
-    float source[];
+    float16_t source[];
 };
 
 layout(set = 0, binding = 2) buffer dest_buffer {
-    float dest[];
+    float16_t dest[];
 };
 
 // Convert to 3/2 of the input sample rate by inserting two zeros between samples to up-sample 3x,
@@ -39,6 +39,8 @@ void main() {
     int image_width = int(image_width_f);
     int filter_height = int(filter_height_f);
     int filter_width = int(filter_width_f);
+    float16_t border_value = float16_t(border_value_f);
+    float16_t multiplier = float16_t(multiplier_f);
 
     if (row >= image_height || col >= image_width)
         return;
@@ -46,15 +48,15 @@ void main() {
     int H = filter_height / 2;
     int W = filter_width / 2;
 
-    float s = 0;
+    float16_t s = 0.hf;
     for (int i = -H; i <= H; i++) {
         int read_row = row + i;
         for (int j = -W; j <= W; j ++) {
             int read_col = col + j;
-            float v = read_row >= 0 && read_row < image_height && read_col >= 0 && read_col < image_width ?
+            float16_t v = read_row >= 0 && read_row < image_height && read_col >= 0 && read_col < image_width ?
                 source[read_row * image_width + read_col] : border_value;
             s += v * image_filter[(i + H) * filter_width + j + W];
         }
     }
-    dest[row * image_width + col] = clamp(s * multiplier, 0, 255);
+    dest[row * image_width + col] = clamp(s * multiplier, 0.hf, 255.hf);
 }

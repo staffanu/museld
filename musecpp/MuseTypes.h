@@ -5,13 +5,11 @@
 #ifndef MUSECPP_MUSETYPES_H
 #define MUSECPP_MUSETYPES_H
 
-#include <cstdint>
 #include <optional>
 #include <ostream>
 
 // input file currently uses shorts in the range 0...1023
 #define MUSE_SHORT_INPUT_MULT 4
-#define MUSE_FLOAT_INPUT_MULT 4
 
 #define MUSE_TOTAL_HEIGHT 1125
 #define MUSE_TOTAL_WIDTH 480

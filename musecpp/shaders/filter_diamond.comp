@@ -14,11 +14,11 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(set = 0, binding = 0) buffer filter_input {
-    float diamond_filter[];
+    float16_t diamond_filter[];
 };
 
 layout(set = 0, binding = 1) buffer framebuffer_inout {
-    float frame_buffer[];
+    float16_t frame_buffer[];
 };
 
 void main() {
@@ -33,7 +33,7 @@ void main() {
     uint W = filter_width / 2;
     uint W_odd =  (W - 1) / 2 * 2 + 1;// rounded down to odd value
 
-    float s = 0;
+    float16_t s = 0.hf;
     int i_start = -int(min(H, row));
     int i_max = int(min(H, frame_buffer_height - row - 1));
     for (int i = i_start; i <= i_max; i++) {
@@ -44,5 +44,5 @@ void main() {
                 s += frame_buffer[(row + i) * frame_buffer_width + col + j] *
                     diamond_filter[(i + H) * filter_width + j + W];
     }
-    frame_buffer[row * frame_buffer_width + col] = (clamp(s * 2, 0, 255));
+    frame_buffer[row * frame_buffer_width + col] = (clamp(s * 2.hf, 0.hf, 255.hf));
 }

@@ -5,13 +5,15 @@
 #include "ComputeShader.h"
 
 namespace musevk {
-    ComputeShader::ComputeShader(vk::Device &device,
+    ComputeShader::ComputeShader(std::string name,
+                                 vk::Device &device,
                                  const std::vector<std::shared_ptr<VulkanBuffer>> &buffers,
                                  int32_t push_constants_size,
                                  const std::vector<uint32_t> &spirv,
                                  const Workgroup &workgroup,
                                  int max_descriptor_sets)
-            : m_device(device),
+            : m_name(name),
+              m_device(device),
               m_descriptor_count(buffers.size()),
               m_buffers{buffers},
               m_spirv(spirv),

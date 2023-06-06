@@ -6,6 +6,7 @@
 #define MUSECPP_VULKANMANAGER_H
 
 #define GLFW_INCLUDE_VULKAN
+#include <string>
 #include <GLFW/glfw3.h>
 #include "VulkanBuffer.h"
 #include "CommandQueue.h"
@@ -30,22 +31,31 @@ namespace musevk {
                 bool allow_transfers = false);
 
         std::shared_ptr<ComputeShader> createComputeShader(
+                std::string name,
                 const std::vector<std::shared_ptr<VulkanBuffer>> &buffers,
                 int32_t push_constants_size,
                 const std::vector<uint32_t> &spirv,
                 const Workgroup &workgroup,
                 int max_descriptor_sets = 1);
 
-        std::shared_ptr<CommandQueue> sequence(
+        std::shared_ptr<CommandQueue> createCommandQueue(
                 std::vector<vk::Semaphore> wait_semaphores = {},
                 std::vector<vk::PipelineStageFlags> wait_dst_stage_masks = {},
                 uint32_t totalTimestamps = 0);
     private:
-        const std::vector<const char *> validationLayers = {
+        const std::vector<const char *> c_validation_layers = {
                 "VK_LAYER_KHRONOS_validation"
         };
-        const std::vector<const char *> deviceExtensions = {
-                VK_KHR_SWAPCHAIN_EXTENSION_NAME
+        const std::vector<const char *> c_instance_extensions = {
+                VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+        };
+        const std::vector<const char *> c_device_extensions = {
+                VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+                VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME,
+                VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
+                VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME,
+//                VK_AMD_GPU_SHADER_HALF_FLOAT_EXTENSION_NAME,
+//                VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
         };
 #ifdef NDEBUG
         const bool enableValidationLayers = false;
@@ -74,6 +84,7 @@ namespace musevk {
         void createSurface();
         void pickPhysicalDevice();
         bool isDeviceSuitable(vk::PhysicalDevice &device);
+        bool checkDeviceFeaturesSupport(vk::PhysicalDevice &device);
         bool checkDeviceExtensionSupport(vk::PhysicalDevice &device);
 
         struct QueueFamilyIndices {

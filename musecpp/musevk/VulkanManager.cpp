@@ -45,9 +45,9 @@ namespace musevk {
         vkAcquireNextImageKHR(m_logical_device, m_swapChain, UINT64_MAX, m_image_available_semaphore, VK_NULL_HANDLE,
                               &imageIndex);
 
-        auto sq = manager.sequence(std::vector{vk::Semaphore(m_image_available_semaphore)},
-                                   std::vector{vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe)});
-        sq->begin();
+        auto sq = manager.createCommandQueue(std::vector{vk::Semaphore(m_image_available_semaphore)},
+                                             std::vector{
+                                                     vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe)});
 
         sq->enqueueTransitionMemoryLayout(swapChainImages[imageIndex], vk::Format::eB8G8R8A8Unorm,
                                           vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
@@ -91,10 +91,20 @@ namespace musevk {
     }
 
     std::shared_ptr<VulkanBuffer> VulkanManager::createDeviceBuffer(const std::vector<float> &data) {
-        auto host_buffer = VulkanBuffer(m_physical_device, m_logical_device, data.size(), sizeof(float), true, true /* unused */);
-        memcpy(host_buffer.data<void>(), data.data(), data.size() * sizeof(float));
-        auto device_buffer = std::make_shared<VulkanBuffer>(m_physical_device, m_logical_device, data.size(), sizeof(float), false, true);
-        auto sq = sequence();
+        // from "Accuracy and performance of the lattice Boltzmann method with 64-bit, 32-bit, and customized 16-bit number formats"
+        auto as_uint = [](const float x) -> uint { return *(uint*)&x; };
+        auto float_to_half = [as_uint](const float x) -> ushort { // IEEE-754 16-bit floating-point format (without infinity): 1-5-10, exp-15, +-131008.0, +-6.1035156E-5, +-5.9604645E-8, 3.311 digits
+            const uint b = as_uint(x)+0x00001000; // round-to-nearest-even: add last bit after truncated mantissa
+            const uint e = (b&0x7F800000)>>23; // exponent
+            const uint m = b&0x007FFFFF; // mantissa; in line below: 0x007FF000 = 0x00800000-0x00001000 = decimal indicator flag - initial rounding
+            return (b&0x80000000)>>16 | (e>112)*((((e-112)<<10)&0x7C00)|m>>13) | ((e<113)&(e>101))*((((0x007FF000+m)>>(125-e))+1)>>1) | (e>143)*0x7FFF; // sign : normalized : denormalized : saturate
+        };
+
+        auto host_buffer = VulkanBuffer(m_physical_device, m_logical_device, data.size(), 2, true, true /* unused */);
+        for (int i = 0; i < data.size(); i++)
+            host_buffer.data<ushort>()[i] = float_to_half(data[i]);
+        auto device_buffer = std::make_shared<VulkanBuffer>(m_physical_device, m_logical_device, data.size(), 2, false, true);
+        auto sq = createCommandQueue();
         sq->enqueueCopyBuffer(host_buffer, *device_buffer);
         sq->evalAsync();
         sq->evalAwait();
@@ -111,16 +121,19 @@ namespace musevk {
     }
 
     std::shared_ptr<ComputeShader> VulkanManager::createComputeShader(
+            std::string name,
             const std::vector<std::shared_ptr<VulkanBuffer>> &buffers,
             int32_t push_constants_size,
             const std::vector<uint32_t> &spirv,
             const Workgroup &workgroup,
             int max_descriptor_sets) {
         return std::make_shared<ComputeShader>(
-                m_logical_device, buffers, push_constants_size, spirv, workgroup, max_descriptor_sets);
+                name,
+                m_logical_device,
+                buffers, push_constants_size, spirv, workgroup, max_descriptor_sets);
     }
 
-    std::shared_ptr<CommandQueue> VulkanManager::sequence(
+    std::shared_ptr<CommandQueue> VulkanManager::createCommandQueue(
             std::vector<vk::Semaphore> wait_semaphores,
             std::vector<vk::PipelineStageFlags> wait_dst_stage_masks,
             uint32_t totalTimestamps) {
@@ -141,25 +154,20 @@ namespace musevk {
             throw std::runtime_error("validation layers requested, but not available!");
         }
 
-        vk::ApplicationInfo appInfo{};
-        appInfo.pApplicationName = "Muse Decoder";
-        appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.pEngineName = "No Engine";
-        appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = VK_API_VERSION_1_0;
-
-        vk::InstanceCreateInfo createInfo{};
-        createInfo.pApplicationInfo = &appInfo;
+        vk::ApplicationInfo appInfo("Muse Decoder", VK_MAKE_VERSION(1, 0, 0), "No Engine", VK_MAKE_VERSION(1, 0, 0), VK_API_VERSION_1_2);
+        vk::InstanceCreateInfo createInfo({}, &appInfo);
 
         uint32_t glfwExtensionCount = 0;
-        const char **glfwExtensions;
-        glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+        const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
-        createInfo.enabledExtensionCount = glfwExtensionCount;
-        createInfo.ppEnabledExtensionNames = glfwExtensions;
+        std::vector<const char *> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+        extensions.insert(extensions.cend(), c_instance_extensions.cbegin(), c_instance_extensions.cend());
+
+        createInfo.enabledExtensionCount = extensions.size();
+        createInfo.ppEnabledExtensionNames = extensions.data();
         if (enableValidationLayers) {
-            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
-            createInfo.ppEnabledLayerNames = validationLayers.data();
+            createInfo.enabledLayerCount = c_validation_layers.size();
+            createInfo.ppEnabledLayerNames = c_validation_layers.data();
         } else {
             createInfo.enabledLayerCount = 0;
         }
@@ -169,7 +177,7 @@ namespace musevk {
     bool VulkanManager::checkValidationLayerSupport() {
         auto available_layers = vk::enumerateInstanceLayerProperties();
 
-        for (const char *layerName: validationLayers) {
+        for (const char *layerName: c_validation_layers) {
             bool layerFound = false;
             for (const auto &layerProperties: available_layers) {
                 if (strcmp(layerName, layerProperties.layerName) == 0) {
@@ -195,6 +203,8 @@ namespace musevk {
         auto devices = m_instance.enumeratePhysicalDevices();
         bool found = false;
         for (auto &device: devices) {
+            auto properties = device.getProperties();
+            std::cout << "Checking device " << properties.deviceName << std::endl;
             if (isDeviceSuitable(device)) {
                 found = true;
                 m_physical_device = device;
@@ -206,22 +216,37 @@ namespace musevk {
     }
 
     bool VulkanManager::isDeviceSuitable(vk::PhysicalDevice &device) {
+        if (!checkDeviceFeaturesSupport(device))
+            return false;
+        if (!checkDeviceExtensionSupport(device))
+            return false;
+
         QueueFamilyIndices indices = findQueueFamilies(device);
-        bool extensionsSupported = checkDeviceExtensionSupport(device);
+        if (!indices.isComplete())
+            return false;
 
-        bool swapChainAdequate = false;
-        if (extensionsSupported) {
-            SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
-            swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
-        }
+        SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
+        if (swapChainSupport.formats.empty() || swapChainSupport.presentModes.empty())
+            return false;
 
-        return indices.isComplete() && extensionsSupported && swapChainAdequate;
+        return true;
+    }
+
+    bool VulkanManager::checkDeviceFeaturesSupport(vk::PhysicalDevice &device) {
+        auto features2 = device.getFeatures2<
+                vk::PhysicalDeviceFeatures2,
+                vk::PhysicalDeviceVulkan11Features,
+                vk::PhysicalDeviceVulkan12Features>();
+
+        return (features2.get<vk::PhysicalDeviceVulkan11Features>().storageBuffer16BitAccess &&
+                features2.get<vk::PhysicalDeviceVulkan11Features>().uniformAndStorageBuffer16BitAccess &&
+                features2.get<vk::PhysicalDeviceVulkan12Features>().shaderFloat16);
     }
 
     bool VulkanManager::checkDeviceExtensionSupport(vk::PhysicalDevice &device) {
         auto availableExtensions = device.enumerateDeviceExtensionProperties();
 
-        std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
+        std::set<std::string> requiredExtensions(c_device_extensions.begin(), c_device_extensions.end());
 
         for (const auto &extension: availableExtensions) {
             requiredExtensions.erase(extension.extensionName);
@@ -269,18 +294,28 @@ namespace musevk {
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        vk::PhysicalDeviceFeatures deviceFeatures{};
+        auto device_vulkan_12_features = vk::PhysicalDeviceVulkan12Features();
+        device_vulkan_12_features.shaderFloat16 = VK_TRUE;
+
+        auto device_vulkan_11_features = vk::PhysicalDeviceVulkan11Features();
+        device_vulkan_11_features.storageBuffer16BitAccess = VK_TRUE;
+        device_vulkan_11_features.uniformAndStorageBuffer16BitAccess = VK_TRUE;
+        device_vulkan_11_features.pNext = &device_vulkan_12_features;
+
+        auto device_features = vk::PhysicalDeviceFeatures2();
+        device_features.pNext = &device_vulkan_11_features;
+
         vk::DeviceCreateInfo createInfo{};
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
 
-        createInfo.pEnabledFeatures = &deviceFeatures;
-        createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
-        createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+        createInfo.pNext = &device_features;
+        createInfo.enabledExtensionCount = static_cast<uint32_t>(c_device_extensions.size());
+        createInfo.ppEnabledExtensionNames = c_device_extensions.data();
 
         if (enableValidationLayers) {
-            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
-            createInfo.ppEnabledLayerNames = validationLayers.data();
+            createInfo.enabledLayerCount = static_cast<uint32_t>(c_validation_layers.size());
+            createInfo.ppEnabledLayerNames = c_validation_layers.data();
         } else {
             createInfo.enabledLayerCount = 0;
         }

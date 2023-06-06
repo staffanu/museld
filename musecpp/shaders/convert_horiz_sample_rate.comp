@@ -7,7 +7,7 @@
 
 layout(push_constant) uniform PushConstants {
     uint filter_size;
-    uint upsample_factor;
+    uint upsample_factor_i;
     uint downsample_factor;
     uint source_height;
     uint source_width;
@@ -15,19 +15,19 @@ layout(push_constant) uniform PushConstants {
     uint dest_row_step_size;
     uint dest_start_col;
     uint dest_col_step_size;
-    uint multiplier;
+    uint multiplier_i;
 };
 
 layout(set = 0, binding = 0) buffer filter_buffer {
-    float fir_filter[];
+    float16_t fir_filter[];
 };
 
 layout(set = 0, binding = 1) buffer source_buffer {
-    float source[];
+    float16_t source[];
 };
 
 layout(set = 0, binding = 2) buffer dest_buffer {
-    float dest[];
+    float16_t dest[];
 };
 
 // Convert to upsample_factor/downsample_factor of the input sample rate by inserting two zeros
@@ -41,7 +41,10 @@ layout(set = 0, binding = 2) buffer dest_buffer {
 void main() {
     uint source_row = gl_GlobalInvocationID.y;
     uint dest_col_filter_out = gl_GlobalInvocationID.x;
-    uint dest_width_filter_out = source_width * upsample_factor / downsample_factor;
+    uint dest_width_filter_out = source_width * upsample_factor_i / downsample_factor;
+
+    float16_t multiplier = float16_t(multiplier_i);
+    float16_t upsample_factor = float16_t(upsample_factor_i);
 
     if (source_row >= source_height || dest_col_filter_out >= dest_width_filter_out)
         return;
@@ -52,10 +55,10 @@ void main() {
 
     int N = int(filter_size) / 2;
     int hiFreqIx = int(dest_col_filter_out * downsample_factor /* + dest_start_col * 2 */);
-    float s = 0;
-    for (int l = (hiFreqIx - N + int(upsample_factor) - 1) / int(upsample_factor); l <= (hiFreqIx + N) / int(upsample_factor); l++) {
-        float v = l >= 0 && l < source_width ? source[source_row * source_width + l] : 128;
-        s += v * fir_filter[upsample_factor * l - hiFreqIx + N];
+    float16_t s = 0.hf;
+    for (int l = (hiFreqIx - N + int(upsample_factor_i) - 1) / int(upsample_factor_i); l <= (hiFreqIx + N) / int(upsample_factor_i); l++) {
+        float16_t v = l >= 0 && l < source_width ? source[source_row * source_width + l] : 128.hf;
+        s += v * fir_filter[upsample_factor_i * l - hiFreqIx + N];
     }
-    dest[dest_row * dest_width + dest_col] = clamp(s * upsample_factor * multiplier, 0, 255);
+    dest[dest_row * dest_width + dest_col] = clamp(s * upsample_factor * multiplier, 0.hf, 255.hf);
 }

@@ -14,11 +14,11 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(set = 0, binding = 0) buffer frame_data_buffer {
-    float frame_data[];
+    float16_t frame_data[];
 };
 
 layout(set = 0, binding = 1) buffer output_data_buffer {
-    float output_data[];
+    float16_t output_data[];
 };
 
 void main() {
@@ -31,9 +31,9 @@ void main() {
     uint v_offset = field_parity == 0 ? 46 : 608;
     uint phase = (frame_phase_y + row + 1) % 2; // notice row is even when line no is odd (row 0 is really line 47/609)
 
-    float v = frame_data[(row + v_offset) * MUSE_TOTAL_WIDTH + col + 106];
+    float16_t v = frame_data[(row + v_offset) * MUSE_TOTAL_WIDTH + col + 106];
 
     output_data[row * MUSE_Y_BUF_WIDTH * 2 + col * 2 + phase] = v;
     if (zero_non_copied_entries != 0)
-        output_data[row * MUSE_Y_BUF_WIDTH * 2 + col * 2 + 1 - phase] = 0;
+        output_data[row * MUSE_Y_BUF_WIDTH * 2 + col * 2 + 1 - phase] = 0.hf;
 }

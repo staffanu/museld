@@ -11,7 +11,7 @@ namespace musevk {
                                uint32_t queueIndex,
                                std::vector<vk::Semaphore> &wait_semaphores,
                                std::vector<vk::PipelineStageFlags> &wait_dst_stage_masks,
-                               uint32_t totalTimestamps)
+                               uint32_t max_timestamps)
             : m_physical_device(physicalDevice),
               m_device(device),
               m_compute_queue(computeQueue),
@@ -19,23 +19,38 @@ namespace musevk {
               m_wait_semaphores(wait_semaphores),
               m_wait_dst_stage_masks(wait_dst_stage_masks) {
 
-        createCommandPool();
-        createCommandBuffer();
-        if (totalTimestamps > 0)
-            createTimestampQueryPool(totalTimestamps + 1); //+1 for the first one
+        vk::CommandPoolCreateInfo commandPoolInfo(vk::CommandPoolCreateFlags(
+                vk::CommandPoolCreateFlagBits::eResetCommandBuffer), m_queue_index);
+        m_command_pool = m_device.createCommandPool(commandPoolInfo);
+
+        vk::CommandBufferAllocateInfo commandBufferAllocateInfo(m_command_pool, vk::CommandBufferLevel::ePrimary, 1);
+        m_command_buffer = m_device.allocateCommandBuffers(commandBufferAllocateInfo)[0];
+
+        if (max_timestamps > 0) {
+            vk::PhysicalDeviceProperties physical_device_properties = m_physical_device.getProperties();
+            if (physical_device_properties.limits.timestampComputeAndGraphics) {
+                vk::QueryPoolCreateInfo query_pool_info;
+                query_pool_info.setQueryCount(max_timestamps);
+                query_pool_info.setQueryType(vk::QueryType::eTimestamp);
+                m_timestamp_query_pool = m_device.createQueryPool(query_pool_info);
+            } else {
+                throw std::runtime_error("Device does not support timestamps");
+            }
+        }
+        m_allocated_timestamp_queries = max_timestamps;
     }
 
     CommandQueue::~CommandQueue() {
         m_device.freeCommandBuffers(m_command_pool, m_command_buffer);
         m_device.destroy(m_command_pool);
-        if (m_timestampQueryPool) {
-            m_device.destroy(m_timestampQueryPool);
+        if (m_timestamp_query_pool) {
+            m_device.destroy(m_timestamp_query_pool);
         }
     }
 
     void CommandQueue::enqueueTransitionMemoryLayout(vk::Image image, vk::Format format,
                                                      vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
-        m_operation_count++;
+        begin();
         vk::ImageMemoryBarrier barrier;
         barrier.oldLayout = oldLayout;
         barrier.newLayout = newLayout;
@@ -55,30 +70,76 @@ namespace musevk {
                                          {},
                                          {},
                                          {barrier});
+        maybeTimestamp("transitionImage");
     }
 
     void CommandQueue::enqueueCopyBuffer(VulkanBuffer &source, VulkanBuffer &destination) {
-        this->begin();
-        m_operation_count++;
+        begin();
         vk::DeviceSize buffer_size(source.getMemorySize());
         vk::BufferCopy copy_region(0, 0, buffer_size);
         m_command_buffer.copyBuffer(source.buffer(), destination.buffer(), copy_region);
+        maybeTimestamp("copy");
     }
 
     void CommandQueue::enqueueCopyBufferToImage(vk::Buffer &bufferFrom,
-                                  vk::Image imageTo,
-                                  vk::ImageLayout layout,
-                                  vk::BufferImageCopy region) {
-        this->begin();
-        m_operation_count++;
+                                                vk::Image imageTo,
+                                                vk::ImageLayout layout,
+                                                vk::BufferImageCopy region) {
+        begin();
         m_command_buffer.copyBufferToImage(bufferFrom, imageTo, layout, region);
+        maybeTimestamp("copyToImage");
     }
 
-    std::vector<std::uint64_t> CommandQueue::getTimestamps() {
-        const auto n = m_operation_count + 1;
-        std::vector<std::uint64_t> timestamps(n, 0);
+    void CommandQueue::maybeTimestamp(std::string label) {
+        if (m_allocated_timestamp_queries > m_timestamped_operations.size()) {
+            m_command_buffer.writeTimestamp(
+                    vk::PipelineStageFlagBits::eAllCommands,
+                    m_timestamp_query_pool,
+                    m_timestamped_operations.size());
+            m_timestamped_operations.emplace_back(label);
+        }
+    }
+
+    void CommandQueue::evalAsync() {
+        assert(!m_is_running);
+        assert(m_recording);
+        m_command_buffer.end();
+        m_recording = false;
+        m_is_running = true;
+
+        vk::SubmitInfo submitInfo(m_wait_semaphores, m_wait_dst_stage_masks, m_command_buffer);
+        m_fence = m_device.createFence(vk::FenceCreateInfo());
+        m_compute_queue.submit(submitInfo, m_fence);
+    }
+
+    void CommandQueue::evalAwait() {
+        assert(m_is_running);
+        auto result = m_device.waitForFences(m_fence, VK_TRUE, UINT64_MAX);
+        assert(result != vk::Result::eTimeout);
+        m_device.destroy(m_fence);
+        m_is_running = false;
+    }
+
+    void CommandQueue::begin() {
+        assert(!m_is_running);
+        if (!m_recording) {
+            m_command_buffer.begin(vk::CommandBufferBeginInfo());
+            m_recording = true;
+
+            if (m_allocated_timestamp_queries) {
+                m_command_buffer.resetQueryPool(m_timestamp_query_pool, 0, m_allocated_timestamp_queries);
+                m_timestamped_operations.clear();
+                maybeTimestamp("begin");
+            }
+        }
+    }
+
+    std::vector<std::pair<std::string, int>> CommandQueue::getTimestamps() {
+        assert(m_allocated_timestamp_queries);
+        const auto n = m_timestamped_operations.size();
+        std::vector<uint64_t> timestamps(n, 0);
         auto result = m_device.getQueryPoolResults(
-                m_timestampQueryPool,
+                m_timestamp_query_pool,
                 0,
                 n,
                 timestamps.size() * sizeof(std::uint64_t),
@@ -86,32 +147,16 @@ namespace musevk {
                 sizeof(uint64_t),
                 vk::QueryResultFlagBits::e64 | vk::QueryResultFlagBits::eWait);
         if (result != vk::Result::eSuccess)
-            throw std::runtime_error("error");
+            throw std::runtime_error("getQueryPoolResults error");
 
-        return timestamps;
-    }
+        vk::PhysicalDeviceProperties physical_device_properties = m_physical_device.getProperties();
+        auto time_stamp_period = physical_device_properties.limits.timestampPeriod;
 
-    void CommandQueue::createCommandPool() {
-        vk::CommandPoolCreateInfo commandPoolInfo(vk::CommandPoolCreateFlags(), m_queue_index);
-        m_command_pool = m_device.createCommandPool(commandPoolInfo);
-    }
+        std::vector<std::pair<std::string, int>> labeled_timestamps(n);
+        for (int i = 0; i < n; i++)
+            labeled_timestamps[i] = std::pair(m_timestamped_operations[i],
+                                            time_stamp_period * (double)(timestamps[i] - timestamps[0]) / 1000);
 
-    void CommandQueue::createCommandBuffer() {
-        vk::CommandBufferAllocateInfo commandBufferAllocateInfo(m_command_pool, vk::CommandBufferLevel::ePrimary, 1);
-        m_command_buffer = m_device.allocateCommandBuffers(commandBufferAllocateInfo)[0];
-    }
-
-    void CommandQueue::createTimestampQueryPool(uint32_t total_timestamps) {
-        vk::PhysicalDeviceProperties physicalDeviceProperties = m_physical_device.getProperties();
-
-        m_free_timestamp_query_pool = true;
-        if (physicalDeviceProperties.limits.timestampComputeAndGraphics) {
-            vk::QueryPoolCreateInfo query_pool_info;
-            query_pool_info.setQueryCount(total_timestamps);
-            query_pool_info.setQueryType(vk::QueryType::eTimestamp);
-            m_timestampQueryPool = m_device.createQueryPool(query_pool_info);
-        } else {
-            throw std::runtime_error("Device does not support timestamps");
-        }
+        return labeled_timestamps;
     }
 }

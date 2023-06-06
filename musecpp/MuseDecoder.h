@@ -29,6 +29,8 @@ private:
     std::ifstream m_input;
     std::pair<float, float> m_eq;
     std::shared_ptr<musevk::VulkanBuffer> m_input_vulkan_buffer;
+    std::shared_ptr<musevk::CommandQueue>  m_command_queue;
+    const bool m_benchmark_shaders;
     int m_frame_no;
     int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field
     long m_total_elapsed_time_us;

@@ -20,7 +20,7 @@ namespace musevk {
                      uint32_t queueIndex,
                      std::vector<vk::Semaphore> &wait_semaphores,
                      std::vector<vk::PipelineStageFlags> &wait_dst_stage_masks,
-                     uint32_t totalTimestamps = 0);
+                     uint32_t max_timestamps = 0);
 
         void enqueueTransitionMemoryLayout(vk::Image image, vk::Format format,
                                            vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
@@ -36,8 +36,7 @@ namespace musevk {
         void enqueueComputeShader(const std::shared_ptr<ComputeShader> &compute_shader,
                                   const std::vector<T> &pushConstants,
                                   int descriptor_set_index = 0) {
-            m_operation_count++;
-            this->begin();
+            begin();
             for (const std::shared_ptr<VulkanBuffer> &buffer: compute_shader->getBuffers(descriptor_set_index)) {
                 buffer->enqueueMemoryBarrier(
                         m_command_buffer,
@@ -47,67 +46,24 @@ namespace musevk {
                         vk::PipelineStageFlagBits::eComputeShader);
             }
 
-            compute_shader->enqueueBindCore(m_command_buffer, descriptor_set_index);
-            compute_shader->enqueueBindPush(m_command_buffer, pushConstants);
-            compute_shader->enqueueDispatch(m_command_buffer);
+            compute_shader->bindPipelineAndDescriptorSets(m_command_buffer, descriptor_set_index);
+            compute_shader->bindPushConstants(m_command_buffer, pushConstants);
+            compute_shader->dispatch(m_command_buffer);
+            maybeTimestamp(compute_shader->name());
         }
 
-        void evalAsync() {
-            if (m_recording)
-                this->end();
-            assert(!m_is_running);
-            m_is_running = true;
+        void maybeTimestamp(std::string label);
 
-            vk::SubmitInfo submitInfo(m_wait_semaphores, m_wait_dst_stage_masks, m_command_buffer);
-            m_fence = m_device.createFence(vk::FenceCreateInfo());
-            m_compute_queue.submit(submitInfo, m_fence);
-        }
+        void evalAsync();
 
-        void evalAwait() {
-            assert(m_is_running);
-            auto result = m_device.waitForFences(m_fence, VK_TRUE, UINT64_MAX);
-            assert(result != vk::Result::eTimeout);
-            m_device.destroy(m_fence);
-            m_is_running = false;
-        }
+        void evalAwait();
 
-        void clear() {
-            if (m_recording)
-                this->end();
-        }
-
-        std::vector<std::uint64_t> getTimestamps();
-
-        void begin() {
-            if (m_recording) {
-                return;
-            }
-
-            assert(!m_is_running);
-            this->m_command_buffer.begin(vk::CommandBufferBeginInfo());
-            this->m_recording = true;
-
-            // latch the first timestamp before any commands are submitted
-            if (m_free_timestamp_query_pool)
-                m_command_buffer.writeTimestamp(
-                        vk::PipelineStageFlagBits::eAllCommands,
-                        m_timestampQueryPool,
-                        0);
-        }
-
-        void end() {
-            assert(!m_is_running);
-            assert(m_recording);
-            m_command_buffer.end();
-            m_recording = false;
-        }
+        std::vector<std::pair<std::string, int>> getTimestamps();
 
         ~CommandQueue();
 
     private:
-        void createCommandPool();
-        void createCommandBuffer();
-        void createTimestampQueryPool(uint32_t total_timestamps);
+        void begin();
 
         vk::PhysicalDevice &m_physical_device;
         vk::Device &m_device;
@@ -118,9 +74,10 @@ namespace musevk {
         vk::CommandBuffer m_command_buffer;
 
         vk::Fence m_fence;
-        int m_operation_count = 0;
-        vk::QueryPool m_timestampQueryPool;
-        bool m_free_timestamp_query_pool = false;
+
+        int m_allocated_timestamp_queries;
+        vk::QueryPool m_timestamp_query_pool;
+        std::vector<std::string> m_timestamped_operations;
 
         std::vector<vk::Semaphore> m_wait_semaphores;
         std::vector<vk::PipelineStageFlags> m_wait_dst_stage_masks;

@@ -12,7 +12,7 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(set = 0, binding = 0) buffer frame_buffer {
-    float frame[];
+    float16_t frame[];
 };
 
 // probably not the best interpolation of missing lines but looks more or less ok
@@ -26,7 +26,7 @@ void main() {
 
     uint row_above = row == 0 ? 1 : row - 1;
     uint row_below = row == height - 1 ? height - 2 : row + 1;
-    float s = (frame[row_above * width + col] + frame[row_below * width + col]) / 2;
+    float16_t s = (frame[row_above * width + col] + frame[row_below * width + col]) / 2.hf;
 
-    frame[row * width + col] = clamp(s, 0, 255);
+    frame[row * width + col] = clamp(s, 0.hf, 255.hf);
 }

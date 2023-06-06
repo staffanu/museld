@@ -26,6 +26,7 @@ public:
     void operator=(const Shaders &) = delete;
 
     MuseBuffer createMuseBuffer(unsigned int height, unsigned int width, bool allow_transfers = false);
+    MuseBuffer createMuseUintBuffer(unsigned int height, unsigned int width, bool allow_transfers = false);
 
     void convertToFloatAndApplyEqAndGamma(musevk::CommandQueue &sq,
                                           std::shared_ptr<musevk::VulkanBuffer> input, MuseBuffer &buffer,

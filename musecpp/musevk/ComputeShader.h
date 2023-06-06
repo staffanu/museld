@@ -21,12 +21,17 @@ namespace musevk {
 
     class ComputeShader {
     public:
-        ComputeShader(vk::Device &device,
+        ComputeShader(std::string name,
+                      vk::Device &device,
                       const std::vector<std::shared_ptr<VulkanBuffer>> &buffers,
                       int32_t push_constants_size,
                       const std::vector<uint32_t> &spirv,
                       const Workgroup &workgroup,
                       int max_descriptor_sets);
+
+        std::string &name() {
+            return m_name;
+        }
 
         void updateBufferDescriptorsInSet(int set_index, const std::vector<std::shared_ptr<VulkanBuffer>> &buffers) {
             assert(buffers.size() == m_descriptor_count);
@@ -36,31 +41,6 @@ namespace musevk {
 
         void updateWorkgroup(Workgroup const &workgroup) {
             m_workgroup = workgroup;
-        }
-
-        void enqueueBindCore(const vk::CommandBuffer &commandBuffer, int descriptor_set_index) {
-            commandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_pipeline);
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
-                                             m_pipeline_layout,
-                                             0, // First set
-                                             m_descriptor_sets[descriptor_set_index],
-                                             nullptr // Dispatcher
-            );
-        }
-
-        template<typename T>
-        void enqueueBindPush(const vk::CommandBuffer &commandBuffer, const std::vector<T> &push_constants) {
-            if (!push_constants.empty()) {
-                commandBuffer.pushConstants(m_pipeline_layout,
-                                            vk::ShaderStageFlagBits::eCompute,
-                                            0,
-                                            sizeof(T) * push_constants.size(),
-                                            push_constants.data());
-            }
-        }
-
-        void enqueueDispatch(const vk::CommandBuffer &commandBuffer) {
-            commandBuffer.dispatch(m_workgroup.x_size, m_workgroup.y_size, m_workgroup.z_size);
         }
 
         const std::vector<std::shared_ptr<VulkanBuffer>> &getBuffers(int descriptor_set_index) {
@@ -77,11 +57,38 @@ namespace musevk {
         }
 
     private:
+        friend class CommandQueue;
+
         void createShaderModule();
         void createDescriptorLayout(int number_of_descriptor_sets);
         void updateDescriptorSet(int set_index);
         void createPipeline(int32_t push_constants_size);
+        void bindPipelineAndDescriptorSets(const vk::CommandBuffer &commandBuffer, int descriptor_set_index) {
+            commandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_pipeline);
+            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                                             m_pipeline_layout,
+                                             0, // First set
+                                             m_descriptor_sets[descriptor_set_index],
+                                             nullptr // Dispatcher
+            );
+        }
 
+        template<typename T>
+        void bindPushConstants(const vk::CommandBuffer &commandBuffer, const std::vector<T> &push_constants) {
+            if (!push_constants.empty()) {
+                commandBuffer.pushConstants(m_pipeline_layout,
+                                            vk::ShaderStageFlagBits::eCompute,
+                                            0,
+                                            sizeof(T) * push_constants.size(),
+                                            push_constants.data());
+            }
+        }
+
+        void dispatch(const vk::CommandBuffer &commandBuffer) {
+            commandBuffer.dispatch(m_workgroup.x_size, m_workgroup.y_size, m_workgroup.z_size);
+        }
+
+        std::string m_name;
         vk::Device &m_device;
         int m_descriptor_count;
         std::vector<std::vector<std::shared_ptr<VulkanBuffer>>> m_buffers;

@@ -6,19 +6,19 @@
 // from (0, 0) to (MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)
 
 layout(set = 0, binding = 0) buffer movement_field0_buffer {
-    float movement_field0[];
+    float16_t movement_field0[];
 };
 
 layout(set = 0, binding = 1) buffer movement_field1_buffer {
-    float movement_field1[];
+    float16_t movement_field1[];
 };
 
 layout(set = 0, binding = 2) buffer movement_field2_buffer {
-    float movement_field2[];
+    float16_t movement_field2[];
 };
 
 layout(set = 0, binding = 3) buffer movement_out_buffer {
-    float movement_out[];
+    float16_t movement_out[];
 };
 
 void main() {
@@ -31,14 +31,14 @@ void main() {
     uint movement_row = row / 2;
     uint movement_col = col / 6;
 
-    float maximum = 0;
+    float16_t maximum = 0.hf;
     for (int i = -1; i <= 1; i++)
         for (int j = -1; j <= 1; j++) {
             uint ix = (movement_row + i) * MUSE_MOTION_FIELD_BUF_WIDTH + movement_col + j;
             maximum = max(maximum, abs(movement_field0[ix] - movement_field1[ix]));
             maximum = max(maximum, abs(movement_field0[ix] - movement_field2[ix]));
         }
-    float m = maximum < 5 ? 0 : maximum > 25 ? 1 : maximum / 25;
+    float16_t m = maximum < 5.hf ? 0.hf : maximum > 25.hf ? 1.hf : maximum / 25.hf;
 
     movement_out[row * MUSE_Y_BUF_WIDTH * 3 + col] = m;
 }

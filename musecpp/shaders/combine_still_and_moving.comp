@@ -12,31 +12,31 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(set = 0, binding = 0) buffer field_Y_buffer {
-    float field_y[];
+    float16_t field_y[];
 };
 
 layout(set = 0, binding = 1) buffer field_r_buffer {
-    float field_r[];
+    float16_t field_r[];
 };
 
 layout(set = 0, binding = 2) buffer field_b_buffer {
-    float field_b[];
+    float16_t field_b[];
 };
 
 layout(set = 0, binding = 3) buffer inter_frame_Y_buffer {
-    float inter_frame_y[];
+    float16_t inter_frame_y[];
 };
 
 layout(set = 0, binding = 4) buffer inter_frame_r_buffer {
-    float inter_frame_r[];
+    float16_t inter_frame_r[];
 };
 
 layout(set = 0, binding = 5) buffer inter_frame_b_buffer {
-    float inter_frame_b[];
+    float16_t inter_frame_b[];
 };
 
 layout(set = 0, binding = 6) buffer movement_buffer {
-    float movement_data[];
+    float16_t movement_data[];
 };
 
 layout(set = 0, binding = 7) buffer frame_out_buffer {
@@ -52,23 +52,23 @@ void main() {
     if (row >= MUSE_BUF_HEIGHT * 2 || col >= MUSE_Y_BUF_WIDTH * 3)
         return;
 
-    float YM_field = field_y[row * MUSE_Y_BUF_WIDTH * 3 + col];
-    float RmYM_field = field_r[(row / 2) * MUSE_Y_BUF_WIDTH + col / 3] - 128.0f;
-    float BmYM_field = field_b[(row / 2) * MUSE_Y_BUF_WIDTH + col / 3] - 128.0f;
-    float YM_inter_frame = inter_frame_y[row * MUSE_Y_BUF_WIDTH * 3 + col];
-    float RmYM_inter_frame = inter_frame_r[(row / 2) * MUSE_Y_BUF_WIDTH + col / 3] - 128.0f;
-    float BmYM_inter_frame = inter_frame_b[(row / 2) * MUSE_Y_BUF_WIDTH + col / 3] - 128.0f;
+    float16_t YM_field = field_y[row * MUSE_Y_BUF_WIDTH * 3 + col];
+    float16_t RmYM_field = field_r[(row / 2) * MUSE_Y_BUF_WIDTH + col / 3] - 128.0hf;
+    float16_t BmYM_field = field_b[(row / 2) * MUSE_Y_BUF_WIDTH + col / 3] - 128.0hf;
+    float16_t YM_inter_frame = inter_frame_y[row * MUSE_Y_BUF_WIDTH * 3 + col];
+    float16_t RmYM_inter_frame = inter_frame_r[(row / 2) * MUSE_Y_BUF_WIDTH + col / 3] - 128.0hf;
+    float16_t BmYM_inter_frame = inter_frame_b[(row / 2) * MUSE_Y_BUF_WIDTH + col / 3] - 128.0hf;
 
-    float movement = force_field_only != 0 ?
-        1.0f : force_inter_frame_only != 0 ?
-            0.0f : movement_data[row * MUSE_Y_BUF_WIDTH * 3 + col];
+    float16_t movement = force_field_only != 0 ?
+        1.0hf : force_inter_frame_only != 0 ?
+            0.0hf : movement_data[row * MUSE_Y_BUF_WIDTH * 3 + col];
 
-    float YM = YM_field * movement + YM_inter_frame * (1 - movement);
-    float BmYM = BmYM_field * movement + BmYM_inter_frame * (1 - movement);
-    float RmYM = RmYM_field * movement + RmYM_inter_frame * (1 - movement);
+    float16_t YM = YM_field * movement + YM_inter_frame * (1.0hf - movement);
+    float16_t BmYM = BmYM_field * movement + BmYM_inter_frame * (1.0hf - movement);
+    float16_t RmYM = RmYM_field * movement + RmYM_inter_frame * (1.0hf - movement);
 
-    int g = clamp(int(YM - BmYM / 4 - RmYM / 2), 0, 255);
-    int b = clamp(int(YM + BmYM + BmYM / 4), 0, 255);
+    int g = clamp(int(YM - BmYM / 4.0hf - RmYM / 2.0hf), 0, 255);
+    int b = clamp(int(YM + BmYM + BmYM / 4.0hf), 0, 255);
     int r = clamp(int(YM + RmYM), 0, 255);
 
     frame_out[row * MUSE_Y_BUF_WIDTH * 3 + col] = (0xff << 24) | (r << 16) | (g << 8) | (b);

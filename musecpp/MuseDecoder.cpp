@@ -18,7 +18,9 @@ MuseDecoder::MuseDecoder(
         const string &filename, Shaders &shaders, musevk::VulkanManager &manager)
 : m_filename(filename),
   m_shaders(shaders),
-  m_manager(manager) {
+  m_manager(manager),
+  m_benchmark_shaders(false),
+  m_command_queue(m_manager.createCommandQueue({}, {}, m_benchmark_shaders ? 40 : 0)) {
 }
 
 MuseDecoder::~MuseDecoder() {
@@ -41,7 +43,7 @@ bool MuseDecoder::Initialize() {
         read_shorts(m_input, skip_buffer.data(), samples_to_skip);
     }
 
-    m_input_vulkan_buffer = m_manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH,sizeof(uint16_t), true, true);
+    m_input_vulkan_buffer = m_manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint16_t), true, true);
 
     // Always keep the three latest frames (required for motion detection) -- pretend we have three already
     for (int i = 0; i < 3; i++)
@@ -63,7 +65,6 @@ bool MuseDecoder::Initialize() {
 
 bool MuseDecoder::Next() {
     auto t0 = chrono::high_resolution_clock::now();
-    auto sq = m_manager.sequence();
     if (m_field_index == 0) {
         auto frame_buffer = m_frame_buffers.back();
         frame_buffer->set_frame_no(++m_frame_no);
@@ -72,7 +73,6 @@ bool MuseDecoder::Next() {
 
         if (!read_shorts(m_input, m_input_vulkan_buffer->data<uint16_t>(), 480 * 1125))
             return false;
-        //sq->enqueueSyncDevice(m_input_vulkan_buffer);
 
         auto eq_estimate = FrameBuffer::EstimateEq(m_input_vulkan_buffer->data<uint16_t>());
         m_eq = {m_eq.first * 0.9 + eq_estimate.first * 0.1, m_eq.second * 0.9 + eq_estimate.second * 0.1};
@@ -80,10 +80,10 @@ bool MuseDecoder::Next() {
 
         frame_buffer->ProcessControlData(m_input_vulkan_buffer->data<uint16_t>(), m_eq);
 
-        m_shaders.convertToFloatAndApplyEqAndGamma(*sq, m_input_vulkan_buffer, frame_buffer->data(), m_eq);
+        m_shaders.convertToFloatAndApplyEqAndGamma(*m_command_queue, m_input_vulkan_buffer, frame_buffer->data(), m_eq);
     }
 
-    m_shaders.decodeIntraField(*sq, m_frame_buffers[0]->get_field(m_field_index));
+    m_shaders.decodeIntraField(*m_command_queue, m_frame_buffers[0]->get_field(m_field_index));
     auto fields = vector<reference_wrapper<FieldBufferView>>{
             m_frame_buffers[0]->get_field(m_field_index),
             m_frame_buffers[1 - m_field_index]->get_field(1 - m_field_index),
@@ -91,18 +91,28 @@ bool MuseDecoder::Next() {
             m_frame_buffers[2 - m_field_index]->get_field(1 - m_field_index),
             m_frame_buffers[2]->get_field(m_field_index)};
 
-    if (m_shaders.decodeInterFrameAndDetectMotion(*sq, fields)) {
+    if (m_shaders.decodeInterFrameAndDetectMotion(*m_command_queue, fields)) {
         cout << "Field " << m_field_index << " inter-frame interpolation success" << endl;
-        m_shaders.combineStillAndMovingParts(*sq, false, false);
+        m_shaders.combineStillAndMovingParts(*m_command_queue, false, false);
     } else {
         cout << "Field " << m_field_index << " inter-frame interpolation failed -- using intra-field interpolation" << endl;
-        m_shaders.combineStillAndMovingParts(*sq, true, false);
+        m_shaders.combineStillAndMovingParts(*m_command_queue, true, false);
     }
-    sq->evalAsync();
+    m_command_queue->evalAsync();
 
     // FIXME: the frame buffer is not synched local here!
     m_audio_decoder.decode_field(m_frame_buffers[0]->get_field(m_field_index).audio_buffer());
-    sq->evalAwait();
+    m_command_queue->evalAwait();
+
+    if (m_benchmark_shaders) {
+        auto timestamps = m_command_queue->getTimestamps();
+        for (int i = 0; i < timestamps.size(); i++) {
+            cout << "Timestamp " << timestamps[i].first << ": " << timestamps[i].second;
+            if (i > 0)
+                cout << " (" << timestamps[i].second - timestamps[i - 1].second << ")";
+            cout << endl;
+        }
+    }
 
     auto t1 = chrono::high_resolution_clock::now();
     long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
