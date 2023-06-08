@@ -48,16 +48,16 @@ namespace musevk {
                               &imageIndex);
 
         m_command_queue->enqueueTransitionMemoryLayout(swapChainImages[imageIndex], vk::Format::eB8G8R8A8Unorm,
-                                          vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+                                                       vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
 
         vk::BufferImageCopy region({}, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2,
                                    vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
                                    {}, {MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 1});
         m_command_queue->enqueueCopyBufferToImage(buffer.buffer(), vk::Image(swapChainImages[imageIndex]),
-                                     vk::ImageLayout::eTransferDstOptimal, region);
+                                                  vk::ImageLayout::eTransferDstOptimal, region);
 
         m_command_queue->enqueueTransitionMemoryLayout(swapChainImages[imageIndex], vk::Format::eB8G8R8A8Unorm,
-                                          vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
+                                                       vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
 
         m_command_queue->evalAsync();
         m_command_queue->evalAwait();
@@ -154,7 +154,12 @@ namespace musevk {
         }
 
         vk::ApplicationInfo appInfo("Muse Decoder", VK_MAKE_VERSION(1, 0, 0), "No Engine", VK_MAKE_VERSION(1, 0, 0), VK_API_VERSION_1_2);
-        vk::InstanceCreateInfo createInfo({}, &appInfo);
+#ifdef __APPLE__
+        vk::InstanceCreateFlagBits createFlags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
+#else
+        vk::InstanceCreateFlagBits createFlags = {};
+#endif
+        vk::InstanceCreateInfo createInfo(createFlags, &appInfo);
 
         uint32_t glfwExtensionCount = 0;
         const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);

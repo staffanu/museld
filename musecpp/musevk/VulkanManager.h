@@ -79,6 +79,9 @@ namespace musevk {
         };
         const std::vector<const char *> c_instance_extensions = {
                 VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+#ifdef __APPLE__
+                VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
+#endif
         };
         const std::vector<const char *> c_device_extensions = {
                 VK_KHR_SWAPCHAIN_EXTENSION_NAME,
