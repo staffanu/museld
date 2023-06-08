@@ -9,7 +9,6 @@
 #include <limits>
 #include "VulkanManager.h"
 #include "VulkanBuffer.h"
-#include "../MuseDecoder.h"
 #include "../MuseTypes.h"
 
 namespace musevk {
@@ -32,9 +31,12 @@ namespace musevk {
         createLogicalDevice();
         createSwapChain();
         createSyncObjects();
+        m_command_queue = createCommandQueue(
+                std::vector{vk::Semaphore(m_image_available_semaphore)},
+                std::vector{vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe)});
     }
 
-    bool VulkanManager::drawNextFrame(VulkanBuffer &buffer, VulkanManager &manager) {
+    bool VulkanManager::drawNextFrame(VulkanBuffer &buffer) {
         if (glfwWindowShouldClose(m_window))
             return false;
         glfwPollEvents();
@@ -45,24 +47,20 @@ namespace musevk {
         vkAcquireNextImageKHR(m_logical_device, m_swapChain, UINT64_MAX, m_image_available_semaphore, VK_NULL_HANDLE,
                               &imageIndex);
 
-        auto sq = manager.createCommandQueue(std::vector{vk::Semaphore(m_image_available_semaphore)},
-                                             std::vector{
-                                                     vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe)});
-
-        sq->enqueueTransitionMemoryLayout(swapChainImages[imageIndex], vk::Format::eB8G8R8A8Unorm,
+        m_command_queue->enqueueTransitionMemoryLayout(swapChainImages[imageIndex], vk::Format::eB8G8R8A8Unorm,
                                           vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
 
         vk::BufferImageCopy region({}, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2,
                                    vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
                                    {}, {MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 1});
-        sq->enqueueCopyBufferToImage(buffer.buffer(), vk::Image(swapChainImages[imageIndex]),
+        m_command_queue->enqueueCopyBufferToImage(buffer.buffer(), vk::Image(swapChainImages[imageIndex]),
                                      vk::ImageLayout::eTransferDstOptimal, region);
 
-        sq->enqueueTransitionMemoryLayout(swapChainImages[imageIndex], vk::Format::eB8G8R8A8Unorm,
+        m_command_queue->enqueueTransitionMemoryLayout(swapChainImages[imageIndex], vk::Format::eB8G8R8A8Unorm,
                                           vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
 
-        sq->evalAsync();
-        sq->evalAwait();
+        m_command_queue->evalAsync();
+        m_command_queue->evalAwait();
         vk::PresentInfoKHR presentInfo{};
 
         vk::Semaphore signalSemaphores[] = {m_render_finished_semaphore};
@@ -79,6 +77,7 @@ namespace musevk {
     }
 
     void VulkanManager::cleanup() {
+        m_command_queue = nullptr;
         m_logical_device.destroy(m_image_available_semaphore);
         m_logical_device.destroy(m_render_finished_semaphore);
         m_logical_device.destroy(m_in_flight_fence);
@@ -352,7 +351,7 @@ namespace musevk {
                 return availablePresentMode;
             }
         }
-
+        // FIXME: what to use?
         return vk::PresentModeKHR::eFifo;
     }
 

@@ -19,7 +19,7 @@ namespace musevk {
         VulkanManager(VulkanManager &other) = delete;
         void initWindow(int width, int height);
         void initVulkan();
-        bool drawNextFrame(VulkanBuffer &buffer, VulkanManager &manager);
+        bool drawNextFrame(VulkanBuffer &buffer);
         void cleanup();
 
         std::shared_ptr<VulkanBuffer> createDeviceBuffer(const std::vector<float> &data);
@@ -93,8 +93,9 @@ namespace musevk {
 #else
         const bool enableValidationLayers = true;
 #endif
-
         GLFWwindow *m_window;
+        std::shared_ptr<CommandQueue> m_command_queue;
+
         vk::Instance m_instance;
         vk::PhysicalDevice m_physical_device;
         vk::Device m_logical_device;
