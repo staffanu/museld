@@ -5,24 +5,50 @@
 #include "ComputeShader.h"
 
 namespace musevk {
-    ComputeShader::ComputeShader(std::string name,
+    ComputeShader::ComputeShader(std::string &name,
                                  vk::Device &device,
-                                 const std::vector<std::shared_ptr<VulkanBuffer>> &buffers,
+                                 const std::vector<MemoryObjectType> &buffer_types,
                                  int32_t push_constants_size,
                                  const std::vector<uint32_t> &spirv,
                                  const Workgroup &workgroup,
                                  int max_descriptor_sets)
-            : m_name(name),
-              m_device(device),
-              m_descriptor_count(buffers.size()),
-              m_buffers{buffers},
-              m_spirv(spirv),
-              m_workgroup(workgroup) {
+: m_name(name),
+  m_device(device),
+  m_descriptor_count(buffer_types.size()),
+  m_spirv(spirv),
+  m_workgroup(workgroup) {
         m_buffers.resize(max_descriptor_sets);
         createShaderModule();
-        createDescriptorLayout(max_descriptor_sets);
+        createDescriptorLayout(max_descriptor_sets, buffer_types);
         createPipeline(push_constants_size);
         updateDescriptorSet(0);
+    }
+
+    ComputeShader::ComputeShader(std::string &name,
+                                 vk::Device &device,
+                                 const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
+                                 int32_t push_constants_size,
+                                 const std::vector<uint32_t> &spirv,
+                                 const Workgroup &workgroup,
+                                 int max_descriptor_sets)
+: m_name(name),
+  m_device(device),
+  m_descriptor_count(buffers.size()),
+  m_spirv(spirv),
+  m_workgroup(workgroup)
+    {
+        std::vector<MemoryObjectType> buffer_types;
+        buffer_types.reserve(buffers.size());
+        for (auto &buffer : buffers)
+            buffer_types.push_back(buffer->getType());
+
+        m_buffers.resize(max_descriptor_sets);
+        createShaderModule();
+        createDescriptorLayout(max_descriptor_sets, buffer_types);
+        createPipeline(push_constants_size);
+        updateDescriptorSet(0);
+
+        updateBufferDescriptorsInSet(0, buffers);
     }
 
     void ComputeShader::createShaderModule() {
@@ -32,7 +58,7 @@ namespace musevk {
         m_shader_module = m_device.createShaderModule(shaderModuleInfo);
     }
 
-    void ComputeShader::createDescriptorLayout(int number_of_descriptor_sets) {
+    void ComputeShader::createDescriptorLayout(int number_of_descriptor_sets, const std::vector<MemoryObjectType> &buffer_types) {
         std::vector<vk::DescriptorPoolSize> descriptor_pool_size = {
                 vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer,
                                        m_descriptor_count * number_of_descriptor_sets)
@@ -47,7 +73,7 @@ namespace musevk {
         for (size_t i = 0; i < m_descriptor_count; i++) {
             descriptor_set_bindings.emplace_back(
                     i, // Binding index
-                    vk::DescriptorType::eStorageBuffer,
+                    buffer_types[i] == eBuffer ? vk::DescriptorType::eStorageBuffer : vk::DescriptorType::eStorageImage,
                     1, // Descriptor count
                     vk::ShaderStageFlagBits::eCompute);
         }
@@ -68,17 +94,8 @@ namespace musevk {
         for (size_t i = 0; i < buffers.size(); i++) {
             if (buffers[i] != nullptr) { // allow null to be updated later
                 std::vector<vk::WriteDescriptorSet> compute_write_descriptor_sets;
-
-                vk::DescriptorBufferInfo descriptor_buffer_info =
-                        buffers[i]->createDescriptorBufferInfo();
-                compute_write_descriptor_sets.emplace_back(
-                        m_descriptor_sets[set_index],
-                        i, // Destination binding
-                        0, // Destination array element
-                        vk::DescriptorType::eStorageBuffer,
-                        nullptr, // Descriptor image info
-                        descriptor_buffer_info);
-
+                compute_write_descriptor_sets.push_back(
+                        buffers[i]->makeWriteDescriptorSet(m_descriptor_sets[set_index], i));
                 m_device.updateDescriptorSets(compute_write_descriptor_sets, nullptr);
             }
         }

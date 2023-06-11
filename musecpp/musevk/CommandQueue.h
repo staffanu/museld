@@ -32,18 +32,31 @@ namespace musevk {
                                       vk::ImageLayout layout,
                                       vk::BufferImageCopy region);
 
+        void enqueueBlitImage(vk::Image &source,
+                              vk::ImageLayout source_layout,
+                              vk::Image &dest,
+                              vk::ImageLayout dest_layout,
+                              vk::ImageBlit region);
+
+        void enqueueMemoryBarrier(VulkanBuffer &buffer,
+                vk::AccessFlagBits srcAccessMask,
+                vk::AccessFlagBits dstAccessMask,
+                vk::PipelineStageFlagBits srcStageMask,
+                vk::PipelineStageFlagBits dstStageMask);
+
         template<typename T = float>
         void enqueueComputeShader(const std::shared_ptr<ComputeShader> &compute_shader,
                                   const std::vector<T> &pushConstants,
                                   int descriptor_set_index = 0) {
             begin();
-            for (const std::shared_ptr<VulkanBuffer> &buffer: compute_shader->getBuffers(descriptor_set_index)) {
-                buffer->enqueueMemoryBarrier(
-                        m_command_buffer,
-                        vk::AccessFlagBits::eTransferWrite,
-                        vk::AccessFlagBits::eShaderRead,
-                        vk::PipelineStageFlagBits::eTransfer,
-                        vk::PipelineStageFlagBits::eComputeShader);
+            for (const std::shared_ptr<VulkanMemoryObject> &buffer: compute_shader->getMemoryObjects(descriptor_set_index)) {
+                if (buffer->getType() == eBuffer) {
+                    enqueueMemoryBarrier((VulkanBuffer &)(*buffer),
+                                         vk::AccessFlagBits::eTransferWrite,
+                                         vk::AccessFlagBits::eShaderRead,
+                                         vk::PipelineStageFlagBits::eTransfer,
+                                         vk::PipelineStageFlagBits::eComputeShader);
+                }
             }
 
             compute_shader->bindPipelineAndDescriptorSets(m_command_buffer, descriptor_set_index);

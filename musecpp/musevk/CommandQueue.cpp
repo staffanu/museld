@@ -90,6 +90,34 @@ namespace musevk {
         maybeTimestamp("copyToImage");
     }
 
+    void CommandQueue::enqueueBlitImage(vk::Image &source, vk::ImageLayout source_layout,
+                                        vk::Image &dest, vk::ImageLayout dest_layout,
+                                        vk::ImageBlit region) {
+        begin();
+        m_command_buffer.blitImage(source, source_layout, dest, dest_layout, region, vk::Filter::eLinear);
+    }
+
+    void CommandQueue::enqueueMemoryBarrier(VulkanBuffer &buffer,
+                                            vk::AccessFlagBits srcAccessMask,
+                                            vk::AccessFlagBits dstAccessMask,
+                                            vk::PipelineStageFlagBits srcStageMask,
+                                            vk::PipelineStageFlagBits dstStageMask) {
+        vk::BufferMemoryBarrier bufferMemoryBarrier;
+        bufferMemoryBarrier.buffer = buffer.buffer();
+        bufferMemoryBarrier.size = buffer.getMemorySize();
+        bufferMemoryBarrier.srcAccessMask = srcAccessMask;
+        bufferMemoryBarrier.dstAccessMask = dstAccessMask;
+        bufferMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+        m_command_buffer.pipelineBarrier(srcStageMask,
+                                         dstStageMask,
+                                         vk::DependencyFlags(),
+                                         nullptr,
+                                         bufferMemoryBarrier,
+                                         nullptr);
+    }
+
     void CommandQueue::maybeTimestamp(std::string label) {
         if (m_allocated_timestamp_queries > m_timestamped_operations.size()) {
             m_command_buffer.writeTimestamp(

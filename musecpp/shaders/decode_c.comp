@@ -11,15 +11,15 @@ layout(push_constant) uniform PushConstants {
     uint zero_non_sample_points;
 };
 
-layout(set = 0, binding = 0) buffer input_frame_buffer {
+layout(set = 0, binding = 0) buffer readonly input_frame_buffer {
     float16_t input_frame[][MUSE_TOTAL_WIDTH];
 };
 
-layout(set = 0, binding = 1) buffer r_data_buffer {
+layout(set = 0, binding = 1) buffer writeonly r_data_buffer {
     float16_t r_data[][MUSE_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 2) buffer b_data_buffer {
+layout(set = 0, binding = 2) buffer writeonly b_data_buffer {
     float16_t b_data[][MUSE_Y_BUF_WIDTH];
 };
 

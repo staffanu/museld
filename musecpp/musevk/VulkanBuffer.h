@@ -9,17 +9,17 @@
 #include <memory>
 #include <iostream>
 #include <optional>
+#include "VulkanMemoryObject.h"
 
 namespace musevk {
-    class VulkanBuffer {
+    class VulkanBuffer final : public VulkanMemoryObject {
     public:
         VulkanBuffer(vk::PhysicalDevice &physical_device,
                      vk::Device &device,
                      uint32_t number_of_elements,
                      uint32_t element_size,
                      bool is_host,
-                     bool allow_transfers);
-
+                     bool allow_transfers);  // only relevant for device local storage buffers
         VulkanBuffer(const VulkanBuffer &other) = delete;
         VulkanBuffer &operator=(const VulkanBuffer &other) = delete;
         VulkanBuffer(VulkanBuffer &&other) = delete;
@@ -31,31 +31,20 @@ namespace musevk {
             return m_buffer;
         }
 
-        void enqueueMemoryBarrier(
-                const vk::CommandBuffer &commandBuffer,
-                vk::AccessFlagBits srcAccessMask,
-                vk::AccessFlagBits dstAccessMask,
-                vk::PipelineStageFlagBits srcStageMask,
-                vk::PipelineStageFlagBits dstStageMask) {
-
-            vk::BufferMemoryBarrier bufferMemoryBarrier;
-            bufferMemoryBarrier.buffer = m_buffer;
-            bufferMemoryBarrier.size = m_memory_size;
-            bufferMemoryBarrier.srcAccessMask = srcAccessMask;
-            bufferMemoryBarrier.dstAccessMask = dstAccessMask;
-            bufferMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            bufferMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-            commandBuffer.pipelineBarrier(srcStageMask,
-                                          dstStageMask,
-                                          vk::DependencyFlags(),
-                                          nullptr,
-                                          bufferMemoryBarrier,
-                                          nullptr);
+        MemoryObjectType getType() const final {
+            return eBuffer;
         }
 
-        [[nodiscard]] vk::DescriptorBufferInfo createDescriptorBufferInfo() {
-            return {m_buffer, 0, m_memory_size};
+        vk::WriteDescriptorSet
+        makeWriteDescriptorSet(vk::DescriptorSet &descriptor_set, uint32_t binding_index) const final {
+            return {
+                    descriptor_set,
+                    binding_index,
+                    0, // Destination array element
+                    vk::DescriptorType::eStorageBuffer,
+                    nullptr, // Descriptor image info
+                    m_descriptor_buffer_info
+            };
         }
 
         [[nodiscard]] uint32_t size() const {
@@ -72,9 +61,8 @@ namespace musevk {
         }
 
     private:
-        void allocateAndBindMemory(vk::MemoryPropertyFlags memoryPropertyFlags);
+        void allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags);
 
-        vk::PhysicalDevice &m_physical_device;
         vk::Device &m_device;
         uint32_t m_size;
         uint32_t m_memory_size;
@@ -83,6 +71,7 @@ namespace musevk {
 
         vk::Buffer m_buffer;
         vk::DeviceMemory m_device_memory;
+        vk::DescriptorBufferInfo m_descriptor_buffer_info;
     };
 }
 

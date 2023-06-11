@@ -11,39 +11,35 @@ layout(push_constant) uniform PushConstants {
     uint force_inter_frame_only;
 };
 
-layout(set = 0, binding = 0) buffer field_Y_buffer {
+layout(set = 0, binding = 0) buffer readonly field_Y_buffer {
     float16_t field_y[];
 };
 
-layout(set = 0, binding = 1) buffer field_r_buffer {
+layout(set = 0, binding = 1) buffer readonly field_r_buffer {
     float16_t field_r[];
 };
 
-layout(set = 0, binding = 2) buffer field_b_buffer {
+layout(set = 0, binding = 2) buffer readonly field_b_buffer {
     float16_t field_b[];
 };
 
-layout(set = 0, binding = 3) buffer inter_frame_Y_buffer {
+layout(set = 0, binding = 3) buffer readonly inter_frame_Y_buffer {
     float16_t inter_frame_y[];
 };
 
-layout(set = 0, binding = 4) buffer inter_frame_r_buffer {
+layout(set = 0, binding = 4) buffer readonly inter_frame_r_buffer {
     float16_t inter_frame_r[];
 };
 
-layout(set = 0, binding = 5) buffer inter_frame_b_buffer {
+layout(set = 0, binding = 5) buffer readonly inter_frame_b_buffer {
     float16_t inter_frame_b[];
 };
 
-layout(set = 0, binding = 6) buffer movement_buffer {
+layout(set = 0, binding = 6) buffer readonly movement_buffer {
     float16_t movement_data[];
 };
 
-layout(set = 0, binding = 7) buffer frame_out_buffer {
-    uint frame_out[];
-};
-
-//layout(set = 0, binding = 8, rgba32ui) uniform writeonly uimage2D frame_out_image;
+layout(set = 0, binding = 7, rgba32f) uniform writeonly image2D frame_out_image;
 
 void main() {
     uint row = gl_GlobalInvocationID.y;
@@ -67,10 +63,9 @@ void main() {
     float16_t BmYM = BmYM_field * movement + BmYM_inter_frame * (1.0hf - movement);
     float16_t RmYM = RmYM_field * movement + RmYM_inter_frame * (1.0hf - movement);
 
-    int g = clamp(int(YM - BmYM / 4.0hf - RmYM / 2.0hf), 0, 255);
-    int b = clamp(int(YM + BmYM + BmYM / 4.0hf), 0, 255);
-    int r = clamp(int(YM + RmYM), 0, 255);
+    float g = clamp((YM - BmYM / 4.0hf - RmYM / 2.0hf) / 255.f, 0.f, 1.f);
+    float b = clamp((YM + BmYM + BmYM / 4.0hf) / 255.f, 0.f, 1.f);
+    float r = clamp((YM + RmYM) / 255.f, 0.f, 1.f);
 
-    frame_out[row * MUSE_Y_BUF_WIDTH * 3 + col] = (0xff << 24) | (r << 16) | (g << 8) | (b);
-    //imageStore(frame_out_image, ivec2(row, col), uvec4(r, g, b, 255));
+    imageStore(frame_out_image, ivec2(col, row), vec4(r, g, b, 1.f));
 }

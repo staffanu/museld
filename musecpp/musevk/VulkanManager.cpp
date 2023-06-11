@@ -36,7 +36,7 @@ namespace musevk {
                 std::vector{vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe)});
     }
 
-    bool VulkanManager::drawNextFrame(VulkanBuffer &buffer) {
+    bool VulkanManager::drawNextFrame(VulkanImage &image) {
         if (glfwWindowShouldClose(m_window))
             return false;
         glfwPollEvents();
@@ -50,11 +50,17 @@ namespace musevk {
         m_command_queue->enqueueTransitionMemoryLayout(swapChainImages[imageIndex], vk::Format::eB8G8R8A8Unorm,
                                                        vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
 
-        vk::BufferImageCopy region({}, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2,
-                                   vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
-                                   {}, {MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 1});
-        m_command_queue->enqueueCopyBufferToImage(buffer.buffer(), vk::Image(swapChainImages[imageIndex]),
-                                                  vk::ImageLayout::eTransferDstOptimal, region);
+        vk::ImageBlit region;
+        region.srcOffsets[0] = vk::Offset3D(0, 0, 0);
+        region.srcOffsets[1] = vk::Offset3D(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 1);
+        region.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+        region.dstOffsets[0] = vk::Offset3D(0, 0, 0);
+        region.dstOffsets[1] = vk::Offset3D(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 1);
+        region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+        auto s = vk::Image(swapChainImages[imageIndex]);
+        m_command_queue->enqueueBlitImage(image.image(), vk::ImageLayout::eTransferSrcOptimal,
+                                          s, vk::ImageLayout::eTransferDstOptimal,
+                                          region);
 
         m_command_queue->enqueueTransitionMemoryLayout(swapChainImages[imageIndex], vk::Format::eB8G8R8A8Unorm,
                                                        vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
@@ -119,9 +125,21 @@ namespace musevk {
                 elementTotalCount, elementMemorySize, is_host, allow_transfers);
     }
 
+    std::shared_ptr<VulkanImage> VulkanManager::createImage(uint32_t width, uint32_t height) {
+        auto image = std::make_shared<VulkanImage>(m_physical_device, m_logical_device, width, height);
+
+        auto sq = createCommandQueue();
+        sq->enqueueTransitionMemoryLayout(image->image(), vk::Format::eB8G8R8A8Unorm,
+                                          vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferSrcOptimal);
+        sq->evalAsync();
+        sq->evalAwait();
+
+        return image;
+    }
+
     std::shared_ptr<ComputeShader> VulkanManager::createComputeShader(
             std::string name,
-            const std::vector<std::shared_ptr<VulkanBuffer>> &buffers,
+            const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
             int32_t push_constants_size,
             const std::vector<uint32_t> &spirv,
             const Workgroup &workgroup,
@@ -130,6 +148,19 @@ namespace musevk {
                 name,
                 m_logical_device,
                 buffers, push_constants_size, spirv, workgroup, max_descriptor_sets);
+    }
+
+    std::shared_ptr<ComputeShader> VulkanManager::createComputeShader(
+            std::string name,
+            const std::vector<MemoryObjectType> &buffer_types,
+            int32_t push_constants_size,
+            const std::vector<uint32_t> &spirv,
+            const Workgroup &workgroup,
+            int max_descriptor_sets) {
+        return std::make_shared<ComputeShader>(
+                name,
+                m_logical_device,
+                buffer_types, push_constants_size, spirv, workgroup, max_descriptor_sets);
     }
 
     std::shared_ptr<CommandQueue> VulkanManager::createCommandQueue(

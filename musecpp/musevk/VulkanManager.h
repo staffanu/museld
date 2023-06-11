@@ -10,6 +10,7 @@
 #include <GLFW/glfw3.h>
 #include "VulkanBuffer.h"
 #include "CommandQueue.h"
+#include "VulkanImage.h"
 
 namespace musevk {
 
@@ -19,7 +20,7 @@ namespace musevk {
         VulkanManager(VulkanManager &other) = delete;
         void initWindow(int width, int height);
         void initVulkan();
-        bool drawNextFrame(VulkanBuffer &buffer);
+        bool drawNextFrame(VulkanImage &image);
         void cleanup();
 
         std::shared_ptr<VulkanBuffer> createDeviceBuffer(const std::vector<float> &data);
@@ -32,11 +33,21 @@ namespace musevk {
 
         std::shared_ptr<ComputeShader> createComputeShader(
                 std::string name,
-                const std::vector<std::shared_ptr<VulkanBuffer>> &buffers,
+                const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
                 int32_t push_constants_size,
                 const std::vector<uint32_t> &spirv,
                 const Workgroup &workgroup,
                 int max_descriptor_sets = 1);
+
+        std::shared_ptr<ComputeShader> createComputeShader(
+                std::string name,
+                const std::vector<MemoryObjectType> &buffer_types,
+                int32_t push_constants_size,
+                const std::vector<uint32_t> &spirv,
+                const Workgroup &workgroup,
+                int max_descriptor_sets = 1);
+
+        std::shared_ptr<VulkanImage> createImage(uint32_t width, uint32_t height);
 
         std::shared_ptr<CommandQueue> createCommandQueue(
                 std::vector<vk::Semaphore> wait_semaphores = {},

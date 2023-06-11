@@ -18,15 +18,15 @@ layout(push_constant) uniform PushConstants {
     uint multiplier_i;
 };
 
-layout(set = 0, binding = 0) buffer filter_buffer {
+layout(set = 0, binding = 0) buffer readonly filter_buffer {
     float16_t fir_filter[];
 };
 
-layout(set = 0, binding = 1) buffer source_buffer {
+layout(set = 0, binding = 1) buffer readonly source_buffer {
     float16_t source[];
 };
 
-layout(set = 0, binding = 2) buffer dest_buffer {
+layout(set = 0, binding = 2) buffer writeonly dest_buffer {
     float16_t dest[];
 };
 

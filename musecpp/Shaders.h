@@ -9,6 +9,7 @@
 #include <vector>
 #include <csignal>
 #include "MuseBuffer.h"
+#include "musevk/VulkanImage.h"
 #include "musevk/CommandQueue.h"
 
 namespace musevk {
@@ -39,7 +40,7 @@ public:
 
     void combineStillAndMovingParts(musevk::CommandQueue &sq, bool force_field_only, bool force_inter_frame_only);
 
-    std::shared_ptr<musevk::VulkanBuffer> getResultBuffer();
+    std::shared_ptr<musevk::VulkanImage> getResultImage();
 
 private:
     // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
@@ -108,7 +109,7 @@ private:
     MuseBuffer m_movement_buffer;
 
     // used for final result
-    MuseBuffer m_frame_out_buffer;
+    std::shared_ptr<musevk::VulkanImage> m_image_out;
 
     // filter definitions
     MuseBuffer m_diamond_filter_buffer;

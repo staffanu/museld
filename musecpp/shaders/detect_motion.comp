@@ -5,20 +5,20 @@
 // This shader should be invoked with global invocation ids
 // from (0, 0) to (MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)
 
-layout(set = 0, binding = 0) buffer movement_field0_buffer {
+layout(set = 0, binding = 0) buffer readonly movement_field0_buffer {
     float16_t movement_field0[];
 };
 
-layout(set = 0, binding = 1) buffer movement_field1_buffer {
+layout(set = 0, binding = 1) buffer readonly movement_field1_buffer {
     float16_t movement_field1[];
 };
 
-layout(set = 0, binding = 2) buffer movement_field2_buffer {
+layout(set = 0, binding = 2) buffer readonly movement_field2_buffer {
     float16_t movement_field2[];
 };
 
-layout(set = 0, binding = 3) buffer movement_out_buffer {
-    float16_t movement_out[];
+layout(set = 0, binding = 3) buffer writeonly movement_out_buffer {
+    float16_t movement_out[][MUSE_Y_BUF_WIDTH * 3];
 };
 
 void main() {
@@ -40,5 +40,5 @@ void main() {
         }
     float16_t m = maximum < 5.hf ? 0.hf : maximum > 25.hf ? 1.hf : maximum / 25.hf;
 
-    movement_out[row * MUSE_Y_BUF_WIDTH * 3 + col] = m;
+    movement_out[row][col] = m;
 }

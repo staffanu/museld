@@ -21,7 +21,7 @@ void process_file(string filename) {
             if (!decoder.Next())
                 break;
             field_count++;
-        } while (app.drawNextFrame(*shaders.getResultBuffer()));
+        } while (app.drawNextFrame(*shaders.getResultImage()));
         auto t1 = chrono::high_resolution_clock::now();
         long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
         cout << "Avg " << setprecision(3) << (time_us / 1000.0 / field_count) << " ms/field"

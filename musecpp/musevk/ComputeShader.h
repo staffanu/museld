@@ -21,9 +21,17 @@ namespace musevk {
 
     class ComputeShader {
     public:
-        ComputeShader(std::string name,
+        ComputeShader(std::string &name,
                       vk::Device &device,
-                      const std::vector<std::shared_ptr<VulkanBuffer>> &buffers,
+                      const std::vector<MemoryObjectType> &buffer_types,
+                      int32_t push_constants_size,
+                      const std::vector<uint32_t> &spirv,
+                      const Workgroup &workgroup,
+                      int max_descriptor_sets);
+
+        ComputeShader(std::string &name,
+                      vk::Device &device,
+                      const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
                       int32_t push_constants_size,
                       const std::vector<uint32_t> &spirv,
                       const Workgroup &workgroup,
@@ -33,7 +41,10 @@ namespace musevk {
             return m_name;
         }
 
-        void updateBufferDescriptorsInSet(int set_index, const std::vector<std::shared_ptr<VulkanBuffer>> &buffers) {
+        // A descriptor set can be used only once for a single command queue submit.  If we
+        // re-use the same shader for several inputs, we create multiple descriptor sets.
+        // They all have to conform to the same layout.
+        void updateBufferDescriptorsInSet(int set_index, const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers) {
             assert(buffers.size() == m_descriptor_count);
             m_buffers[set_index] = buffers;
             updateDescriptorSet(set_index);
@@ -43,7 +54,7 @@ namespace musevk {
             m_workgroup = workgroup;
         }
 
-        const std::vector<std::shared_ptr<VulkanBuffer>> &getBuffers(int descriptor_set_index) {
+        const std::vector<std::shared_ptr<VulkanMemoryObject>> &getMemoryObjects(int descriptor_set_index) {
             return m_buffers[descriptor_set_index];
         }
 
@@ -60,7 +71,7 @@ namespace musevk {
         friend class CommandQueue;
 
         void createShaderModule();
-        void createDescriptorLayout(int number_of_descriptor_sets);
+        void createDescriptorLayout(int number_of_descriptor_sets, const std::vector<MemoryObjectType> &buffer_types);
         void updateDescriptorSet(int set_index);
         void createPipeline(int32_t push_constants_size);
         void bindPipelineAndDescriptorSets(const vk::CommandBuffer &commandBuffer, int descriptor_set_index) {
@@ -90,8 +101,8 @@ namespace musevk {
 
         std::string m_name;
         vk::Device &m_device;
-        int m_descriptor_count;
-        std::vector<std::vector<std::shared_ptr<VulkanBuffer>>> m_buffers;
+        size_t m_descriptor_count;
+        std::vector<std::vector<std::shared_ptr<VulkanMemoryObject>>> m_buffers;
 
         vk::DescriptorSetLayout m_descriptor_set_layout;
         vk::DescriptorPool m_descriptor_pool;

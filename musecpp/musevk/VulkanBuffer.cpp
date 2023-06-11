@@ -11,7 +11,7 @@ namespace musevk {
                                uint32_t element_size,
                                bool is_host,
                                bool allow_transfers) // only relevant for device local storage buffers
-            : m_physical_device(physical_device),
+            : VulkanMemoryObject(physical_device),
               m_device(device),
               m_size(number_of_elements),
               m_memory_size(number_of_elements * element_size),
@@ -33,7 +33,8 @@ namespace musevk {
                                          vk::SharingMode::eExclusive);
         m_buffer = m_device.createBuffer(buffer_info);
 
-        m_device_memory = vk::DeviceMemory();
+        m_descriptor_buffer_info = vk::DescriptorBufferInfo(m_buffer, 0, m_memory_size);
+
         allocateAndBindMemory(memory_property_flags);
 
         if (is_host)
@@ -52,22 +53,10 @@ namespace musevk {
         m_device.freeMemory(m_device_memory);
     }
 
-    void VulkanBuffer::allocateAndBindMemory(vk::MemoryPropertyFlags memoryPropertyFlags) {
-        vk::PhysicalDeviceMemoryProperties memoryProperties = m_physical_device.getMemoryProperties();
+    void VulkanBuffer::allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags) {
         vk::MemoryRequirements memoryRequirements = m_device.getBufferMemoryRequirements(m_buffer);
 
-        uint32_t memoryTypeIndex = -1;
-        for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++) {
-            if (memoryRequirements.memoryTypeBits & (1 << i)) {
-                if (((memoryProperties.memoryTypes[i]).propertyFlags & memoryPropertyFlags) == memoryPropertyFlags) {
-                    memoryTypeIndex = i;
-                    break;
-                }
-            }
-        }
-        if (memoryTypeIndex == -1) {
-            throw std::runtime_error("Memory type index for buffer creation not found");
-        }
+        uint32_t memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, memory_property_flags);
 
         vk::MemoryAllocateInfo memoryAllocateInfo(memoryRequirements.size, memoryTypeIndex);
         m_device_memory = m_device.allocateMemory(memoryAllocateInfo);
