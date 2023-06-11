@@ -19,7 +19,7 @@ namespace musevk {
         glfwInit();
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
         m_window = glfwCreateWindow(width, height, "MUSE", nullptr, nullptr);
     }
@@ -44,10 +44,20 @@ namespace musevk {
         //vkWaitForFences(m_logical_device, 1, &m_in_flight_fence, VK_TRUE, UINT64_MAX);
         //vkResetFences(m_logical_device, 1, &m_in_flight_fence);
         uint32_t imageIndex;
-        vkAcquireNextImageKHR(m_logical_device, m_swapChain, UINT64_MAX, m_image_available_semaphore, VK_NULL_HANDLE,
-                              &imageIndex);
+        auto result = m_logical_device.acquireNextImageKHR(m_swapChain, UINT64_MAX,
+                                                           m_image_available_semaphore, VK_NULL_HANDLE,
+                                                           &imageIndex);
+        if (result == vk::Result::eSuboptimalKHR)
+            std::cout << "Suboptimal" << std::endl;
+        else if (result == vk::Result::eErrorOutOfDateKHR)
+            std::cout << "Out of date" << std::endl;
+        else if (result != vk::Result::eSuccess)
+            throw std::runtime_error("acquireNextImageKHR failed");
 
-        m_command_queue->enqueueTransitionMemoryLayout(swapChainImages[imageIndex], vk::Format::eB8G8R8A8Unorm,
+        auto swap_chain_image = m_swap_chain_images[imageIndex];
+
+        // notice this command queue waits for m_image_available_semaphore
+        m_command_queue->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Unorm,
                                                        vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
 
         vk::ImageBlit region;
@@ -57,18 +67,17 @@ namespace musevk {
         region.dstOffsets[0] = vk::Offset3D(0, 0, 0);
         region.dstOffsets[1] = vk::Offset3D(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 1);
         region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
-        auto s = vk::Image(swapChainImages[imageIndex]);
         m_command_queue->enqueueBlitImage(image.image(), vk::ImageLayout::eTransferSrcOptimal,
-                                          s, vk::ImageLayout::eTransferDstOptimal,
+                                          swap_chain_image, vk::ImageLayout::eTransferDstOptimal,
                                           region);
 
-        m_command_queue->enqueueTransitionMemoryLayout(swapChainImages[imageIndex], vk::Format::eB8G8R8A8Unorm,
+        m_command_queue->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Unorm,
                                                        vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
 
         m_command_queue->evalAsync();
         m_command_queue->evalAwait();
-        vk::PresentInfoKHR presentInfo{};
 
+        vk::PresentInfoKHR presentInfo{};
         vk::Semaphore signalSemaphores[] = {m_render_finished_semaphore};
         presentInfo.waitSemaphoreCount = 0; // 1 TODO!
         presentInfo.pWaitSemaphores = signalSemaphores;
@@ -77,7 +86,9 @@ namespace musevk {
         presentInfo.pSwapchains = swapChains;
         presentInfo.pImageIndices = &imageIndex;
         presentInfo.pResults = nullptr; // Optional
-        auto result = m_present_queue.presentKHR(presentInfo);
+        result = m_present_queue.presentKHR(presentInfo);
+        if (result != vk::Result::eSuccess)
+            throw std::runtime_error("presentKHR failed");
 
         return true;
     }
@@ -453,7 +464,7 @@ namespace musevk {
         createInfo.oldSwapchain = VK_NULL_HANDLE;
 
         m_swapChain = m_logical_device.createSwapchainKHR(createInfo);
-        swapChainImages = m_logical_device.getSwapchainImagesKHR(m_swapChain);
+        m_swap_chain_images = m_logical_device.getSwapchainImagesKHR(m_swapChain);
 
         m_swap_chain_image_format = surfaceFormat.format;
         swap_chain_extent = extent;

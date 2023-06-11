@@ -118,7 +118,7 @@ namespace musevk {
         vk::Queue m_present_queue;
         vk::Queue m_compute_queue;
         vk::SwapchainKHR m_swapChain;
-        std::vector<vk::Image> swapChainImages;
+        std::vector<vk::Image> m_swap_chain_images;
         vk::Format m_swap_chain_image_format;
         vk::Extent2D swap_chain_extent;
         vk::Semaphore m_image_available_semaphore;
