@@ -189,13 +189,13 @@ Shaders::Shaders(VulkanManager &manager)
 
 MuseBuffer Shaders::createMuseBuffer(unsigned int height, unsigned int width, bool allow_transfers) {
     auto vulkan_buffer = m_vulkan_manager.createBuffer(height * width, 2 /* sizeof(float16) */, false, allow_transfers);
-    auto buffer = MuseBuffer(height, width, move(vulkan_buffer));
+    auto buffer = MuseBuffer(height, width, std::move(vulkan_buffer));
     return buffer;
 }
 
 MuseBuffer Shaders::createMuseUintBuffer(unsigned int height, unsigned int width, bool allow_transfers) {
     auto vulkan_buffer = m_vulkan_manager.createBuffer(height * width, sizeof(uint32_t), false, allow_transfers);
-    auto buffer = MuseBuffer(height, width, move(vulkan_buffer));
+    auto buffer = MuseBuffer(height, width, std::move(vulkan_buffer));
     return buffer;
 }
 
