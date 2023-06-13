@@ -154,7 +154,7 @@ Shaders::Shaders(VulkanManager &manager)
             "convert_sample_rate",
             {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 10,
             m_convert_horiz_sample_rate_spirv,
-            Workgroup(m_interpolated32_buffer.width() / 4, m_interpolated32_buffer.height() / 2), 3);
+            Workgroup(m_interpolated32_buffer.width() / 4, m_interpolated32_buffer.height()), 3);
     m_convert_sample_rate_4_to_3_algo = m_vulkan_manager.createComputeShader(
             "convert_sample_rate_4_to_3",
             {m_filter_4_to_3_buffer, m_interpolated32_buffer.getVulkanBuffer(),

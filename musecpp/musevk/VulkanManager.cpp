@@ -12,98 +12,70 @@
 #include "../MuseTypes.h"
 
 namespace musevk {
-
-    VulkanManager::VulkanManager() = default;
-
-    void VulkanManager::initWindow(int width, int height) {
-        glfwInit();
-
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-
-        m_window = glfwCreateWindow(width, height, "MUSE", nullptr, nullptr);
-    }
-
-    void VulkanManager::initVulkan() {
+    void VulkanManager::initVulkan(GLFWwindow *window) {
+        m_window = window;
         createInstance();
         createSurface();
         pickPhysicalDevice();
         createLogicalDevice();
         createSwapChain();
-        createSyncObjects();
-        m_command_queue = createCommandQueue(
-                std::vector{vk::Semaphore(m_image_available_semaphore)},
-                std::vector{vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe)});
-    }
-
-    bool VulkanManager::drawNextFrame(VulkanImage &image) {
-        if (glfwWindowShouldClose(m_window))
-            return false;
-        glfwPollEvents();
-
-        //vkWaitForFences(m_logical_device, 1, &m_in_flight_fence, VK_TRUE, UINT64_MAX);
-        //vkResetFences(m_logical_device, 1, &m_in_flight_fence);
-        uint32_t imageIndex;
-        auto result = m_logical_device.acquireNextImageKHR(m_swapChain, UINT64_MAX,
-                                                           m_image_available_semaphore, VK_NULL_HANDLE,
-                                                           &imageIndex);
-        if (result == vk::Result::eSuboptimalKHR)
-            std::cout << "Suboptimal" << std::endl;
-        else if (result == vk::Result::eErrorOutOfDateKHR)
-            std::cout << "Out of date" << std::endl;
-        else if (result != vk::Result::eSuccess)
-            throw std::runtime_error("acquireNextImageKHR failed");
-
-        auto swap_chain_image = m_swap_chain_images[imageIndex];
-
-        // notice this command queue waits for m_image_available_semaphore
-        m_command_queue->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Unorm,
-                                                       vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
-
-        vk::ImageBlit region;
-        region.srcOffsets[0] = vk::Offset3D(0, 0, 0);
-        region.srcOffsets[1] = vk::Offset3D(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 1);
-        region.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
-        region.dstOffsets[0] = vk::Offset3D(0, 0, 0);
-        region.dstOffsets[1] = vk::Offset3D(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 1);
-        region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
-        m_command_queue->enqueueBlitImage(image.image(), vk::ImageLayout::eTransferSrcOptimal,
-                                          swap_chain_image, vk::ImageLayout::eTransferDstOptimal,
-                                          region);
-
-        m_command_queue->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Unorm,
-                                                       vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
-
-        m_command_queue->evalAsync();
-        m_command_queue->evalAwait();
-
-        vk::PresentInfoKHR presentInfo{};
-        vk::Semaphore signalSemaphores[] = {m_render_finished_semaphore};
-        presentInfo.waitSemaphoreCount = 0; // 1 TODO!
-        presentInfo.pWaitSemaphores = signalSemaphores;
-        vk::SwapchainKHR swapChains[] = {m_swapChain};
-        presentInfo.swapchainCount = 1;
-        presentInfo.pSwapchains = swapChains;
-        presentInfo.pImageIndices = &imageIndex;
-        presentInfo.pResults = nullptr; // Optional
-        result = m_present_queue.presentKHR(presentInfo);
-        if (result != vk::Result::eSuccess)
-            throw std::runtime_error("presentKHR failed");
-
-        return true;
     }
 
     void VulkanManager::cleanup() {
-        m_command_queue = nullptr;
-        m_logical_device.destroy(m_image_available_semaphore);
-        m_logical_device.destroy(m_render_finished_semaphore);
-        m_logical_device.destroy(m_in_flight_fence);
-        m_logical_device.destroy(m_swapChain);
+        cleanupSwapChain();
         m_logical_device.destroy();
         m_instance.destroy(m_surface);
         m_instance.destroy();
-        glfwDestroyWindow(m_window);
         glfwTerminate();
+    }
+
+    void VulkanManager::cleanupSwapChain() {
+        m_logical_device.destroy(m_swap_chain);
+    }
+
+    void VulkanManager::recreateSwapChain() {
+        vkDeviceWaitIdle(m_logical_device);
+        cleanupSwapChain();
+        createSwapChain();
+    }
+
+    vk::Image &VulkanManager::acquireNextImage(vk::Semaphore image_available_semaphore) {
+        uint32_t image_index;
+        vk::Result result;
+        do {
+            result = m_logical_device.acquireNextImageKHR(m_swap_chain, UINT64_MAX,
+                                                          image_available_semaphore, VK_NULL_HANDLE,
+                                                          &image_index);
+            if (result == vk::Result::eSuboptimalKHR || result == vk::Result::eErrorOutOfDateKHR) {
+                std::cout << "Suboptimal or Out of date" << std::endl;
+                recreateSwapChain();
+            } else if (result != vk::Result::eSuccess)
+                throw std::runtime_error("acquireNextImageKHR failed");
+        } while (result != vk::Result::eSuccess);
+
+        return m_swap_chain_images[image_index];
+    }
+
+    void VulkanManager::present(vk::Image image) {
+        uint32_t image_index;
+        for (image_index = 0; image_index < m_swap_chain_images.size(); image_index++)
+            if (m_swap_chain_images[image_index] == image)
+                break;
+        if (image_index == m_swap_chain_images.size())
+            throw std::runtime_error("present called for image not in swap chain");
+
+        vk::PresentInfoKHR presentInfo{};
+        vk::Semaphore signalSemaphores[] = {};//render_finished_semaphore};
+        presentInfo.waitSemaphoreCount = 0; // 1 TODO!
+        presentInfo.pWaitSemaphores = signalSemaphores;
+        vk::SwapchainKHR swapChains[] = {m_swap_chain};
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = swapChains;
+        presentInfo.pImageIndices = &image_index;
+        presentInfo.pResults = nullptr; // Optional
+        auto result = m_present_queue.presentKHR(presentInfo);
+        if (result != vk::Result::eSuccess)
+            throw std::runtime_error("presentKHR failed");
     }
 
     std::shared_ptr<VulkanBuffer> VulkanManager::createDeviceBuffer(const std::vector<float> &data) {
@@ -141,7 +113,7 @@ namespace musevk {
 
         auto sq = createCommandQueue();
         sq->enqueueTransitionMemoryLayout(image->image(), vk::Format::eB8G8R8A8Unorm,
-                                          vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferSrcOptimal);
+                                          vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral);
         sq->evalAsync();
         sq->evalAwait();
 
@@ -463,19 +435,10 @@ namespace musevk {
         createInfo.clipped = VK_TRUE;
         createInfo.oldSwapchain = VK_NULL_HANDLE;
 
-        m_swapChain = m_logical_device.createSwapchainKHR(createInfo);
-        m_swap_chain_images = m_logical_device.getSwapchainImagesKHR(m_swapChain);
+        m_swap_chain = m_logical_device.createSwapchainKHR(createInfo);
+        m_swap_chain_images = m_logical_device.getSwapchainImagesKHR(m_swap_chain);
 
         m_swap_chain_image_format = surfaceFormat.format;
-        swap_chain_extent = extent;
-    }
-
-    void VulkanManager::createSyncObjects() {
-        vk::SemaphoreCreateInfo semaphoreInfo{};
-        vk::FenceCreateInfo fenceInfo{};
-        fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
-        m_image_available_semaphore = m_logical_device.createSemaphore(semaphoreInfo);
-        m_render_finished_semaphore = m_logical_device.createSemaphore(semaphoreInfo);
-        m_in_flight_fence = m_logical_device.createFence(fenceInfo);
+        m_swap_chain_extent = extent;
     }
 }

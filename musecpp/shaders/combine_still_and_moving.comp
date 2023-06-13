@@ -36,7 +36,7 @@ layout(set = 0, binding = 5) buffer readonly inter_frame_b_buffer {
 };
 
 layout(set = 0, binding = 6) buffer readonly movement_buffer {
-    float16_t movement_data[];
+    float16_t movement_data[][MUSE_Y_BUF_WIDTH * 3];
 };
 
 layout(set = 0, binding = 7, rgba32f) uniform writeonly image2D frame_out_image;
@@ -57,7 +57,7 @@ void main() {
 
     float16_t movement = force_field_only != 0 ?
         1.0hf : force_inter_frame_only != 0 ?
-            0.0hf : movement_data[row * MUSE_Y_BUF_WIDTH * 3 + col];
+            0.0hf : movement_data[row][col];
 
     float16_t YM = YM_field * movement + YM_inter_frame * (1.0hf - movement);
     float16_t BmYM = BmYM_field * movement + BmYM_inter_frame * (1.0hf - movement);

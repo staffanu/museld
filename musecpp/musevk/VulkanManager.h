@@ -16,12 +16,17 @@ namespace musevk {
 
     class VulkanManager {
     public:
-        VulkanManager();
+        VulkanManager() = default;
         VulkanManager(VulkanManager &other) = delete;
-        void initWindow(int width, int height);
-        void initVulkan();
-        bool drawNextFrame(VulkanImage &image);
+        void initVulkan(GLFWwindow *window);
         void cleanup();
+
+        vk::Device &getDevice() { return m_logical_device; };
+
+        vk::Image &acquireNextImage(vk::Semaphore image_available_semaphore);
+        void present(vk::Image image);
+        vk::Extent2D getSwapChainExtent() { return m_swap_chain_extent; };
+        void recreateSwapChain();
 
         std::shared_ptr<VulkanBuffer> createDeviceBuffer(const std::vector<float> &data);
 
@@ -54,6 +59,7 @@ namespace musevk {
                 std::vector<vk::PipelineStageFlags> wait_dst_stage_masks = {},
                 uint32_t totalTimestamps = 0);
     private:
+        void cleanupSwapChain();
         void createInstance();
         bool checkValidationLayerSupport();
         void createSurface();
@@ -83,7 +89,6 @@ namespace musevk {
         vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes);
         vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities);
         void createSwapChain();
-        void createSyncObjects();
 
         const std::vector<const char *> c_validation_layers = {
                 "VK_LAYER_KHRONOS_validation"
@@ -117,13 +122,10 @@ namespace musevk {
         vk::Queue m_graphics_queue;
         vk::Queue m_present_queue;
         vk::Queue m_compute_queue;
-        vk::SwapchainKHR m_swapChain;
+        vk::SwapchainKHR m_swap_chain;
         std::vector<vk::Image> m_swap_chain_images;
         vk::Format m_swap_chain_image_format;
-        vk::Extent2D swap_chain_extent;
-        vk::Semaphore m_image_available_semaphore;
-        vk::Semaphore m_render_finished_semaphore;
-        vk::Fence m_in_flight_fence;
+        vk::Extent2D m_swap_chain_extent;
     };
 }
 

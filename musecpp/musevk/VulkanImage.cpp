@@ -43,7 +43,7 @@ namespace musevk {
         m_descriptor_image_info = vk::DescriptorImageInfo(
                 VK_NULL_HANDLE,
                 m_view,
-                vk::ImageLayout::eTransferSrcOptimal);
+                vk::ImageLayout::eGeneral);
     }
 
     VulkanImage::~VulkanImage() {
