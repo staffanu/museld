@@ -71,12 +71,13 @@ namespace musevk {
                     break;
             }
         }
-        std::vector<vk::DescriptorPoolSize> descriptor_pool_sizes = {
-                vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer,
-                                       number_of_storage_buffers * number_of_descriptor_sets),
-                vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage,
-                                       number_of_storage_images * number_of_descriptor_sets)
-        };
+        std::vector<vk::DescriptorPoolSize> descriptor_pool_sizes;
+        if (number_of_storage_buffers != 0)
+            descriptor_pool_sizes.emplace_back(vk::DescriptorType::eStorageBuffer,
+                                       number_of_storage_buffers * number_of_descriptor_sets);
+        if (number_of_storage_images != 0)
+            descriptor_pool_sizes.emplace_back(vk::DescriptorType::eStorageImage,
+                                       number_of_storage_images * number_of_descriptor_sets);
         vk::DescriptorPoolCreateInfo descriptor_pool_info(
                 vk::DescriptorPoolCreateFlags(),
                 number_of_descriptor_sets,
