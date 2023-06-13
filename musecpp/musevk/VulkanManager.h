@@ -99,13 +99,21 @@ namespace musevk {
                 VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
 #endif
         };
+
+#ifdef __APPLE__
+        vk::InstanceCreateFlagBits c_instance_create_flags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
+#else
+        vk::InstanceCreateFlagBits c_instance_create_flags = {};
+#endif
+
         const std::vector<const char *> c_device_extensions = {
                 VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                 VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME,
                 VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
                 VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME,
-//                VK_AMD_GPU_SHADER_HALF_FLOAT_EXTENSION_NAME,
-//                VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+#ifdef __APPLE__
+                "VK_KHR_portability_subset", // FIXME: should really only add if the extension enumeration includes it
+#endif
         };
 #ifdef NDEBUG
         const bool enableValidationLayers = false;

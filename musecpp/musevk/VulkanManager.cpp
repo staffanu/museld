@@ -168,12 +168,7 @@ namespace musevk {
         }
 
         vk::ApplicationInfo appInfo("Muse Decoder", VK_MAKE_VERSION(1, 0, 0), "No Engine", VK_MAKE_VERSION(1, 0, 0), VK_API_VERSION_1_2);
-#ifdef __APPLE__
-        vk::InstanceCreateFlagBits createFlags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
-#else
-        vk::InstanceCreateFlagBits createFlags = {};
-#endif
-        vk::InstanceCreateInfo createInfo(createFlags, &appInfo);
+        vk::InstanceCreateInfo createInfo(c_instance_create_flags, &appInfo);
 
         uint32_t glfwExtensionCount = 0;
         const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
@@ -367,7 +362,7 @@ namespace musevk {
     VulkanManager::chooseSwapPresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes) {
         for (const auto &availablePresentMode: availablePresentModes) {
             if (availablePresentMode == vk::PresentModeKHR::eMailbox) {
-                return availablePresentMode;
+                //return availablePresentMode;
             }
         }
         // FIXME: what to use?

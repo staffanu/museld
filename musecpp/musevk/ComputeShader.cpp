@@ -59,14 +59,28 @@ namespace musevk {
     }
 
     void ComputeShader::createDescriptorLayout(int number_of_descriptor_sets, const std::vector<MemoryObjectType> &buffer_types) {
-        std::vector<vk::DescriptorPoolSize> descriptor_pool_size = {
+        uint32_t number_of_storage_buffers = 0;
+        uint32_t number_of_storage_images = 0;
+        for (auto type : buffer_types) {
+            switch (type) {
+                case eBuffer:
+                    number_of_storage_buffers++;
+                    break;
+                case eImage:
+                    number_of_storage_images++;
+                    break;
+            }
+        }
+        std::vector<vk::DescriptorPoolSize> descriptor_pool_sizes = {
                 vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer,
-                                       m_descriptor_count * number_of_descriptor_sets)
+                                       number_of_storage_buffers * number_of_descriptor_sets),
+                vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage,
+                                       number_of_storage_images * number_of_descriptor_sets)
         };
         vk::DescriptorPoolCreateInfo descriptor_pool_info(
                 vk::DescriptorPoolCreateFlags(),
                 number_of_descriptor_sets,
-                descriptor_pool_size);
+                descriptor_pool_sizes);
         m_descriptor_pool = m_device.createDescriptorPool(descriptor_pool_info);
 
         std::vector<vk::DescriptorSetLayoutBinding> descriptor_set_bindings;
