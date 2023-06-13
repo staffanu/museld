@@ -14,33 +14,17 @@
 using namespace std;
 using namespace musevk;
 
-vector<uint32_t> Shaders::compileSource(const string &filename) {
-    auto command = string("glslc -Werror -O " + filename + " -o " + filename + ".spv");
-    cout << "command: " << command << endl;
-    if (system(command.c_str()))
-        throw runtime_error("Error running glslc command");
-    ifstream fileStream(filename + ".spv", ios::binary);
+vector<uint32_t> Shaders::loadSpirv(string const &executable_dir, string const &filename) {
+    string full_path = executable_dir + "/shaders/" + filename + ".spv";
+    ifstream file_stream(full_path, ios::binary);
+    if (file_stream.fail())
+        throw std::runtime_error("Unable to open shader spirv file " + full_path);
     vector<char> buffer;
-    buffer.insert(buffer.begin(), istreambuf_iterator<char>(fileStream), {});
+    buffer.insert(buffer.begin(), istreambuf_iterator<char>(file_stream), {});
     return {(uint32_t*)buffer.data(), (uint32_t*)(buffer.data() + buffer.size())};
 }
 
-#if false
-#include <opencv2/highgui.hpp>
-void show_buffer(int y_min, int x_min, int height, int width, int x_scale, const MuseBuffer &buffer) {
-    cv::Mat mat(height, width * x_scale, CV_32FC1);
-    for (int row = y_min; row < y_min + height; row++) {
-        auto *mat_row = mat.ptr<float>(row - y_min);
-        for (int col = x_min; col < x_min + width * x_scale; col++) {
-            mat_row[col - x_min] = buffer[row][col / x_scale] / 255.0f;
-        }
-    }
-    cv::imshow("MUSE", mat);
-    cv::waitKey(0);
-}
-#endif
-
-Shaders::Shaders(VulkanManager &manager)
+Shaders::Shaders(std::string const &executable_dir, VulkanManager &manager)
 : m_vulkan_manager(manager),
   m_interpolated32_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
   m_intermediate_r_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
@@ -119,16 +103,15 @@ Shaders::Shaders(VulkanManager &manager)
                   -0.018175863568156325, -0.023868513282649006, -0.015752415092402161
           }))
 {
-    m_convert_to_float_and_apply_eq_and_gamma_spriv = compileSource(
-            "../../musecpp/shaders/convert_to_float_and_apply_eq_and_gamma.comp");
-    m_diamond_spirv = compileSource("../../musecpp/shaders/filter_diamond.comp");
-    m_filter_image_spirv = compileSource("../../musecpp/shaders/filter_image.comp");
-    m_copy_y_for_interpolation_spirv = compileSource("../../musecpp/shaders/copy_y_for_interpolation.comp");
-    m_convert_horiz_sample_rate_spirv = compileSource("../../musecpp/shaders/convert_horiz_sample_rate.comp");
-    m_fill_empty_lines_spirv = compileSource("../../musecpp/shaders/fill_empty_lines.comp");
-    m_decode_c_spirv = compileSource("../../musecpp/shaders/decode_c.comp");
-    m_detect_motion_spirv = compileSource("../../musecpp/shaders/detect_motion.comp");
-    m_combine_still_and_moving_spirv = compileSource("../../musecpp/shaders/combine_still_and_moving.comp");
+    m_convert_to_float_and_apply_eq_and_gamma_spriv = loadSpirv(executable_dir, "convert_to_float_and_apply_eq_and_gamma.comp");
+    m_diamond_spirv = loadSpirv(executable_dir, "filter_diamond.comp");
+    m_filter_image_spirv = loadSpirv(executable_dir, "filter_image.comp");
+    m_copy_y_for_interpolation_spirv = loadSpirv(executable_dir, "copy_y_for_interpolation.comp");
+    m_convert_horiz_sample_rate_spirv = loadSpirv(executable_dir, "convert_horiz_sample_rate.comp");
+    m_fill_empty_lines_spirv = loadSpirv(executable_dir, "fill_empty_lines.comp");
+    m_decode_c_spirv = loadSpirv(executable_dir, "decode_c.comp");
+    m_detect_motion_spirv = loadSpirv(executable_dir, "detect_motion.comp");
+    m_combine_still_and_moving_spirv = loadSpirv(executable_dir, "combine_still_and_moving.comp");
     
     m_convert_to_float_and_apply_eq_and_gamma_algo = m_vulkan_manager.createComputeShader(
             "convert_to_float_and_apply_eq_and_gamma",

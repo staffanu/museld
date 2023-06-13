@@ -7,7 +7,7 @@
 
 using namespace std;
 
-void process_file(string filename) {
+void process_file(string executable_dir, string filename) {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
@@ -28,7 +28,7 @@ void process_file(string filename) {
         auto queue = manager.createCommandQueue(
                 std::vector{vk::Semaphore(image_available_semaphore)},
                 std::vector{vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe)});
-        Shaders shaders(manager);
+        Shaders shaders(executable_dir, manager);
         auto decoder = MuseDecoder(filename, shaders, manager, false);
         decoder.Initialize();
         auto image = shaders.getResultImage();
@@ -87,12 +87,15 @@ void process_file(string filename) {
 }
 
 int main(int argc, char *argv[]) {
+    std::string executable(argv[0]);
+    std::string executable_dir = executable.substr(0, executable.find_last_of('/'));
+
     try {
         const vector<string> args(argv + 1, argv + argc);
         for (auto it = args.cbegin(), end = args.cend(); it != end; ++it) {
             if (!filesystem::exists(*it))
                 throw runtime_error("File not found: " + string(*it));
-            process_file(*it);
+            process_file(executable_dir, *it);
         }
     } catch (const exception &x) {
         cerr << "musecpp: " << x.what() << '\n';
