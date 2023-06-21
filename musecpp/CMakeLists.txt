@@ -21,6 +21,7 @@ add_executable(musecpp
         ControlSignalDecoder.cpp ControlSignalDecoder.h
         Shaders.cpp Shaders.h
         MuseDecoder.cpp MuseDecoder.h
+        AudioPlayback.cpp AudioPlayback.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandQueue.cpp musevk/CommandQueue.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h

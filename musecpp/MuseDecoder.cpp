@@ -68,7 +68,7 @@ bool MuseDecoder::Initialize() {
 
 bool MuseDecoder::Next(AudioDecoder::AudioMode &audio_mode,
                        size_t &sample_count,
-                       int16_t output_samples[4][AudioDecoder::c_max_output_samples]) {
+                       AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples]) {
     auto t0 = chrono::high_resolution_clock::now();
     if (m_field_index == 0) {
         auto frame_buffer = m_frame_buffers.back();

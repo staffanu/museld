@@ -19,13 +19,21 @@ public:
     static const size_t c_max_output_samples = 2048;
     enum AudioMode { MODE_A, MODE_B, MODE_UNKNOWN };
 
+    struct AudioFrame
+    {
+        int16_t channel1;
+        int16_t channel2;
+        int16_t channel3;
+        int16_t channel4;
+    };
+
     AudioDecoder();
 
-    // output samples are written to the first two or all four buffers depending on the detected mode
+    // output samples are written to the first two or all four channels depending on the detected mode
     void decodeFrame(MuseBuffer &audio_converted_freq,
                      AudioMode &audio_mode,
                      size_t &sample_count,
-                     int16_t output_samples[4][c_max_output_samples]);
+                     AudioFrame output_samples[c_max_output_samples]);
 
 private:
     static AudioMode detectModeFromControlData(uint32_t control_data);

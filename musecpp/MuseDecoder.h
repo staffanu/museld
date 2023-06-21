@@ -27,7 +27,7 @@ public:
     bool Initialize();
     bool Next(AudioDecoder::AudioMode &audio_mode,
               size_t &sample_count,
-              int16_t output_samples[4][AudioDecoder::c_max_output_samples]);
+              AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples]);
 
 private:
     std::string m_filename;
