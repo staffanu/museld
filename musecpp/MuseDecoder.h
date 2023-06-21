@@ -6,7 +6,6 @@
 #define MUSECPP_MUSEDECODER_H
 
 #include <string>
-#include <optional>
 #include <deque>
 #include <fstream>
 #include "Shaders.h"
@@ -17,10 +16,14 @@ class FrameBuffer;
 
 class MuseDecoder {
 public:
+    /// \param decode_all_fields If false, skips decoding of the first field of each
+    /// frame individually, so Next should be called 30 times per second instead of 60;
+    /// useful for slow hardware.
     MuseDecoder(const std::string &filename,
                 Shaders &shaders,
                 musevk::VulkanManager &manager,
                 bool decode_video,
+                bool decode_all_fields,
                 bool decode_audio,
                 bool benchmark_shaders);
     ~MuseDecoder();
@@ -34,6 +37,7 @@ private:
     Shaders &m_shaders;
     musevk::VulkanManager &m_manager;
     const bool m_decode_video;
+    const bool m_decode_all_fields;
     const bool m_decode_audio;
     const bool m_benchmark_shaders;
 

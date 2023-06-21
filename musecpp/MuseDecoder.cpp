@@ -16,11 +16,12 @@ using namespace std;
 
 MuseDecoder::MuseDecoder(
         const string &filename, Shaders &shaders, musevk::VulkanManager &manager,
-        bool decode_video, bool decode_audio, bool benchmark_shaders)
+        bool decode_video, bool decode_all_fields, bool decode_audio, bool benchmark_shaders)
 : m_filename(filename),
   m_shaders(shaders),
   m_manager(manager),
   m_decode_video(decode_video),
+  m_decode_all_fields(decode_all_fields),
   m_decode_audio(decode_audio),
   m_benchmark_shaders(benchmark_shaders),
   m_command_queue(m_manager.createCommandQueue({}, {}, benchmark_shaders ? 40 : 0)) {
@@ -96,19 +97,21 @@ bool MuseDecoder::Next(AudioDecoder::AudioMode &audio_mode,
     }
 
     if (m_decode_video) {
-        m_shaders.decodeIntraField(*m_command_queue, m_frame_buffers[0]->get_field(m_field_index));
+        int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
+
+        m_shaders.decodeIntraField(*m_command_queue, m_frame_buffers[0]->get_field(decoded_field_index));
         auto fields = vector<reference_wrapper<FieldBufferView>>{
-                m_frame_buffers[0]->get_field(m_field_index),
-                m_frame_buffers[1 - m_field_index]->get_field(1 - m_field_index),
-                m_frame_buffers[1]->get_field(m_field_index),
-                m_frame_buffers[2 - m_field_index]->get_field(1 - m_field_index),
-                m_frame_buffers[2]->get_field(m_field_index)};
+                m_frame_buffers[0]->get_field(decoded_field_index),
+                m_frame_buffers[1 - decoded_field_index]->get_field(1 - decoded_field_index),
+                m_frame_buffers[1]->get_field(decoded_field_index),
+                m_frame_buffers[2 - decoded_field_index]->get_field(1 - decoded_field_index),
+                m_frame_buffers[2]->get_field(decoded_field_index)};
 
         if (m_shaders.decodeInterFrameAndDetectMotion(*m_command_queue, fields)) {
-            cout << "Field " << m_field_index << " inter-frame interpolation success" << endl;
+            cout << "Field " << decoded_field_index << " inter-frame interpolation success" << endl;
             m_shaders.combineStillAndMovingParts(*m_command_queue, false, false);
         } else {
-            cout << "Field " << m_field_index << " inter-frame interpolation failed -- using intra-field interpolation"
+            cout << "Field " << decoded_field_index << " inter-frame interpolation failed -- using intra-field interpolation"
                  << endl;
             m_shaders.combineStillAndMovingParts(*m_command_queue, true, false);
         }
@@ -131,7 +134,7 @@ bool MuseDecoder::Next(AudioDecoder::AudioMode &audio_mode,
     m_total_elapsed_time_us += time_us;
     cout << "Field elapsed time " << time_us / 1000 << " ms; " << (m_total_elapsed_time_us / 1000 / m_frame_no) << " ms/frame" << endl;
 
-    m_field_index = (m_field_index + 1) % 2;
+    m_field_index = m_decode_all_fields ? (m_field_index + 1) % 2 : 0;
 
     return true;
 }

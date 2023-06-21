@@ -8,7 +8,7 @@
 
 using namespace std;
 
-void process_file(string executable_dir, string filename) {
+void process_file(string executable_dir, string filename, bool decode_all_fields) {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
@@ -40,6 +40,7 @@ void process_file(string executable_dir, string filename) {
                                    shaders,
                                    manager,
                                    true, // decode_video
+                                   decode_all_fields,
                                    true, // decode_audio
                                    false); // benchmark_shaders
         decoder.Initialize();
@@ -47,14 +48,17 @@ void process_file(string executable_dir, string filename) {
 
         auto t0 = chrono::high_resolution_clock::now();
         int field_count = 0;
-        while (decoder.Next(audio_mode, audio_sample_count, audio_samples)) {
+        // We skip calling Next every other field if decode_all_fields is false
+        while ((!decode_all_fields && field_count % 2 == 1) ||
+            decoder.Next(audio_mode, audio_sample_count, audio_samples)) {
+
             field_count++;
 
             if (glfwWindowShouldClose(window))
                 break;
             glfwPollEvents();
 
-            if (audio_sample_count != 0 && audio_mode != AudioDecoder::MODE_UNKNOWN)
+            if (audio_sample_count != 0 && audio_mode != AudioDecoder::MODE_UNKNOWN && field_count % 2 == 1)
                 audio_playback.add_samples(audio_mode, audio_sample_count, audio_samples);
 
             //vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
@@ -87,9 +91,9 @@ void process_file(string executable_dir, string filename) {
             manager.present(swap_chain_image);
         };
         auto t1 = chrono::high_resolution_clock::now();
-        auto time_us = (double)chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
-        cout << "Avg " << setprecision(3) << (time_us / 1000.0 / field_count) << " ms/field"
-             << " (" << setprecision(3) << 1000000.0 / time_us * field_count << " fields/s)" << endl;
+        auto time_us = (double) chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
+        cout << "Avg " << setprecision(3) << (time_us / 1000.0 / field_count * 2) << " ms/frame"
+             << " (" << setprecision(3) << 1000000.0 / time_us * field_count / 2 << " frames/s)" << endl;
     }
 
     device.destroy(image_available_semaphore);
@@ -103,20 +107,33 @@ void process_file(string executable_dir, string filename) {
     glfwDestroyWindow(window);
 }
 
+void usage() {
+    cerr << "usage: musecpp [--full-frames-only] [-all-fields] <input_file> ...\n";
+    exit(EXIT_FAILURE);
+}
+
 int main(int argc, char *argv[]) {
     std::string executable(argv[0]);
     std::string executable_dir = executable.substr(0, executable.find_last_of('/'));
+    bool decode_all_fields = true;
 
     try {
         const vector<string> args(argv + 1, argv + argc);
-        for (auto it = args.cbegin(), end = args.cend(); it != end; ++it) {
-            if (!filesystem::exists(*it))
-                throw runtime_error("File not found: " + string(*it));
-            process_file(executable_dir, *it);
+        for (auto it = args.cbegin(), end = args.cend(); it != end; it++) {
+            if (*it == "--full-frames-only")
+                decode_all_fields = false;
+            else if (*it == "--all-fields")
+                decode_all_fields = true;
+            else if (*it == "--help")
+                usage();
+            else {
+                if (!filesystem::exists(*it))
+                    throw runtime_error("File not found: " + string(*it));
+                process_file(executable_dir, *it, decode_all_fields);
+            }
         }
     } catch (const exception &x) {
         cerr << "musecpp: " << x.what() << '\n';
-        cerr << "usage: musecpp [-f] [-s] <input_file> ...\n";
         return EXIT_FAILURE;
     }
 

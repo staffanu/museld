@@ -19,11 +19,10 @@ public:
     void cleanup();
 
 private:
-    static constexpr int c_audio_buffer_size = 5000;
-    static constexpr int c_audio_buffer_optimal_filled = 2500;
-    static constexpr int c_audio_buffer_filled_flexibility = 100;
-    static constexpr double c_audio_buffer_speed_adjust_constant = 0.0002;
-    static constexpr double c_audio_buffer_max_speed_adjust = 0.7;
+    static constexpr int c_audio_buffer_size = 8192;
+    static constexpr int c_audio_buffer_optimal_filled = 4096;
+    static constexpr double c_audio_buffer_speed_adjust_constant = 1e-6;
+    static constexpr double c_audio_buffer_max_speed_adjust = 0.01;
 
     AudioDecoder::AudioFrame m_audio_buffer[c_audio_buffer_size];
     std::atomic<int> m_next_audio_buffer_write_ix;

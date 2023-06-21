@@ -53,14 +53,14 @@ void AudioPlayback::add_samples(AudioDecoder::AudioMode &audio_mode, size_t &sam
         int audio_buffer_size = m_next_audio_buffer_write_ix >= m_next_audio_buffer_read_ix ?
                                 m_next_audio_buffer_write_ix - m_next_audio_buffer_read_ix :
                                 c_audio_buffer_size - m_next_audio_buffer_read_ix + m_next_audio_buffer_write_ix;
-        if (audio_buffer_size < c_audio_buffer_optimal_filled - c_audio_buffer_filled_flexibility)
+        if (audio_buffer_size < c_audio_buffer_optimal_filled)
             m_audio_speed_adjust = max(
-                    (audio_buffer_size - (c_audio_buffer_optimal_filled - c_audio_buffer_filled_flexibility)) *
-                    c_audio_buffer_speed_adjust_constant, -c_audio_buffer_max_speed_adjust);
-        else if (audio_buffer_size > c_audio_buffer_optimal_filled + c_audio_buffer_filled_flexibility)
+                    (audio_buffer_size - c_audio_buffer_optimal_filled) * c_audio_buffer_speed_adjust_constant,
+                    -c_audio_buffer_max_speed_adjust);
+        else if (audio_buffer_size > c_audio_buffer_optimal_filled)
             m_audio_speed_adjust = min(
-                    (audio_buffer_size - (c_audio_buffer_optimal_filled + c_audio_buffer_filled_flexibility)) *
-                    c_audio_buffer_speed_adjust_constant, c_audio_buffer_max_speed_adjust);
+                    (audio_buffer_size - c_audio_buffer_optimal_filled) * c_audio_buffer_speed_adjust_constant,
+                    c_audio_buffer_max_speed_adjust);
         else
             m_audio_speed_adjust = 0;
 
