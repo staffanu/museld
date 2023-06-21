@@ -7,13 +7,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(glfw3 3.3 REQUIRED)
 find_package(Vulkan REQUIRED)
 
+SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake-modules" ${CMAKE_MODULE_PATH})
+find_package(PORTAUDIO REQUIRED)
+
 add_executable(musecpp
         main.cpp
         MuseBuffer.h
-        MuseSubBuffer.cpp MuseSubBuffer.h
         FrameBuffer.cpp FrameBuffer.h
         FieldBufferView.cpp FieldBufferView.h
         AudioDecoder.cpp AudioDecoder.h
+        BchDecoder.cpp BchDecoder.h
+        AudioChannelDecoder.cpp AudioChannelDecoder.h
         ControlSignalDecoder.cpp ControlSignalDecoder.h
         Shaders.cpp Shaders.h
         MuseDecoder.cpp MuseDecoder.h
@@ -24,11 +28,12 @@ add_executable(musecpp
         musevk/VulkanImage.cpp musevk/VulkanImage.h
         musevk/VulkanBuffer.cpp musevk/VulkanBuffer.h
         musevk/TimestampStatistics.cpp musevk/TimestampStatistics.h
+        musevk/HalfFloatUtil.h
         )
 target_link_libraries(musecpp
-        #        PRIVATE ${OpenCV_LIBS}
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
+        PRIVATE ${PORTAUDIO_LIBRARIES}
         )
 
 set(GLSLC "glslc")

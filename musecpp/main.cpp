@@ -1,11 +1,39 @@
 #include <iostream>
 #include <filesystem>
+#include <portaudio.h>
 #include "Shaders.h"
 #include "MuseDecoder.h"
 #include "musevk/VulkanManager.h"
 #include "MuseTypes.h"
 
 using namespace std;
+
+struct AudioFrame
+{
+    int16_t left;
+    int16_t right;
+};
+
+static deque<AudioFrame> samples;
+
+static int audio_callback(const void *input_buffer, void *output_buffer, unsigned long frames_per_buffer,
+                          const PaStreamCallbackTimeInfo *time_info, PaStreamCallbackFlags status_flags,
+                          void *userData)
+{
+    auto *out = (int16_t *)output_buffer;
+    unsigned int i;
+
+    for (i = 0; i < frames_per_buffer; i++) {
+        if (!samples.empty()) {
+            auto frame = samples.front();
+            samples.pop_front();
+            *out++ = frame.left;
+            *out++ = frame.right;
+        }
+    }
+    return 0;
+}
+
 
 void process_file(string executable_dir, string filename) {
     glfwInit();
@@ -24,23 +52,52 @@ void process_file(string executable_dir, string filename) {
     auto render_finished_semaphore = device.createSemaphore(semaphoreInfo);
     auto in_flight_fence = device.createFence(fenceInfo);
 
+    auto audio_status = Pa_Initialize();
+    if (audio_status != paNoError)
+        throw runtime_error(Pa_GetErrorText(audio_status));
+
+    PaStream *audio_stream;
+    audio_status = Pa_OpenDefaultStream(&audio_stream,
+                                        0, // no input channels
+                                        2, // stereo output
+                                        paInt16,
+                                        32000, // sample rate
+                                        256,   // frames per buffer, maybe use paFramesPerBufferUnspecified
+                                        audio_callback,
+                                        nullptr);
+    if (audio_status != paNoError)
+        throw runtime_error(Pa_GetErrorText(audio_status));
+
+    audio_status = Pa_StartStream(audio_stream);
+    if (audio_status != paNoError)
+        throw runtime_error(Pa_GetErrorText(audio_status));
+
+    AudioDecoder::AudioMode audio_mode;
+    size_t audio_sample_count;
+    int16_t audio_samples[4][AudioDecoder::c_max_output_samples];
+
     {
         auto queue = manager.createCommandQueue(
                 std::vector{vk::Semaphore(image_available_semaphore)},
                 std::vector{vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe)});
         Shaders shaders(executable_dir, manager);
-        auto decoder = MuseDecoder(filename, shaders, manager, false);
+        auto decoder = MuseDecoder(filename, shaders, manager, true, true, false);
         decoder.Initialize();
         auto image = shaders.getResultImage();
 
         auto t0 = chrono::high_resolution_clock::now();
         int field_count = 0;
-        while (decoder.Next()) {
+        while (decoder.Next(audio_mode, audio_sample_count, audio_samples)) {
             field_count++;
 
             if (glfwWindowShouldClose(window))
                 break;
             glfwPollEvents();
+
+            if (audio_sample_count != 0) {
+                for (int i = 0; i < audio_sample_count; i++)
+                    samples.push_back(AudioFrame{audio_samples[0][i], audio_samples[1][i]});
+            }
 
             //vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
             //vkResetFences(device, 1, &in_flight_fence);
@@ -72,7 +129,7 @@ void process_file(string executable_dir, string filename) {
             manager.present(swap_chain_image);
         };
         auto t1 = chrono::high_resolution_clock::now();
-        long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
+        auto time_us = (double)chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
         cout << "Avg " << setprecision(3) << (time_us / 1000.0 / field_count) << " ms/field"
              << " (" << setprecision(3) << 1000000.0 / time_us * field_count << " fields/s)" << endl;
     }
@@ -81,9 +138,21 @@ void process_file(string executable_dir, string filename) {
     device.destroy(render_finished_semaphore);
     device.destroy(in_flight_fence);
 
+    manager.cleanup();
+
     glfwDestroyWindow(window);
 
-    manager.cleanup();
+    audio_status = Pa_StopStream(audio_stream); // possibly Pa_AbortStream instead
+    if (audio_status != paNoError)
+        throw runtime_error(Pa_GetErrorText(audio_status));
+
+    audio_status = Pa_CloseStream(audio_stream);
+    if (audio_status != paNoError)
+        throw runtime_error(Pa_GetErrorText(audio_status));
+
+    audio_status = Pa_Terminate();
+    if (audio_status != paNoError)
+        throw runtime_error(Pa_GetErrorText(audio_status));
 }
 
 int main(int argc, char *argv[]) {

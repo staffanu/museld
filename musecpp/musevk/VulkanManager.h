@@ -33,7 +33,7 @@ namespace musevk {
         std::shared_ptr<VulkanBuffer> createBuffer(
                 uint32_t elementTotalCount,
                 uint32_t elementMemorySize,
-                bool is_host = false,
+                bool is_host_visible = false,
                 bool allow_transfers = false);
 
         std::shared_ptr<ComputeShader> createComputeShader(

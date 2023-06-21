@@ -101,7 +101,8 @@ Shaders::Shaders(std::string const &executable_dir, VulkanManager &manager)
                   -0.047257245277206421, -0.055693197659514346, -0.033755175198004597, -0.000000000000000010,
                   0.026254025154003564, 0.033415918595708603, 0.021480566035093858, 0.000000000000000010,
                   -0.018175863568156325, -0.023868513282649006, -0.015752415092402161
-          }))
+          })),
+  m_audio_data(createMuseBuffer(88, MUSE_TOTAL_WIDTH * 3 / 4, true))
 {
     m_convert_to_float_and_apply_eq_and_gamma_spriv = loadSpirv(executable_dir, "convert_to_float_and_apply_eq_and_gamma.comp");
     m_diamond_spirv = loadSpirv(executable_dir, "filter_diamond.comp");
@@ -135,19 +136,19 @@ Shaders::Shaders(std::string const &executable_dir, VulkanManager &manager)
             m_fill_empty_lines_spirv, Workgroup(m_field_Y_buffer.width(), m_field_Y_buffer.height() / 2));
     m_convert_sample_rate_algo = m_vulkan_manager.createComputeShader(
             "convert_sample_rate",
-            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 10,
+            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 12,
             m_convert_horiz_sample_rate_spirv,
             Workgroup(m_interpolated32_buffer.width() / 4, m_interpolated32_buffer.height()), 3);
     m_convert_sample_rate_4_to_3_algo = m_vulkan_manager.createComputeShader(
             "convert_sample_rate_4_to_3",
             {m_filter_4_to_3_buffer, m_interpolated32_buffer.getVulkanBuffer(),
-             m_inter_frame_Y_buffer.getVulkanBuffer()}, sizeof(uint32_t) * 10,
+             m_inter_frame_Y_buffer.getVulkanBuffer()}, sizeof(uint32_t) * 12,
             m_convert_horiz_sample_rate_spirv,
             Workgroup(m_inter_frame_Y_buffer.width(), m_inter_frame_Y_buffer.height() / 2));
     m_convert_sample_rate_2_to_3_algo = m_vulkan_manager.createComputeShader(
             "convert_sample_rate_2_to_3",
             {m_filter_2_to_3_buffer, m_interpolated32_buffer.getVulkanBuffer(), m_field_Y_buffer.getVulkanBuffer()},
-            sizeof(uint32_t) * 10,
+            sizeof(uint32_t) * 12,
             m_convert_horiz_sample_rate_spirv,
             Workgroup(m_field_Y_buffer.width(), m_field_Y_buffer.height() / 2));
     m_decode_c_algo = m_vulkan_manager.createComputeShader(
@@ -168,16 +169,15 @@ Shaders::Shaders(std::string const &executable_dir, VulkanManager &manager)
             sizeof(uint32_t) * 2,
             m_combine_still_and_moving_spirv,
             Workgroup(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2));
+    m_convert_audio_sample_rate_algo = m_vulkan_manager.createComputeShader(
+            "convert_audio_sample_rate",
+            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 12,
+            m_convert_horiz_sample_rate_spirv,
+            Workgroup(MUSE_TOTAL_WIDTH, 44), 2);
 }
 
-MuseBuffer Shaders::createMuseBuffer(unsigned int height, unsigned int width, bool allow_transfers) {
-    auto vulkan_buffer = m_vulkan_manager.createBuffer(height * width, 2 /* sizeof(float16) */, false, allow_transfers);
-    auto buffer = MuseBuffer(height, width, std::move(vulkan_buffer));
-    return buffer;
-}
-
-MuseBuffer Shaders::createMuseUintBuffer(unsigned int height, unsigned int width, bool allow_transfers) {
-    auto vulkan_buffer = m_vulkan_manager.createBuffer(height * width, sizeof(uint32_t), false, allow_transfers);
+MuseBuffer Shaders::createMuseBuffer(unsigned int height, unsigned int width, bool host_visible) {
+    auto vulkan_buffer = m_vulkan_manager.createBuffer(height * width, 2 /* sizeof(float16) */, host_visible, false);
     auto buffer = MuseBuffer(height, width, std::move(vulkan_buffer));
     return buffer;
 }
@@ -206,7 +206,8 @@ void Shaders::decodeIntraField(CommandQueue &sq, FieldBufferView &field) {
 
     sq.enqueueComputeShader(
             m_convert_sample_rate_2_to_3_algo,
-            vector{m_filter_2_to_3_buffer->size(), 3u, 2u, m_interpolated32_buffer.height(), m_interpolated32_buffer.width(), uint(1 - field_parity), 2u, 0u, 1u, 1u});
+            vector{m_filter_2_to_3_buffer->size(), 3u, 2u, 0u, 0u, m_interpolated32_buffer.height(), m_interpolated32_buffer.width(),
+                   uint(1 - field_parity), 2u, 0u, 1u, 1u});
 
     sq.enqueueComputeShader(m_fill_empty_lines_algo,
                             vector{m_field_Y_buffer.height(), m_field_Y_buffer.width(), (unsigned)field_parity});
@@ -333,7 +334,7 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandQueue &sq, const vector<ref
                  m_movement_field_buffers[i].getVulkanBuffer()});
         sq.enqueueComputeShader(
                 m_convert_sample_rate_algo,
-                vector{m_filter_4_to_1_buffer->size(), 1u, 4u, m_interpolated32_buffer.height(),
+                vector{m_filter_4_to_1_buffer->size(), 1u, 4u, 0u, 0u, m_interpolated32_buffer.height(),
                             m_interpolated32_buffer.width(), 0u, 1u, 0u, 1u, 2u},
                 i);
     }
@@ -355,7 +356,7 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandQueue &sq,
 
     sq.enqueueComputeShader(
             m_convert_sample_rate_4_to_3_algo,
-            vector{m_filter_4_to_3_buffer->size(), 3u, 4u, m_interpolated32_buffer.height(),
+            vector{m_filter_4_to_3_buffer->size(), 3u, 4u, 0u, 0u, m_interpolated32_buffer.height(),
                         m_interpolated32_buffer.width(), uint(1 - fields_parity), 2u, uint(1 - fields_phases), 2u, 1u});
 }
 
@@ -366,4 +367,22 @@ void Shaders::combineStillAndMovingParts(CommandQueue &sq, bool force_field_only
 
 shared_ptr<VulkanImage> Shaders::getResultImage() {
     return m_image_out;
+}
+
+void Shaders::convertAudioSampleRate(musevk::CommandQueue &sq, MuseBuffer &frame) {
+    for (int i = 0; i < 2; i++) {
+        m_convert_audio_sample_rate_algo->updateBufferDescriptorsInSet(
+                i,
+                {m_filter_4_to_3_buffer, frame.getVulkanBuffer(), m_audio_data.getVulkanBuffer()});
+        sq.enqueueComputeShader(
+                m_convert_audio_sample_rate_algo,
+                vector{m_filter_4_to_3_buffer->size(), 3u, 4u,
+                       2u + 562u * i, 2u, 44u, (uint32_t)MUSE_TOTAL_WIDTH,
+                       44u * i, 1u, 0u, 1u, 1u},
+                i);
+    }
+}
+
+MuseBuffer &Shaders::getAudioData() {
+    return m_audio_data;
 }

@@ -9,7 +9,6 @@
 #include "MuseTypes.h"
 #include "ControlSignalDecoder.h"
 #include "MuseBuffer.h"
-#include "MuseSubBuffer.h"
 #include "musevk/CommandQueue.h"
 
 class FieldBufferView {
@@ -24,7 +23,6 @@ public:
     void ProcessControlData(uint16_t const *control_data, std::pair<float, float> const &eq);
 
     std::shared_ptr<musevk::VulkanBuffer> getVulkanBuffer();
-    MuseSubBuffer audio_buffer() const;
     std::optional<ControlSignalDecoder> const &control_data();
 
     int m_frame_no;

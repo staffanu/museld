@@ -15,12 +15,13 @@ namespace musevk {
 : m_name(name),
   m_device(device),
   m_descriptor_count(buffer_types.size()),
+  m_push_constants_size(push_constants_size),
   m_spirv(spirv),
   m_workgroup(workgroup) {
         m_buffers.resize(max_descriptor_sets);
         createShaderModule();
         createDescriptorLayout(max_descriptor_sets, buffer_types);
-        createPipeline(push_constants_size);
+        createPipeline();
         updateDescriptorSet(0);
     }
 
@@ -34,6 +35,7 @@ namespace musevk {
 : m_name(name),
   m_device(device),
   m_descriptor_count(buffers.size()),
+  m_push_constants_size(push_constants_size),
   m_spirv(spirv),
   m_workgroup(workgroup)
     {
@@ -45,7 +47,7 @@ namespace musevk {
         m_buffers.resize(max_descriptor_sets);
         createShaderModule();
         createDescriptorLayout(max_descriptor_sets, buffer_types);
-        createPipeline(push_constants_size);
+        createPipeline();
         updateDescriptorSet(0);
 
         updateBufferDescriptorsInSet(0, buffers);
@@ -116,7 +118,7 @@ namespace musevk {
         }
     }
 
-    void ComputeShader::createPipeline(int32_t push_constants_size) {
+    void ComputeShader::createPipeline() {
         vk::PipelineShaderStageCreateInfo shader_stage_info(vk::PipelineShaderStageCreateFlags(),
                                                             vk::ShaderStageFlagBits::eCompute,
                                                             m_shader_module,
@@ -128,10 +130,10 @@ namespace musevk {
 
         vk::PipelineLayoutCreateInfo pipeline_layout_info(vk::PipelineLayoutCreateFlags(), m_descriptor_set_layout);
         vk::PushConstantRange pushConstantRange;
-        if (push_constants_size) {
+        if (m_push_constants_size) {
             pushConstantRange.setStageFlags(vk::ShaderStageFlagBits::eCompute);
             pushConstantRange.setOffset(0);
-            pushConstantRange.setSize(push_constants_size);
+            pushConstantRange.setSize(m_push_constants_size);
             pipeline_layout_info.setPushConstantRangeCount(1);
             pipeline_layout_info.setPPushConstantRanges(&pushConstantRange);
         }

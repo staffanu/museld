@@ -5,7 +5,6 @@
 #include "MuseTypes.h"
 #include "FieldBufferView.h"
 #include "ControlSignalDecoder.h"
-#include "MuseSubBuffer.h"
 
 using namespace std;
 
@@ -32,10 +31,6 @@ void FieldBufferView::ProcessControlData(uint16_t const *control_data, std::pair
 
 shared_ptr<musevk::VulkanBuffer> FieldBufferView::getVulkanBuffer() {
     return m_data.getVulkanBuffer();
-}
-
-MuseSubBuffer FieldBufferView::audio_buffer() const {
-    return {m_data, m_field_parity ? 2u : 564u, 11, 44, 469 };
 }
 
 optional<ControlSignalDecoder> const &FieldBufferView::control_data() {

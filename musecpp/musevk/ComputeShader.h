@@ -73,7 +73,7 @@ namespace musevk {
         void createShaderModule();
         void createDescriptorLayout(int number_of_descriptor_sets, const std::vector<MemoryObjectType> &buffer_types);
         void updateDescriptorSet(int set_index);
-        void createPipeline(int32_t push_constants_size);
+        void createPipeline();
         void bindPipelineAndDescriptorSets(const vk::CommandBuffer &commandBuffer, int descriptor_set_index) {
             commandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_pipeline);
             commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
@@ -86,6 +86,7 @@ namespace musevk {
 
         template<typename T>
         void bindPushConstants(const vk::CommandBuffer &commandBuffer, const std::vector<T> &push_constants) {
+            assert(push_constants.size() * sizeof(T) == m_push_constants_size);
             if (!push_constants.empty()) {
                 commandBuffer.pushConstants(m_pipeline_layout,
                                             vk::ShaderStageFlagBits::eCompute,
@@ -102,6 +103,7 @@ namespace musevk {
         std::string m_name;
         vk::Device &m_device;
         size_t m_descriptor_count;
+        size_t m_push_constants_size;
         std::vector<std::vector<std::shared_ptr<VulkanMemoryObject>>> m_buffers;
 
         vk::DescriptorSetLayout m_descriptor_set_layout;

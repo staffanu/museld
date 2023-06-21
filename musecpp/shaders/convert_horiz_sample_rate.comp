@@ -9,6 +9,8 @@ layout(push_constant) uniform PushConstants {
     uint filter_size;
     uint upsample_factor_i;
     uint downsample_factor;
+    uint source_y_offset;
+    uint source_x_offset;
     uint source_height;
     uint source_width;
     uint dest_start_row;
@@ -57,7 +59,7 @@ void main() {
     int hiFreqIx = int(dest_col_filter_out * downsample_factor /* + dest_start_col * 2 */);
     float16_t s = 0.hf;
     for (int l = (hiFreqIx - N + int(upsample_factor_i) - 1) / int(upsample_factor_i); l <= (hiFreqIx + N) / int(upsample_factor_i); l++) {
-        float16_t v = l >= 0 && l < source_width ? source[source_row * source_width + l] : 128.hf;
+        float16_t v = l >= 0 && l < source_width ? source[(source_row + source_y_offset) * source_width + source_x_offset + l] : 128.hf;
         s += v * fir_filter[upsample_factor_i * l - hiFreqIx + N];
     }
     dest[dest_row * dest_width + dest_col] = clamp(s * upsample_factor * multiplier, 0.hf, 255.hf);

@@ -6,9 +6,9 @@
 #define MUSECPP_CONTROLSIGNALDECODER_H
 
 #include <map>
+#include <array>
 #include <optional>
 #include "MuseTypes.h"
-#include "MuseSubBuffer.h"
 
 enum MotionInformation {
     Normal, CompleteStillPicture, SlightlyInMotion, SceneChange, Motion

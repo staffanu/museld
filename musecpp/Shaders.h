@@ -26,8 +26,7 @@ public:
     Shaders(Shaders &other) = delete;
     void operator=(const Shaders &) = delete;
 
-    MuseBuffer createMuseBuffer(unsigned int height, unsigned int width, bool allow_transfers = false);
-    MuseBuffer createMuseUintBuffer(unsigned int height, unsigned int width, bool allow_transfers = false);
+    MuseBuffer createMuseBuffer(unsigned int height, unsigned int width, bool host_visible = false);
 
     void convertToFloatAndApplyEqAndGamma(musevk::CommandQueue &sq,
                                           std::shared_ptr<musevk::VulkanBuffer> input, MuseBuffer &buffer,
@@ -41,6 +40,10 @@ public:
     void combineStillAndMovingParts(musevk::CommandQueue &sq, bool force_field_only, bool force_inter_frame_only);
 
     std::shared_ptr<musevk::VulkanImage> getResultImage();
+
+    void convertAudioSampleRate(musevk::CommandQueue &sq, MuseBuffer &frame);
+
+    MuseBuffer &getAudioData();
 
 private:
     // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
@@ -89,6 +92,7 @@ private:
     std::shared_ptr<musevk::ComputeShader> m_decode_c_algo;
     std::shared_ptr<musevk::ComputeShader> m_detect_motion_algo;
     std::shared_ptr<musevk::ComputeShader> m_combine_still_and_moving_algo;
+    std::shared_ptr<musevk::ComputeShader> m_convert_audio_sample_rate_algo;
 
     // temporary data used by the single field decoder and inter-frame interpolation
     MuseBuffer m_interpolated32_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH * 2
@@ -110,6 +114,9 @@ private:
 
     // used for final result
     std::shared_ptr<musevk::VulkanImage> m_image_out;
+
+    // sample rate converted audio data
+    MuseBuffer m_audio_data;
 
     // filter definitions
     MuseBuffer m_diamond_filter_buffer;

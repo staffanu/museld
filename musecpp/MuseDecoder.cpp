@@ -15,10 +15,13 @@
 using namespace std;
 
 MuseDecoder::MuseDecoder(
-        const string &filename, Shaders &shaders, musevk::VulkanManager &manager, bool benchmark_shaders)
+        const string &filename, Shaders &shaders, musevk::VulkanManager &manager,
+        bool decode_video, bool decode_audio, bool benchmark_shaders)
 : m_filename(filename),
   m_shaders(shaders),
   m_manager(manager),
+  m_decode_video(decode_video),
+  m_decode_audio(decode_audio),
   m_benchmark_shaders(benchmark_shaders),
   m_command_queue(m_manager.createCommandQueue({}, {}, benchmark_shaders ? 40 : 0)) {
 }
@@ -63,7 +66,9 @@ bool MuseDecoder::Initialize() {
     return true;
 }
 
-bool MuseDecoder::Next() {
+bool MuseDecoder::Next(AudioDecoder::AudioMode &audio_mode,
+                       size_t &sample_count,
+                       int16_t output_samples[4][AudioDecoder::c_max_output_samples]) {
     auto t0 = chrono::high_resolution_clock::now();
     if (m_field_index == 0) {
         auto frame_buffer = m_frame_buffers.back();
@@ -80,31 +85,43 @@ bool MuseDecoder::Next() {
         m_eq = {m_eq.first * 0.9 + eq_estimate.first * 0.1, m_eq.second * 0.9 + eq_estimate.second * 0.1};
         cout << "eq: " << m_eq.first << ", " << m_eq.second << endl;
 
-        frame_buffer->ProcessControlData(m_input_vulkan_buffer->data<uint16_t>(), m_eq);
+        // Since we really only need to decode the control data when we process the second field,
+        // we should probably delay this until graphics operations are queued. But it is quick.
+        if (m_decode_video)
+            frame_buffer->ProcessControlData(m_input_vulkan_buffer->data<uint16_t>(), m_eq);
 
         m_shaders.convertToFloatAndApplyEqAndGamma(*m_command_queue, m_input_vulkan_buffer, frame_buffer->data(), m_eq);
+
+        m_shaders.convertAudioSampleRate(*m_command_queue, frame_buffer->data());
     }
 
-    m_shaders.decodeIntraField(*m_command_queue, m_frame_buffers[0]->get_field(m_field_index));
-    auto fields = vector<reference_wrapper<FieldBufferView>>{
-            m_frame_buffers[0]->get_field(m_field_index),
-            m_frame_buffers[1 - m_field_index]->get_field(1 - m_field_index),
-            m_frame_buffers[1]->get_field(m_field_index),
-            m_frame_buffers[2 - m_field_index]->get_field(1 - m_field_index),
-            m_frame_buffers[2]->get_field(m_field_index)};
+    if (m_decode_video) {
+        m_shaders.decodeIntraField(*m_command_queue, m_frame_buffers[0]->get_field(m_field_index));
+        auto fields = vector<reference_wrapper<FieldBufferView>>{
+                m_frame_buffers[0]->get_field(m_field_index),
+                m_frame_buffers[1 - m_field_index]->get_field(1 - m_field_index),
+                m_frame_buffers[1]->get_field(m_field_index),
+                m_frame_buffers[2 - m_field_index]->get_field(1 - m_field_index),
+                m_frame_buffers[2]->get_field(m_field_index)};
 
-    if (m_shaders.decodeInterFrameAndDetectMotion(*m_command_queue, fields)) {
-        cout << "Field " << m_field_index << " inter-frame interpolation success" << endl;
-        m_shaders.combineStillAndMovingParts(*m_command_queue, false, false);
-    } else {
-        cout << "Field " << m_field_index << " inter-frame interpolation failed -- using intra-field interpolation" << endl;
-        m_shaders.combineStillAndMovingParts(*m_command_queue, true, false);
+        if (m_shaders.decodeInterFrameAndDetectMotion(*m_command_queue, fields)) {
+            cout << "Field " << m_field_index << " inter-frame interpolation success" << endl;
+            m_shaders.combineStillAndMovingParts(*m_command_queue, false, false);
+        } else {
+            cout << "Field " << m_field_index << " inter-frame interpolation failed -- using intra-field interpolation"
+                 << endl;
+            m_shaders.combineStillAndMovingParts(*m_command_queue, true, false);
+        }
     }
-    m_command_queue->evalAsync();
-
-    // FIXME: the frame buffer is not synched local here!
-    m_audio_decoder.decode_field(m_frame_buffers[0]->get_field(m_field_index).audio_buffer());
-    m_command_queue->evalAwait();
+    if (m_field_index == 0 || m_decode_video) {
+        m_command_queue->evalAsync();
+        m_command_queue->evalAwait(); // FIXME: remove and add fence
+    }
+    if (m_decode_audio && m_field_index == 0)
+        m_audio_decoder.decodeFrame(m_shaders.getAudioData(), audio_mode, sample_count, output_samples);
+    else
+        sample_count = 0;
+    //m_command_queue->evalAwait();
 
     if (m_benchmark_shaders)
         m_timestamp_statistics.add_timestamps(m_command_queue->getTimestamps());
