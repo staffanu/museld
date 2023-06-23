@@ -8,14 +8,16 @@
 
 using namespace std;
 
-void process_file(string executable_dir, string filename, bool decode_all_fields) {
+void process_file(string executable_dir, string filename, bool decode_all_fields, bool full_screen, bool no_sync) {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    GLFWwindow *window = glfwCreateWindow(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, "MUSE", nullptr, nullptr);
+    GLFWwindow *window = glfwCreateWindow(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2,
+                                          "MUSE", full_screen ? glfwGetPrimaryMonitor() : nullptr, nullptr);
+    glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
 
     musevk::VulkanManager manager;
-    manager.initVulkan(window);
+    manager.initVulkan(window, no_sync);
     vk::Device &device = manager.getDevice();
 
     vk::SemaphoreCreateInfo semaphoreInfo{};
@@ -48,6 +50,7 @@ void process_file(string executable_dir, string filename, bool decode_all_fields
 
         auto t0 = chrono::high_resolution_clock::now();
         int field_count = 0;
+        bool paused = false;
         // We skip calling Next every other field if decode_all_fields is false
         while ((!decode_all_fields && field_count % 2 == 1) ||
             decoder.Next(audio_mode, audio_sample_count, audio_samples)) {
@@ -57,6 +60,16 @@ void process_file(string executable_dir, string filename, bool decode_all_fields
             if (glfwWindowShouldClose(window))
                 break;
             glfwPollEvents();
+            if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS && full_screen) {
+                glfwSetWindowMonitor(window, nullptr, 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
+                full_screen = false;
+            }
+            if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && !full_screen) {
+                glfwSetWindowMonitor(window, glfwGetPrimaryMonitor(), 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
+                full_screen = true;
+            }
+            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+                paused = !paused;
 
             if (audio_sample_count != 0 && audio_mode != AudioDecoder::MODE_UNKNOWN && field_count % 2 == 1)
                 audio_playback.add_samples(audio_mode, audio_sample_count, audio_samples);
@@ -116,6 +129,8 @@ int main(int argc, char *argv[]) {
     std::string executable(argv[0]);
     std::string executable_dir = executable.substr(0, executable.find_last_of('/'));
     bool decode_all_fields = true;
+    bool full_screen = false;
+    bool no_sync = false;
 
     try {
         const vector<string> args(argv + 1, argv + argc);
@@ -124,12 +139,16 @@ int main(int argc, char *argv[]) {
                 decode_all_fields = false;
             else if (*it == "--all-fields")
                 decode_all_fields = true;
+            else if (*it == "--full-screen")
+                full_screen = true;
+            else if (*it == "--no-sync")
+                no_sync = true;
             else if (*it == "--help")
                 usage();
             else {
                 if (!filesystem::exists(*it))
                     throw runtime_error("File not found: " + string(*it));
-                process_file(executable_dir, *it, decode_all_fields);
+                process_file(executable_dir, *it, decode_all_fields, full_screen, no_sync);
             }
         }
     } catch (const exception &x) {

@@ -18,7 +18,7 @@ namespace musevk {
     public:
         VulkanManager() = default;
         VulkanManager(VulkanManager &other) = delete;
-        void initVulkan(GLFWwindow *window);
+        void initVulkan(GLFWwindow *window, bool no_sync);
         void cleanup();
 
         vk::Device &getDevice() { return m_logical_device; };
@@ -121,6 +121,7 @@ namespace musevk {
         const bool enableValidationLayers = true;
 #endif
         GLFWwindow *m_window;
+        bool m_no_sync;
         std::shared_ptr<CommandQueue> m_command_queue;
 
         vk::Instance m_instance;

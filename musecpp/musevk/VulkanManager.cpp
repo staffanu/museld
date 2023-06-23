@@ -11,9 +11,12 @@
 #include "VulkanBuffer.h"
 #include "HalfFloatUtil.h"
 
+using namespace std;
+
 namespace musevk {
-    void VulkanManager::initVulkan(GLFWwindow *window) {
+    void VulkanManager::initVulkan(GLFWwindow *window, bool no_sync) {
         m_window = window;
+        m_no_sync = no_sync;
         createInstance();
         createSurface();
         pickPhysicalDevice();
@@ -48,10 +51,10 @@ namespace musevk {
                                                           image_available_semaphore, VK_NULL_HANDLE,
                                                           &image_index);
             if (result == vk::Result::eSuboptimalKHR || result == vk::Result::eErrorOutOfDateKHR) {
-                std::cout << "Suboptimal or Out of date" << std::endl;
+                cout << "Suboptimal or Out of date" << endl;
                 recreateSwapChain();
             } else if (result != vk::Result::eSuccess)
-                throw std::runtime_error("acquireNextImageKHR failed");
+                throw runtime_error("acquireNextImageKHR failed");
         } while (result != vk::Result::eSuccess);
 
         return m_swap_chain_images[image_index];
@@ -63,7 +66,7 @@ namespace musevk {
             if (m_swap_chain_images[image_index] == image)
                 break;
         if (image_index == m_swap_chain_images.size())
-            throw std::runtime_error("present called for image not in swap chain");
+            throw runtime_error("present called for image not in swap chain");
 
         vk::PresentInfoKHR presentInfo{};
         vk::Semaphore signalSemaphores[] = {};//render_finished_semaphore};
@@ -76,15 +79,14 @@ namespace musevk {
         presentInfo.pResults = nullptr; // Optional
         auto result = m_present_queue.presentKHR(presentInfo);
         if (result != vk::Result::eSuccess)
-            throw std::runtime_error("presentKHR failed");
+            throw runtime_error("presentKHR failed");
     }
 
-    std::shared_ptr<VulkanBuffer> VulkanManager::createDeviceBuffer(const std::vector<float> &data) {
-
+    shared_ptr<VulkanBuffer> VulkanManager::createDeviceBuffer(const vector<float> &data) {
         auto host_buffer = VulkanBuffer(m_physical_device, m_logical_device, data.size(), 2, true, true /* unused */);
         for (int i = 0; i < data.size(); i++)
             host_buffer.data<ushort>()[i] = HalfFloatUtil::float_to_half(data[i]);
-        auto device_buffer = std::make_shared<VulkanBuffer>(m_physical_device, m_logical_device, data.size(), 2, false, true);
+        auto device_buffer = make_shared<VulkanBuffer>(m_physical_device, m_logical_device, data.size(), 2, false, true);
         auto sq = createCommandQueue();
         sq->enqueueCopyBuffer(host_buffer, *device_buffer);
         sq->evalAsync();
@@ -92,18 +94,18 @@ namespace musevk {
         return device_buffer;
     }
 
-    std::shared_ptr<VulkanBuffer> VulkanManager::createBuffer(
+    shared_ptr<VulkanBuffer> VulkanManager::createBuffer(
             uint32_t elementTotalCount,
             uint32_t elementMemorySize,
             bool is_host_visible,
             bool allow_transfers) {
-        return std::make_shared<VulkanBuffer>(m_physical_device, m_logical_device,
+        return make_shared<VulkanBuffer>(m_physical_device, m_logical_device,
                                               elementTotalCount, elementMemorySize,
                                               is_host_visible, allow_transfers);
     }
 
-    std::shared_ptr<VulkanImage> VulkanManager::createImage(uint32_t width, uint32_t height) {
-        auto image = std::make_shared<VulkanImage>(m_physical_device, m_logical_device, width, height);
+    shared_ptr<VulkanImage> VulkanManager::createImage(uint32_t width, uint32_t height) {
+        auto image = make_shared<VulkanImage>(m_physical_device, m_logical_device, width, height);
 
         auto sq = createCommandQueue();
         sq->enqueueTransitionMemoryLayout(image->image(), vk::Format::eB8G8R8A8Unorm,
@@ -114,39 +116,39 @@ namespace musevk {
         return image;
     }
 
-    std::shared_ptr<ComputeShader> VulkanManager::createComputeShader(
-            std::string name,
-            const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
+    shared_ptr<ComputeShader> VulkanManager::createComputeShader(
+            string name,
+            const vector<shared_ptr<VulkanMemoryObject>> &buffers,
             int32_t push_constants_size,
-            const std::vector<uint32_t> &spirv,
+            const vector<uint32_t> &spirv,
             const Workgroup &workgroup,
             int max_descriptor_sets) {
-        return std::make_shared<ComputeShader>(
+        return make_shared<ComputeShader>(
                 name,
                 m_logical_device,
                 buffers, push_constants_size, spirv, workgroup, max_descriptor_sets);
     }
 
-    std::shared_ptr<ComputeShader> VulkanManager::createComputeShader(
-            std::string name,
-            const std::vector<MemoryObjectType> &buffer_types,
+    shared_ptr<ComputeShader> VulkanManager::createComputeShader(
+            string name,
+            const vector<MemoryObjectType> &buffer_types,
             int32_t push_constants_size,
-            const std::vector<uint32_t> &spirv,
+            const vector<uint32_t> &spirv,
             const Workgroup &workgroup,
             int max_descriptor_sets) {
-        return std::make_shared<ComputeShader>(
+        return make_shared<ComputeShader>(
                 name,
                 m_logical_device,
                 buffer_types, push_constants_size, spirv, workgroup, max_descriptor_sets);
     }
 
-    std::shared_ptr<CommandQueue> VulkanManager::createCommandQueue(
-            std::vector<vk::Semaphore> wait_semaphores,
-            std::vector<vk::PipelineStageFlags> wait_dst_stage_masks,
+    shared_ptr<CommandQueue> VulkanManager::createCommandQueue(
+            vector<vk::Semaphore> wait_semaphores,
+            vector<vk::PipelineStageFlags> wait_dst_stage_masks,
             uint32_t totalTimestamps) {
         auto indices = findQueueFamilies(m_physical_device);
         uint32_t queue_index = indices.graphicsAndComputeFamily.value();
-        return std::make_shared<CommandQueue>(
+        return make_shared<CommandQueue>(
                 m_physical_device,
                 m_logical_device,
                 m_compute_queue,
@@ -158,7 +160,7 @@ namespace musevk {
 
     void VulkanManager::createInstance() {
         if (enableValidationLayers && !checkValidationLayerSupport()) {
-            throw std::runtime_error("validation layers requested, but not available!");
+            throw runtime_error("validation layers requested, but not available!");
         }
 
         vk::ApplicationInfo appInfo("Muse Decoder", VK_MAKE_VERSION(1, 0, 0), "No Engine", VK_MAKE_VERSION(1, 0, 0), VK_API_VERSION_1_2);
@@ -167,7 +169,7 @@ namespace musevk {
         uint32_t glfwExtensionCount = 0;
         const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
-        std::vector<const char *> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+        vector<const char *> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
         extensions.insert(extensions.cend(), c_instance_extensions.cbegin(), c_instance_extensions.cend());
 
         createInfo.enabledExtensionCount = extensions.size();
@@ -201,7 +203,7 @@ namespace musevk {
     void VulkanManager::createSurface() {
         VkSurfaceKHR surface;
         if (glfwCreateWindowSurface(m_instance, m_window, nullptr, &surface) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create window surface!");
+            throw runtime_error("failed to create window surface!");
         }
         m_surface = vk::SurfaceKHR(surface);
     }
@@ -211,7 +213,7 @@ namespace musevk {
         bool found = false;
         for (auto &device: devices) {
             auto properties = device.getProperties();
-            std::cout << "Checking device " << properties.deviceName << std::endl;
+            cout << "Checking device " << properties.deviceName << endl;
             if (isDeviceSuitable(device)) {
                 found = true;
                 m_physical_device = device;
@@ -219,7 +221,7 @@ namespace musevk {
             }
         }
         if (!found)
-            throw std::runtime_error("failed to find a suitable GPU!");
+            throw runtime_error("failed to find a suitable GPU!");
     }
 
     bool VulkanManager::isDeviceSuitable(vk::PhysicalDevice &device) {
@@ -253,7 +255,7 @@ namespace musevk {
     bool VulkanManager::checkDeviceExtensionSupport(vk::PhysicalDevice &device) {
         auto availableExtensions = device.enumerateDeviceExtensionProperties();
 
-        std::set<std::string> requiredExtensions(c_device_extensions.begin(), c_device_extensions.end());
+        set<string> requiredExtensions(c_device_extensions.begin(), c_device_extensions.end());
 
         for (const auto &extension: availableExtensions) {
             requiredExtensions.erase(extension.extensionName);
@@ -288,8 +290,8 @@ namespace musevk {
     void VulkanManager::createLogicalDevice() {
         QueueFamilyIndices indices = findQueueFamilies(m_physical_device);
 
-        std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
-        std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsAndComputeFamily.value(),
+        vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
+        set<uint32_t> uniqueQueueFamilies = {indices.graphicsAndComputeFamily.value(),
                                                   indices.presentFamily.value()};
 
         float queuePriority = 1.0f;
@@ -341,7 +343,7 @@ namespace musevk {
     }
 
     vk::SurfaceFormatKHR
-    VulkanManager::chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR> &availableFormats) {
+    VulkanManager::chooseSwapSurfaceFormat(const vector<vk::SurfaceFormatKHR> &availableFormats) {
         for (const auto &availableFormat: availableFormats) {
             if (availableFormat.format == vk::Format::eB8G8R8A8Srgb &&
                 availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
@@ -353,18 +355,18 @@ namespace musevk {
     }
 
     vk::PresentModeKHR
-    VulkanManager::chooseSwapPresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes) {
+    VulkanManager::chooseSwapPresentMode(const vector<vk::PresentModeKHR> &availablePresentModes) {
         for (const auto &availablePresentMode: availablePresentModes) {
             if (availablePresentMode == vk::PresentModeKHR::eMailbox) {
                 //return availablePresentMode;
             }
         }
         // FIXME: what to use?
-        return vk::PresentModeKHR::eFifo;
+        return m_no_sync ? vk::PresentModeKHR::eImmediate : vk::PresentModeKHR::eFifo;
     }
 
     vk::Extent2D VulkanManager::chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities) {
-        if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+        if (capabilities.currentExtent.width != numeric_limits<uint32_t>::max()) {
             return capabilities.currentExtent;
         } else {
             int width, height;
@@ -375,9 +377,9 @@ namespace musevk {
                     static_cast<uint32_t>(height)
             };
 
-            actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width,
+            actualExtent.width = clamp(actualExtent.width, capabilities.minImageExtent.width,
                                             capabilities.maxImageExtent.width);
-            actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height,
+            actualExtent.height = clamp(actualExtent.height, capabilities.minImageExtent.height,
                                              capabilities.maxImageExtent.height);
 
             return actualExtent;
@@ -429,5 +431,6 @@ namespace musevk {
 
         m_swap_chain_image_format = surfaceFormat.format;
         m_swap_chain_extent = extent;
+        cout << "Swap chain created with extent " << extent.width << "x" << extent.height << endl;
     }
 }
