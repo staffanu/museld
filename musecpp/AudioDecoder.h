@@ -21,10 +21,7 @@ public:
 
     struct AudioFrame
     {
-        int16_t channel1;
-        int16_t channel2;
-        int16_t channel3;
-        int16_t channel4;
+        int16_t samples[4];
     };
 
     AudioDecoder();

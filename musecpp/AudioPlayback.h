@@ -30,6 +30,7 @@ private:
     std::atomic<double> m_audio_speed_adjust; // m_audio_buffer to skip per sample -- 0.1 skips every 10th sample
     double m_audio_speed_adjust_sum;
     AudioDecoder::AudioMode m_current_mode;
+    int m_channels_used;
     PaStream *m_audio_stream;
 
     static int audio_callback(const void *input_buffer, void *output_buffer, unsigned long frames_per_buffer,

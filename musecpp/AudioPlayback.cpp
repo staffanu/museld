@@ -23,7 +23,7 @@ AudioPlayback::AudioPlayback()
   m_audio_stream(nullptr) {
     auto audio_status = Pa_Initialize();
     if (audio_status != paNoError)
-        throw runtime_error(Pa_GetErrorText(audio_status));
+        throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
 }
 
 void AudioPlayback::cleanup() {
@@ -32,7 +32,7 @@ void AudioPlayback::cleanup() {
 
     auto audio_status = Pa_Terminate();
     if (audio_status != paNoError)
-        throw runtime_error(Pa_GetErrorText(audio_status));
+        throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
 }
 
 void AudioPlayback::add_samples(AudioDecoder::AudioMode &audio_mode, size_t &sample_count,
@@ -93,47 +93,52 @@ int AudioPlayback::audioCallbackMember(void *output_buffer, unsigned long frames
                     m_next_audio_buffer_read_ix = 0;
                 m_audio_speed_adjust_sum -= 1.0;
             }
-            *out++ = frame.channel1; // TODO: figure out which channel is which
-            *out++ = frame.channel2;
-            if (m_current_mode == AudioDecoder::MODE_A) {
-                *out++ = frame.channel3;
-                *out++ = frame.channel4;
-            }
+            for (int k = 0; k < m_channels_used; k++)
+                *out++ = frame.samples[k]; // TODO: figure out which channel is which
         } else {
-            *out++ = 0;
-            *out++ = 0;
-            if (m_current_mode == AudioDecoder::MODE_A) {
+            for (int k = 0; k < m_channels_used; k++)
                 *out++ = 0;
-                *out++ = 0;
-            }
         }
     }
     return 0;
 }
 
 void AudioPlayback::openStream() {
-    auto audio_status = Pa_OpenDefaultStream(&m_audio_stream,
-                                        0, // no input channels
-                                        m_current_mode == AudioDecoder::MODE_A ? 4 : 2,
-                                        paInt16,
-                                        m_current_mode == AudioDecoder::MODE_A ? 32000 : 48000,
-                                        256, // frames per buffer, maybe use paFramesPerBufferUnspecified
-                                        audio_callback,
-                                        this);
+    PaDeviceIndex device_index = Pa_GetDefaultOutputDevice();
+    auto *info = Pa_GetDeviceInfo(device_index);
+    m_channels_used = min(m_current_mode == AudioDecoder::MODE_A ? 4 : 2, info->maxOutputChannels);
+    cout << "Using device " << info->name << ": maximum " << info->maxOutputChannels << " output channels, "
+         << m_channels_used << " used." << endl;
+
+    PaStreamParameters parameters {
+        device_index,
+        m_channels_used,
+        paInt16,
+        info->defaultLowOutputLatency,
+        nullptr};
+
+    auto audio_status = Pa_OpenStream(&m_audio_stream,
+                                      nullptr, // no input channels
+                                      &parameters,
+                                      m_current_mode == AudioDecoder::MODE_A ? 32000.0 : 48000.0,
+                                      256ul, // frames per buffer, maybe use paFramesPerBufferUnspecified
+                                      paNoFlag, // stream flags
+                                      audio_callback,
+                                      this);
     if (audio_status != paNoError)
-        throw runtime_error(Pa_GetErrorText(audio_status));
+        throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
 
     audio_status = Pa_StartStream(m_audio_stream);
     if (audio_status != paNoError)
-        throw runtime_error(Pa_GetErrorText(audio_status));
+        throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
 }
 
 void AudioPlayback::closeStream() {
     auto audio_status = Pa_AbortStream(m_audio_stream);
     if (audio_status != paNoError)
-        throw runtime_error(Pa_GetErrorText(audio_status));
+        throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
 
     audio_status = Pa_CloseStream(m_audio_stream);
     if (audio_status != paNoError)
-        throw runtime_error(Pa_GetErrorText(audio_status));
+        throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
 }
