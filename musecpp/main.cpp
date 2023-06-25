@@ -52,10 +52,11 @@ void process_file(string executable_dir, string filename, bool decode_all_fields
         int field_count = 0;
         bool paused = false;
         // We skip calling Next every other field if decode_all_fields is false
-        while ((!decode_all_fields && field_count % 2 == 1) ||
+        while ((!decode_all_fields && field_count % 2 == 1) || paused ||
             decoder.Next(audio_mode, audio_sample_count, audio_samples)) {
 
-            field_count++;
+            if (!paused)
+                field_count++;
 
             if (glfwWindowShouldClose(window))
                 break;
@@ -68,10 +69,16 @@ void process_file(string executable_dir, string filename, bool decode_all_fields
                 glfwSetWindowMonitor(window, glfwGetPrimaryMonitor(), 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
                 full_screen = true;
             }
-            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
                 paused = !paused;
+                while (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+                    usleep(100000);
+                    glfwPollEvents();
+                }
+            }
 
-            if (audio_sample_count != 0 && audio_mode != AudioDecoder::MODE_UNKNOWN && field_count % 2 == 1)
+            if (audio_sample_count != 0 && audio_mode != AudioDecoder::MODE_UNKNOWN &&
+                field_count % 2 == 1 && !paused)
                 audio_playback.add_samples(audio_mode, audio_sample_count, audio_samples);
 
             //vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
