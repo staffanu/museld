@@ -5,10 +5,12 @@
 #include "musevk/VulkanManager.h"
 #include "MuseTypes.h"
 #include "AudioPlayback.h"
+#include "InputReader.h"
 
 using namespace std;
 
-void process_file(string executable_dir, string filename, bool decode_all_fields, bool full_screen, bool no_sync) {
+void process_file(const string& executable_dir, InputReader &reader,
+                  bool decode_all_fields, bool full_screen, bool no_sync) {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
@@ -38,22 +40,23 @@ void process_file(string executable_dir, string filename, bool decode_all_fields
                 std::vector{vk::Semaphore(image_available_semaphore)},
                 std::vector{vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe)});
         Shaders shaders(executable_dir, manager);
-        auto decoder = MuseDecoder(filename,
+        auto decoder = MuseDecoder(reader,
                                    shaders,
                                    manager,
                                    true, // decode_video
                                    decode_all_fields,
                                    true, // decode_audio
                                    false); // benchmark_shaders
-        decoder.Initialize();
+        if (!decoder.initialize())
+            throw runtime_error("MuseDecoder initialization failed");
         auto image = shaders.getResultImage();
 
         auto t0 = chrono::high_resolution_clock::now();
         int field_count = 0;
         bool paused = false;
-        // We skip calling Next every other field if decode_all_fields is false
+        // We skip calling next every other field if decode_all_fields is false
         while ((!decode_all_fields && field_count % 2 == 1) || paused ||
-            decoder.Next(audio_mode, audio_sample_count, audio_samples)) {
+                decoder.next(audio_mode, audio_sample_count, audio_samples)) {
 
             if (!paused)
                 field_count++;
@@ -155,7 +158,10 @@ int main(int argc, char *argv[]) {
             else {
                 if (!filesystem::exists(*it))
                     throw runtime_error("File not found: " + string(*it));
-                process_file(executable_dir, *it, decode_all_fields, full_screen, no_sync);
+                InputReader reader(*it);
+                if (!reader.initialize())
+                    throw runtime_error("InputReader initialization failed");
+                process_file(executable_dir, reader, decode_all_fields, full_screen, no_sync);
             }
         }
     } catch (const exception &x) {

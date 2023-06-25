@@ -5,21 +5,20 @@
 #ifndef MUSECPP_MUSEDECODER_H
 #define MUSECPP_MUSEDECODER_H
 
-#include <string>
 #include <deque>
-#include <fstream>
 #include "Shaders.h"
 #include "AudioDecoder.h"
 #include "musevk/TimestampStatistics.h"
+#include "InputReader.h"
 
 class FrameBuffer;
 
 class MuseDecoder {
 public:
     /// \param decode_all_fields If false, skips decoding of the first field of each
-    /// frame individually, so Next should be called 30 times per second instead of 60;
+    /// frame individually, so next should be called 30 times per second instead of 60;
     /// useful for slow hardware.
-    MuseDecoder(const std::string &filename,
+    MuseDecoder(InputReader &reader,
                 Shaders &shaders,
                 musevk::VulkanManager &manager,
                 bool decode_video,
@@ -27,13 +26,13 @@ public:
                 bool decode_audio,
                 bool benchmark_shaders);
     ~MuseDecoder();
-    bool Initialize();
-    bool Next(AudioDecoder::AudioMode &audio_mode,
+    [[nodiscard]] bool initialize();
+    bool next(AudioDecoder::AudioMode &audio_mode,
               size_t &sample_count,
               AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples]);
 
 private:
-    std::string m_filename;
+    InputReader &m_reader;
     Shaders &m_shaders;
     musevk::VulkanManager &m_manager;
     const bool m_decode_video;
@@ -41,7 +40,6 @@ private:
     const bool m_decode_audio;
     const bool m_benchmark_shaders;
 
-    std::ifstream m_input;
     std::pair<float, float> m_eq;
     std::shared_ptr<musevk::VulkanBuffer> m_input_vulkan_buffer;
     std::shared_ptr<musevk::CommandQueue> m_command_queue;
@@ -51,10 +49,6 @@ private:
     long m_total_elapsed_time_us;
     AudioDecoder m_audio_decoder;
     std::deque<FrameBuffer *> m_frame_buffers;
-
-    bool read_big_endian_to_buffer(std::ifstream &input, float *out, size_t n);
-    static bool read_shorts(std::ifstream &input, uint16_t *out, size_t n);
-    std::pair<int, std::pair<float, float>> compute_initial_skip();
 };
 
 

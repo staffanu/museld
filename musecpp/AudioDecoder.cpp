@@ -27,10 +27,13 @@ const std::array<bool, 16> AudioDecoder::c_sync_pattern = {
 };
 
 AudioDecoder::AudioDecoder()
-: m_deinterleave_buffer_start(0),
+: m_deinterleave_data{},
+  m_deinterleave_buffer_start(0),
   m_total_deinterleaved_bits(0),
   m_q(0),
   m_consecutive_failed_syncs(100), // start by searching for sync pattern
+  m_active_control_signal(0),
+  m_active_audio_mode(MODE_UNKNOWN),
   m_bch_decoder(82, 74, 137),
   m_range_bch_decoder(7, 3, 11),
   aModeChannel1Decoder(1),
