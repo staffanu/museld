@@ -29,6 +29,10 @@ namespace musevk {
         cleanupSwapChain();
         m_logical_device.destroy();
         m_instance.destroy(m_surface);
+        if (enableValidationLayers) {
+            vk::DispatchLoaderDynamic dynamic_loader(m_instance, vkGetInstanceProcAddr);
+            m_instance.destroyDebugUtilsMessengerEXT(m_debug_messenger, nullptr, dynamic_loader);
+        }
         m_instance.destroy();
         glfwTerminate();
     }
@@ -172,15 +176,43 @@ namespace musevk {
         vector<const char *> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
         extensions.insert(extensions.cend(), c_instance_extensions.cbegin(), c_instance_extensions.cend());
 
-        createInfo.enabledExtensionCount = extensions.size();
-        createInfo.ppEnabledExtensionNames = extensions.data();
+        auto debugUtilsMessengerCreateInfo = createDebugMessengerCreateInfo();
+
         if (enableValidationLayers) {
             createInfo.enabledLayerCount = c_validation_layers.size();
             createInfo.ppEnabledLayerNames = c_validation_layers.data();
+            extensions.insert(extensions.cend(), c_validation_extensions.cbegin(), c_validation_extensions.cend());
+            createInfo.pNext = &debugUtilsMessengerCreateInfo;
         } else {
             createInfo.enabledLayerCount = 0;
         }
+
+        createInfo.enabledExtensionCount = extensions.size();
+        createInfo.ppEnabledExtensionNames = extensions.data();
+
         m_instance = vk::createInstance(createInfo);
+
+        if (enableValidationLayers) {
+            vk::DispatchLoaderDynamic dynamic_loader(m_instance, vkGetInstanceProcAddr);
+            m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(
+                    debugUtilsMessengerCreateInfo, nullptr, dynamic_loader);
+        }
+    }
+
+    vk::DebugUtilsMessengerCreateInfoEXT VulkanManager::createDebugMessengerCreateInfo() {
+        vk::DebugUtilsMessengerCreateInfoEXT createInfo{};
+        createInfo.messageSeverity =
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eError;
+        createInfo.messageType =
+                vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
+                vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
+                vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance;;
+        createInfo.pfnUserCallback = (PFN_vkDebugUtilsMessengerCallbackEXT)debugCallback;
+        createInfo.pUserData = nullptr;
+        return createInfo;
     }
 
     bool VulkanManager::checkValidationLayerSupport() {
@@ -432,5 +464,55 @@ namespace musevk {
         m_swap_chain_image_format = surfaceFormat.format;
         m_swap_chain_extent = extent;
         cout << "Swap chain created with extent " << extent.width << "x" << extent.height << endl;
+    }
+
+    VKAPI_ATTR VkBool32 VKAPI_CALL VulkanManager::debugCallback(
+            vk::DebugUtilsMessageSeverityFlagBitsEXT message_severity,
+            vk::DebugUtilsMessageTypeFlagBitsEXT message_type,
+            const vk::DebugUtilsMessengerCallbackDataEXT *callback_data,
+            void *user_data) {
+        if (message_severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning) {
+            string severity_string;
+            switch (message_severity) {
+                case vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose:
+                    severity_string = "verbose";
+                    break;
+                case vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo:
+                    severity_string = "info";
+                    break;
+                case vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning:
+                    severity_string = "warning";
+                    break;
+                case vk::DebugUtilsMessageSeverityFlagBitsEXT::eError:
+                    severity_string = "error";
+                    break;
+                default:
+                    severity_string = "???";
+                    break;
+            }
+            string type_string;
+            switch (message_type) {
+                case vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance:
+                    type_string = "performance";
+                    break;
+                case vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation:
+                    type_string = "validation";
+                    break;
+                case vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral:
+                    type_string = "general";
+                    break;
+                case vk::DebugUtilsMessageTypeFlagBitsEXT::eDeviceAddressBinding:
+                    type_string = "device address binding";
+                    break;
+                default:
+                    type_string = "???";
+                    break;
+            }
+
+            cerr << "Vulkan validation: [" << severity_string << ", " << type_string << "] " <<
+                callback_data->pMessage << endl;
+        }
+
+        return VK_FALSE;
     }
 }

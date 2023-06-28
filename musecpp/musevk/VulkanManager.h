@@ -61,6 +61,7 @@ namespace musevk {
     private:
         void cleanupSwapChain();
         void createInstance();
+        static vk::DebugUtilsMessengerCreateInfoEXT createDebugMessengerCreateInfo();
         bool checkValidationLayerSupport();
         void createSurface();
         void pickPhysicalDevice();
@@ -90,8 +91,17 @@ namespace musevk {
         vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities);
         void createSwapChain();
 
+        static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+            vk::DebugUtilsMessageSeverityFlagBitsEXT message_severity,
+            vk::DebugUtilsMessageTypeFlagBitsEXT message_type,
+            const vk::DebugUtilsMessengerCallbackDataEXT* callback_data,
+            void* user_data);
+
         const std::vector<const char *> c_validation_layers = {
                 "VK_LAYER_KHRONOS_validation"
+        };
+        const std::vector<const char *> c_validation_extensions = {
+                VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
         };
         const std::vector<const char *> c_instance_extensions = {
                 VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
@@ -125,6 +135,7 @@ namespace musevk {
         std::shared_ptr<CommandQueue> m_command_queue;
 
         vk::Instance m_instance;
+        vk::DebugUtilsMessengerEXT m_debug_messenger;
         vk::PhysicalDevice m_physical_device;
         vk::Device m_logical_device;
         vk::SurfaceKHR m_surface;
