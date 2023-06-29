@@ -9,10 +9,23 @@
 #include <iostream>
 #include <unistd.h>
 #include <fcntl.h>
+#include <cstring>
 #include "InputReader.h"
 #include "MuseTypes.h"
 
 using namespace std;
+
+InputReader::InputReader(const std::string &filename, int sample_rate, bool stop_on_eof)
+        : m_filename(filename),
+          m_stop_on_eof(stop_on_eof),
+          m_input_pll(sample_rate),
+          m_input{},
+          m_file_fd(-1),
+          m_input_buffer{},
+          m_t(0),
+          m_input_buffer_bytes(c_input_buffer_min_read_pos),
+          m_input_buffer_read_pos(c_input_buffer_min_read_pos) {
+}
 
 bool InputReader::initialize() {
 //    auto [samples_to_skip, eq] = compute_initial_skip();
@@ -140,35 +153,40 @@ bool InputReader::readShorts(uint16_t *buffer) {
 }
 
 bool InputReader::readSamples(int sample_count, uint16_t buffer[c_sample_buffer_size], double dt) {
-    double t = m_t;
+    double t = m_t; // always in [0, 1)
+    int read_pos = m_input_buffer_read_pos;
     for (int sample_ix = 0; sample_ix < sample_count; sample_ix++) {
-        double bytes_read = floor(t);
         t += dt;
-        double t1_int = floor(t);
-        while (bytes_read < t1_int) {
-            while (m_input_buffer_read_pos >= m_input_buffer_bytes) {
-                m_input_buffer_bytes = read(m_file_fd, (void *) m_input_buffer, c_input_buffer_size);
-                if (m_input_buffer_bytes == -1)
+        int bytes_to_read = (int)t;
+        t -= bytes_to_read;
+
+        if (read_pos + bytes_to_read >= m_input_buffer_bytes) {
+            // move remaining input to start of buffer
+            int start_copy_pos = read_pos - c_input_buffer_min_read_pos;
+            int n = m_input_buffer_bytes - start_copy_pos;
+            if (n > 0) // 0 first time, and could be later if we have short reads
+                memcpy(m_input_buffer, m_input_buffer + start_copy_pos, n);
+            m_input_buffer_bytes -= start_copy_pos;
+            read_pos = c_input_buffer_min_read_pos;
+
+            do {
+                ssize_t read_count = read(m_file_fd,
+                                          (void *) (m_input_buffer + m_input_buffer_bytes),
+                                          c_input_buffer_size - m_input_buffer_bytes);
+                if (read_count == -1)
                     throw runtime_error("Error reading from file");
-                else if (m_input_buffer_bytes == 0 && m_stop_on_eof) {
+                else if (read_count == 0 && m_stop_on_eof) {
                     return false;
                 }
-                m_input_buffer_read_pos = 0;
-            }
-            uint8_t b = m_input_buffer[m_input_buffer_read_pos++];
-            bytes_read++;
-
-            m_last_written_ix++;
-            if (m_last_written_ix == c_interpolation_buffer_size)
-                m_last_written_ix = 0;
-            m_interpolation_buffer[m_last_written_ix] = b;
+                m_input_buffer_bytes += (int)read_count;
+            } while (read_pos + bytes_to_read >= m_input_buffer_bytes);
         }
-        t -= t1_int;
+        read_pos += bytes_to_read;
 
-        double b0 = (m_interpolation_buffer[(m_last_written_ix + c_interpolation_buffer_size - 3) % c_interpolation_buffer_size] & 0xff);
-        double b1 = (m_interpolation_buffer[(m_last_written_ix + c_interpolation_buffer_size - 2) % c_interpolation_buffer_size] & 0xff);
-        double b2 = (m_interpolation_buffer[(m_last_written_ix + c_interpolation_buffer_size - 1) % c_interpolation_buffer_size] & 0xff);
-        double b3 = (m_interpolation_buffer[m_last_written_ix] & 0xff);
+        double b0 = m_input_buffer[read_pos - 3];
+        double b1 = m_input_buffer[read_pos - 2];
+        double b2 = m_input_buffer[read_pos - 1];
+        double b3 = m_input_buffer[read_pos - 0];
 
         double x = 1 + t;
         // cubic spline though 4 points, f(x) = a0 + a1 x + a2 x(x-1) + a3 x(x-1)(x-2)
@@ -182,5 +200,6 @@ bool InputReader::readSamples(int sample_count, uint16_t buffer[c_sample_buffer_
         buffer[sample_ix] = (uint16_t)(y * MUSE_SHORT_INPUT_MULT);
     }
     m_t = t;
+    m_input_buffer_read_pos = read_pos;
     return true;
 }
