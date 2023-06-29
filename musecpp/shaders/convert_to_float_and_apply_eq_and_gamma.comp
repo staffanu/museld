@@ -20,7 +20,8 @@ layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
     float16_t frame_out[];
 };
 
-#define SWAP_BYTES(a) (((a & 0xffu) << 8) | ((a & 0xff00u) >> 8))
+//#define SWAP_BYTES(a) (((a & 0xffu) << 8) | ((a & 0xff00u) >> 8))
+#define SWAP_BYTES(a) (a)
 
 const float16_t min_value = 16.hf;
 const float16_t max_value = 239.hf;

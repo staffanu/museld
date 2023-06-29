@@ -21,7 +21,6 @@ public:
       m_input_pll(sample_rate),
       m_input{},
       m_file_fd(-1),
-      m_exit_flag(false),
       m_input_buffer{},
       m_t(0),
       m_interpolation_buffer{},
@@ -41,11 +40,12 @@ public:
 //    }
 
 private:
-    uint16_t readSample(double dt);
-
     // We keep a total of c_interpolation_buffer_size values in the input queue for interpolation
+    static constexpr size_t c_sample_buffer_size = 480;
     static constexpr size_t c_input_buffer_size = 16384;
     static constexpr int c_interpolation_buffer_size = 4;
+
+    bool readSamples(int sample_count, uint16_t buffer[c_sample_buffer_size], double dt);
 
     bool readBigEndianToBuffer(std::ifstream &input, float *out, size_t n);
     static bool readShorts(std::ifstream &input, uint16_t *out, size_t n);
@@ -57,7 +57,6 @@ private:
     InputPll m_input_pll;
     std::ifstream m_input;
     int m_file_fd;
-    bool m_exit_flag;
     uint8_t m_input_buffer[c_input_buffer_size];
     int m_input_buffer_bytes;
     int m_input_buffer_read_pos;

@@ -125,25 +125,33 @@ pair<int, pair<float, float>> InputReader::compute_initial_skip() {
 }
 
 bool InputReader::readShorts(uint16_t *buffer) {
-    uint16_t sample;
-    do {
-        sample = readSample(m_input_pll.getInputSamplesPerSample());
-    } while (!m_exit_flag && !m_input_pll.process(sample, buffer));
-    return !m_exit_flag;
+    uint16_t sample_buffer[c_sample_buffer_size];
+    InputPll::PllResult pll_result{};
+    double input_samples_per_sample = m_input_pll.getInputSamplesPerSample();
+    int samples_to_read = 1;
+    while (readSamples(samples_to_read, sample_buffer, input_samples_per_sample)) {
+        pll_result = m_input_pll.process(samples_to_read, sample_buffer, buffer);
+        samples_to_read = pll_result.samples_to_read;
+        input_samples_per_sample = pll_result.input_samples_per_sample;
+        if (pll_result.frame_done)
+            break;
+    }
+    return pll_result.frame_done;
 }
 
-uint16_t InputReader::readSample(double dt) {
-        double t1 = m_t + dt;
-        int t1_int = (int)t1;
-        int bytes_read = (int)m_t;
+bool InputReader::readSamples(int sample_count, uint16_t buffer[c_sample_buffer_size], double dt) {
+    double t = m_t;
+    for (int sample_ix = 0; sample_ix < sample_count; sample_ix++) {
+        double bytes_read = floor(t);
+        t += dt;
+        double t1_int = floor(t);
         while (bytes_read < t1_int) {
             while (m_input_buffer_read_pos >= m_input_buffer_bytes) {
-                m_input_buffer_bytes = read(m_file_fd, (void *)m_input_buffer, c_input_buffer_size);
+                m_input_buffer_bytes = read(m_file_fd, (void *) m_input_buffer, c_input_buffer_size);
                 if (m_input_buffer_bytes == -1)
                     throw runtime_error("Error reading from file");
                 else if (m_input_buffer_bytes == 0 && m_stop_on_eof) {
-                    m_exit_flag = true;
-                    return 0;
+                    return false;
                 }
                 m_input_buffer_read_pos = 0;
             }
@@ -155,15 +163,14 @@ uint16_t InputReader::readSample(double dt) {
                 m_last_written_ix = 0;
             m_interpolation_buffer[m_last_written_ix] = b;
         }
-        double p = t1 - t1_int;
-        m_t = p;
+        t -= t1_int;
 
         double b0 = (m_interpolation_buffer[(m_last_written_ix + c_interpolation_buffer_size - 3) % c_interpolation_buffer_size] & 0xff);
         double b1 = (m_interpolation_buffer[(m_last_written_ix + c_interpolation_buffer_size - 2) % c_interpolation_buffer_size] & 0xff);
         double b2 = (m_interpolation_buffer[(m_last_written_ix + c_interpolation_buffer_size - 1) % c_interpolation_buffer_size] & 0xff);
         double b3 = (m_interpolation_buffer[m_last_written_ix] & 0xff);
 
-        double x = 1 + p;
+        double x = 1 + t;
         // cubic spline though 4 points, f(x) = a0 + a1 x + a2 x(x-1) + a3 x(x-1)(x-2)
         double a0 = b0;
         double a1 = b1 - a0;
@@ -172,5 +179,8 @@ uint16_t InputReader::readSample(double dt) {
         // now evaluate at point 1 + p
         double y = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
 
-        return (uint16_t)y;
+        buffer[sample_ix] = (uint16_t)(y * MUSE_SHORT_INPUT_MULT);
+    }
+    m_t = t;
+    return true;
 }

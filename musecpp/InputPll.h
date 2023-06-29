@@ -14,7 +14,12 @@ public:
     explicit InputPll(int sample_rate);
 
     // returns true if output contains a full output frame
-    bool process(uint16_t sample, uint16_t *output);
+    struct PllResult {
+        bool frame_done;
+        int samples_to_read;
+        double input_samples_per_sample;
+    };
+    PllResult process(int sample_count, const uint16_t samples[], uint16_t *output);
     double getInputSamplesPerSample();
 
 private:
@@ -23,7 +28,7 @@ private:
 
     double m_input_samples_per_sample_ref;
     double m_input_samples_per_sample;
-    double m_Ts; // We think of one m_line as one sample here since we detect the phase once per m_line
+    double m_Ts; // We think of one line as one sample here since we detect the phase once per line
     double m_G1;
     double m_G2;
     double m_GpdGvco;
@@ -37,14 +42,11 @@ private:
     int m_consecutive_good_syncs;
     double m_avg_sample_value;
     int m_missed_line_pulses;
-    uint32_t m_shift_reg[5];
-    int m_shift_reg_last_written_ix;
 
     enum State {
         eSearching, eLocked, eLockedHoriz
     };
     State m_state;
-    State m_prev_state;
     int m_error_sum;
 };
 

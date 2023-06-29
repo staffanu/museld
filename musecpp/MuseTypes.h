@@ -17,6 +17,8 @@
 #define MUSE_Y_BUF_WIDTH 374
 #define MUSE_C_BUF_WIDTH 94
 
+#define MAYBE_SWAP_BYTE_ORDER(x) (x)
+
 template<typename T>
 std::ostream& operator<<(std::ostream& os, std::optional<T> const& opt)
 {
