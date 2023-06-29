@@ -202,12 +202,17 @@ void AudioDecoder::decodeFrame(MuseBuffer &audio_converted_freq,
                 range2ok = m_range_bch_decoder.decode(range2);
 
                 for (int i = 0; i < 16; i++) {
-                    output_samples[sample_count].samples[0] = bModeChannel1Decoder.decodeSample(range1, range1ok, &deinterleave_matrix[i][12], row_ok[i]);
-                    output_samples[sample_count].samples[1] = bModeChannel2Decoder.decodeSample(range2, range2ok, &deinterleave_matrix[i][23], row_ok[i]);
+                    output_samples[sample_count].samples[0] = bModeChannel1Decoder.decodeSample(range1, range1ok, &deinterleave_matrix[i][1], row_ok[i]);
+                    output_samples[sample_count].samples[1] = bModeChannel2Decoder.decodeSample(range2, range2ok, &deinterleave_matrix[i][34], row_ok[i]);
                     sample_count++;
                 }
                 for (int i = 0; i < 16; i++) {
-                    output_samples[sample_count].samples[0] = bModeChannel1Decoder.decodeSample(range1, range1ok, &deinterleave_matrix[i][45], row_ok[i]);
+                    output_samples[sample_count].samples[0] = bModeChannel1Decoder.decodeSample(range1, range1ok, &deinterleave_matrix[i][12], row_ok[i]);
+                    output_samples[sample_count].samples[1] = bModeChannel2Decoder.decodeSample(range2, range2ok, &deinterleave_matrix[i][45], row_ok[i]);
+                    sample_count++;
+                }
+                for (int i = 0; i < 16; i++) {
+                    output_samples[sample_count].samples[0] = bModeChannel1Decoder.decodeSample(range1, range1ok, &deinterleave_matrix[i][23], row_ok[i]);
                     output_samples[sample_count].samples[1] = bModeChannel2Decoder.decodeSample(range2, range2ok, &deinterleave_matrix[i][56], row_ok[i]);
                     sample_count++;
                 }
