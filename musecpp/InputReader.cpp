@@ -7,20 +7,32 @@
 #include <algorithm>
 #include <map>
 #include <iostream>
+#include <unistd.h>
+#include <fcntl.h>
 #include "InputReader.h"
 #include "MuseTypes.h"
 
 using namespace std;
 
 bool InputReader::initialize() {
-    auto [samples_to_skip, eq] = compute_initial_skip();
+//    auto [samples_to_skip, eq] = compute_initial_skip();
 
-    m_input = ifstream(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
-    m_input.exceptions(ifstream::badbit);
+//    m_input = ifstream(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
+//    m_input.exceptions(ifstream::badbit);
 
-    vector<uint16_t> skip_buffer(samples_to_skip);
-    cout << "Skipping " << samples_to_skip << " initial samples" << endl;
-    readShorts(m_input, skip_buffer.data(), samples_to_skip);
+//    for (int i = 0; i < c_interpolation_buffer_size; i++)
+//        m_interpolation_buffer.push_back(0);
+
+//    vector<uint16_t> skip_buffer(samples_to_skip);
+//    cout << "Skipping " << samples_to_skip << " initial samples" << endl;
+//    readShorts(m_input, skip_buffer.data(), samples_to_skip);
+
+    m_file_fd = open(m_filename.c_str(), 0);
+    if (m_file_fd == -1)
+        throw runtime_error("Unable to open file");
+
+    // cout << "Seeking: " << lseek(m_file_fd, 500000 * 3000, SEEK_SET) << endl;
+
     return true;
 }
 
@@ -31,6 +43,11 @@ bool InputReader::readBigEndianToBuffer(ifstream &input, float *out, size_t n) {
         out[i] = (float)ntohs(input_buffer[i]) / MUSE_SHORT_INPUT_MULT;
     }
     return input.good();
+}
+
+InputReader::~InputReader() {
+    if (m_file_fd != -1)
+        close(m_file_fd);
 }
 
 bool InputReader::readShorts(ifstream &input, uint16_t *out, size_t n) {
@@ -55,7 +72,7 @@ pair<int, pair<float, float>> InputReader::compute_initial_skip() {
     for (float &it: equalized)
         it = ((it - eq.second) / eq.first);
 
-    // checks if the line starting at off has a positive or a negative sync
+    // checks if the m_line starting at off has a positive or a negative sync
     auto isSyncGood = [&equalized](int off, bool expectedPositive) {
         bool isPos = equalized[off + 3] < equalized[off + 5] && equalized[off + 5] < equalized[off + 7];
         bool isNeg = equalized[off + 3] > equalized[off + 5] && equalized[off + 5] > equalized[off + 7];
@@ -105,4 +122,55 @@ pair<int, pair<float, float>> InputReader::compute_initial_skip() {
     input.close();
 
     return { bestLineOffset * 480 + bestPixelOffset, eq };
+}
+
+bool InputReader::readShorts(uint16_t *buffer) {
+    uint16_t sample;
+    do {
+        sample = readSample(m_input_pll.getInputSamplesPerSample());
+    } while (!m_exit_flag && !m_input_pll.process(sample, buffer));
+    return !m_exit_flag;
+}
+
+uint16_t InputReader::readSample(double dt) {
+        double t1 = m_t + dt;
+        int t1_int = (int)t1;
+        int bytes_read = (int)m_t;
+        while (bytes_read < t1_int) {
+            while (m_input_buffer_read_pos >= m_input_buffer_bytes) {
+                m_input_buffer_bytes = read(m_file_fd, (void *)m_input_buffer, c_input_buffer_size);
+                if (m_input_buffer_bytes == -1)
+                    throw runtime_error("Error reading from file");
+                else if (m_input_buffer_bytes == 0 && m_stop_on_eof) {
+                    m_exit_flag = true;
+                    return 0;
+                }
+                m_input_buffer_read_pos = 0;
+            }
+            uint8_t b = m_input_buffer[m_input_buffer_read_pos++];
+            bytes_read++;
+
+            m_last_written_ix++;
+            if (m_last_written_ix == c_interpolation_buffer_size)
+                m_last_written_ix = 0;
+            m_interpolation_buffer[m_last_written_ix] = b;
+        }
+        double p = t1 - t1_int;
+        m_t = p;
+
+        double b0 = (m_interpolation_buffer[(m_last_written_ix + c_interpolation_buffer_size - 3) % c_interpolation_buffer_size] & 0xff);
+        double b1 = (m_interpolation_buffer[(m_last_written_ix + c_interpolation_buffer_size - 2) % c_interpolation_buffer_size] & 0xff);
+        double b2 = (m_interpolation_buffer[(m_last_written_ix + c_interpolation_buffer_size - 1) % c_interpolation_buffer_size] & 0xff);
+        double b3 = (m_interpolation_buffer[m_last_written_ix] & 0xff);
+
+        double x = 1 + p;
+        // cubic spline though 4 points, f(x) = a0 + a1 x + a2 x(x-1) + a3 x(x-1)(x-2)
+        double a0 = b0;
+        double a1 = b1 - a0;
+        double a2 = (b2 - a0 - 2 * a1) / 2;
+        double a3 = (b3 - a0 - 3 * a1 - 6 * a2) / 6;
+        // now evaluate at point 1 + p
+        double y = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
+
+        return (uint16_t)y;
 }

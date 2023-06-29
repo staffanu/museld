@@ -158,7 +158,7 @@ int main(int argc, char *argv[]) {
             else {
                 if (!filesystem::exists(*it))
                     throw runtime_error("File not found: " + string(*it));
-                InputReader reader(*it);
+                InputReader reader(*it, 54000000, true);
                 if (!reader.initialize())
                     throw runtime_error("InputReader initialization failed");
                 process_file(executable_dir, reader, decode_all_fields, full_screen, no_sync);

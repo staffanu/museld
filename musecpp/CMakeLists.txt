@@ -10,6 +10,10 @@ find_package(Vulkan REQUIRED)
 SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake-modules" ${CMAKE_MODULE_PATH})
 find_package(PORTAUDIO REQUIRED)
 
+#add_compile_options(-O0 -pg -g)
+#SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Og -pg -g")
+#SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -pg -g")
+
 add_executable(musecpp
         main.cpp
         MuseBuffer.h
@@ -23,6 +27,7 @@ add_executable(musecpp
         MuseDecoder.cpp MuseDecoder.h
         AudioPlayback.cpp AudioPlayback.h
         InputReader.cpp InputReader.h
+        InputPll.cpp InputPll.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandQueue.cpp musevk/CommandQueue.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h
