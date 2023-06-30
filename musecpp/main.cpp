@@ -6,6 +6,8 @@
 #include "MuseTypes.h"
 #include "AudioPlayback.h"
 #include "InputReader.h"
+#include "ResamplingInputReader.h"
+#include "BigEndian16MHzInputReader.h"
 
 using namespace std;
 
@@ -21,6 +23,15 @@ void process_file(const string& executable_dir, InputReader &reader,
     musevk::VulkanManager manager;
     manager.initVulkan(window, no_sync);
     vk::Device &device = manager.getDevice();
+
+    {
+        std::vector<std::shared_ptr<musevk::VulkanBuffer>> input_vulkan_buffers{};
+        for (int i = 0; i < 2; i++)
+            input_vulkan_buffers.push_back(
+                    manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint16_t), true, true));
+        if (!reader.initialize(input_vulkan_buffers))
+            throw runtime_error("InputReader initialization failed");
+    }
 
     vk::SemaphoreCreateInfo semaphoreInfo{};
     vk::FenceCreateInfo fenceInfo{};
@@ -123,6 +134,7 @@ void process_file(const string& executable_dir, InputReader &reader,
     device.destroy(render_finished_semaphore);
     device.destroy(in_flight_fence);
 
+    reader.cleanup();
     manager.cleanup();
 
     audio_playback.cleanup();
@@ -136,16 +148,26 @@ void usage() {
 }
 
 int main(int argc, char *argv[]) {
+    enum InputFormat {
+        eOverSampledBytes,
+        eBigEndianShorts,
+        eUnknown
+    };
     std::string executable(argv[0]);
     std::string executable_dir = executable.substr(0, executable.find_last_of('/'));
     bool decode_all_fields = true;
     bool full_screen = false;
     bool no_sync = false;
+    InputFormat input_format = eUnknown;
 
     try {
         const vector<string> args(argv + 1, argv + argc);
         for (auto it = args.cbegin(), end = args.cend(); it != end; it++) {
-            if (*it == "--full-frames-only")
+            if (*it == "--resample")
+                input_format = eOverSampledBytes;
+            else if (*it == "--big-endian")
+                input_format = eBigEndianShorts;
+            else if (*it == "--full-frames-only")
                 decode_all_fields = false;
             else if (*it == "--all-fields")
                 decode_all_fields = true;
@@ -158,10 +180,19 @@ int main(int argc, char *argv[]) {
             else {
                 if (!filesystem::exists(*it))
                     throw runtime_error("File not found: " + string(*it));
-                InputReader reader(*it, 54000000, true);
-                if (!reader.initialize())
-                    throw runtime_error("InputReader initialization failed");
-                process_file(executable_dir, reader, decode_all_fields, full_screen, no_sync);
+                InputReader *reader;
+                switch (input_format) {
+                    case eOverSampledBytes:
+                        reader = new ResamplingInputReader(*it, 54000000, true);
+                        break;
+                    case eBigEndianShorts:
+                        reader = new BigEndian16MHzInputReader(*it, true);
+                        break;
+                    case eUnknown:
+                    default:
+                        throw runtime_error("No input format specified");
+                }
+                process_file(executable_dir, *reader, decode_all_fields, full_screen, no_sync);
             }
         }
     } catch (const exception &x) {

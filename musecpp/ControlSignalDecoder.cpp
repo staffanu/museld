@@ -38,8 +38,8 @@ ControlSignalDecoder::ControlSignalDecoder(uint16_t const *data, std::pair<float
         for (int col = 7; col < 87; col += 16) { // start of each encoded 4 bit group
             array<int, 8> bits{};
             for (int bit_ix = 0; bit_ix < 8; bit_ix++) {
-                uint8_t d1 = (uint8_t)clamp(((float)MAYBE_SWAP_BYTE_ORDER(data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix]) / MUSE_SHORT_INPUT_MULT - eq.second) / eq.first, 0.0f, 255.0f);
-                uint8_t d2 = (uint8_t)clamp(((float)MAYBE_SWAP_BYTE_ORDER(data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix + 1]) / MUSE_SHORT_INPUT_MULT - eq.second) / eq.first, 0.0f, 255.0f);
+                uint8_t d1 = (uint8_t)clamp(((float)data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix] / MUSE_SHORT_INPUT_MULT - eq.second) / eq.first, 0.0f, 255.0f);
+                uint8_t d2 = (uint8_t)clamp(((float)data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix + 1] / MUSE_SHORT_INPUT_MULT - eq.second) / eq.first, 0.0f, 255.0f);
                 bits[bit_ix] = d1 + d2 > 256 ? 1 : 0;
             }
 

@@ -5,49 +5,36 @@
 #ifndef MUSECPP_INPUTREADER_H
 #define MUSECPP_INPUTREADER_H
 
-#include <cstdint>
-#include <fstream>
-#include <cmath>
-#include <queue>
-#include <optional>
+#include <thread>
+#include <condition_variable>
 #include "InputPll.h"
+#include "musevk/VulkanBuffer.h"
 
 class InputReader {
 public:
-    explicit InputReader(const std::string &filename, int sample_rate, bool stop_on_eof);
+    [[nodiscard]] virtual bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers);
+    virtual void cleanup();
 
-    [[nodiscard]] bool initialize();
+    std::shared_ptr<musevk::VulkanBuffer> getNextInputBuffer();
+    void returnBuffer(std::shared_ptr<musevk::VulkanBuffer> &buffer);
 
-    ~InputReader();
+protected:
+    InputReader(const std::string &filename, bool stop_on_eof);
 
-        // Reads 480 * 1125 unsigned shorts into the given buffer, corresponding to a MUSE frame
-    bool readShorts(uint16_t *buffer);
-//    {
-//        return readShorts(m_input, buffer, 480 * 1125);
-//    }
-
-private:
-    // We keep a total of c_interpolation_buffer_size values in the input queue for interpolation
-    static constexpr size_t c_sample_buffer_size = 480;
-    static constexpr size_t c_input_buffer_size = 1024 * 1024;
-    static constexpr int c_input_buffer_min_read_pos = 3; // we look back 3 bytes
-
-    bool readSamples(int sample_count, uint16_t buffer[c_sample_buffer_size], double dt);
-
-    bool readBigEndianToBuffer(std::ifstream &input, float *out, size_t n);
-    static bool readShorts(std::ifstream &input, uint16_t *out, size_t n);
-    std::pair<int, std::pair<float, float>> compute_initial_skip();
+    virtual void threadFunc() = 0;
 
     std::string m_filename;
     bool m_stop_on_eof;
-    InputPll m_input_pll;
-    std::ifstream m_input;
-    int m_file_fd;
-    uint8_t m_input_buffer[c_input_buffer_size];
-    int m_input_buffer_bytes;
-    int m_input_buffer_read_pos;
+    std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_vacant_muse_input_buffers;
+    std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_filled_muse_input_buffers;
+    bool m_stop_request;
+    bool m_reader_thread_finished;
+    std::mutex m_mutex;
+    std::condition_variable m_cv_filled;
+    std::condition_variable m_cv_vacant;
 
-    double m_t; // the time of the previous read
+private:
+    std::thread *m_reader_thread;
 };
 
 #endif //MUSECPP_INPUTREADER_H

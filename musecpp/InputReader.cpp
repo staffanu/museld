@@ -2,204 +2,59 @@
 // Created by staffanu on 6/25/23.
 //
 
-#include <vector>
-#include <netinet/in.h>
-#include <algorithm>
-#include <map>
-#include <iostream>
-#include <unistd.h>
-#include <fcntl.h>
-#include <cstring>
 #include "InputReader.h"
-#include "MuseTypes.h"
 
 using namespace std;
 
-InputReader::InputReader(const std::string &filename, int sample_rate, bool stop_on_eof)
+InputReader::InputReader(const std::string &filename, bool stop_on_eof)
         : m_filename(filename),
           m_stop_on_eof(stop_on_eof),
-          m_input_pll(sample_rate),
-          m_input{},
-          m_file_fd(-1),
-          m_input_buffer{},
-          m_t(0),
-          m_input_buffer_bytes(c_input_buffer_min_read_pos),
-          m_input_buffer_read_pos(c_input_buffer_min_read_pos) {
+          m_vacant_muse_input_buffers{},
+          m_filled_muse_input_buffers{},
+          m_reader_thread(nullptr),
+          m_reader_thread_finished(false),
+          m_stop_request(false),
+          m_mutex(),
+          m_cv_filled(),
+          m_cv_vacant() {
 }
 
-bool InputReader::initialize() {
-//    auto [samples_to_skip, eq] = compute_initial_skip();
+bool InputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) {
+    for (const auto &b : buffers)
+        m_vacant_muse_input_buffers.push_back(b);
 
-//    m_input = ifstream(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
-//    m_input.exceptions(ifstream::badbit);
-
-//    for (int i = 0; i < c_interpolation_buffer_size; i++)
-//        m_interpolation_buffer.push_back(0);
-
-//    vector<uint16_t> skip_buffer(samples_to_skip);
-//    cout << "Skipping " << samples_to_skip << " initial samples" << endl;
-//    readShorts(m_input, skip_buffer.data(), samples_to_skip);
-
-    m_file_fd = open(m_filename.c_str(), 0);
-    if (m_file_fd == -1)
-        throw runtime_error("Unable to open file");
-
-    // cout << "Seeking: " << lseek(m_file_fd, 500000 * 3000, SEEK_SET) << endl;
+    m_reader_thread = new thread(&InputReader::threadFunc, this);
 
     return true;
 }
 
-bool InputReader::readBigEndianToBuffer(ifstream &input, float *out, size_t n) {
-    uint16_t *input_buffer = (uint16_t *)malloc(480 * 1125 * 2 * sizeof(float));
-    input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(uint16_t));
-    for (int i = 0; i < n; i++) {
-        out[i] = (float)ntohs(input_buffer[i]) / MUSE_SHORT_INPUT_MULT;
+void InputReader::cleanup() {
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_cv_vacant.notify_one();
+        m_stop_request = true;
     }
-    return input.good();
+    m_reader_thread->join();
+    m_vacant_muse_input_buffers.clear();
+    m_filled_muse_input_buffers.clear();
 }
 
-InputReader::~InputReader() {
-    if (m_file_fd != -1)
-        close(m_file_fd);
+shared_ptr<musevk::VulkanBuffer> InputReader::getNextInputBuffer() {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_cv_filled.wait(
+            lock,
+            [this]{return m_reader_thread_finished || !m_filled_muse_input_buffers.empty();});
+
+    if (m_reader_thread_finished)
+        return nullptr;
+
+    auto buffer = m_filled_muse_input_buffers.front();
+    m_filled_muse_input_buffers.pop_front();
+    return buffer;
 }
 
-bool InputReader::readShorts(ifstream &input, uint16_t *out, size_t n) {
-    input.read(reinterpret_cast<char *>(out), n * sizeof(uint16_t));
-    return input.good();
-}
-
-pair<int, pair<float, float>> InputReader::compute_initial_skip() {
-    ifstream input(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
-    input.exceptions(ifstream::badbit);
-    vector<float> buffer(480 * 1125 * 2); // two frames of data
-    readBigEndianToBuffer(input, buffer.data(), 480 * 1125 * 2);
-
-    auto sorted(buffer);
-    sort(sorted.begin(), sorted.end());
-    auto y1 = sorted[500];
-    auto y2 = sorted[480 * 1125 * 2 - 500];
-    pair<float, float> eq = {(y2 - y1) / (239.0f - 16.0f), y1 - 16.0f};
-    cout << "Initial eq: " << eq.first << ", " << eq.second << endl;
-
-    auto equalized(buffer);
-    for (float &it: equalized)
-        it = ((it - eq.second) / eq.first);
-
-    // checks if the m_line starting at off has a positive or a negative sync
-    auto isSyncGood = [&equalized](int off, bool expectedPositive) {
-        bool isPos = equalized[off + 3] < equalized[off + 5] && equalized[off + 5] < equalized[off + 7];
-        bool isNeg = equalized[off + 3] > equalized[off + 5] && equalized[off + 5] > equalized[off + 7];
-        return expectedPositive && isPos || !expectedPositive && isNeg;
-    };
-
-    auto goodSynchsForPixelOffsets = map<int, int>();
-    for (int pixelOffset = 0; pixelOffset < 480; pixelOffset++) {
-        int goodSynchsForLineStarts = 0;
-        for (int startLine = 0; startLine < 2000; startLine += 50) {
-            int goodSynchsPerPhase = 0;
-            for (int phase = 0; phase <= 1; phase++) {
-                int goodSyncs = 0;
-                for (int line = startLine; line < startLine + 50; line++) {
-                    int off = line * 480 + pixelOffset;
-                    if (isSyncGood(off, (line + phase) % 2 == 0))
-                        goodSyncs++;
-                }
-                if (goodSyncs > 47)
-                    goodSynchsPerPhase++;
-            }
-            if (goodSynchsPerPhase != 0)
-                goodSynchsForLineStarts++;
-        }
-        goodSynchsForPixelOffsets[pixelOffset] = goodSynchsForLineStarts;
-    }
-    int bestPixelOffset = max_element(goodSynchsForPixelOffsets.cbegin(), goodSynchsForPixelOffsets.cend(),
-                                      [] (const pair<int, int> & p1, const pair<int, int> & p2) {
-                                          return p1.second < p2.second;
-                                      })->first;
-
-    auto goodnessForLineOffset = map<int, int>();
-    for (int lineOffset = 0; lineOffset < 1125; lineOffset++) {
-        int goodSyncsForOffset = 0;
-        for (int line = 0; line < 1125; line++) {
-            int expectedPosSync = line == 0 || line > 2 && line % 2 == 1;
-            if (isSyncGood((lineOffset + line) * 480 + bestPixelOffset, expectedPosSync))
-                goodSyncsForOffset++;
-        }
-        goodnessForLineOffset[lineOffset] = goodSyncsForOffset;
-    }
-    int bestLineOffset = max_element(goodnessForLineOffset.cbegin(), goodnessForLineOffset.cend(),
-                                     [] (const pair<int, int> & p1, const pair<int, int> & p2) {
-                                         return p1.second < p2.second;
-                                     })->first;
-
-    input.close();
-
-    return { bestLineOffset * 480 + bestPixelOffset, eq };
-}
-
-bool InputReader::readShorts(uint16_t *buffer) {
-    uint16_t sample_buffer[c_sample_buffer_size];
-    InputPll::PllResult pll_result{};
-    double input_samples_per_sample = m_input_pll.getInputSamplesPerSample();
-    int samples_to_read = 1;
-    while (readSamples(samples_to_read, sample_buffer, input_samples_per_sample)) {
-        pll_result = m_input_pll.process(samples_to_read, sample_buffer, buffer);
-        samples_to_read = pll_result.samples_to_read;
-        input_samples_per_sample = pll_result.input_samples_per_sample;
-        if (pll_result.frame_done)
-            break;
-    }
-    return pll_result.frame_done;
-}
-
-bool InputReader::readSamples(int sample_count, uint16_t buffer[c_sample_buffer_size], double dt) {
-    double t = m_t; // always in [0, 1)
-    int read_pos = m_input_buffer_read_pos;
-    for (int sample_ix = 0; sample_ix < sample_count; sample_ix++) {
-        t += dt;
-        int bytes_to_read = (int)t;
-        t -= bytes_to_read;
-
-        if (read_pos + bytes_to_read >= m_input_buffer_bytes) {
-            // move remaining input to start of buffer
-            int start_copy_pos = read_pos - c_input_buffer_min_read_pos;
-            int n = m_input_buffer_bytes - start_copy_pos;
-            if (n > 0) // 0 first time, and could be later if we have short reads
-                memcpy(m_input_buffer, m_input_buffer + start_copy_pos, n);
-            m_input_buffer_bytes -= start_copy_pos;
-            read_pos = c_input_buffer_min_read_pos;
-
-            do {
-                ssize_t read_count = read(m_file_fd,
-                                          (void *) (m_input_buffer + m_input_buffer_bytes),
-                                          c_input_buffer_size - m_input_buffer_bytes);
-                if (read_count == -1)
-                    throw runtime_error("Error reading from file");
-                else if (read_count == 0 && m_stop_on_eof) {
-                    return false;
-                }
-                m_input_buffer_bytes += (int)read_count;
-            } while (read_pos + bytes_to_read >= m_input_buffer_bytes);
-        }
-        read_pos += bytes_to_read;
-
-        double b0 = m_input_buffer[read_pos - 3];
-        double b1 = m_input_buffer[read_pos - 2];
-        double b2 = m_input_buffer[read_pos - 1];
-        double b3 = m_input_buffer[read_pos - 0];
-
-        double x = 1 + t;
-        // cubic spline though 4 points, f(x) = a0 + a1 x + a2 x(x-1) + a3 x(x-1)(x-2)
-        double a0 = b0;
-        double a1 = b1 - a0;
-        double a2 = (b2 - a0 - 2 * a1) / 2;
-        double a3 = (b3 - a0 - 3 * a1 - 6 * a2) / 6;
-        // now evaluate at point 1 + p
-        double y = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
-
-        buffer[sample_ix] = (uint16_t)(y * MUSE_SHORT_INPUT_MULT);
-    }
-    m_t = t;
-    m_input_buffer_read_pos = read_pos;
-    return true;
+void InputReader::returnBuffer(std::shared_ptr<musevk::VulkanBuffer> &buffer) {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_cv_vacant.notify_one();
+    m_vacant_muse_input_buffers.push_back(buffer);
 }

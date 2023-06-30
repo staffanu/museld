@@ -30,14 +30,13 @@ std::pair<float, float> FrameBuffer::EstimateEq(uint16_t const *data) {
     int line_1_high_sum = 0;
     int line_2_low_sum = 0;
     for (int i = 19; i < 259; i++) {
-        line_1_high_sum += MAYBE_SWAP_BYTE_ORDER(data[0 * MUSE_TOTAL_WIDTH + i]);
-        line_2_low_sum += MAYBE_SWAP_BYTE_ORDER(data[1 * MUSE_TOTAL_WIDTH + i]);
+        line_1_high_sum += data[0 * MUSE_TOTAL_WIDTH + i];
+        line_2_low_sum += data[1 * MUSE_TOTAL_WIDTH + i];
     }
     int blanking_sum =  0;
-    for (int i = 127; i < 383; i++) {
-        blanking_sum += MAYBE_SWAP_BYTE_ORDER(data[562 * MUSE_TOTAL_WIDTH + i]) +
-                MAYBE_SWAP_BYTE_ORDER(data[1124 * MUSE_TOTAL_WIDTH + i]);
-    }
+    for (int i = 127; i < 383; i++)
+        blanking_sum += data[562 * MUSE_TOTAL_WIDTH + i] +
+                        data[1124 * MUSE_TOTAL_WIDTH + i];
 
     float avg_high = (float)line_1_high_sum / MUSE_SHORT_INPUT_MULT / 240.0f;
     float avg_low = (float)line_2_low_sum / MUSE_SHORT_INPUT_MULT/ 240.0f;

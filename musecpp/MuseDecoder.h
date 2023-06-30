@@ -41,7 +41,6 @@ private:
     const bool m_benchmark_shaders;
 
     std::pair<float, float> m_eq;
-    std::shared_ptr<musevk::VulkanBuffer> m_input_vulkan_buffer;
     std::shared_ptr<musevk::CommandQueue> m_command_queue;
     musevk::TimestampStatistics m_timestamp_statistics;
     int m_frame_no;

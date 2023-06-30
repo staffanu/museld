@@ -27,7 +27,9 @@ add_executable(musecpp
         MuseDecoder.cpp MuseDecoder.h
         AudioPlayback.cpp AudioPlayback.h
         InputReader.cpp InputReader.h
+        ResamplingInputReader.cpp ResamplingInputReader.h
         InputPll.cpp InputPll.h
+        BigEndian16MHzInputReader.cpp BigEndian16MHzInputReader.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandQueue.cpp musevk/CommandQueue.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h

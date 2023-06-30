@@ -35,8 +35,6 @@ MuseDecoder::~MuseDecoder() {
 }
 
 bool MuseDecoder::initialize() {
-    m_input_vulkan_buffer = m_manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint16_t), true, true);
-
     // Always keep the three latest frames (required for motion detection) -- pretend we have three already
     for (int i = 0; i < 3; i++)
         m_frame_buffers.push_back(new FrameBuffer(-i,
@@ -59,18 +57,20 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
                        size_t &sample_count,
                        AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples]) {
     auto t0 = chrono::high_resolution_clock::now();
+    shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = nullptr;
     if (m_field_index == 0) {
         auto frame_buffer = m_frame_buffers.back();
         frame_buffer->set_frame_no(++m_frame_no);
         m_frame_buffers.pop_back();
         m_frame_buffers.push_front(frame_buffer);
 
-        if (!m_reader.readShorts(m_input_vulkan_buffer->data<uint16_t>())) {
+        input_vulkan_buffer = m_reader.getNextInputBuffer();
+        if (input_vulkan_buffer == nullptr) {
             m_timestamp_statistics.print_stats();
             return false;
         }
 
-        auto eq_estimate = FrameBuffer::EstimateEq(m_input_vulkan_buffer->data<uint16_t>());
+        auto eq_estimate = FrameBuffer::EstimateEq(input_vulkan_buffer->data<uint16_t>());
         if (m_eq.first == -1 && m_eq.second == -1)
             m_eq = eq_estimate;
         else
@@ -80,9 +80,9 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
         // Since we really only need to decode the control data when we process the second field,
         // we should probably delay this until graphics operations are queued. But it is quick.
         if (m_decode_video)
-            frame_buffer->ProcessControlData(m_input_vulkan_buffer->data<uint16_t>(), m_eq);
+            frame_buffer->ProcessControlData(input_vulkan_buffer->data<uint16_t>(), m_eq);
 
-        m_shaders.convertToFloatAndApplyEqAndGamma(*m_command_queue, m_input_vulkan_buffer, frame_buffer->data(), m_eq);
+        m_shaders.convertToFloatAndApplyEqAndGamma(*m_command_queue, input_vulkan_buffer, frame_buffer->data(), m_eq);
 
         m_shaders.convertAudioSampleRate(*m_command_queue, frame_buffer->data());
     }
@@ -98,9 +98,9 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
                 m_frame_buffers[2 - decoded_field_index]->get_field(1 - decoded_field_index),
                 m_frame_buffers[2]->get_field(decoded_field_index)};
 
-        if (m_shaders.decodeInterFrameAndDetectMotion(*m_command_queue, fields)) {
+        if (m_shaders.decodeInterFrameAndDetectMotion(*m_command_queue, fields) || m_frame_no >= 3) {
             cout << "Field " << decoded_field_index << " inter-frame interpolation success" << endl;
-            m_shaders.combineStillAndMovingParts(*m_command_queue, false, false);
+            m_shaders.combineStillAndMovingParts(*m_command_queue, false, true); // false);
         } else {
             cout << "Field " << decoded_field_index << " inter-frame interpolation failed -- using intra-field interpolation"
                  << endl;
@@ -116,6 +116,8 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
     else
         sample_count = 0;
     //m_command_queue->evalAwait();
+    if (input_vulkan_buffer != nullptr)
+        m_reader.returnBuffer(input_vulkan_buffer);
 
     if (m_benchmark_shaders)
         m_timestamp_statistics.add_timestamps(m_command_queue->getTimestamps());
