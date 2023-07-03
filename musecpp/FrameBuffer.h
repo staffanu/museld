@@ -13,7 +13,7 @@
 
 class FrameBuffer {
 public:
-    FrameBuffer(int frame_no, MuseBuffer data);
+    FrameBuffer(Logger &log, int frame_no, MuseBuffer data);
 
     static std::pair<float, float> EstimateEq(uint16_t const *data);
 

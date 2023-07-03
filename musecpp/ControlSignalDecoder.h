@@ -9,14 +9,15 @@
 #include <array>
 #include <optional>
 #include "MuseTypes.h"
+#include "Logger.h"
 
 enum MotionInformation {
     Normal, CompleteStillPicture, SlightlyInMotion, SceneChange, Motion
 };
 
 struct ControlSignalDecoder {
-    explicit ControlSignalDecoder(uint16_t const *data, std::pair<float, float> const &eq);
-    void print_control_data() const;
+    explicit ControlSignalDecoder(Logger &log, uint16_t const *data, std::pair<float, float> const &eq);
+    void log_control_data() const;
     std::optional<int> field_subsampling_phase_Y;
     std::optional<int> horizontal_motion_vector;
     std::optional<int> vertical_motion_vector;
@@ -31,6 +32,8 @@ private:
 
     static std::array<int, 4> multiply(std::array<std::array<int, 8>, 4> m, std::array<int, 8> v);
     static bool is_zero(std::array<int, 4> a);
+
+    Logger &m_log;
 };
 
 

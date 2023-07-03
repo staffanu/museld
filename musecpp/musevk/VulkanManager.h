@@ -7,16 +7,18 @@
 
 #define GLFW_INCLUDE_VULKAN
 #include <string>
+#include <optional>
 #include <GLFW/glfw3.h>
 #include "VulkanBuffer.h"
 #include "CommandQueue.h"
 #include "VulkanImage.h"
+#include "../Logger.h"
 
 namespace musevk {
 
     class VulkanManager {
     public:
-        VulkanManager() = default;
+        VulkanManager(Logger &log);
         VulkanManager(VulkanManager &other) = delete;
         void initVulkan(GLFWwindow *window, bool no_sync);
         void cleanup();
@@ -130,6 +132,7 @@ namespace musevk {
 #else
         const bool enableValidationLayers = true;
 #endif
+        Logger &m_log;
         GLFWwindow *m_window;
         bool m_no_sync;
         std::shared_ptr<CommandQueue> m_command_queue;

@@ -13,7 +13,7 @@
 
 class FieldBufferView {
 public:
-    FieldBufferView(int frame_no, MuseBuffer &data, int field_parity);
+    FieldBufferView(Logger &log, int frame_no, MuseBuffer &data, int field_parity);
 
     void set_frame_no(int frame_no);
     void set_prev_field(FieldBufferView *prev_field);
@@ -31,6 +31,7 @@ public:
     MuseBuffer &m_data;
 
 private:
+    Logger &m_log;
     FieldBufferView *m_prev_field; // for control data access
     std::optional<ControlSignalDecoder> m_control;
 };

@@ -14,6 +14,9 @@
 using namespace std;
 
 namespace musevk {
+    VulkanManager::VulkanManager(Logger &log)
+    : m_log(log) {}
+
     void VulkanManager::initVulkan(GLFWwindow *window, bool no_sync) {
         m_window = window;
         m_no_sync = no_sync;

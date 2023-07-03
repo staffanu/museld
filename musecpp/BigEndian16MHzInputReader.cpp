@@ -4,14 +4,16 @@
 
 #include <netinet/in.h>
 #include <map>
+#include <fmt/format.h>
 #include "MuseTypes.h"
 #include "BigEndian16MHzInputReader.h"
 
 using namespace std;
 
 BigEndian16MHzInputReader::BigEndian16MHzInputReader(
-        const std::string &filename, bool stop_on_eof)
-        : InputReader(filename, stop_on_eof),
+        Logger &log,
+        const std::string &filename, bool input_is_fifo)
+        : InputReader(log, filename, input_is_fifo),
         m_input{} {
 }
 
@@ -22,7 +24,7 @@ bool BigEndian16MHzInputReader::initialize(std::vector<std::shared_ptr<musevk::V
     m_input.exceptions(ifstream::badbit);
 
     vector<uint16_t> skip_buffer(samples_to_skip);
-    cout << "Skipping " << samples_to_skip << " initial samples" << endl;
+    m_log.info(eInput, fmt::format("Skipping {} initial samples", samples_to_skip));
     readShorts(m_input, skip_buffer.data(), samples_to_skip);
 
     return InputReader::initialize(buffers);

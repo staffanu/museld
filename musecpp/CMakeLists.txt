@@ -4,6 +4,7 @@ project(musecpp)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+find_package(fmt REQUIRED)
 find_package(glfw3 3.3 REQUIRED)
 find_package(Vulkan REQUIRED)
 
@@ -16,6 +17,7 @@ find_package(PORTAUDIO REQUIRED)
 
 add_executable(musecpp
         main.cpp
+        Logger.cpp Logger.h
         MuseBuffer.h
         FrameBuffer.cpp FrameBuffer.h
         FieldBufferView.cpp FieldBufferView.h
@@ -43,6 +45,7 @@ target_link_libraries(musecpp
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
+        PRIVATE fmt::fmt
         )
 
 set(GLSLC "glslc")

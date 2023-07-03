@@ -8,10 +8,11 @@
 #include <cstdint>
 #include <cmath>
 #include <deque>
+#include "Logger.h"
 
 class InputPll {
 public:
-    explicit InputPll(int sample_rate);
+    explicit InputPll(Logger &log, double sample_rate);
 
     // returns true if output contains a full output frame
     struct PllResult {
@@ -26,6 +27,7 @@ private:
     static double c_omega; // undamped frequency
     static double c_zeta; // damping factor
 
+    Logger &m_log;
     double m_input_samples_per_sample_ref;
     double m_input_samples_per_sample;
     double m_Ts; // We think of one line as one sample here since we detect the phase once per line

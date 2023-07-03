@@ -9,8 +9,9 @@
 using namespace std;
 
 FieldBufferView::FieldBufferView(
-        int frame_no, MuseBuffer &data, int field_parity)
-: m_frame_no(frame_no),
+        Logger &log, int frame_no, MuseBuffer &data, int field_parity)
+: m_log(log),
+  m_frame_no(frame_no),
   m_data(data),
   m_field_parity(field_parity),
   m_control(nullopt),
@@ -26,7 +27,7 @@ void FieldBufferView::set_prev_field(FieldBufferView *prev_field) {
 }
 
 void FieldBufferView::ProcessControlData(uint16_t const *control_data, std::pair<float, float> const &eq) {
-    m_control = optional(ControlSignalDecoder(control_data, eq));
+    m_control.emplace(ControlSignalDecoder(m_log, control_data, eq));
 }
 
 shared_ptr<musevk::VulkanBuffer> FieldBufferView::getVulkanBuffer() {

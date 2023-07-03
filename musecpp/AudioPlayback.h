@@ -11,7 +11,7 @@
 
 class AudioPlayback {
 public:
-    AudioPlayback();
+    AudioPlayback(Logger &log);
     void add_samples(
             AudioDecoder::AudioMode &audio_mode,
             size_t &sample_count,
@@ -24,6 +24,7 @@ private:
     static constexpr double c_audio_buffer_speed_adjust_constant = 1e-6;
     static constexpr double c_audio_buffer_max_speed_adjust = 0.01;
 
+    Logger &m_log;
     AudioDecoder::AudioFrame m_audio_buffer[c_audio_buffer_size];
     std::atomic<int> m_next_audio_buffer_write_ix;
     std::atomic<int> m_next_audio_buffer_read_ix;

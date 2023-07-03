@@ -10,10 +10,10 @@
 
 using namespace std;
 
-FrameBuffer::FrameBuffer(int frame_no, MuseBuffer data)
+FrameBuffer::FrameBuffer(Logger &log, int frame_no, MuseBuffer data)
 : m_frame_no(frame_no),
   m_data(std::move(data)),
-  m_fields({FieldBufferView(frame_no, m_data, 0), FieldBufferView(frame_no, m_data, 1) }) {
+  m_fields({FieldBufferView(log, frame_no, m_data, 0), FieldBufferView(log, frame_no, m_data, 1) }) {
 }
 
 void FrameBuffer::set_frame_no(int frame_no) {

@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include "InputPll.h"
 #include "musevk/VulkanBuffer.h"
+#include "Logger.h"
 
 class InputReader {
 public:
@@ -19,12 +20,12 @@ public:
     void returnBuffer(std::shared_ptr<musevk::VulkanBuffer> &buffer);
 
 protected:
-    InputReader(const std::string &filename, bool stop_on_eof);
+    InputReader(Logger &log, const std::string &filename, bool input_is_fifo);
 
     virtual void threadFunc() = 0;
 
+    Logger &m_log;
     std::string m_filename;
-    bool m_stop_on_eof;
     std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_vacant_muse_input_buffers;
     std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_filled_muse_input_buffers;
     bool m_stop_request;

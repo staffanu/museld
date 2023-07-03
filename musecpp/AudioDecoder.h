@@ -11,6 +11,7 @@
 #include <string>
 #include "BchDecoder.h"
 #include "AudioChannelDecoder.h"
+#include "Logger.h"
 
 class MuseBuffer;
 
@@ -24,7 +25,7 @@ public:
         int16_t samples[4];
     };
 
-    AudioDecoder();
+    AudioDecoder(Logger &log);
 
     // output samples are written to the first two or all four channels depending on the detected mode
     void decodeFrame(MuseBuffer &audio_converted_freq,
@@ -40,6 +41,7 @@ private:
     static const std::array<std::array<bool, 3>, 8> c_symbol_bits;
     static const std::array<bool, 16> c_sync_pattern;
 
+    Logger &m_log;
     bool m_deinterleave_data[c_deinterleave_buffer_size];
     int m_deinterleave_buffer_start; // start of circular buffer
     int m_total_deinterleaved_bits;

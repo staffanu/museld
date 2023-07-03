@@ -2,9 +2,8 @@
 // Created by staffanu on 6/25/23.
 //
 
-#include <iostream>
-#include <optional>
 #include <cassert>
+#include <fmt/format.h>
 #include "InputPll.h"
 #include "MuseTypes.h"
 
@@ -13,8 +12,9 @@ using namespace std;
 double InputPll::c_omega = 2 * M_PI * 5000 / 54e6;
 double InputPll::c_zeta = 0.75;
 
-InputPll::InputPll(int sample_rate)
-: m_input_samples_per_sample_ref(sample_rate / 16.2e6),
+InputPll::InputPll(Logger &log, double sample_rate)
+: m_log(log),
+  m_input_samples_per_sample_ref(sample_rate / 16.2e6),
   m_input_samples_per_sample(m_input_samples_per_sample_ref),
   m_Ts(m_input_samples_per_sample_ref * 480),
   m_G1(1 - exp(-2 * c_zeta * c_omega * m_Ts)),
@@ -32,7 +32,7 @@ InputPll::InputPll(int sample_rate)
   m_missed_line_pulses(0),
   m_state(eSearching),
   m_error_sum(0) {
-    cout << "m_g1=" << m_g1 << " m_g2=" << m_g2 << endl;
+    m_log.info(eInput, fmt::format("m_g1={:.4f} m_g2={:.4f}", m_g1, m_g2));
 }
 
 InputPll::PllResult InputPll::process(int sample_count, const uint16_t samples[], uint16_t *output) {
@@ -63,7 +63,7 @@ InputPll::PllResult InputPll::process(int sample_count, const uint16_t samples[]
             } else if (m_pixel == 480) {
                 if (m_state == eLockedHoriz && m_line1_frame_pulse_sum > 3000 *
                                                                          MUSE_SHORT_INPUT_MULT) { // TODO: maybe adjust or make threshold dynamic
-                    cout << "New state eLocked at line " << m_line << endl;
+                    m_log.info(eInput, fmt::format("New state eLocked at line {}", m_line));
                     m_line = 1;
                     m_state = eLocked;
                 }
@@ -75,7 +75,7 @@ InputPll::PllResult InputPll::process(int sample_count, const uint16_t samples[]
                         if (m_missed_line_pulses < 3)
                             m_missed_line_pulses += 1;
                         else {
-                            cout << "New state eSearching at line " << m_line << endl;
+                            m_log.warn(eInput, fmt::format("New state eSearching at line {}", m_line));
                             m_state = eSearching;
                         }
                     }
@@ -106,7 +106,7 @@ InputPll::PllResult InputPll::process(int sample_count, const uint16_t samples[]
                 m_consecutive_good_syncs = m_sync_is_good ? m_consecutive_good_syncs + 1 :
                                            m_consecutive_good_syncs >= 2 ? m_consecutive_good_syncs - 2 : 0;
                 if (m_consecutive_good_syncs >= 50) {
-                    cout << "New state eLockedHoriz at line " << m_line << endl;
+                    m_log.info(eInput, fmt::format("New state eLockedHoriz at line {}", m_line));
                     m_state = eLockedHoriz;
                 }
             }
@@ -116,7 +116,7 @@ InputPll::PllResult InputPll::process(int sample_count, const uint16_t samples[]
                 m_error_sum = 0;
                 m_input_samples_per_sample = m_input_samples_per_sample_ref;
 
-                cout << "New state eSearching at line " << m_line << endl;
+                m_log.info(eInput, fmt::format("New state eSearching at line {}", m_line));
                 m_state = eSearching; // TODO: add to VHDL
                 m_line = 3;
                 m_pixel = 263; // "random", start search from new position

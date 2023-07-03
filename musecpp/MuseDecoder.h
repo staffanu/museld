@@ -10,6 +10,7 @@
 #include "AudioDecoder.h"
 #include "musevk/TimestampStatistics.h"
 #include "InputReader.h"
+#include "Logger.h"
 
 class FrameBuffer;
 
@@ -18,7 +19,8 @@ public:
     /// \param decode_all_fields If false, skips decoding of the first field of each
     /// frame individually, so next should be called 30 times per second instead of 60;
     /// useful for slow hardware.
-    MuseDecoder(InputReader &reader,
+    MuseDecoder(Logger &log,
+                InputReader &reader,
                 Shaders &shaders,
                 musevk::VulkanManager &manager,
                 bool decode_video,
@@ -32,6 +34,7 @@ public:
               AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples]);
 
 private:
+    Logger &m_log;
     InputReader &m_reader;
     Shaders &m_shaders;
     musevk::VulkanManager &m_manager;

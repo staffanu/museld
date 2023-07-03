@@ -11,6 +11,7 @@
 #include "MuseBuffer.h"
 #include "musevk/VulkanImage.h"
 #include "musevk/CommandQueue.h"
+#include "Logger.h"
 
 namespace musevk {
     class VulkanManager;
@@ -21,7 +22,7 @@ class Shaders {
 public:
     static std::vector<uint32_t> loadSpirv(std::string const &executable_dir, std::string const &filename);
 
-    Shaders(std::string const &executable_dir, musevk::VulkanManager &manager);
+    Shaders(Logger &log, std::string const &executable_dir, musevk::VulkanManager &manager);
 
     Shaders(Shaders &other) = delete;
     void operator=(const Shaders &) = delete;
@@ -69,6 +70,7 @@ private:
                                         FieldBufferView &field_b, unsigned int field_b_frame_phase_y,
                                         unsigned int fields_parity, unsigned int fields_phases);
 
+    Logger &m_log;
     musevk::VulkanManager &m_vulkan_manager;
 
     std::vector<uint32_t> m_convert_to_float_and_apply_eq_and_gamma_spriv;

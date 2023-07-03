@@ -3,6 +3,7 @@
 //
 
 #include <cassert>
+#include <fmt/format.h>
 #include "AudioPlayback.h"
 
 using namespace std;
@@ -13,8 +14,9 @@ int AudioPlayback::audio_callback(const void *input_buffer, void *output_buffer,
     return ((AudioPlayback *)userData)->audioCallbackMember(output_buffer, frames_per_buffer, time_info, status_flags);
 }
 
-AudioPlayback::AudioPlayback()
-: m_audio_buffer{},
+AudioPlayback::AudioPlayback(Logger &log)
+: m_log(log),
+  m_audio_buffer{},
   m_next_audio_buffer_write_ix(0),
   m_next_audio_buffer_read_ix(0),
   m_audio_speed_adjust(0),
@@ -64,7 +66,7 @@ void AudioPlayback::add_samples(AudioDecoder::AudioMode &audio_mode, size_t &sam
         else
             m_audio_speed_adjust = 0;
 
-        cout << "Audio buffer size: " << audio_buffer_size << ", adjustment: " << m_audio_speed_adjust << endl;
+        m_log.info(eAudio, fmt::format("Audio buffer size: {}, adjustment: ", audio_buffer_size, m_audio_speed_adjust));
     }
 
     for (int i = 0; i < sample_count; i++) {
@@ -107,8 +109,8 @@ void AudioPlayback::openStream() {
     PaDeviceIndex device_index = Pa_GetDefaultOutputDevice();
     auto *info = Pa_GetDeviceInfo(device_index);
     m_channels_used = min(m_current_mode == AudioDecoder::MODE_A ? 4 : 2, info->maxOutputChannels);
-    cout << "Using device " << info->name << ": maximum " << info->maxOutputChannels << " output channels, "
-         << m_channels_used << " used." << endl;
+    m_log.info(eAudio, fmt::format("Using device {}: maximum {} output channels, {} used.",
+                                   info->name, info->maxOutputChannels, m_channels_used));
 
     PaStreamParameters parameters {
         device_index,

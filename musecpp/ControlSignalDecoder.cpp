@@ -7,6 +7,7 @@
 #include <vector>
 #include <functional>
 #include <cassert>
+#include <sstream>
 #include "MuseTypes.h"
 #include "ControlSignalDecoder.h"
 
@@ -31,7 +32,8 @@ map<array<int, 4>, int> ControlSignalDecoder::s_H_column_index = [] {
     return ix;
 }();
 
-ControlSignalDecoder::ControlSignalDecoder(uint16_t const *data, std::pair<float, float> const &eq) {
+ControlSignalDecoder::ControlSignalDecoder(Logger &log, uint16_t const *data, std::pair<float, float> const &eq)
+: m_log(log) {
     auto groups = vector<pair<array<int, 4>, bool>>();
     groups.reserve(25);
     for (int row = 0; row < 5; row++) {
@@ -149,12 +151,13 @@ ControlSignalDecoder::ControlSignalDecoder(uint16_t const *data, std::pair<float
     }
 }
 
-void ControlSignalDecoder::print_control_data() const {
-    cout << "phases (fieldY frameY frameC) = "
+void ControlSignalDecoder::log_control_data() const {
+    ostringstream ss;
+    ss << "phases (fieldY frameY frameC) = "
          << field_subsampling_phase_Y << frame_subsampling_phase_Y << frame_subsampling_phase_C
          << ", hVector=" << horizontal_motion_vector << ", vVector=" << vertical_motion_vector
-         << ", motion=" << motion_information << ", extent=" << motion_extent << endl;
-
+         << ", motion=" << motion_information << ", extent=" << motion_extent;
+    m_log.info(eVideo, ss.str());
 }
 
 std::array<int, 4> ControlSignalDecoder::multiply(std::array<std::array<int, 8>, 4> m, std::array<int, 8> v) {

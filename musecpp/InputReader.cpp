@@ -2,13 +2,14 @@
 // Created by staffanu on 6/25/23.
 //
 
+#include <fmt/format.h>
 #include "InputReader.h"
 
 using namespace std;
 
-InputReader::InputReader(const std::string &filename, bool stop_on_eof)
-        : m_filename(filename),
-          m_stop_on_eof(stop_on_eof),
+InputReader::InputReader(Logger &log, const std::string &filename, bool input_is_fifo)
+        : m_log(log),
+          m_filename(filename),
           m_vacant_muse_input_buffers{},
           m_filled_muse_input_buffers{},
           m_reader_thread(nullptr),
@@ -40,10 +41,13 @@ void InputReader::cleanup() {
 }
 
 shared_ptr<musevk::VulkanBuffer> InputReader::getNextInputBuffer() {
+    m_log.debug(eInput, fmt::format("getNextInputBuffer: acquiring lock"));
     std::unique_lock<std::mutex> lock(m_mutex);
+    m_log.debug(eInput, fmt::format("getNextInputBuffer: {} buffers filled", m_filled_muse_input_buffers.size()));
     m_cv_filled.wait(
             lock,
             [this]{return m_reader_thread_finished || !m_filled_muse_input_buffers.empty();});
+    m_log.debug(eInput, fmt::format("getNextInputBuffer: waited: {} buffers filled", m_filled_muse_input_buffers.size()));
 
     if (m_reader_thread_finished)
         return nullptr;
@@ -54,7 +58,9 @@ shared_ptr<musevk::VulkanBuffer> InputReader::getNextInputBuffer() {
 }
 
 void InputReader::returnBuffer(std::shared_ptr<musevk::VulkanBuffer> &buffer) {
+    m_log.debug(eInput, fmt::format("returnBuffer: acquiring lock"));
     std::unique_lock<std::mutex> lock(m_mutex);
+    m_log.debug(eInput, fmt::format("returnBuffer: locked"));
     m_cv_vacant.notify_one();
     m_vacant_muse_input_buffers.push_back(buffer);
 }

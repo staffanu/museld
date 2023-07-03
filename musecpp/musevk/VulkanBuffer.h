@@ -7,8 +7,6 @@
 
 #include <vulkan/vulkan.hpp>
 #include <memory>
-#include <iostream>
-#include <optional>
 #include "VulkanMemoryObject.h"
 
 namespace musevk {

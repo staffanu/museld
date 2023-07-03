@@ -1,5 +1,5 @@
-#include <iostream>
 #include <filesystem>
+#include <fmt/format.h>
 #include "Shaders.h"
 #include "MuseDecoder.h"
 #include "musevk/VulkanManager.h"
@@ -8,10 +8,11 @@
 #include "InputReader.h"
 #include "ResamplingInputReader.h"
 #include "BigEndian16MHzInputReader.h"
+#include "Logger.h"
 
 using namespace std;
 
-void process_file(const string& executable_dir, InputReader &reader,
+void process_file(Logger &log, const string& executable_dir, InputReader &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync) {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -20,7 +21,7 @@ void process_file(const string& executable_dir, InputReader &reader,
                                           "MUSE", full_screen ? glfwGetPrimaryMonitor() : nullptr, nullptr);
     glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
 
-    musevk::VulkanManager manager;
+    musevk::VulkanManager manager(log);
     manager.initVulkan(window, no_sync);
     vk::Device &device = manager.getDevice();
 
@@ -40,7 +41,7 @@ void process_file(const string& executable_dir, InputReader &reader,
     auto render_finished_semaphore = device.createSemaphore(semaphoreInfo);
     auto in_flight_fence = device.createFence(fenceInfo);
 
-    AudioPlayback audio_playback;
+    AudioPlayback audio_playback(log);
 
     AudioDecoder::AudioMode audio_mode;
     size_t audio_sample_count;
@@ -50,8 +51,9 @@ void process_file(const string& executable_dir, InputReader &reader,
         auto queue = manager.createCommandQueue(
                 std::vector{vk::Semaphore(image_available_semaphore)},
                 std::vector{vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe)});
-        Shaders shaders(executable_dir, manager);
-        auto decoder = MuseDecoder(reader,
+        Shaders shaders(log, executable_dir, manager);
+        auto decoder = MuseDecoder(log,
+                                   reader,
                                    shaders,
                                    manager,
                                    true, // decode_video
@@ -126,8 +128,10 @@ void process_file(const string& executable_dir, InputReader &reader,
         };
         auto t1 = chrono::high_resolution_clock::now();
         auto time_us = (double) chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
-        cout << "Avg " << setprecision(3) << (time_us / 1000.0 / field_count * 2) << " ms/frame"
-             << " (" << setprecision(3) << 1000000.0 / time_us * field_count / 2 << " frames/s)" << endl;
+        log.info(eApplication | ePerformance,
+            fmt::format("Avg {:.3f} ms/frame ({:.3f} frames/s)",
+                        time_us / 1000.0 / field_count * 2,
+                        1000000.0 / time_us * field_count / 2));
     }
 
     device.destroy(image_available_semaphore);
@@ -148,8 +152,11 @@ void usage() {
 }
 
 int main(int argc, char *argv[]) {
+    Logger log(eDebug, eApplication | ePerformance | eAudio | eVideo | eDecoder | eInput);
+    //Logger log(eDebug, eInput);
     enum InputFormat {
-        eOverSampledBytes,
+        eOverSampledUnsignedBytes,
+        eOverSampledSignedShortsLittleEndian,
         eBigEndianShorts,
         eUnknown
     };
@@ -159,14 +166,22 @@ int main(int argc, char *argv[]) {
     bool full_screen = false;
     bool no_sync = false;
     InputFormat input_format = eUnknown;
+    double input_sample_frequency = 40e6;
+    bool input_is_fifo = false;
 
     try {
         const vector<string> args(argv + 1, argv + argc);
         for (auto it = args.cbegin(), end = args.cend(); it != end; it++) {
-            if (*it == "--resample")
-                input_format = eOverSampledBytes;
+            if (*it == "--resample-bytes")
+                input_format = eOverSampledUnsignedBytes;
+            else if (*it == "--resample-shorts")
+                input_format = eOverSampledSignedShortsLittleEndian;
+            else if (*it == "--sample-freq")
+                input_sample_frequency = stod(*(++it));
             else if (*it == "--big-endian")
                 input_format = eBigEndianShorts;
+            else if (*it == "--fifo")
+                input_is_fifo = true;
             else if (*it == "--full-frames-only")
                 decode_all_fields = false;
             else if (*it == "--all-fields")
@@ -182,21 +197,30 @@ int main(int argc, char *argv[]) {
                     throw runtime_error("File not found: " + string(*it));
                 InputReader *reader;
                 switch (input_format) {
-                    case eOverSampledBytes:
-                        reader = new ResamplingInputReader(*it, 54000000, true);
+                    case eOverSampledUnsignedBytes:
+                        reader = new ResamplingInputReader(
+                                log, *it,
+                                ResamplingInputReader::InputFormat::eUnsignedByte,
+                                input_sample_frequency, input_is_fifo);
+                        break;
+                    case eOverSampledSignedShortsLittleEndian:
+                        reader = new ResamplingInputReader(
+                                log, *it,
+                                ResamplingInputReader::InputFormat::eSignedShortLittleEndian,
+                                input_sample_frequency, input_is_fifo);
                         break;
                     case eBigEndianShorts:
-                        reader = new BigEndian16MHzInputReader(*it, true);
+                        reader = new BigEndian16MHzInputReader(log, *it, true);
                         break;
                     case eUnknown:
                     default:
                         throw runtime_error("No input format specified");
                 }
-                process_file(executable_dir, *reader, decode_all_fields, full_screen, no_sync);
+                process_file(log, executable_dir, *reader, decode_all_fields, full_screen, no_sync);
             }
         }
     } catch (const exception &x) {
-        cerr << "musecpp: " << x.what() << '\n';
+        log.error(eApplication, x.what());
         return EXIT_FAILURE;
     }
 

@@ -3,9 +3,9 @@
 //
 
 #include <string>
-#include <iostream>
 #include <map>
 #include <chrono>
+#include <fmt/format.h>
 #include "MuseTypes.h"
 #include "MuseDecoder.h"
 #include "FrameBuffer.h"
@@ -14,9 +14,10 @@
 using namespace std;
 
 MuseDecoder::MuseDecoder(
-        InputReader &reader, Shaders &shaders, musevk::VulkanManager &manager,
+        Logger &log, InputReader &reader, Shaders &shaders, musevk::VulkanManager &manager,
         bool decode_video, bool decode_all_fields, bool decode_audio, bool benchmark_shaders)
-: m_reader(reader),
+: m_log(log),
+  m_reader(reader),
   m_shaders(shaders),
   m_manager(manager),
   m_decode_video(decode_video),
@@ -24,7 +25,8 @@ MuseDecoder::MuseDecoder(
   m_decode_audio(decode_audio),
   m_benchmark_shaders(benchmark_shaders),
   m_eq{-1, -1},
-  m_command_queue(m_manager.createCommandQueue({}, {}, benchmark_shaders ? 40 : 0)) {
+  m_command_queue(m_manager.createCommandQueue({}, {}, benchmark_shaders ? 40 : 0)),
+  m_audio_decoder(log) {
 }
 
 MuseDecoder::~MuseDecoder() {
@@ -37,7 +39,7 @@ MuseDecoder::~MuseDecoder() {
 bool MuseDecoder::initialize() {
     // Always keep the three latest frames (required for motion detection) -- pretend we have three already
     for (int i = 0; i < 3; i++)
-        m_frame_buffers.push_back(new FrameBuffer(-i,
+        m_frame_buffers.push_back(new FrameBuffer(m_log, -i,
                                                   m_shaders.createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)));
 
     for (int i = 0; i < 3; i++)
@@ -75,7 +77,7 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
             m_eq = eq_estimate;
         else
             m_eq = {m_eq.first * 0.9 + eq_estimate.first * 0.1, m_eq.second * 0.9 + eq_estimate.second * 0.1};
-        cout << "eq: " << m_eq.first << ", " << m_eq.second << endl;
+        m_log.info(eDecoder, fmt::format("eq: {}, {}", m_eq.first, m_eq.second));
 
         // Since we really only need to decode the control data when we process the second field,
         // we should probably delay this until graphics operations are queued. But it is quick.
@@ -99,11 +101,10 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
                 m_frame_buffers[2]->get_field(decoded_field_index)};
 
         if (m_shaders.decodeInterFrameAndDetectMotion(*m_command_queue, fields) || m_frame_no >= 3) {
-            cout << "Field " << decoded_field_index << " inter-frame interpolation success" << endl;
+            m_log.debug(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation success", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_command_queue, false, true); // false);
         } else {
-            cout << "Field " << decoded_field_index << " inter-frame interpolation failed -- using intra-field interpolation"
-                 << endl;
+            m_log.warn(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_command_queue, true, false);
         }
     }
@@ -125,7 +126,9 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
     auto t1 = chrono::high_resolution_clock::now();
     long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
     m_total_elapsed_time_us += time_us;
-    cout << "Field elapsed time " << time_us / 1000 << " ms; " << (m_total_elapsed_time_us / 1000 / m_frame_no) << " ms/frame" << endl;
+    m_log.info(ePerformance | eVideo, fmt::format("Field elapsed time {} ms; {} ms/frame",
+                                                  time_us / 1000,
+                                                  m_total_elapsed_time_us / 1000 / m_frame_no));
 
     m_field_index = m_decode_all_fields ? (m_field_index + 1) % 2 : 0;
 

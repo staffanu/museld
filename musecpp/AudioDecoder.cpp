@@ -4,6 +4,7 @@
 
 #include <ostream>
 #include <bitset>
+#include <fmt/format.h>
 #include "AudioDecoder.h"
 #include "MuseBuffer.h"
 #include "musevk/HalfFloatUtil.h"
@@ -26,8 +27,9 @@ const std::array<bool, 16> AudioDecoder::c_sync_pattern = {
         false, true, false, true, true, true, true, false
 };
 
-AudioDecoder::AudioDecoder()
-: m_deinterleave_data{},
+AudioDecoder::AudioDecoder(Logger &log)
+: m_log(log),
+  m_deinterleave_data{},
   m_deinterleave_buffer_start(0),
   m_total_deinterleaved_bits(0),
   m_q(0),
@@ -75,7 +77,7 @@ void AudioDecoder::decodeFrame(MuseBuffer &audio_converted_freq,
                     second_closest = {i, dist};
             }
 
-            if (abs(closest.second - second_closest.second) > 20) {
+            if (abs(closest.second - second_closest.second) > 40) {
                 pair<float, float> prev_location = m_symbol_locations[closest.first];
                 float new_x = (prev_location.first * 15 + xin) / 16;
                 float new_y = (prev_location.second * 15 + yin) / 16;
@@ -103,7 +105,7 @@ void AudioDecoder::decodeFrame(MuseBuffer &audio_converted_freq,
     while (m_queue.size() >= 1350) {
         if (m_consecutive_failed_syncs > 2) {
             if (!printed_searching) {
-                cout << "searching for sync pattern" << endl;
+                m_log.info(eAudio, "searching for sync pattern");
                 printed_searching = true;
             }
             auto ix = search(m_queue.cbegin(), m_queue.cend(), c_sync_pattern.cbegin(), c_sync_pattern.cend());
@@ -116,7 +118,7 @@ void AudioDecoder::decodeFrame(MuseBuffer &audio_converted_freq,
         } else {
             if (!equal(m_queue.cbegin(), m_queue.cbegin() + 16, c_sync_pattern.cbegin())) {
                 m_consecutive_failed_syncs++;
-                cout << "Sync pattern not recognized!" << endl;
+                m_log.warn(eAudio, "Sync pattern not recognized!");
             } else {
                 m_consecutive_failed_syncs = 0;
             }
@@ -141,13 +143,13 @@ void AudioDecoder::decodeFrame(MuseBuffer &audio_converted_freq,
             })->first;
             if (majority != m_active_control_signal) {
                 m_active_control_signal = majority;
-                cout << "audio control signal now: " << bitset<22>(m_active_control_signal) << endl;
+                m_log.info(eAudio, fmt::format("audio control signal now: {}", bitset<22>(m_active_control_signal).to_string()));
                 auto mode = detectModeFromControlData(majority);
                 if (mode != m_active_audio_mode) {
                     m_active_audio_mode = mode;
                     audio_mode = mode;
                     sample_count = 0;
-                    cout << "audio mode now: " << m_active_audio_mode << endl;
+                    m_log.info(eAudio, fmt::format("audio mode now: {}", m_active_audio_mode));
                 }
             }
 
@@ -217,7 +219,7 @@ void AudioDecoder::decodeFrame(MuseBuffer &audio_converted_freq,
                     sample_count++;
                 }
             } else
-                cout << "Unknown audio mode" << endl;
+                m_log.warn(eAudio, "Unknown audio mode");
         }
     }
 }

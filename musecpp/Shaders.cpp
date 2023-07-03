@@ -4,7 +4,7 @@
 
 #include <stdexcept>
 #include <fstream>
-#include <iostream>
+#include <fmt/format.h>
 #include "MuseTypes.h"
 #include "MuseBuffer.h"
 #include "Shaders.h"
@@ -24,8 +24,9 @@ vector<uint32_t> Shaders::loadSpirv(string const &executable_dir, string const &
     return {(uint32_t*)buffer.data(), (uint32_t*)(buffer.data() + buffer.size())};
 }
 
-Shaders::Shaders(std::string const &executable_dir, VulkanManager &manager)
-: m_vulkan_manager(manager),
+Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &manager)
+: m_log(log),
+  m_vulkan_manager(manager),
   m_interpolated32_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
   m_intermediate_r_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_intermediate_b_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
@@ -190,9 +191,9 @@ void Shaders::convertToFloatAndApplyEqAndGamma(
 }
 
 void Shaders::decodeIntraField(CommandQueue &sq, FieldBufferView &field) {
-    cout << "Decoding frame " << field.m_frame_no << " field " << field.m_field_parity << endl;
+    m_log.info(eVideo, fmt::format("Decoding frame {} field {}", field.m_frame_no, field.m_field_parity));
     if (field.control_data().has_value())
-        field.control_data().value().print_control_data();
+        field.control_data().value().log_control_data();
 
     int field_parity = field.m_field_parity;
     int frame_phase_y = field.control_data().has_value() ?
@@ -278,7 +279,7 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandQueue &sq, const vector<ref
                            f.get().control_data().value().frame_subsampling_phase_Y.has_value() &&
                            f.get().control_data().value().frame_subsampling_phase_C.has_value();
                 })) {
-        cout << "Unknown phases for inter frame interpolation" << endl;
+        m_log.warn(eVideo, "Unknown phases for inter frame interpolation");
         return false;
     }
 
@@ -306,7 +307,7 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandQueue &sq, const vector<ref
     if (!(field_parities[0] == field_parities[2] && field_parities[1] == field_parities[3] && field_parities[0] != field_parities[1]) ||
         !(field_phases_y[0] == field_phases_y[2] && field_phases_y[1] == field_phases_y[3] && field_phases_y[0] != field_phases_y[1]) ||
         !(frame_phases_y[0] != frame_phases_y[2] && frame_phases_y[1] != frame_phases_y[3])) {
-        cout << "Inconsistent phases for inter frame interpolation" << endl;
+        m_log.error(eVideo, "Inconsistent phases for inter frame interpolation");
         return false;
     }
 

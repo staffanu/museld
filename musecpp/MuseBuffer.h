@@ -5,9 +5,6 @@
 #ifndef MUSECPP_MUSEBUFFER_H
 #define MUSECPP_MUSEBUFFER_H
 
-#include <cstddef>
-#include <type_traits>
-#include <iostream>
 #include "musevk/CommandQueue.h"
 
 class MuseBuffer {

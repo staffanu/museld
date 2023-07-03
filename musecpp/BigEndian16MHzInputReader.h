@@ -10,7 +10,7 @@
 
 class BigEndian16MHzInputReader : public InputReader {
 public:
-    explicit BigEndian16MHzInputReader(const std::string &filename, bool stop_on_eof);
+    explicit BigEndian16MHzInputReader(Logger &log, const std::string &filename, bool input_is_fifo);
 
     bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) override;
     void cleanup() override;
