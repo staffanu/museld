@@ -10,7 +10,7 @@ namespace musevk {
                                vk::Queue &computeQueue,
                                uint32_t queueIndex,
                                std::vector<vk::Semaphore> &wait_semaphores,
-                               vk::PipelineStageFlags &wait_dst_stage_masks,
+                               std::vector<vk::PipelineStageFlags> &wait_dst_stage_masks,
                                uint32_t max_timestamps)
             : m_physical_device(physicalDevice),
               m_device(device),

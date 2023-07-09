@@ -151,7 +151,7 @@ namespace musevk {
 
     shared_ptr<CommandQueue> VulkanManager::createCommandQueue(
             vector<vk::Semaphore> wait_semaphores,
-            vk::PipelineStageFlags wait_dst_stage_masks,
+            vector<vk::PipelineStageFlags> wait_dst_stage_masks,
             uint32_t totalTimestamps) {
         auto indices = findQueueFamilies(m_physical_device);
         uint32_t queue_index = indices.graphicsAndComputeFamily.value();
