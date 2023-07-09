@@ -66,7 +66,7 @@ void AudioPlayback::add_samples(AudioDecoder::AudioMode &audio_mode, size_t &sam
         else
             m_audio_speed_adjust = 0;
 
-        m_log.info(eAudio, fmt::format("Audio buffer size: {}, adjustment: ", audio_buffer_size, m_audio_speed_adjust));
+        m_log.info(eAudio, fmt::format("Audio buffer size: {}, adjustment: {}", audio_buffer_size, m_audio_speed_adjust));
     }
 
     for (int i = 0; i < sample_count; i++) {

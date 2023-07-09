@@ -50,10 +50,19 @@ AudioDecoder::AudioDecoder(Logger &log)
                 m_symbol_locations.emplace_back(pair(28 + i * 100, 28 + j * 100));
 }
 
-void AudioDecoder::decodeFrame(MuseBuffer &audio_converted_freq,
+void AudioDecoder::decodeFrame(int frame_no,
+                               MuseBuffer &audio_converted_freq,
                                AudioMode &audio_mode,
                                size_t &sample_count,
                                AudioFrame output_samples[c_max_output_samples]) {
+    if (frame_no % 30 == 0) {
+        ostringstream ss;
+        ss << "Symbol locations: ";
+        for (int i = 0; i < 8; i++)
+            ss << "(" << (int)m_symbol_locations[i].first << ", " << (int)m_symbol_locations[i].second << ") ";
+        m_log.debug(eAudio, ss.str());
+    }
+
     audio_mode = m_active_audio_mode;
     sample_count = 0;
 

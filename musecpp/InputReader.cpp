@@ -41,13 +41,11 @@ void InputReader::cleanup() {
 }
 
 shared_ptr<musevk::VulkanBuffer> InputReader::getNextInputBuffer() {
-    m_log.debug(eInput, fmt::format("getNextInputBuffer: acquiring lock"));
     std::unique_lock<std::mutex> lock(m_mutex);
     m_log.debug(eInput, fmt::format("getNextInputBuffer: {} buffers filled", m_filled_muse_input_buffers.size()));
     m_cv_filled.wait(
             lock,
             [this]{return m_reader_thread_finished || !m_filled_muse_input_buffers.empty();});
-    m_log.debug(eInput, fmt::format("getNextInputBuffer: waited: {} buffers filled", m_filled_muse_input_buffers.size()));
 
     if (m_reader_thread_finished)
         return nullptr;
@@ -58,9 +56,7 @@ shared_ptr<musevk::VulkanBuffer> InputReader::getNextInputBuffer() {
 }
 
 void InputReader::returnBuffer(std::shared_ptr<musevk::VulkanBuffer> &buffer) {
-    m_log.debug(eInput, fmt::format("returnBuffer: acquiring lock"));
     std::unique_lock<std::mutex> lock(m_mutex);
-    m_log.debug(eInput, fmt::format("returnBuffer: locked"));
     m_cv_vacant.notify_one();
     m_vacant_muse_input_buffers.push_back(buffer);
 }

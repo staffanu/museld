@@ -113,7 +113,7 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
         m_command_queue->evalAwait(); // FIXME: remove and add fence
     }
     if (m_decode_audio && m_field_index == 0)
-        m_audio_decoder.decodeFrame(m_shaders.getAudioData(), audio_mode, sample_count, output_samples);
+        m_audio_decoder.decodeFrame(m_frame_no, m_shaders.getAudioData(), audio_mode, sample_count, output_samples);
     else
         sample_count = 0;
     //m_command_queue->evalAwait();

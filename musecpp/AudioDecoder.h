@@ -28,7 +28,8 @@ public:
     AudioDecoder(Logger &log);
 
     // output samples are written to the first two or all four channels depending on the detected mode
-    void decodeFrame(MuseBuffer &audio_converted_freq,
+    void decodeFrame(int frame_no,
+                     MuseBuffer &audio_converted_freq,
                      AudioMode &audio_mode,
                      size_t &sample_count,
                      AudioFrame output_samples[c_max_output_samples]);

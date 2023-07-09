@@ -9,7 +9,12 @@
 
 class ResamplingInputReader : public InputReader {
 public:
-    explicit ResamplingInputReader(const std::string &filename, int sample_rate, bool stop_on_eof);
+    enum InputFormat {
+        eUnsignedByte,
+        eSignedShortLittleEndian,
+    };
+    explicit ResamplingInputReader(Logger &log, const std::string &filename, InputFormat input_format,
+                                   double sample_rate, bool input_is_fifo);
 
     bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) override;
     void cleanup() override;
@@ -19,11 +24,13 @@ protected:
 
 private:
     static constexpr size_t c_sample_buffer_size = 480;
-    static constexpr size_t c_input_buffer_size = 1024 * 1024;
-    static constexpr int c_input_buffer_min_read_pos = 3; // we look back 3 bytes
+    static constexpr size_t c_input_buffer_size = 1024 * 256;
+    static constexpr int c_input_buffer_lookback = 3; // we look back 3 samples
 
     bool readSamples(int sample_count, uint16_t buffer[c_sample_buffer_size], double dt);
 
+    InputFormat m_input_format;
+    bool m_input_is_fifo;
     InputPll m_input_pll;
     int m_file_fd;
     uint8_t m_file_input_buffer[c_input_buffer_size];
