@@ -78,6 +78,8 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             if (glfwWindowShouldClose(window))
                 break;
             glfwPollEvents();
+            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+                break;
             if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS && full_screen) {
                 glfwSetWindowMonitor(window, nullptr, 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
                 full_screen = false;
