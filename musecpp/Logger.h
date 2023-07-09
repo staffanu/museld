@@ -6,6 +6,7 @@
 #define MUSECPP_LOGGER_H
 
 #include <string>
+#include <algorithm>
 #include <map>
 #include <iostream>
 #include <mutex>
