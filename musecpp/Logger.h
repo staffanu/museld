@@ -33,10 +33,22 @@ inline LogCategoryFlags operator|(LogCategoryFlags a, LogCategoryFlags b)
 
 class Logger {
 public:
-    Logger(LogPriority minimum_priority, LogCategoryFlags enabled_categories)
-    : m_minimum_priority(minimum_priority),
-      m_enabled_categories(enabled_categories)
-    {}
+    static const std::map<LogCategoryFlags, LogPriority> c_log_all;
+    static const std::map<LogCategoryFlags, LogPriority> c_log_info;
+    static const std::map<LogCategoryFlags, LogPriority> c_log_warn;
+
+    // The log_priority_per_category map contains the minimum priority for each category
+    // to produce a log message.  eError messages are always logged, so passing an empty
+    // map logs all eError logs.
+    explicit Logger(std::map<LogCategoryFlags, LogPriority> log_priority_per_category)
+    : m_log_priority_per_category(std::move(log_priority_per_category))
+    {
+        m_minimum_priority = std::min_element(
+                m_log_priority_per_category.cbegin(), m_log_priority_per_category.cend(),
+                [](const std::pair<LogCategoryFlags, LogPriority> a, const std::pair<LogCategoryFlags, LogPriority> b) -> bool {
+                    return a.second < b.second;
+                })->second;
+    }
 
     void error(LogCategoryFlags categorization, const std::string &message) {
         log(eError, categorization, message);
@@ -57,8 +69,8 @@ private:
 
     void log(LogPriority priority, LogCategoryFlags categorization, const std::string &message);
 
+    std::map<LogCategoryFlags, LogPriority> m_log_priority_per_category;
     LogPriority m_minimum_priority;
-    LogCategoryFlags m_enabled_categories;
     std::mutex m_mutex;
 };
 

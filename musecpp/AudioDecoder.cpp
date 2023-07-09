@@ -158,7 +158,7 @@ void AudioDecoder::decodeFrame(int frame_no,
                     m_active_audio_mode = mode;
                     audio_mode = mode;
                     sample_count = 0;
-                    m_log.info(eAudio, fmt::format("audio mode now: {}", m_active_audio_mode));
+                    m_log.info(eAudio, fmt::format("audio mode now: {}", (int)m_active_audio_mode));
                 }
             }
 

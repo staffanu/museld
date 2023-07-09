@@ -14,6 +14,7 @@ find_path(PORTAUDIO_INCLUDE_DIRS
   PATHS
       /usr/local/include
       /usr/include
+      /opt/homebrew/include
   HINTS
     ${PC_PORTAUDIO_INCLUDEDIR}
 )

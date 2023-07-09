@@ -5,9 +5,37 @@
 #include <chrono>
 #include <fmt/format.h>
 #include <fmt/chrono.h>
+#include <sstream>
 #include "Logger.h"
 
 using namespace std;
+
+const map<LogCategoryFlags, LogPriority>  Logger::c_log_all = {
+        { eApplication, eDebug },
+        { ePerformance, eDebug },
+        { eAudio, eDebug },
+        { eVideo, eDebug },
+        { eDecoder, eDebug },
+        { eInput, eDebug },
+};
+
+const map<LogCategoryFlags, LogPriority>  Logger::c_log_info = {
+        { eApplication, eInfo },
+        { ePerformance, eInfo },
+        { eAudio, eInfo },
+        { eVideo, eInfo },
+        { eDecoder, eInfo },
+        { eInput, eInfo },
+};
+
+const map<LogCategoryFlags, LogPriority>  Logger::c_log_warn = {
+        { eApplication, eWarn },
+        { ePerformance, eWarn },
+        { eAudio, eWarn },
+        { eVideo, eWarn },
+        { eDecoder, eWarn },
+        { eInput, eWarn },
+};
 
 const map<int, string> Logger::c_priority_names = {
         { eDebug, "DEBUG" },
@@ -27,26 +55,33 @@ const map<int, string> Logger::c_category_names = {
 
 void Logger::log(LogPriority priority, LogCategoryFlags categorization, const std::string &message) {
     int flags = categorization;
-    if (priority >= m_minimum_priority && categorization & m_enabled_categories) {
+    if (priority >= m_minimum_priority) {
         auto tp = chrono::time_point_cast<chrono::microseconds>(chrono::system_clock::now());
         auto us = tp.time_since_epoch().count() % micro::den;
-
-        std::unique_lock<std::mutex> lock(m_mutex);
-        cerr << fmt::format("{:%Y-%m-%d %H:%M:%S}.{:06d} [{}] (",
+        ostringstream ss;
+        ss << fmt::format("{:%Y-%m-%d %H:%M:%S}.{:06d} [{}] (",
                    tp, us, c_priority_names.at(priority));
         bool first = true;
+        bool do_log = false;
         for (int bit = 1; flags != 0; bit <<= 1, flags >>= 1) {
             if (flags & 1) {
                 if (!first)
-                    std::cerr << " ";
+                    ss << " ";
                 auto cat_str = c_category_names.find(bit);
                 if (cat_str == c_category_names.cend())
-                    std::cerr << "unknown category " << bit;
+                    ss << "unknown category " << bit;
                 else
-                    std::cerr << cat_str->second;
+                    ss << cat_str->second;
                 first = false;
+                auto cat_level = m_log_priority_per_category.find((LogCategoryFlags)bit);
+                if (priority == eError || cat_level != m_log_priority_per_category.cend() && priority >= cat_level->second)
+                    do_log = true;
             }
         }
-        std::cerr << "): " << message << std::endl;
+
+        if (do_log) {
+            std::unique_lock<std::mutex> lock(m_mutex);
+            cerr << ss.str() << "): " << message << endl;
+        }
     }
 }

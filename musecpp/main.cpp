@@ -1,4 +1,5 @@
 #include <filesystem>
+#include <unistd.h>
 #include <fmt/format.h>
 #include "Shaders.h"
 #include "MuseDecoder.h"
@@ -152,8 +153,7 @@ void usage() {
 }
 
 int main(int argc, char *argv[]) {
-    Logger log(eDebug, eApplication | ePerformance | eAudio | eVideo | eDecoder | eInput);
-    //Logger log(eDebug, eInput);
+    auto log_selection = Logger::c_log_warn;
     enum InputFormat {
         eOverSampledUnsignedBytes,
         eOverSampledSignedShortsLittleEndian,
@@ -188,11 +188,15 @@ int main(int argc, char *argv[]) {
                 decode_all_fields = true;
             else if (*it == "--full-screen")
                 full_screen = true;
+            else if (*it == "--verbose")
+                log_selection = Logger::c_log_all;
             else if (*it == "--no-sync")
                 no_sync = true;
             else if (*it == "--help")
                 usage();
             else {
+                Logger log(log_selection);
+//                Logger log({{eAudio, eDebug}});
                 if (!filesystem::exists(*it))
                     throw runtime_error("File not found: " + string(*it));
                 InputReader *reader;
@@ -220,6 +224,7 @@ int main(int argc, char *argv[]) {
             }
         }
     } catch (const exception &x) {
+        Logger log(Logger::c_log_all);
         log.error(eApplication, x.what());
         return EXIT_FAILURE;
     }

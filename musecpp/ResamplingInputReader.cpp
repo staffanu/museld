@@ -3,6 +3,7 @@
 //
 
 #include <fcntl.h>
+#include <unistd.h>
 #include <csignal>
 #include <fmt/format.h>
 #include "MuseTypes.h"
@@ -29,11 +30,13 @@ bool ResamplingInputReader::initialize(std::vector<std::shared_ptr<musevk::Vulka
     if (m_file_fd == -1)
         throw runtime_error("Unable to open file");
 
+#ifdef linux
     if (m_input_is_fifo) {
         m_log.debug(eInput, fmt::format("Pipe size: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
         fcntl(m_file_fd, F_SETPIPE_SZ, 1024 * 1024);
         m_log.debug(eInput, fmt::format("Pipe size now: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
     }
+#endif
     // cout << "Seeking: " << lseek(m_file_fd, 500000 * 1000, SEEK_SET) << endl;
 
     return InputReader::initialize(buffers);
