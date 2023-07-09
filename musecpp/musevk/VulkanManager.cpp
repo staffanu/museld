@@ -55,7 +55,7 @@ namespace musevk {
         vk::Result result;
         do {
             result = m_logical_device.acquireNextImageKHR(m_swap_chain, UINT64_MAX,
-                                                          image_available_semaphore, VK_NULL_HANDLE,
+                                                          image_available_semaphore, nullptr,
                                                           &image_index);
             if (result == vk::Result::eSuboptimalKHR || result == vk::Result::eErrorOutOfDateKHR) {
                 cout << "Suboptimal or Out of date" << endl;
@@ -151,7 +151,7 @@ namespace musevk {
 
     shared_ptr<CommandQueue> VulkanManager::createCommandQueue(
             vector<vk::Semaphore> wait_semaphores,
-            vector<vk::PipelineStageFlags> wait_dst_stage_masks,
+            vk::PipelineStageFlags wait_dst_stage_masks,
             uint32_t totalTimestamps) {
         auto indices = findQueueFamilies(m_physical_device);
         uint32_t queue_index = indices.graphicsAndComputeFamily.value();
@@ -459,7 +459,7 @@ namespace musevk {
         createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
         createInfo.presentMode = presentMode;
         createInfo.clipped = VK_TRUE;
-        createInfo.oldSwapchain = VK_NULL_HANDLE;
+        createInfo.oldSwapchain = nullptr; //VK_NULL_HANDLE;
 
         m_swap_chain = m_logical_device.createSwapchainKHR(createInfo);
         m_swap_chain_images = m_logical_device.getSwapchainImagesKHR(m_swap_chain);

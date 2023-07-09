@@ -19,7 +19,7 @@ namespace musevk {
                      vk::Queue &computeQueue,
                      uint32_t queueIndex,
                      std::vector<vk::Semaphore> &wait_semaphores,
-                     std::vector<vk::PipelineStageFlags> &wait_dst_stage_masks,
+                     vk::PipelineStageFlags &wait_dst_stage_masks,
                      uint32_t max_timestamps = 0);
 
         void enqueueTransitionMemoryLayout(vk::Image image, vk::Format format,
@@ -93,7 +93,7 @@ namespace musevk {
         std::vector<std::string> m_timestamped_operations;
 
         std::vector<vk::Semaphore> m_wait_semaphores;
-        std::vector<vk::PipelineStageFlags> m_wait_dst_stage_masks;
+        vk::PipelineStageFlags m_wait_dst_stage_masks;
 
         bool m_recording = false;
         bool m_is_running = false;

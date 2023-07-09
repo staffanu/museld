@@ -41,7 +41,7 @@ namespace musevk {
         m_view = m_device.createImageView(view_info);
 
         m_descriptor_image_info = vk::DescriptorImageInfo(
-                VK_NULL_HANDLE,
+                nullptr,
                 m_view,
                 vk::ImageLayout::eGeneral);
     }

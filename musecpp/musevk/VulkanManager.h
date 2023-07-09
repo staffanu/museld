@@ -58,7 +58,7 @@ namespace musevk {
 
         std::shared_ptr<CommandQueue> createCommandQueue(
                 std::vector<vk::Semaphore> wait_semaphores = {},
-                std::vector<vk::PipelineStageFlags> wait_dst_stage_masks = {},
+                vk::PipelineStageFlags wait_dst_stage_masks = {},
                 uint32_t totalTimestamps = 0);
     private:
         void cleanupSwapChain();

@@ -51,7 +51,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     {
         auto queue = manager.createCommandQueue(
                 std::vector{vk::Semaphore(image_available_semaphore)},
-                std::vector{vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe)});
+                vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe));
         Shaders shaders(log, executable_dir, manager);
         auto decoder = MuseDecoder(log,
                                    reader,
