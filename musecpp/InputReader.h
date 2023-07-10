@@ -16,7 +16,12 @@ public:
     [[nodiscard]] virtual bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers);
     virtual void cleanup();
 
-    std::shared_ptr<musevk::VulkanBuffer> getNextInputBuffer();
+    enum PresentationHint {
+        eNormal = 0,
+        eSlowdown = 1,
+        eSpeedup = 2
+    };
+    std::pair<std::shared_ptr<musevk::VulkanBuffer>, PresentationHint> getNextInputBuffer();
     void returnBuffer(std::shared_ptr<musevk::VulkanBuffer> &buffer);
 
 protected:
@@ -26,6 +31,7 @@ protected:
 
     Logger &m_log;
     std::string m_filename;
+    bool m_input_is_fifo;
     std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_vacant_muse_input_buffers;
     std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_filled_muse_input_buffers;
     bool m_stop_request;
@@ -33,6 +39,7 @@ protected:
     std::mutex m_mutex;
     std::condition_variable m_cv_filled;
     std::condition_variable m_cv_vacant;
+    int m_get_input_buffers_count;
 
 private:
     std::thread *m_reader_thread;

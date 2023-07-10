@@ -62,9 +62,9 @@ void ResamplingInputReader::threadFunc() {
             if (m_input_is_fifo && m_vacant_muse_input_buffers.empty()) {
                 // discard a filled buffer -- this is better than having the writer to the fifo wait
                 m_log.warn(eInput, "Discarding filled input buffer due to overrun");
+                assert(!m_filled_muse_input_buffers.empty());
                 m_vacant_muse_input_buffers.push_back(m_filled_muse_input_buffers.back());
                 m_filled_muse_input_buffers.pop_back();
-                assert(!m_filled_muse_input_buffers.empty());
             }
             m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_muse_input_buffers.empty();});
             if (m_stop_request)

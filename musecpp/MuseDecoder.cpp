@@ -59,14 +59,16 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
                        size_t &sample_count,
                        AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples]) {
     auto t0 = chrono::high_resolution_clock::now();
+    bool needs_queue_submit = false;
     shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = nullptr;
+    InputReader::PresentationHint presentationHint;
     if (m_field_index == 0) {
         auto frame_buffer = m_frame_buffers.back();
         frame_buffer->set_frame_no(++m_frame_no);
         m_frame_buffers.pop_back();
         m_frame_buffers.push_front(frame_buffer);
 
-        input_vulkan_buffer = m_reader.getNextInputBuffer();
+        tie(input_vulkan_buffer, presentationHint) = m_reader.getNextInputBuffer();
         if (input_vulkan_buffer == nullptr) {
             m_timestamp_statistics.print_stats();
             return false;
@@ -77,7 +79,8 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
             m_eq = eq_estimate;
         else
             m_eq = {m_eq.first * 0.9 + eq_estimate.first * 0.1, m_eq.second * 0.9 + eq_estimate.second * 0.1};
-        m_log.info(eDecoder, fmt::format("eq: {}, {}", m_eq.first, m_eq.second));
+        if (m_frame_no % 30 == 0)
+            m_log.info(eDecoder, fmt::format("eq: {}, {}", m_eq.first, m_eq.second));
 
         // Since we really only need to decode the control data when we process the second field,
         // we should probably delay this until graphics operations are queued. But it is quick.
@@ -87,9 +90,13 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
         m_shaders.convertToFloatAndApplyEqAndGamma(*m_command_queue, input_vulkan_buffer, frame_buffer->data(), m_eq);
 
         m_shaders.convertAudioSampleRate(*m_command_queue, frame_buffer->data());
+
+        needs_queue_submit = true;
     }
 
-    if (m_decode_video) {
+    // if not decoding all fields, we only decode on field 0 (when we read the data), but
+    // actually decode the second field.  For field 1, the same field will be shown again.
+    if (m_decode_video && (m_decode_all_fields || m_field_index == 0)) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
         m_shaders.decodeIntraField(*m_command_queue, m_frame_buffers[0]->get_field(decoded_field_index));
@@ -107,8 +114,9 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
             m_log.warn(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_command_queue, true, false);
         }
+        needs_queue_submit = true;
     }
-    if (m_field_index == 0 || m_decode_video) {
+    if (needs_queue_submit) {
         m_command_queue->evalAsync();
         m_command_queue->evalAwait(); // FIXME: remove and add fence
     }
@@ -126,11 +134,11 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
     auto t1 = chrono::high_resolution_clock::now();
     long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
     m_total_elapsed_time_us += time_us;
-    m_log.info(ePerformance | eVideo, fmt::format("Field elapsed time {} ms; {} ms/frame",
-                                                  time_us / 1000,
+    m_log.info(ePerformance | eVideo, fmt::format("Field {} elapsed time {} ms; {} ms/frame",
+                                                  m_field_index, time_us / 1000,
                                                   m_total_elapsed_time_us / 1000 / m_frame_no));
 
-    m_field_index = m_decode_all_fields ? (m_field_index + 1) % 2 : 0;
+    m_field_index = (m_field_index + 1) % 2;
 
     return true;
 }

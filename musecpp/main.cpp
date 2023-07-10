@@ -14,7 +14,8 @@
 using namespace std;
 
 void process_file(Logger &log, const string& executable_dir, InputReader &reader,
-                  bool decode_all_fields, bool full_screen, bool no_sync) {
+                  bool decode_all_fields, bool full_screen, bool no_sync,
+                  bool decode_video, bool decode_audio) {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
@@ -57,9 +58,9 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                                    reader,
                                    shaders,
                                    manager,
-                                   true, // decode_video
+                                   decode_video,
                                    decode_all_fields,
-                                   true, // decode_audio
+                                   decode_audio,
                                    false); // benchmark_shaders
         if (!decoder.initialize())
             throw runtime_error("MuseDecoder initialization failed");
@@ -69,9 +70,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         int field_count = 0;
         bool paused = false;
         // We skip calling next every other field if decode_all_fields is false
-        while ((!decode_all_fields && field_count % 2 == 1) || paused ||
-                decoder.next(audio_mode, audio_sample_count, audio_samples)) {
-
+        while (paused || decoder.next(audio_mode, audio_sample_count, audio_samples)) {
             if (!paused)
                 field_count++;
 
@@ -96,8 +95,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                 }
             }
 
-            if (audio_sample_count != 0 && audio_mode != AudioDecoder::MODE_UNKNOWN &&
-                field_count % 2 == 1 && !paused)
+            if (audio_sample_count != 0 && audio_mode != AudioDecoder::MODE_UNKNOWN && !paused)
                 audio_playback.add_samples(audio_mode, audio_sample_count, audio_samples);
 
             //vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
@@ -150,7 +148,11 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
 }
 
 void usage() {
-    cerr << "usage: musecpp [--full-frames-only] [-all-fields] <input_file> ...\n";
+    cerr << "usage: musecpp "
+            "<--resample-bytes|--resample-shorts|--big-endian> [--sample-freq] "
+            "[--fifo] [--full-frames-only] [-all-fields] "
+            "[--full-screen] [--no-video] [no-audio] [--verbose] [--nosync] [--help] "
+            "<input_file> ...\n";
     exit(EXIT_FAILURE);
 }
 
@@ -170,6 +172,8 @@ int main(int argc, char *argv[]) {
     InputFormat input_format = eUnknown;
     double input_sample_frequency = 40e6;
     bool input_is_fifo = false;
+    bool decode_video = true;
+    bool decode_audio = true;
 
     try {
         const vector<string> args(argv + 1, argv + argc);
@@ -190,6 +194,10 @@ int main(int argc, char *argv[]) {
                 decode_all_fields = true;
             else if (*it == "--full-screen")
                 full_screen = true;
+            else if (*it == "--no-video")
+                decode_video = false;
+            else if (*it == "--no-audio")
+                decode_audio = false;
             else if (*it == "--verbose")
                 log_selection = Logger::c_log_all;
             else if (*it == "--no-sync")
@@ -197,8 +205,8 @@ int main(int argc, char *argv[]) {
             else if (*it == "--help")
                 usage();
             else {
-                Logger log(log_selection);
-//                Logger log({{eAudio, eDebug}});
+//                Logger log(log_selection);
+                Logger log({{eInput, eDebug}, {eAudio, eDebug}, {eVideo, eInfo}});
                 if (!filesystem::exists(*it))
                     throw runtime_error("File not found: " + string(*it));
                 InputReader *reader;
@@ -216,13 +224,14 @@ int main(int argc, char *argv[]) {
                                 input_sample_frequency, input_is_fifo);
                         break;
                     case eBigEndianShorts:
-                        reader = new BigEndian16MHzInputReader(log, *it, true);
+                        reader = new BigEndian16MHzInputReader(log, *it, input_is_fifo);
                         break;
                     case eUnknown:
                     default:
                         throw runtime_error("No input format specified");
                 }
-                process_file(log, executable_dir, *reader, decode_all_fields, full_screen, no_sync);
+                process_file(log, executable_dir, *reader, decode_all_fields,
+                             full_screen, no_sync, decode_video, decode_audio);
             }
         }
     } catch (const exception &x) {
