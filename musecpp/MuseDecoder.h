@@ -29,9 +29,16 @@ public:
                 bool benchmark_shaders);
     ~MuseDecoder();
     [[nodiscard]] bool initialize();
+
+    enum FieldInterpolationMode {
+        eNormal, eForceIntraField, eForceInterFrame
+    };
+
     bool next(AudioDecoder::AudioMode &audio_mode,
               size_t &sample_count,
-              AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples]);
+              AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples],
+              FieldInterpolationMode field_interpolation_mode,
+              bool redo_last_field);
 
 private:
     Logger &m_log;

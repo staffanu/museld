@@ -13,6 +13,18 @@
 
 using namespace std;
 
+// checks if a key is pressed and waits for it to be released before return
+bool check_glfw_key(GLFWwindow *window, int key) {
+    if (glfwGetKey(window, key) == GLFW_PRESS) {
+        while (glfwGetKey(window, key) == GLFW_PRESS) {
+            usleep(10000);
+            glfwPollEvents();
+        }
+        return true;
+    }
+    return false;
+}
+
 void process_file(Logger &log, const string& executable_dir, InputReader &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
                   bool start_paused, bool decode_video, bool decode_audio) {
@@ -70,10 +82,14 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         int field_count = 0;
         bool paused = false;
         int paused_countdown = start_paused ? 5 : 0;
+        MuseDecoder::FieldInterpolationMode field_interpolation_mode = MuseDecoder::eNormal;
+        bool redo_last_field = false;
+
         // We skip calling next every other field if decode_all_fields is false
-        while (paused || decoder.next(audio_mode, audio_sample_count, audio_samples)) {
+        while (paused || decoder.next(audio_mode, audio_sample_count, audio_samples, field_interpolation_mode, redo_last_field)) {
             if (!paused)
                 field_count++;
+            redo_last_field = false;
 
             if (audio_sample_count != 0 && audio_mode != AudioDecoder::MODE_UNKNOWN && !paused)
                 audio_playback.add_samples(audio_mode, audio_sample_count, audio_samples);
@@ -112,26 +128,49 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             if (glfwWindowShouldClose(window))
                 break;
             glfwPollEvents();
-            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+
+            if (check_glfw_key(window, GLFW_KEY_Q))
                 break;
-            if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS && full_screen) {
+            if (check_glfw_key(window, GLFW_KEY_ESCAPE) && full_screen) {
                 glfwSetWindowMonitor(window, nullptr, 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
                 full_screen = false;
             }
-            if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && !full_screen) {
+            if (check_glfw_key(window, GLFW_KEY_TAB) && !full_screen) {
                 glfwSetWindowMonitor(window, glfwGetPrimaryMonitor(), 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
                 full_screen = true;
             }
-            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+            if (check_glfw_key(window, GLFW_KEY_SPACE))
                 paused = !paused;
-                while (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-                    usleep(100000);
-                    glfwPollEvents();
-                }
-            }
-            if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
+            if (check_glfw_key(window, GLFW_KEY_RIGHT)) {
                 paused = false;
                 paused_countdown = 1;
+            }
+            if (check_glfw_key(window, GLFW_KEY_1)) {
+                field_interpolation_mode = MuseDecoder::eNormal;
+                if (paused) {
+                    paused = false;
+                    redo_last_field = true;
+                    paused_countdown = 1;
+                }
+                log.info(eApplication | eVideo | eDecoder, "Field interpolation determined by motion detection");
+            }
+            if (check_glfw_key(window, GLFW_KEY_2)) {
+                field_interpolation_mode = MuseDecoder::eForceIntraField;
+                if (paused) {
+                    paused = false;
+                    redo_last_field = true;
+                    paused_countdown = 1;
+                }
+                log.info(eApplication | eVideo | eDecoder, "Field interpolation forced to intra field only");
+            }
+            if (check_glfw_key(window, GLFW_KEY_3)) {
+                field_interpolation_mode = MuseDecoder::eForceInterFrame;
+                if (paused) {
+                    paused = false;
+                    redo_last_field = true;
+                    paused_countdown = 1;
+                }
+                log.info(eApplication | eVideo | eDecoder, "Inter-frame interpolation forced");
             }
         }
         auto t1 = chrono::high_resolution_clock::now();

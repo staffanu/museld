@@ -57,12 +57,17 @@ bool MuseDecoder::initialize() {
 
 bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
                        size_t &sample_count,
-                       AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples]) {
+                       AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples],
+                       FieldInterpolationMode field_interpolation_mode,
+                       bool redo_last_field) {
+    if (redo_last_field)
+        m_field_index = (m_field_index + 1) % 2;
+
     auto t0 = chrono::high_resolution_clock::now();
     bool needs_queue_submit = false;
     shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = nullptr;
     InputReader::PresentationHint presentationHint;
-    if (m_field_index == 0) {
+    if (m_field_index == 0 && !redo_last_field) {
         auto frame_buffer = m_frame_buffers.back();
         frame_buffer->set_frame_no(++m_frame_no);
         m_frame_buffers.pop_back();
@@ -109,7 +114,9 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
 
         if (m_shaders.decodeInterFrameAndDetectMotion(*m_command_queue, fields) || m_frame_no >= 3) {
             m_log.debug(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation success", decoded_field_index));
-            m_shaders.combineStillAndMovingParts(*m_command_queue, false, true); // false);
+            m_shaders.combineStillAndMovingParts(*m_command_queue,
+                                                 field_interpolation_mode == eForceIntraField,
+                                                 field_interpolation_mode == eForceInterFrame);
         } else {
             m_log.warn(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_command_queue, true, false);
