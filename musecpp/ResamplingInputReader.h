@@ -14,7 +14,8 @@ public:
         eSignedShortLittleEndian,
     };
     explicit ResamplingInputReader(Logger &log, const std::string &filename, InputFormat input_format,
-                                   double sample_rate, bool input_is_fifo, double initial_seek_seconds);
+                                   double sample_rate, bool input_is_fifo, double initial_seek_seconds,
+                                   const std::optional<std::string> &output_filename);
 
     bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) override;
     void cleanup() override;

@@ -8,7 +8,7 @@
 #include "AudioPlayback.h"
 #include "InputReader.h"
 #include "ResamplingInputReader.h"
-#include "BigEndian16MHzInputReader.h"
+#include "PhaseCorrect16MHzInputReader.h"
 #include "Logger.h"
 
 using namespace std;
@@ -207,6 +207,7 @@ int main(int argc, char *argv[]) {
     enum InputFormat {
         eOverSampledUnsignedBytes,
         eOverSampledSignedShortsLittleEndian,
+        eLittleEndianShorts,
         eBigEndianShorts,
         eUnknown
     };
@@ -220,6 +221,7 @@ int main(int argc, char *argv[]) {
     bool input_is_fifo = false;
     double initial_seek_seconds = 0;
     bool start_paused = false;
+    optional<string> output_filename; // always written as little endian unsigned short values
     bool decode_video = true;
     bool decode_audio = true;
 
@@ -232,6 +234,8 @@ int main(int argc, char *argv[]) {
                 input_format = eOverSampledSignedShortsLittleEndian;
             else if (*it == "--sample-freq")
                 input_sample_frequency = stod(*(++it));
+            else if (*it == "--little-endian")
+                input_format = eLittleEndianShorts;
             else if (*it == "--big-endian")
                 input_format = eBigEndianShorts;
             else if (*it == "--fifo")
@@ -246,6 +250,8 @@ int main(int argc, char *argv[]) {
                 initial_seek_seconds = stod(*(++it));
             else if (*it == "--pause")
                 start_paused = true;
+            else if (*it == "--write")
+                output_filename = *(++it);
             else if (*it == "--no-video")
                 decode_video = false;
             else if (*it == "--no-audio")
@@ -262,23 +268,23 @@ int main(int argc, char *argv[]) {
                 if (!filesystem::exists(*it))
                     throw runtime_error("File not found: " + string(*it));
 //                Logger log(log_selection);
-                Logger log({{eInput, eDebug}, {eAudio, eDebug}, {eVideo, eInfo}});
+                Logger log({{eInput, eDebug}, {eAudio, eWarn}, {eVideo, eInfo}});
                 InputReader *reader;
                 switch (input_format) {
                     case eOverSampledUnsignedBytes:
-                        reader = new ResamplingInputReader(
-                                log, *it,
-                                ResamplingInputReader::InputFormat::eUnsignedByte,
-                                input_sample_frequency, input_is_fifo, initial_seek_seconds);
-                        break;
                     case eOverSampledSignedShortsLittleEndian:
                         reader = new ResamplingInputReader(
                                 log, *it,
-                                ResamplingInputReader::InputFormat::eSignedShortLittleEndian,
-                                input_sample_frequency, input_is_fifo, initial_seek_seconds);
+                                input_format == eOverSampledSignedShortsLittleEndian ? ResamplingInputReader::eSignedShortLittleEndian : ResamplingInputReader::eUnsignedByte,
+                                input_sample_frequency, input_is_fifo, initial_seek_seconds,
+                                output_filename);
                         break;
+                    case eLittleEndianShorts:
                     case eBigEndianShorts:
-                        reader = new BigEndian16MHzInputReader(log, *it, input_is_fifo, initial_seek_seconds);
+                        reader = new PhaseCorrect16MHzInputReader(log, *it,
+                                                                  input_format == eBigEndianShorts,
+                                                                  input_is_fifo, initial_seek_seconds,
+                                                                  output_filename);
                         break;
                     case eUnknown:
                     default:

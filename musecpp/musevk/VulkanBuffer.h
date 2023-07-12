@@ -46,7 +46,7 @@ namespace musevk {
         }
 
         [[nodiscard]] uint32_t size() const {
-            return this->m_size;
+            return m_size;
         }
 
         [[nodiscard]] uint32_t getMemorySize() const {

@@ -4,7 +4,6 @@
 
 #include <fcntl.h>
 #include <unistd.h>
-#include <csignal>
 #include <fmt/format.h>
 #include "MuseTypes.h"
 #include "ResamplingInputReader.h"
@@ -14,8 +13,9 @@ using namespace std;
 ResamplingInputReader::ResamplingInputReader(
         Logger &log,
         const std::string &filename, InputFormat input_format, double sample_rate,
-        bool input_is_fifo, double initial_seek_seconds)
-        : InputReader(log, filename, input_is_fifo, initial_seek_seconds),
+        bool input_is_fifo, double initial_seek_seconds,
+        const std::optional<std::string> &output_filename)
+        : InputReader(log, filename, input_is_fifo, initial_seek_seconds, output_filename),
           m_input_format(input_format),
           m_input_pll(log, sample_rate),
           m_input_is_fifo(input_is_fifo),

@@ -31,7 +31,7 @@ add_executable(musecpp
         InputReader.cpp InputReader.h
         ResamplingInputReader.cpp ResamplingInputReader.h
         InputPll.cpp InputPll.h
-        BigEndian16MHzInputReader.cpp BigEndian16MHzInputReader.h
+        PhaseCorrect16MHzInputReader.cpp PhaseCorrect16MHzInputReader.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandQueue.cpp musevk/CommandQueue.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h

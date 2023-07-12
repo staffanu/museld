@@ -25,14 +25,17 @@ public:
     void returnBuffer(std::shared_ptr<musevk::VulkanBuffer> &buffer);
 
 protected:
-    InputReader(Logger &log, const std::string &filename, bool input_is_fifo, double initial_seek_seconds);
+    InputReader(Logger &log, const std::string &filename, bool input_is_fifo, double initial_seek_seconds,
+                const std::optional<std::string> &output_filename);
 
     virtual void threadFunc() = 0;
 
     Logger &m_log;
-    std::string m_filename;
-    bool m_input_is_fifo;
-    double m_initial_seek_seconds;
+    const std::string m_filename;
+    const bool m_input_is_fifo;
+    const double m_initial_seek_seconds;
+    const std::optional<std::string> m_output_filename;
+    int m_output_file_fd;
     std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_vacant_muse_input_buffers;
     std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_filled_muse_input_buffers;
     bool m_stop_request;

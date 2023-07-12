@@ -6,19 +6,21 @@
 #include <map>
 #include <fmt/format.h>
 #include "MuseTypes.h"
-#include "BigEndian16MHzInputReader.h"
+#include "PhaseCorrect16MHzInputReader.h"
 
 using namespace std;
 
-BigEndian16MHzInputReader::BigEndian16MHzInputReader(
+PhaseCorrect16MHzInputReader::PhaseCorrect16MHzInputReader(
         Logger &log,
-        const std::string &filename, bool input_is_fifo, double initial_seek_seconds)
-        : InputReader(log, filename, input_is_fifo, initial_seek_seconds),
-        m_input{} {
+        const std::string &filename, bool big_endian, bool input_is_fifo, double initial_seek_seconds,
+        const std::optional<std::string> &output_filename)
+        : InputReader(log, filename, input_is_fifo, initial_seek_seconds, output_filename),
+        m_input{},
+        m_big_endian(big_endian) {
 }
 
-bool BigEndian16MHzInputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) {
-    auto [samples_to_skip, eq] = compute_initial_skip();
+bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) {
+    auto [samples_to_skip, eq] = compute_initial_skip(m_log);
 
     m_input = ifstream(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
     m_input.exceptions(ifstream::badbit);
@@ -42,12 +44,12 @@ bool BigEndian16MHzInputReader::initialize(std::vector<std::shared_ptr<musevk::V
     return InputReader::initialize(buffers);
 }
 
-void BigEndian16MHzInputReader::cleanup() {
+void PhaseCorrect16MHzInputReader::cleanup() {
     InputReader::cleanup();
     m_input.close();
 }
 
-void BigEndian16MHzInputReader::threadFunc() {
+void PhaseCorrect16MHzInputReader::threadFunc() {
     //pthread_setname_np(m_reader_thread->native_handle(), "musecpp-reader");
 
     for (;;) {
@@ -74,47 +76,36 @@ void BigEndian16MHzInputReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
-bool BigEndian16MHzInputReader::readBigEndianToBuffer(ifstream &input, float *out, size_t n) {
+bool PhaseCorrect16MHzInputReader::readShorts(ifstream &input, uint16_t *out, size_t n) {
     auto *input_buffer = (uint16_t *)malloc(480 * 1125 * 2 * sizeof(float));
     input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(uint16_t));
     for (int i = 0; i < n; i++) {
-        out[i] = (float)ntohs(input_buffer[i]) / MUSE_SHORT_INPUT_MULT;
+        out[i] = m_big_endian ? ntohs(input_buffer[i]) : input_buffer[i];
     }
     free(input_buffer);
     return input.good();
 }
 
-bool BigEndian16MHzInputReader::readShorts(ifstream &input, uint16_t *out, size_t n) {
-    auto *input_buffer = (uint16_t *)malloc(480 * 1125 * 2 * sizeof(float));
-    input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(uint16_t));
-    for (int i = 0; i < n; i++) {
-        out[i] = ntohs(input_buffer[i]);
-    }
-    free(input_buffer);
-    return input.good();
-}
-
-pair<int, pair<float, float>> BigEndian16MHzInputReader::compute_initial_skip() {
+pair<int, pair<float, float>> PhaseCorrect16MHzInputReader::compute_initial_skip(Logger &log) {
     ifstream input(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
     input.exceptions(ifstream::badbit);
-    vector<float> buffer(480 * 1125 * 2); // two frames of data
-    readBigEndianToBuffer(input, buffer.data(), 480 * 1125 * 2);
+    vector<uint16_t> buffer(480 * 1125 * 2); // two frames of data
+    readShorts(input, buffer.data(), 480 * 1125 * 2);
 
     auto sorted(buffer);
     sort(sorted.begin(), sorted.end());
     auto y1 = sorted[500];
     auto y2 = sorted[480 * 1125 * 2 - 500];
-    pair<float, float> eq = {(y2 - y1) / (239.0f - 16.0f), y1 - 16.0f};
-    cout << "Initial eq: " << eq.first << ", " << eq.second << endl;
+    pair<float, float> eq = {(y2 - y1) / (MUSE_SHORT_INPUT_MULT * (239.0f - 16.0f)), (float)y1 / MUSE_SHORT_INPUT_MULT - 16.0f};
+    log.info(eInput, fmt::format("Initial eq: {}, {}", eq.first, eq.second));
 
-    auto equalized(buffer);
-    for (float &it: equalized)
-        it = ((it - eq.second) / eq.first);
+    // The rest of the code only checks the signal for rising or falling values, and never uses the actual
+    // values directly.  We do not need to do any equalization for this.
 
     // checks if the m_line starting at off has a positive or a negative sync
-    auto isSyncGood = [&equalized](int off, bool expectedPositive) {
-        bool isPos = equalized[off + 3] < equalized[off + 5] && equalized[off + 5] < equalized[off + 7];
-        bool isNeg = equalized[off + 3] > equalized[off + 5] && equalized[off + 5] > equalized[off + 7];
+    auto isSyncGood = [&buffer](int off, bool expectedPositive) {
+        bool isPos = buffer[off + 3] < buffer[off + 5] && buffer[off + 5] < buffer[off + 7];
+        bool isNeg = buffer[off + 3] > buffer[off + 5] && buffer[off + 5] > buffer[off + 7];
         return expectedPositive && isPos || !expectedPositive && isNeg;
     };
 
