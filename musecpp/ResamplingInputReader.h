@@ -14,7 +14,7 @@ public:
         eSignedShortLittleEndian,
     };
     explicit ResamplingInputReader(Logger &log, const std::string &filename, InputFormat input_format,
-                                   double sample_rate, bool input_is_fifo);
+                                   double sample_rate, bool input_is_fifo, double initial_seek_seconds);
 
     bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) override;
     void cleanup() override;
@@ -37,6 +37,9 @@ private:
     int m_file_input_buffer_bytes;
     int m_file_input_buffer_read_pos;
     double m_t; // the time of the previous read
+    int m_bytes_per_sample;
+    double m_output_multiplier;
+    double m_output_add;
 };
 
 #endif //MUSECPP_RESAMPLINGINPUTREADER_H

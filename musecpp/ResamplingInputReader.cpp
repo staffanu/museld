@@ -13,8 +13,9 @@ using namespace std;
 
 ResamplingInputReader::ResamplingInputReader(
         Logger &log,
-        const std::string &filename, InputFormat input_format, double sample_rate, bool input_is_fifo)
-        : InputReader(log, filename, input_is_fifo),
+        const std::string &filename, InputFormat input_format, double sample_rate,
+        bool input_is_fifo, double initial_seek_seconds)
+        : InputReader(log, filename, input_is_fifo, initial_seek_seconds),
           m_input_format(input_format),
           m_input_pll(log, sample_rate),
           m_input_is_fifo(input_is_fifo),
@@ -23,6 +24,20 @@ ResamplingInputReader::ResamplingInputReader(
           m_t(0),
           m_file_input_buffer_bytes(c_input_buffer_lookback),
           m_file_input_buffer_read_pos(c_input_buffer_lookback) {
+    switch (m_input_format) {
+        case eUnsignedByte:
+            m_bytes_per_sample = 1;
+            m_output_multiplier = MUSE_SHORT_INPUT_MULT;
+            m_output_add = 0;
+            break;
+        case eSignedShortLittleEndian:
+            m_bytes_per_sample = 2;
+            m_output_multiplier = 1024.0 / 65536.0;
+            m_output_add = 512;
+            break;
+        default:
+            throw runtime_error("Unrecognized input format");
+    }
 }
 
 bool ResamplingInputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) {
@@ -37,7 +52,13 @@ bool ResamplingInputReader::initialize(std::vector<std::shared_ptr<musevk::Vulka
         m_log.debug(eInput, fmt::format("Pipe size now: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
     }
 #endif
-    // cout << "Seeking: " << lseek(m_file_fd, 500000 * 1000, SEEK_SET) << endl;
+    if (m_initial_seek_seconds != 0) {
+        size_t samples_to_seek = (size_t)(m_initial_seek_seconds * 16.2e6 * m_input_pll.getInputSamplesPerSample());
+        size_t bytes_to_seek = m_bytes_per_sample * samples_to_seek;
+        m_log.info(eInput, fmt::format("Seeking to time {} s, {} samples, {} bytes.",
+                                       m_initial_seek_seconds, samples_to_seek, bytes_to_seek));
+        lseek(m_file_fd, bytes_to_seek, SEEK_SET);
+    }
 
     return InputReader::initialize(buffers);
 }
@@ -91,25 +112,6 @@ void ResamplingInputReader::threadFunc() {
 }
 
 bool ResamplingInputReader::readSamples(int sample_count, uint16_t buffer[c_sample_buffer_size], double dt) {
-    int bytes_per_sample;
-    double output_multiplier;
-    double output_add;
-    switch (m_input_format) {
-        case eUnsignedByte:
-            bytes_per_sample = 1;
-            output_multiplier = MUSE_SHORT_INPUT_MULT;
-            output_add = 0;
-            break;
-        case eSignedShortLittleEndian:
-            bytes_per_sample = 2;
-            output_multiplier = 1024.0 / 65536.0;
-            output_add = 512;
-            break;
-        default:
-            throw runtime_error("Unrecognized input format");
-    }
-
-
     double t = m_t; // always in [0, 1)
     int read_pos = m_file_input_buffer_read_pos;
     for (int sample_ix = 0; sample_ix < sample_count; sample_ix++) {
@@ -117,14 +119,14 @@ bool ResamplingInputReader::readSamples(int sample_count, uint16_t buffer[c_samp
         int samples_to_read = (int)t;
         t -= samples_to_read;
 
-        if (read_pos + samples_to_read * bytes_per_sample >= m_file_input_buffer_bytes) {
+        if (read_pos + samples_to_read * m_bytes_per_sample >= m_file_input_buffer_bytes) {
             // move remaining input to start of buffer
-            int start_copy_pos = read_pos - c_input_buffer_lookback * bytes_per_sample;
+            int start_copy_pos = read_pos - c_input_buffer_lookback * m_bytes_per_sample;
             int n = m_file_input_buffer_bytes - start_copy_pos;
             if (n > 0) // 0 first time, and could be later if we have short reads
                 memcpy(m_file_input_buffer, m_file_input_buffer + start_copy_pos, n);
             m_file_input_buffer_bytes -= start_copy_pos;
-            read_pos = c_input_buffer_lookback * bytes_per_sample;
+            read_pos = c_input_buffer_lookback * m_bytes_per_sample;
 
             do {
                 ssize_t read_count = read(m_file_fd,
@@ -139,9 +141,9 @@ bool ResamplingInputReader::readSamples(int sample_count, uint16_t buffer[c_samp
                     throw runtime_error(fmt::format("Error reading from file: {}", strerror(errno)));
                 else
                     m_file_input_buffer_bytes += (int)read_count;
-            } while (read_pos + samples_to_read * bytes_per_sample >= m_file_input_buffer_bytes);
+            } while (read_pos + samples_to_read * m_bytes_per_sample >= m_file_input_buffer_bytes);
         }
-        read_pos += samples_to_read * bytes_per_sample;
+        read_pos += samples_to_read * m_bytes_per_sample;
 
         double b0, b1, b2, b3;
         switch (m_input_format) {
@@ -170,7 +172,7 @@ bool ResamplingInputReader::readSamples(int sample_count, uint16_t buffer[c_samp
         // now evaluate at point 1 + p
         double y = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
 
-        auto muse_int = (uint16_t)(y * output_multiplier + output_add);
+        auto muse_int = (uint16_t)(y * m_output_multiplier + m_output_add);
         buffer[sample_ix] = muse_int;
     }
     m_t = t;

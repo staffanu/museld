@@ -12,8 +12,8 @@ using namespace std;
 
 BigEndian16MHzInputReader::BigEndian16MHzInputReader(
         Logger &log,
-        const std::string &filename, bool input_is_fifo)
-        : InputReader(log, filename, input_is_fifo),
+        const std::string &filename, bool input_is_fifo, double initial_seek_seconds)
+        : InputReader(log, filename, input_is_fifo, initial_seek_seconds),
         m_input{} {
 }
 
@@ -23,9 +23,21 @@ bool BigEndian16MHzInputReader::initialize(std::vector<std::shared_ptr<musevk::V
     m_input = ifstream(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
     m_input.exceptions(ifstream::badbit);
 
-    vector<uint16_t> skip_buffer(samples_to_skip);
+    size_t samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
+    assert(samples_per_frame >= samples_to_skip);
+    vector<uint16_t> skip_buffer(samples_per_frame);
     m_log.info(eInput, fmt::format("Skipping {} initial samples", samples_to_skip));
     readShorts(m_input, skip_buffer.data(), samples_to_skip);
+
+    if (m_initial_seek_seconds != 0) {
+        size_t frames_to_seek = (size_t)(m_initial_seek_seconds * 30);
+        size_t samples_to_seek = frames_to_seek * samples_per_frame;
+        double actual_seek_time = (double)frames_to_seek / 30.0;
+        m_log.info(eInput, fmt::format("Seeking to time {} s, {} samples.",
+                                       actual_seek_time, samples_to_seek));
+        for (int i = 0; i < frames_to_seek; i++)
+            readShorts(m_input, skip_buffer.data(), samples_per_frame);
+    }
 
     return InputReader::initialize(buffers);
 }

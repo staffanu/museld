@@ -7,10 +7,11 @@
 
 using namespace std;
 
-InputReader::InputReader(Logger &log, const std::string &filename, bool input_is_fifo)
+InputReader::InputReader(Logger &log, const std::string &filename, bool input_is_fifo, double initial_seek_seconds)
         : m_log(log),
           m_filename(filename),
           m_input_is_fifo(input_is_fifo),
+          m_initial_seek_seconds(initial_seek_seconds),
           m_vacant_muse_input_buffers{},
           m_filled_muse_input_buffers{},
           m_reader_thread(nullptr),

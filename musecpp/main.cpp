@@ -15,7 +15,7 @@ using namespace std;
 
 void process_file(Logger &log, const string& executable_dir, InputReader &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
-                  bool decode_video, bool decode_audio) {
+                  bool start_paused, bool decode_video, bool decode_audio) {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
@@ -69,31 +69,11 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         auto t0 = chrono::high_resolution_clock::now();
         int field_count = 0;
         bool paused = false;
+        int paused_countdown = start_paused ? 5 : 0;
         // We skip calling next every other field if decode_all_fields is false
         while (paused || decoder.next(audio_mode, audio_sample_count, audio_samples)) {
             if (!paused)
                 field_count++;
-
-            if (glfwWindowShouldClose(window))
-                break;
-            glfwPollEvents();
-            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
-                break;
-            if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS && full_screen) {
-                glfwSetWindowMonitor(window, nullptr, 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
-                full_screen = false;
-            }
-            if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && !full_screen) {
-                glfwSetWindowMonitor(window, glfwGetPrimaryMonitor(), 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
-                full_screen = true;
-            }
-            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-                paused = !paused;
-                while (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-                    usleep(100000);
-                    glfwPollEvents();
-                }
-            }
 
             if (audio_sample_count != 0 && audio_mode != AudioDecoder::MODE_UNKNOWN && !paused)
                 audio_playback.add_samples(audio_mode, audio_sample_count, audio_samples);
@@ -121,12 +101,39 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
 
             queue->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Unorm,
                                                  vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
-
             queue->evalAsync();
             queue->evalAwait();
 
             manager.present(swap_chain_image);
-        };
+
+            if (paused_countdown != 0 && --paused_countdown == 0) {
+                paused = true;
+            }
+            if (glfwWindowShouldClose(window))
+                break;
+            glfwPollEvents();
+            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+                break;
+            if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS && full_screen) {
+                glfwSetWindowMonitor(window, nullptr, 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
+                full_screen = false;
+            }
+            if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && !full_screen) {
+                glfwSetWindowMonitor(window, glfwGetPrimaryMonitor(), 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
+                full_screen = true;
+            }
+            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+                paused = !paused;
+                while (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+                    usleep(100000);
+                    glfwPollEvents();
+                }
+            }
+            if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
+                paused = false;
+                paused_countdown = 1;
+            }
+        }
         auto t1 = chrono::high_resolution_clock::now();
         auto time_us = (double) chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
         log.info(eApplication | ePerformance,
@@ -172,6 +179,8 @@ int main(int argc, char *argv[]) {
     InputFormat input_format = eUnknown;
     double input_sample_frequency = 40e6;
     bool input_is_fifo = false;
+    double initial_seek_seconds = 0;
+    bool start_paused = false;
     bool decode_video = true;
     bool decode_audio = true;
 
@@ -194,6 +203,10 @@ int main(int argc, char *argv[]) {
                 decode_all_fields = true;
             else if (*it == "--full-screen")
                 full_screen = true;
+            else if (*it == "--seek")
+                initial_seek_seconds = stod(*(++it));
+            else if (*it == "--pause")
+                start_paused = true;
             else if (*it == "--no-video")
                 decode_video = false;
             else if (*it == "--no-audio")
@@ -205,33 +218,35 @@ int main(int argc, char *argv[]) {
             else if (*it == "--help")
                 usage();
             else {
-//                Logger log(log_selection);
-                Logger log({{eInput, eDebug}, {eAudio, eDebug}, {eVideo, eInfo}});
+                if (initial_seek_seconds != 0 && input_is_fifo)
+                    throw runtime_error("Initial seek is not compatible with reading from fifo");
                 if (!filesystem::exists(*it))
                     throw runtime_error("File not found: " + string(*it));
+//                Logger log(log_selection);
+                Logger log({{eInput, eDebug}, {eAudio, eDebug}, {eVideo, eInfo}});
                 InputReader *reader;
                 switch (input_format) {
                     case eOverSampledUnsignedBytes:
                         reader = new ResamplingInputReader(
                                 log, *it,
                                 ResamplingInputReader::InputFormat::eUnsignedByte,
-                                input_sample_frequency, input_is_fifo);
+                                input_sample_frequency, input_is_fifo, initial_seek_seconds);
                         break;
                     case eOverSampledSignedShortsLittleEndian:
                         reader = new ResamplingInputReader(
                                 log, *it,
                                 ResamplingInputReader::InputFormat::eSignedShortLittleEndian,
-                                input_sample_frequency, input_is_fifo);
+                                input_sample_frequency, input_is_fifo, initial_seek_seconds);
                         break;
                     case eBigEndianShorts:
-                        reader = new BigEndian16MHzInputReader(log, *it, input_is_fifo);
+                        reader = new BigEndian16MHzInputReader(log, *it, input_is_fifo, initial_seek_seconds);
                         break;
                     case eUnknown:
                     default:
                         throw runtime_error("No input format specified");
                 }
                 process_file(log, executable_dir, *reader, decode_all_fields,
-                             full_screen, no_sync, decode_video, decode_audio);
+                             full_screen, no_sync, start_paused, decode_video, decode_audio);
             }
         }
     } catch (const exception &x) {
