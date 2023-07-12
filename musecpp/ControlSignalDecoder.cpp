@@ -149,6 +149,11 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, uint16_t const *data, st
         motion_information = nullopt;
         motion_extent = nullopt;
     }
+
+    if (horizontal_motion_vector.has_value() && horizontal_motion_vector.value() != 0 ||
+        vertical_motion_vector.has_value() && vertical_motion_vector.value() != 0)
+        // Of course this is not an error -- but if we see an actual motion vector we don't want to miss it!
+        throw runtime_error("Actually found non-zero motion vector!");
 }
 
 void ControlSignalDecoder::log_control_data() const {
