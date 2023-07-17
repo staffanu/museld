@@ -35,8 +35,10 @@ public:
                      AudioFrame output_samples[c_max_output_samples]);
 
 private:
+    static std::vector<std::pair<float, float>> defaultSymbolLocations();
     static AudioMode detectModeFromControlData(uint32_t control_data);
 
+    static const std::vector<std::pair<float, float>> c_default_symbol_locations;
     static const int c_deinterleave_stages = 25;
     static const int c_deinterleave_buffer_size =  (c_deinterleave_stages - 1) * 1350 + 1;
     static const std::array<std::array<bool, 3>, 8> c_symbol_bits;

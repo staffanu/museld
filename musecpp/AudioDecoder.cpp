@@ -11,7 +11,9 @@
 
 using namespace std;
 
-const std::array<std::array<bool, 3>, 8> AudioDecoder::c_symbol_bits = {
+const vector<pair<float, float>> AudioDecoder::c_default_symbol_locations = defaultSymbolLocations();
+
+const array<array<bool, 3>, 8> AudioDecoder::c_symbol_bits = {
         false, false, false, // 0, 0
         false, false, true, // 0, 1
         false, true, true, // 0, 2
@@ -22,10 +24,35 @@ const std::array<std::array<bool, 3>, 8> AudioDecoder::c_symbol_bits = {
         true, true, false // 2, 2
 };
 
-const std::array<bool, 16> AudioDecoder::c_sync_pattern = {
+const array<bool, 16> AudioDecoder::c_sync_pattern = {
         false, false, false, true, false, false, true, true,
         false, true, false, true, true, true, true, false
 };
+
+AudioDecoder::AudioMode AudioDecoder::detectModeFromControlData(uint32_t control_data) {
+    // I found no documentation whatsoever for the control signal, so this is just a table of
+    // what I have seen in examples.  There is probably more information than just the MODE A/B
+    // designation.
+    switch (control_data) {
+        case 0b0110010000000010100001:
+        case 0b0110011001000010101001:
+            return MODE_A;
+        case 0b1001100000000010100011:
+        case 0b1001100000000010100001:
+            return MODE_B;
+        default:
+            return MODE_UNKNOWN;
+    }
+}
+
+vector<pair<float, float>> AudioDecoder::defaultSymbolLocations() {
+    vector<pair<float, float>> symbol_locations;
+    for (int i = 0; i <= 2; i++)
+        for (int j = 0; j <= 2; j++)
+            if (i != 1 || j != 1)
+                symbol_locations.emplace_back(pair(28 + i * 100, 28 + j * 100));
+    return symbol_locations;
+}
 
 AudioDecoder::AudioDecoder(Logger &log)
 : m_log(log),
@@ -34,6 +61,7 @@ AudioDecoder::AudioDecoder(Logger &log)
   m_total_deinterleaved_bits(0),
   m_q(0),
   m_consecutive_failed_syncs(100), // start by searching for sync pattern
+  m_symbol_locations(defaultSymbolLocations()),
   m_active_control_signal(0),
   m_active_audio_mode(MODE_UNKNOWN),
   m_bch_decoder(82, 74, 137),
@@ -44,10 +72,6 @@ AudioDecoder::AudioDecoder(Logger &log)
   aModeChannel4Decoder(4),
   bModeChannel1Decoder(1),
   bModeChannel2Decoder(2) {
-    for (int i = 0; i <= 2; i++)
-        for (int j = 0; j <= 2; j++)
-            if (i != 1 || j != 1)
-                m_symbol_locations.emplace_back(pair(28 + i * 100, 28 + j * 100));
 }
 
 void AudioDecoder::decodeFrame(int frame_no,
@@ -87,10 +111,15 @@ void AudioDecoder::decodeFrame(int frame_no,
             }
 
             if (abs(closest.second - second_closest.second) > 40) {
-                pair<float, float> prev_location = m_symbol_locations[closest.first];
-                float new_x = (prev_location.first * 15 + xin) / 16;
-                float new_y = (prev_location.second * 15 + yin) / 16;
-                m_symbol_locations[closest.first] = {new_x, new_y};
+                if (pow(xin - c_default_symbol_locations[closest.first].first, 2) +
+                        pow(yin - c_default_symbol_locations[closest.first].second, 2) < 49 * 49 + 49 * 49) {
+                    pair<float, float> prev_location = m_symbol_locations[closest.first];
+                    float new_x = (prev_location.first * 15 + xin) / 16;
+                    float new_y = (prev_location.second * 15 + yin) / 16;
+                    m_symbol_locations[closest.first] = {new_x, new_y};
+                } else
+                    m_log.debug(eAudio, fmt::format("Not updating symbol location due to too far from default location: "
+                                                    "presumed symbol {}=({}, {})", closest.first, xin, yin));
             }
 
             array<bool, 3> bits = c_symbol_bits[closest.first];
@@ -230,21 +259,5 @@ void AudioDecoder::decodeFrame(int frame_no,
             } else
                 m_log.warn(eAudio, "Unknown audio mode");
         }
-    }
-}
-
-AudioDecoder::AudioMode AudioDecoder::detectModeFromControlData(uint32_t control_data) {
-    // I found no documentation whatsoever for the control signal, so this is just a table of
-    // what I have seen in examples.  There is probably more information than just the MODE A/B
-    // designation.
-    switch (control_data) {
-        case 0b0110010000000010100001:
-        case 0b0110011001000010101001:
-            return MODE_A;
-        case 0b1001100000000010100011:
-        case 0b1001100000000010100001:
-            return MODE_B;
-        default:
-            return MODE_UNKNOWN;
     }
 }
