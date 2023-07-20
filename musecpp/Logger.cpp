@@ -56,11 +56,11 @@ const map<int, string> Logger::c_category_names = {
 void Logger::log(LogPriority priority, LogCategoryFlags categorization, const std::string &message) {
     int flags = categorization;
     if (priority >= m_minimum_priority) {
-        auto tp = chrono::time_point_cast<chrono::microseconds>(chrono::system_clock::now());
+        auto tp = chrono::time_point_cast<chrono::milliseconds>(chrono::system_clock::now());
         auto us = tp.time_since_epoch().count() % micro::den;
         ostringstream ss;
-        ss << fmt::format("{:%Y-%m-%d %H:%M:%S}.{:06d} [{}] (",
-                   tp, us, c_priority_names.at(priority));
+        ss << fmt::format("{:%Y-%m-%d %H:%M:%S} [{}] (",
+                   tp, c_priority_names.at(priority));
         bool first = true;
         bool do_log = false;
         for (int bit = 1; flags != 0; bit <<= 1, flags >>= 1) {
