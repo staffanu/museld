@@ -37,8 +37,7 @@ bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::shared_ptr<musevk
         double actual_seek_time = (double)frames_to_seek / 30.0;
         m_log.info(eInput, fmt::format("Seeking to time {} s, {} samples.",
                                        actual_seek_time, samples_to_seek));
-        for (int i = 0; i < frames_to_seek; i++)
-            readShorts(m_input, skip_buffer.data(), samples_per_frame);
+        m_input.seekg(samples_to_seek * 2, ios_base::seekdir::cur);
     }
 
     return InputReader::initialize(buffers);
