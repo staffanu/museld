@@ -57,7 +57,7 @@ private:
     int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field
     long m_total_elapsed_time_us;
     AudioDecoder m_audio_decoder;
-    std::deque<FrameBuffer *> m_frame_buffers;
+    std::deque<FrameBuffer *> m_frame_buffers; // The front (index 0) is the newest received frame
 };
 
 
