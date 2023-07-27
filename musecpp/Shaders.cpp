@@ -315,7 +315,7 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandQueue &sq, const vector<ref
                                    field_phases_y[0]);
     makeFieldFromConsecutiveFrames(sq, 3, fields[1], frame_phases_y[1], fields[3], frame_phases_y[3], field_parities[1],
                                    field_phases_y[1]);
-    filterImageDiamond(sq, 1, 1 ^ field_parities[0] ^ field_phases_y[0], m_inter_frame_Y_buffer);
+    filterImageDiamond(sq, 1, field_parities[0] ^ field_phases_y[0], m_inter_frame_Y_buffer);
 
     for (int i = 0; i < 4; i++)
         decodeC(sq, 1 + i, fields[i].get().m_data, frame_phases_c[i], field_parities[i], i == 0);
@@ -358,7 +358,7 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandQueue &sq,
     sq.enqueueComputeShader(
             m_convert_sample_rate_4_to_3_algo,
             vector{m_filter_4_to_3_buffer->size(), 3u, 4u, 0u, 0u, m_interpolated32_buffer.height(),
-                        m_interpolated32_buffer.width(), uint(1 - fields_parity), 2u, uint(1 - fields_phases), 2u, 1u});
+                        m_interpolated32_buffer.width(), uint(1 - fields_parity), 2u, fields_phases, 2u, 1u});
 }
 
 void Shaders::combineStillAndMovingParts(CommandQueue &sq, bool force_field_only, bool force_inter_frame_only) {
