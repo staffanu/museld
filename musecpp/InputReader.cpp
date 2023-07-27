@@ -72,7 +72,7 @@ InputReader::getNextInputBuffer() {
                 lock,
                 [this] { return m_reader_thread_finished || !m_filled_muse_input_buffers.empty(); });
 
-        if (m_reader_thread_finished)
+        if (m_filled_muse_input_buffers.empty())
             return {nullptr, eNormal};
 
         buffer = m_filled_muse_input_buffers.front();
