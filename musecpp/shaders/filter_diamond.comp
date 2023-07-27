@@ -44,5 +44,5 @@ void main() {
                 s += frame_buffer[(row + i) * frame_buffer_width + col + j] *
                     diamond_filter[(i + H) * filter_width + j + W];
     }
-    frame_buffer[row * frame_buffer_width + col] = (clamp(s * 2.hf, 0.hf, 255.hf));
+    frame_buffer[row * frame_buffer_width + col] = clamp(s * 2.hf, 0.hf, 255.hf);
 }

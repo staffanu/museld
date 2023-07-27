@@ -137,19 +137,19 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             m_fill_empty_lines_spirv, Workgroup(m_field_Y_buffer.width(), m_field_Y_buffer.height() / 2));
     m_convert_sample_rate_algo = m_vulkan_manager.createComputeShader(
             "convert_sample_rate",
-            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 12,
+            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 13,
             m_convert_horiz_sample_rate_spirv,
             Workgroup(m_interpolated32_buffer.width() / 4, m_interpolated32_buffer.height()), 3);
     m_convert_sample_rate_4_to_3_algo = m_vulkan_manager.createComputeShader(
             "convert_sample_rate_4_to_3",
             {m_filter_4_to_3_buffer, m_interpolated32_buffer.getVulkanBuffer(),
-             m_inter_frame_Y_buffer.getVulkanBuffer()}, sizeof(uint32_t) * 12,
+             m_inter_frame_Y_buffer.getVulkanBuffer()}, sizeof(uint32_t) * 13,
             m_convert_horiz_sample_rate_spirv,
             Workgroup(m_inter_frame_Y_buffer.width(), m_inter_frame_Y_buffer.height() / 2));
     m_convert_sample_rate_2_to_3_algo = m_vulkan_manager.createComputeShader(
             "convert_sample_rate_2_to_3",
             {m_filter_2_to_3_buffer, m_interpolated32_buffer.getVulkanBuffer(), m_field_Y_buffer.getVulkanBuffer()},
-            sizeof(uint32_t) * 12,
+            sizeof(uint32_t) * 13,
             m_convert_horiz_sample_rate_spirv,
             Workgroup(m_field_Y_buffer.width(), m_field_Y_buffer.height() / 2));
     m_decode_c_algo = m_vulkan_manager.createComputeShader(
@@ -172,7 +172,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             Workgroup(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2));
     m_convert_audio_sample_rate_algo = m_vulkan_manager.createComputeShader(
             "convert_audio_sample_rate",
-            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 12,
+            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 13,
             m_convert_horiz_sample_rate_spirv,
             Workgroup(MUSE_TOTAL_WIDTH, 44), 2);
 }
@@ -208,7 +208,7 @@ void Shaders::decodeIntraField(CommandQueue &sq, FieldBufferView &field) {
     sq.enqueueComputeShader(
             m_convert_sample_rate_2_to_3_algo,
             vector{m_filter_2_to_3_buffer->size(), 3u, 2u, 0u, 0u, m_interpolated32_buffer.height(), m_interpolated32_buffer.width(),
-                   uint(1 - field_parity), 2u, 0u, 1u, 1u});
+                   uint(1 - field_parity), 2u, 0u, 1u, 0u, 1u});
 
     sq.enqueueComputeShader(m_fill_empty_lines_algo,
                             vector{m_field_Y_buffer.height(), m_field_Y_buffer.width(), (unsigned)field_parity});
@@ -336,7 +336,7 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandQueue &sq, const vector<ref
         sq.enqueueComputeShader(
                 m_convert_sample_rate_algo,
                 vector{m_filter_4_to_1_buffer->size(), 1u, 4u, 0u, 0u, m_interpolated32_buffer.height(),
-                            m_interpolated32_buffer.width(), 0u, 1u, 0u, 1u, 2u},
+                            m_interpolated32_buffer.width(), 0u, 1u, 0u, 1u, 0u, 2u},
                 i);
     }
 
@@ -358,7 +358,7 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandQueue &sq,
     sq.enqueueComputeShader(
             m_convert_sample_rate_4_to_3_algo,
             vector{m_filter_4_to_3_buffer->size(), 3u, 4u, 0u, 0u, m_interpolated32_buffer.height(),
-                        m_interpolated32_buffer.width(), uint(1 - fields_parity), 2u, fields_phases, 2u, 1u});
+                        m_interpolated32_buffer.width(), uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases, 1u});
 }
 
 void Shaders::combineStillAndMovingParts(CommandQueue &sq, bool force_field_only, bool force_inter_frame_only) {
@@ -379,7 +379,7 @@ void Shaders::convertAudioSampleRate(musevk::CommandQueue &sq, MuseBuffer &frame
                 m_convert_audio_sample_rate_algo,
                 vector{m_filter_4_to_3_buffer->size(), 3u, 4u,
                        2u + 562u * i, 2u, 44u, (uint32_t)MUSE_TOTAL_WIDTH,
-                       44u * i, 1u, 0u, 1u, 1u},
+                       44u * i, 1u, 0u, 1u, 0u, 1u},
                 i);
     }
 }
