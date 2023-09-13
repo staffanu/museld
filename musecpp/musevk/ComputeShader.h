@@ -8,7 +8,12 @@
 #include <vulkan/vulkan.hpp>
 #include "VulkanBuffer.h"
 
+#define LOCAL_WORKGROUP_SIZE_X 16
+#define LOCAL_WORKGROUP_SIZE_Y 4
+#define LOCAL_WORKGROUP_SIZE_Z 1
+
 namespace musevk {
+    // Represents the global workgroup size
     struct Workgroup {
         Workgroup(uint32_t x, uint32_t y = 1, uint32_t z = 1)
         : x_size(x),
@@ -97,7 +102,10 @@ namespace musevk {
         }
 
         void dispatch(const vk::CommandBuffer &commandBuffer) {
-            commandBuffer.dispatch(m_workgroup.x_size, m_workgroup.y_size, m_workgroup.z_size);
+            uint32_t group_count_x = (m_workgroup.x_size + LOCAL_WORKGROUP_SIZE_X - 1) / LOCAL_WORKGROUP_SIZE_X;
+            uint32_t group_count_y = (m_workgroup.y_size + LOCAL_WORKGROUP_SIZE_Y - 1) / LOCAL_WORKGROUP_SIZE_Y;
+            uint32_t group_count_z = (m_workgroup.z_size + LOCAL_WORKGROUP_SIZE_Z - 1) / LOCAL_WORKGROUP_SIZE_Z;
+            commandBuffer.dispatch(group_count_x, group_count_y, group_count_z);
         }
 
         std::string m_name;

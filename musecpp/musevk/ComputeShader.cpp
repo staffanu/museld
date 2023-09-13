@@ -4,6 +4,8 @@
 
 #include "ComputeShader.h"
 
+using namespace std;
+
 namespace musevk {
     ComputeShader::ComputeShader(std::string &name,
                                  vk::Device &device,
@@ -73,7 +75,7 @@ namespace musevk {
                     break;
             }
         }
-        std::vector<vk::DescriptorPoolSize> descriptor_pool_sizes;
+        vector<vk::DescriptorPoolSize> descriptor_pool_sizes;
         if (number_of_storage_buffers != 0)
             descriptor_pool_sizes.emplace_back(vk::DescriptorType::eStorageBuffer,
                                        number_of_storage_buffers * number_of_descriptor_sets);
@@ -86,7 +88,7 @@ namespace musevk {
                 descriptor_pool_sizes);
         m_descriptor_pool = m_device.createDescriptorPool(descriptor_pool_info);
 
-        std::vector<vk::DescriptorSetLayoutBinding> descriptor_set_bindings;
+        vector<vk::DescriptorSetLayoutBinding> descriptor_set_bindings;
         for (size_t i = 0; i < m_descriptor_count; i++) {
             descriptor_set_bindings.emplace_back(
                     i, // Binding index
@@ -110,7 +112,7 @@ namespace musevk {
         auto buffers = m_buffers[set_index];
         for (size_t i = 0; i < buffers.size(); i++) {
             if (buffers[i] != nullptr) { // allow null to be updated later
-                std::vector<vk::WriteDescriptorSet> compute_write_descriptor_sets;
+                vector<vk::WriteDescriptorSet> compute_write_descriptor_sets;
                 compute_write_descriptor_sets.push_back(
                         buffers[i]->makeWriteDescriptorSet(m_descriptor_sets[set_index], i));
                 m_device.updateDescriptorSets(compute_write_descriptor_sets, nullptr);
@@ -119,11 +121,26 @@ namespace musevk {
     }
 
     void ComputeShader::createPipeline() {
+        struct Constants {
+            uint32_t size_x = LOCAL_WORKGROUP_SIZE_X;
+            uint32_t size_y = LOCAL_WORKGROUP_SIZE_Y;
+            uint32_t size_z = LOCAL_WORKGROUP_SIZE_Z;
+        } constants;
+        vector<vk::SpecializationMapEntry> specialization_map_entries {
+                vk::SpecializationMapEntry(1, offsetof(Constants, size_x), sizeof(constants.size_x)),
+                vk::SpecializationMapEntry(2, offsetof(Constants, size_y), sizeof(constants.size_y)),
+                vk::SpecializationMapEntry(3, offsetof(Constants, size_z), sizeof(constants.size_z)),
+        };
+        vk::SpecializationInfo specialization_info(specialization_map_entries.size(),
+                                                   specialization_map_entries.data(),
+                                                   sizeof(constants),
+                                                   &constants);
+
         vk::PipelineShaderStageCreateInfo shader_stage_info(vk::PipelineShaderStageCreateFlags(),
                                                             vk::ShaderStageFlagBits::eCompute,
                                                             m_shader_module,
                                                             "main",
-                                                            nullptr);
+                                                            &specialization_info);
 
         vk::PipelineCacheCreateInfo pipeline_cache_info = vk::PipelineCacheCreateInfo();
         m_pipeline_cache = m_device.createPipelineCache(pipeline_cache_info);

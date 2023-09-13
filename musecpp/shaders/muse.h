@@ -5,10 +5,9 @@
 #extension GL_EXT_shader_16bit_storage : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable
 
-#ifndef NO_SET_WORKGROUP_SIZE
-layout (local_size_x = 16) in;
-layout (local_size_y = 1) in;
-#endif
+layout (local_size_x_id = 1) in;
+layout (local_size_y_id = 2) in;
+layout (local_size_z_id = 3) in;
 
 #define MUSE_INPUT_MULT 4.hf
 
