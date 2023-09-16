@@ -111,8 +111,9 @@ private:
     MuseBuffer m_inter_frame_r_buffer;
     MuseBuffer m_inter_frame_b_buffer;
 
-    MuseBuffer m_movement_field_buffers[3]; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH / 2
-    MuseBuffer m_movement_buffer;
+    MuseBuffer m_movement_buffer; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
+    MuseBuffer m_movement_edge_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
+    MuseBuffer m_movement_coring_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
 
     // used for final result
     std::shared_ptr<musevk::VulkanImage> m_image_out;

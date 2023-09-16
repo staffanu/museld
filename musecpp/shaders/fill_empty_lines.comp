@@ -1,7 +1,7 @@
 #version 450
 
 // This shader should be invoked with global invocation ids
-// from (0, 0) to (source_width, source_height / 2)
+// from (0, 0) to (width, height / 2)
 
 #include "muse.h"
 

@@ -3,42 +3,98 @@
 #include "muse.h"
 
 // This shader should be invoked with global invocation ids
-// from (0, 0) to (MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)
+// from (0, 0) to (MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)
 
-layout(set = 0, binding = 0) buffer readonly movement_field0_buffer {
-    float16_t movement_field0[];
+layout(push_constant) uniform PushConstants {
+    uint field_parity;
 };
 
-layout(set = 0, binding = 1) buffer readonly movement_field1_buffer {
-    float16_t movement_field1[];
+layout(set = 0, binding = 0) buffer readonly frame0_buffer {
+    // the latest input frame
+    float16_t frame0[][MUSE_TOTAL_WIDTH];
 };
 
-layout(set = 0, binding = 2) buffer readonly movement_field2_buffer {
-    float16_t movement_field2[];
+layout(set = 0, binding = 1) buffer readonly frame1_buffer {
+    // one frame back for one frame frame difference; not currently used
+    float16_t frame1[][MUSE_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 2) buffer readonly frame2_buffer {
+    // two frames back for two frame frame difference
+    float16_t frame2[][MUSE_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 3) buffer writeonly movement_out_buffer {
+    // values are between 0 and 1
+    // Size is the full frame output resolution
     float16_t movement_out[][MUSE_Y_BUF_WIDTH * 3];
 };
+
+layout(set = 0, binding = 4) buffer edge_buffer {
+    // values are between 0 and 15
+    float16_t edge[][MUSE_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 5) buffer core_out_buffer {
+    // movement values 0-15 before extending the region to the output
+    float16_t core_out[][MUSE_Y_BUF_WIDTH];
+};
+
+float16_t H[9] = { -0.024427hf, 0.000000hf, 0.037425hf, 0.070336hf, 0.083333hf, 0.070336hf, 0.037425hf, 0.000000hf, -0.024427hf };
 
 void main() {
     uint row = gl_GlobalInvocationID.y;
     uint col = gl_GlobalInvocationID.x;
 
-    if (row >= MUSE_BUF_HEIGHT * 2 || col >= MUSE_Y_BUF_WIDTH * 3)
+    if (row >= MUSE_BUF_HEIGHT || col >= MUSE_Y_BUF_WIDTH)
         return;
 
-    uint movement_row = row / 2;
-    uint movement_col = col / 6;
+    uint v_offset = field_parity == 0 ? 46 : 608;
+    uint h_offset = 106;
 
-    float16_t maximum = 0.hf;
-    for (int i = -1; i <= 1; i++)
-        for (int j = -1; j <= 1; j++) {
-            uint ix = (movement_row + i) * MUSE_MOTION_FIELD_BUF_WIDTH + movement_col + j;
-            maximum = max(maximum, abs(movement_field0[ix] - movement_field1[ix]));
-            maximum = max(maximum, abs(movement_field0[ix] - movement_field2[ix]));
+    // Compute a high-pass filtered image to indicate edges in the picture
+
+    // TODO: think about not using surrounding pixels
+    float16_t hipass_out = frame0[row + v_offset][col + h_offset] * 4.hf
+        - frame0[row + v_offset - 1][col + h_offset]
+        - frame0[row + v_offset][col + h_offset - 1]
+        - frame0[row + v_offset][col + h_offset + 1]
+        - frame0[row + v_offset + 1][col + h_offset];
+    edge[row][col] = clamp(abs(hipass_out) / 13.3hf, 0.hf, 15.hf);
+
+    barrier();
+
+    // The actual edge level used is a maximum calculation for the surrounding pixels
+    float16_t edge_level =
+        max(edge[row][col],
+            max(edge[row-1][col] + edge[row+1][col], edge[row][col-1] + edge[row][col+1]));
+
+    // Compute the low-pass filtered difference signal
+    // TODO: think about not using surrounding pixels
+    float16_t diff2 = 0.hf;
+    for (int j = -2; j <= 1; j++)
+        for (int i = -4; i <= 4; i++) {
+            float16_t d = frame0[row + v_offset + j][col + h_offset + i] - frame2[row + v_offset + j][col + h_offset + i];
+            diff2 += d * H[i + 4];
         }
-    float16_t m = maximum < 5.hf ? 0.hf : maximum > 25.hf ? 1.hf : maximum / 25.hf;
+    diff2 = abs(diff2);
 
-    movement_out[row][col] = m;
+    // Use coring to compute a movement value -- edges and bright areas naturally have
+    // higher difference values, so this is compensated for.
+    float16_t level = (frame0[row + v_offset][col + h_offset] + frame2[row + v_offset][col + h_offset]) / 2.hf;
+    float16_t motion_none = 3.hf + edge_level / 15.hf;
+    float16_t motion_full = 5.hf + edge_level + level / 16.hf;
+    core_out[row][col] = clamp((diff2 - motion_none) / (motion_full - motion_none), 0.hf, 1.hf) * 15.hf;
+
+    barrier();
+
+    // Enlarge the detected area -- output values are between 0 and 1
+    float16_t enlarged =
+        max(core_out[row][col],
+        max(core_out[row-1][col] + core_out[row+1][col], core_out[row][col-1] + core_out[row][col+1]));
+
+    // TODO: and add low-pass filtering
+    for (int j = 0; j < 2; j++)
+        for (int i = 0; i < 3; i++)
+            movement_out[row * 2 + j][col * 3 + i] = enlarged / 15.hf;
 }
