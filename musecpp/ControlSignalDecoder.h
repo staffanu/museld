@@ -23,6 +23,8 @@ struct ControlSignalDecoder {
     std::optional<int> vertical_motion_vector;
     std::optional<int> frame_subsampling_phase_Y;
     std::optional<int> frame_subsampling_phase_C;
+    std::optional<int> motion_detector_sensitivity;
+    std::optional<int> edge_detection_prohibited;
     std::optional<MotionInformation> motion_information;
     std::optional<int> motion_extent;
 

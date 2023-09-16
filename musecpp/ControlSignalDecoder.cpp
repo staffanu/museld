@@ -120,6 +120,8 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, uint16_t const *data, st
     vertical_motion_vector = vector_to_int_opt(vector(result.cbegin() + 5, result.cbegin() + 8));
     frame_subsampling_phase_Y = vector_index_to_bit_opt(result, 8);
     frame_subsampling_phase_C = vector_index_to_bit_opt(result, 9);
+    motion_detector_sensitivity = vector_index_to_bit_opt(result, 13);
+    edge_detection_prohibited = vector_index_to_bit_opt(result, 14);
 
     auto motion_int_opt = vector_to_int_opt(vector(result.cbegin() + 15, result.cbegin() + 18));
     if (motion_int_opt.has_value()) {
@@ -151,8 +153,10 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, uint16_t const *data, st
     }
 
     if (horizontal_motion_vector.has_value() && horizontal_motion_vector.value() != 0 ||
-        vertical_motion_vector.has_value() && vertical_motion_vector.value() != 0)
-        // Of course this is not an error -- but if we see an actual motion vector we don't want to miss it!
+        vertical_motion_vector.has_value() && vertical_motion_vector.value() != 0 ||
+        motion_detector_sensitivity.has_value() && motion_detector_sensitivity.value() != 0 ||
+        edge_detection_prohibited.has_value() && motion_detector_sensitivity.value() != 0)
+        // Of course this is not an error -- but if we see examples we don't want to miss them!
         throw runtime_error("Actually found non-zero motion vector!");
 }
 
@@ -161,6 +165,8 @@ void ControlSignalDecoder::log_control_data() const {
     ss << "phases (fieldY frameY frameC) = "
          << field_subsampling_phase_Y << frame_subsampling_phase_Y << frame_subsampling_phase_C
          << ", hVector=" << horizontal_motion_vector << ", vVector=" << vertical_motion_vector
+         << ", motionSensitivity=" << motion_detector_sensitivity
+         << ", edgeDetectProhibited=" << edge_detection_prohibited
          << ", motion=" << motion_information << ", extent=" << motion_extent;
     m_log.info(eVideo, ss.str());
 }
