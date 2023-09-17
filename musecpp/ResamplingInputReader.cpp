@@ -52,14 +52,6 @@ bool ResamplingInputReader::initialize(std::vector<std::shared_ptr<musevk::Vulka
         m_log.debug(eInput, fmt::format("Pipe size now: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
     }
 #endif
-    if (m_initial_seek_seconds != 0) {
-        size_t samples_to_seek = (size_t)(m_initial_seek_seconds * 16.2e6 * m_input_pll.getInputSamplesPerSample());
-        size_t bytes_to_seek = m_bytes_per_sample * samples_to_seek;
-        m_log.info(eInput, fmt::format("Seeking to time {} s, {} samples, {} bytes.",
-                                       m_initial_seek_seconds, samples_to_seek, bytes_to_seek));
-        lseek(m_file_fd, bytes_to_seek, SEEK_SET);
-    }
-
     return InputReader::initialize(buffers);
 }
 
@@ -68,6 +60,17 @@ void ResamplingInputReader::cleanup() {
 
     if (m_file_fd != -1)
         close(m_file_fd);
+}
+
+void ResamplingInputReader::seek(double seconds) {
+    // FIXME: make this thread safe!
+    if (!m_input_is_fifo) {
+        off_t samples_to_seek = (off_t) (seconds * 16.2e6 * m_input_pll.getInputSamplesPerSample());
+        off_t bytes_to_seek = m_bytes_per_sample * samples_to_seek;
+        m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples, {} bytes.",
+                                       seconds, samples_to_seek, bytes_to_seek));
+        lseek(m_file_fd, bytes_to_seek, SEEK_CUR);
+    }
 }
 
 void ResamplingInputReader::threadFunc() {

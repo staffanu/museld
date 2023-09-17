@@ -7,6 +7,7 @@
 
 #include <thread>
 #include <condition_variable>
+#include <optional>
 #include "InputPll.h"
 #include "musevk/VulkanBuffer.h"
 #include "Logger.h"
@@ -23,6 +24,7 @@ public:
     };
     std::pair<std::shared_ptr<musevk::VulkanBuffer>, PresentationHint> getNextInputBuffer();
     void returnBuffer(std::shared_ptr<musevk::VulkanBuffer> &buffer);
+    virtual void seek(double seconds) = 0;
 
 protected:
     InputReader(Logger &log, const std::string &filename, bool input_is_fifo, double initial_seek_seconds,

@@ -29,6 +29,9 @@ InputReader::InputReader(Logger &log, const std::string &filename, bool input_is
 }
 
 bool InputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) {
+    if (m_initial_seek_seconds != 0)
+        seek(m_initial_seek_seconds);
+
     for (const auto &b : buffers)
         m_vacant_muse_input_buffers.push_back(b);
 

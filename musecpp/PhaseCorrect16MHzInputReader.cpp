@@ -25,20 +25,11 @@ bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::shared_ptr<musevk
     m_input = ifstream(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
     m_input.exceptions(ifstream::badbit);
 
-    size_t samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
+    off_t samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
     assert(samples_per_frame >= samples_to_skip);
     vector<uint16_t> skip_buffer(samples_per_frame);
     m_log.info(eInput, fmt::format("Skipping {} initial samples", samples_to_skip));
     readShorts(m_input, skip_buffer.data(), samples_to_skip);
-
-    if (m_initial_seek_seconds != 0) {
-        size_t frames_to_seek = (size_t)(m_initial_seek_seconds * 30);
-        size_t samples_to_seek = frames_to_seek * samples_per_frame;
-        double actual_seek_time = (double)frames_to_seek / 30.0;
-        m_log.info(eInput, fmt::format("Seeking to time {} s, {} samples.",
-                                       actual_seek_time, samples_to_seek));
-        m_input.seekg(samples_to_seek * 2, ios_base::seekdir::cur);
-    }
 
     return InputReader::initialize(buffers);
 }
@@ -46,6 +37,25 @@ bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::shared_ptr<musevk
 void PhaseCorrect16MHzInputReader::cleanup() {
     InputReader::cleanup();
     m_input.close();
+}
+
+void PhaseCorrect16MHzInputReader::seek(double seconds) {
+    if (!m_input_is_fifo) {
+        // FIXME: make this thread safe!
+        off_t samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
+        off_t frames_to_seek = (off_t)(seconds * 30);
+
+        // ensure that we do not seek to before the beginning of the file
+        auto current_pos = m_input.tellg();
+        if (current_pos < -2 * frames_to_seek * samples_per_frame)
+            frames_to_seek = -current_pos / 2 / samples_per_frame;
+
+        off_t samples_to_seek = frames_to_seek * samples_per_frame;
+        double actual_seek_time = (double)frames_to_seek / 30.0;
+        m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples.",
+                                       actual_seek_time, samples_to_seek));
+        m_input.seekg(samples_to_seek * 2, ifstream::cur);
+    }
 }
 
 void PhaseCorrect16MHzInputReader::threadFunc() {
