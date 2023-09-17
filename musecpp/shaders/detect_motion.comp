@@ -36,8 +36,13 @@ layout(set = 0, binding = 4) buffer edge_buffer {
 };
 
 layout(set = 0, binding = 5) buffer core_out_buffer {
-    // movement values 0-15 before extending the region to the output
+    // movement values 0-15 before after coring (taking absolute level and edge info into account)
     float16_t core_out[][MUSE_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 6) buffer enlarged_buffer {
+    // movement values 0-1 after enlarging the detected area slightly
+    float16_t enlarged[][MUSE_Y_BUF_WIDTH];
 };
 
 float16_t H[9] = { -0.024427hf, 0.000000hf, 0.037425hf, 0.070336hf, 0.083333hf, 0.070336hf, 0.037425hf, 0.000000hf, -0.024427hf };
@@ -54,12 +59,16 @@ void main() {
 
     // Compute a high-pass filtered image to indicate edges in the picture
 
-    // TODO: think about not using surrounding pixels
-    float16_t hipass_out = frame0[row + v_offset][col + h_offset] * 4.hf
+    float16_t hipass_out;
+    if (row == 0 || col == 0 || row == MUSE_BUF_HEIGHT - 1 || col == MUSE_Y_BUF_WIDTH - 1)
+        hipass_out = 0.hf;
+    else
+        hipass_out = frame0[row + v_offset][col + h_offset] * 4.hf
         - frame0[row + v_offset - 1][col + h_offset]
         - frame0[row + v_offset][col + h_offset - 1]
         - frame0[row + v_offset][col + h_offset + 1]
         - frame0[row + v_offset + 1][col + h_offset];
+
     edge[row][col] = clamp(abs(hipass_out) / 13.3hf, 0.hf, 15.hf);
 
     barrier();
@@ -67,20 +76,22 @@ void main() {
     // The actual edge level used is a maximum calculation for the surrounding pixels
     float16_t edge_level =
         max(edge[row][col],
-            max(edge[row-1][col] + edge[row+1][col], edge[row][col-1] + edge[row][col+1]));
+            max((row > 0 ? edge[row-1][col] : 0.hf) + (row < MUSE_BUF_HEIGHT - 1 ? edge[row+1][col] : 0.hf),
+                (col > 0 ? edge[row][col-1] : 0.hf) + (col < MUSE_Y_BUF_WIDTH - 1 ? edge[row][col+1] : 0.hf)));
 
     // Compute the low-pass filtered difference signal
     // TODO: think about not using surrounding pixels
     float16_t diff2 = 0.hf;
     for (int j = -2; j <= 1; j++)
-        for (int i = -4; i <= 4; i++) {
-            float16_t d = frame0[row + v_offset + j][col + h_offset + i] - frame2[row + v_offset + j][col + h_offset + i];
-            diff2 += d * H[i + 4];
-        }
+        for (int i = -4; i <= 4; i++)
+            if (row + j >= 0 && col + i >= 0 && row + j < MUSE_BUF_HEIGHT && col + i < MUSE_Y_BUF_WIDTH) {
+                float16_t d = frame0[row + v_offset + j][col + h_offset + i] - frame2[row + v_offset + j][col + h_offset + i];
+                diff2 += d * H[i + 4];
+            }
     diff2 = abs(diff2);
 
     // Use coring to compute a movement value -- edges and bright areas naturally have
-    // higher difference values, so this is compensated for.
+    // higher difference values, so this is compensated for. Values are between 0 and 15.
     float16_t level = (frame0[row + v_offset][col + h_offset] + frame2[row + v_offset][col + h_offset]) / 2.hf;
     float16_t motion_none = 3.hf + edge_level / 15.hf;
     float16_t motion_full = 5.hf + edge_level + level / 16.hf;
@@ -89,12 +100,27 @@ void main() {
     barrier();
 
     // Enlarge the detected area -- output values are between 0 and 1
-    float16_t enlarged =
+    enlarged[row][col] = clamp(
         max(core_out[row][col],
-        max(core_out[row-1][col] + core_out[row+1][col], core_out[row][col-1] + core_out[row][col+1]));
+        max((row > 0 ? core_out[row-1][col] : 0.hf) + (row < MUSE_BUF_HEIGHT - 1 ? core_out[row+1][col] : 0.hf),
+            (col > 0 ? core_out[row][col-1] : 0.hf) + (col < MUSE_Y_BUF_WIDTH - 1 ? core_out[row][col+1] : 0.hf))),
+        0.hf, 15.hf) / 15.hf;
 
-    // TODO: and add low-pass filtering
-    for (int j = 0; j < 2; j++)
-        for (int i = 0; i < 3; i++)
-            movement_out[row * 2 + j][col * 3 + i] = enlarged / 15.hf;
+    barrier();
+
+    // Use linear interpolation to cover the entire output area
+    float16_t e00 = enlarged[row][col];
+    float16_t e01 = col < MUSE_Y_BUF_WIDTH - 1 ? enlarged[row][col+1] : 0.hf;
+    float16_t e10 = row < MUSE_BUF_HEIGHT - 1 ? enlarged[row+1][col] : 0.hf;
+    float16_t e11 = row < MUSE_BUF_HEIGHT - 1 && col < MUSE_Y_BUF_WIDTH - 1 ? enlarged[row+1][col+1] : 0.hf;
+    float16_t x0 = 0.5hf * (e00 + e10);
+    float16_t x1 = 0.5hf * (e01 + e11);
+
+    movement_out[row * 2][col * 3] = e00;
+    movement_out[row * 2][col * 3 + 1] = 0.667hf * e00 + 0.333hf * e01;
+    movement_out[row * 2][col * 3 + 2] = 0.333hf * e00 + 0.667hf * e01;
+
+    movement_out[row * 2 + 1][col * 3] = x0;
+    movement_out[row * 2 + 1][col * 3 + 1] = 0.667hf * x0 + 0.333hf * x1;
+    movement_out[row * 2 + 1][col * 3 + 2] = 0.333hf * x0 + 0.667hf * x1;
 }

@@ -114,6 +114,7 @@ private:
     MuseBuffer m_movement_buffer; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
     MuseBuffer m_movement_edge_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
     MuseBuffer m_movement_coring_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
+    MuseBuffer m_movement_enlarged_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
 
     // used for final result
     std::shared_ptr<musevk::VulkanImage> m_image_out;
@@ -128,7 +129,6 @@ private:
 
     std::shared_ptr<musevk::VulkanBuffer> m_filter_2_to_3_buffer;
     std::shared_ptr<musevk::VulkanBuffer> m_filter_4_to_3_buffer;
-    std::shared_ptr<musevk::VulkanBuffer> m_filter_4_to_1_buffer;
 };
 
 #endif //MUSECPP_SHADERS_H
