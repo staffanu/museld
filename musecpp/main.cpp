@@ -27,7 +27,7 @@ bool check_glfw_key(GLFWwindow *window, int key) {
 
 void process_file(Logger &log, const string& executable_dir, InputReader &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
-                  bool start_paused, bool decode_video, bool decode_audio) {
+                  bool start_paused, bool decode_video, bool decode_audio, bool benchmark_shaders) {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
@@ -73,7 +73,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                                    decode_video,
                                    decode_all_fields,
                                    decode_audio,
-                                   false); // benchmark_shaders
+                                   benchmark_shaders);
         if (!decoder.initialize())
             throw runtime_error("MuseDecoder initialization failed");
         auto image = shaders.getResultImage();
@@ -185,6 +185,8 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             fmt::format("Avg {:.3f} ms/frame ({:.3f} frames/s)",
                         time_us / 1000.0 / field_count * 2,
                         1000000.0 / time_us * field_count / 2));
+        if (benchmark_shaders)
+            decoder.output_benchmark_results();
     }
 
     device.destroy(image_available_semaphore);
@@ -230,6 +232,7 @@ int main(int argc, char *argv[]) {
     optional<string> output_filename; // always written as little endian unsigned short values
     bool decode_video = true;
     bool decode_audio = true;
+    bool benchmark_shaders = false;
 
     try {
         const vector<string> args(argv + 1, argv + argc);
@@ -264,6 +267,8 @@ int main(int argc, char *argv[]) {
                 decode_audio = false;
             else if (*it == "--verbose")
                 log_selection = Logger::c_log_all;
+            else if (*it == "--benchmark-shaders")
+                benchmark_shaders = true;
             else if (*it == "--no-sync")
                 no_sync = true;
             else if (*it == "--help")
@@ -273,8 +278,8 @@ int main(int argc, char *argv[]) {
                     throw runtime_error("Initial seek is not compatible with reading from fifo");
                 if (!filesystem::exists(*it))
                     throw runtime_error("File not found: " + string(*it));
-                Logger log(log_selection);
-//                Logger log({{eInput, eDebug}, {eAudio, eWarn}, {eVideo, eInfo}});
+//                Logger log(log_selection);
+                Logger log({{eInput, eWarn}, {eAudio, eWarn}, {eVideo, eInfo}});
                 InputReader *reader;
                 switch (input_format) {
                     case eOverSampledUnsignedBytes:
@@ -297,7 +302,8 @@ int main(int argc, char *argv[]) {
                         throw runtime_error("No input format specified");
                 }
                 process_file(log, executable_dir, *reader, decode_all_fields,
-                             full_screen, no_sync, start_paused, decode_video, decode_audio);
+                             full_screen, no_sync, start_paused, decode_video, decode_audio,
+                             benchmark_shaders);
             }
         }
     } catch (const exception &x) {

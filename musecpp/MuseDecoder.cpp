@@ -75,7 +75,6 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
 
         tie(input_vulkan_buffer, presentationHint) = m_reader.getNextInputBuffer();
         if (input_vulkan_buffer == nullptr) {
-            m_timestamp_statistics.print_stats();
             return false;
         }
 
@@ -148,4 +147,8 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
     m_field_index = (m_field_index + 1) % 2;
 
     return true;
+}
+
+void MuseDecoder::output_benchmark_results() {
+    m_timestamp_statistics.print_stats();
 }

@@ -40,6 +40,8 @@ public:
               FieldInterpolationMode field_interpolation_mode,
               bool redo_last_field);
 
+    void output_benchmark_results();
+
 private:
     Logger &m_log;
     InputReader &m_reader;
