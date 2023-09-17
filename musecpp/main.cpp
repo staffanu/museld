@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <unistd.h>
 #include <fmt/format.h>
+#include <set>
 #include "Shaders.h"
 #include "MuseDecoder.h"
 #include "musevk/VulkanManager.h"
@@ -13,16 +14,19 @@
 
 using namespace std;
 
-// checks if a key is pressed and waits for it to be released before return
+static set<int> current_keys_down;
+
 bool check_glfw_key(GLFWwindow *window, int key) {
     if (glfwGetKey(window, key) == GLFW_PRESS) {
-        while (glfwGetKey(window, key) == GLFW_PRESS) {
-            usleep(10000);
-            glfwPollEvents();
-        }
-        return true;
+        if (current_keys_down.find(key) == current_keys_down.end()) {
+            current_keys_down.insert(key);
+            return true;
+        } else
+            return false;
+    } else {
+        current_keys_down.erase(key);
+        return false;
     }
-    return false;
 }
 
 void process_file(Logger &log, const string& executable_dir, InputReader &reader,
