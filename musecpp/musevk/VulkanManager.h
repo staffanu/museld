@@ -63,7 +63,7 @@ namespace musevk {
     private:
         void cleanupSwapChain();
         void createInstance();
-        static vk::DebugUtilsMessengerCreateInfoEXT createDebugMessengerCreateInfo();
+        vk::DebugUtilsMessengerCreateInfoEXT createDebugMessengerCreateInfo();
         bool checkValidationLayerSupport();
         void createSurface();
         void pickPhysicalDevice();
@@ -98,6 +98,11 @@ namespace musevk {
             vk::DebugUtilsMessageTypeFlagBitsEXT message_type,
             const vk::DebugUtilsMessengerCallbackDataEXT* callback_data,
             void* user_data);
+
+        VKAPI_ATTR VkBool32 VKAPI_CALL debugCallbackMember(
+                vk::DebugUtilsMessageSeverityFlagBitsEXT message_severity,
+                vk::DebugUtilsMessageTypeFlagBitsEXT message_type,
+                const vk::DebugUtilsMessengerCallbackDataEXT* callback_data);
 
         const std::vector<const char *> c_validation_layers = {
                 "VK_LAYER_KHRONOS_validation"

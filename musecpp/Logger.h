@@ -51,6 +51,8 @@ public:
                 })->second;
     }
 
+    void log(LogPriority priority, LogCategoryFlags categorization, const std::string &message);
+
     void error(LogCategoryFlags categorization, const std::string &message) {
         log(eError, categorization, message);
     }
@@ -67,8 +69,6 @@ public:
 private:
     static const std::map<int, std::string> c_priority_names;
     static const std::map<int, std::string> c_category_names;
-
-    void log(LogPriority priority, LogCategoryFlags categorization, const std::string &message);
 
     std::map<LogCategoryFlags, LogPriority> m_log_priority_per_category;
     LogPriority m_minimum_priority;

@@ -2,11 +2,12 @@
 // Created by staffanu on 5/24/23.
 //
 
+#include <limits>
 #include <set>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.hpp>
-#include <limits>
+#include <fmt/format.h>
 #include "VulkanManager.h"
 #include "VulkanBuffer.h"
 #include "HalfFloatUtil.h"
@@ -50,19 +51,29 @@ namespace musevk {
         createSwapChain();
     }
 
+    bool recreate_swap_chain_next_call = false;
+
     vk::Image &VulkanManager::acquireNextImage(vk::Semaphore image_available_semaphore) {
+        if (recreate_swap_chain_next_call) {
+            recreateSwapChain();
+            recreate_swap_chain_next_call = false;
+        }
+
         uint32_t image_index;
         vk::Result result;
         do {
             result = m_logical_device.acquireNextImageKHR(m_swap_chain, UINT64_MAX,
                                                           image_available_semaphore, nullptr,
                                                           &image_index);
-            if (result == vk::Result::eSuboptimalKHR || result == vk::Result::eErrorOutOfDateKHR) {
-                cout << "Suboptimal or Out of date" << endl;
+            if (result == vk::Result::eSuboptimalKHR) {
+                m_log.warn(eVideo, "acquireNextImageKHR: eSuboptimalKHR");
+                recreate_swap_chain_next_call = true;
+            } else if (result == vk::Result::eErrorOutOfDateKHR) {
+                m_log.warn(eVideo, "acquireNextImageKHR: eErrorOutOfDateKHR");
                 recreateSwapChain();
             } else if (result != vk::Result::eSuccess)
                 throw runtime_error("acquireNextImageKHR failed");
-        } while (result != vk::Result::eSuccess);
+        } while (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR);
 
         return m_swap_chain_images[image_index];
     }
@@ -85,7 +96,9 @@ namespace musevk {
         presentInfo.pImageIndices = &image_index;
         presentInfo.pResults = nullptr; // Optional
         auto result = m_present_queue.presentKHR(presentInfo);
-        if (result != vk::Result::eSuccess)
+        if (result == vk::Result::eSuboptimalKHR)
+            m_log.warn(eVideo, "presentKHR: eSuboptimalKHR");
+        else if (result != vk::Result::eSuccess)
             throw runtime_error("presentKHR failed");
     }
 
@@ -214,7 +227,7 @@ namespace musevk {
                 vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
                 vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance;;
         createInfo.pfnUserCallback = (PFN_vkDebugUtilsMessengerCallbackEXT)debugCallback;
-        createInfo.pUserData = nullptr;
+        createInfo.pUserData = this;
         return createInfo;
     }
 
@@ -466,7 +479,7 @@ namespace musevk {
 
         m_swap_chain_image_format = surfaceFormat.format;
         m_swap_chain_extent = extent;
-        cout << "Swap chain created with extent " << extent.width << "x" << extent.height << endl;
+        m_log.info(eVideo, fmt::format("Swap chain created with extent {}x{}", extent.width, extent.height));
     }
 
     VKAPI_ATTR VkBool32 VKAPI_CALL VulkanManager::debugCallback(
@@ -474,24 +487,30 @@ namespace musevk {
             vk::DebugUtilsMessageTypeFlagBitsEXT message_type,
             const vk::DebugUtilsMessengerCallbackDataEXT *callback_data,
             void *user_data) {
+        return ((VulkanManager *)user_data)->debugCallbackMember(message_severity, message_type, callback_data);
+    }
+
+    VKAPI_ATTR VkBool32 VKAPI_CALL VulkanManager::debugCallbackMember(
+            vk::DebugUtilsMessageSeverityFlagBitsEXT message_severity,
+            vk::DebugUtilsMessageTypeFlagBitsEXT message_type,
+            const vk::DebugUtilsMessengerCallbackDataEXT* callback_data) {
         if (message_severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning) {
-            string severity_string;
+            LogPriority severity;
             switch (message_severity) {
                 case vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose:
-                    severity_string = "verbose";
+                    severity = LogPriority::eDebug;
                     break;
                 case vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo:
-                    severity_string = "info";
+                    severity = LogPriority::eInfo;
                     break;
                 case vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning:
-                    severity_string = "warning";
+                    severity = LogPriority::eWarn;
                     break;
                 case vk::DebugUtilsMessageSeverityFlagBitsEXT::eError:
-                    severity_string = "error";
+                    severity = LogPriority::eError;
                     break;
                 default:
-                    severity_string = "???";
-                    break;
+                    throw runtime_error(fmt::format("Unknown message_severity {}", (int)message_severity));
             }
             string type_string;
             switch (message_type) {
@@ -512,8 +531,7 @@ namespace musevk {
                     break;
             }
 
-            cerr << "Vulkan validation: [" << severity_string << ", " << type_string << "] " <<
-                callback_data->pMessage << endl;
+            m_log.log(severity, eVideo, fmt::format("Vulkan validation: ({}) {}", type_string, callback_data->pMessage));
         }
 
         return VK_FALSE;
