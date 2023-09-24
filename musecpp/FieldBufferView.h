@@ -16,10 +16,12 @@ public:
     FieldBufferView(Logger &log, int frame_no, MuseBuffer &data, int field_parity);
 
     void set_frame_no(int frame_no);
+
+    // Called when initializing the chain of 3 frames (6 fields) that are used in
+    // round-robin order, so that we can easily access the control data for the field.
     void set_prev_field(FieldBufferView *prev_field);
 
-    // Intended to be called immediately after construction.  The reason this is not a constructor
-    // parameter is that we call this from the main loop after creating the FrameBuffer.
+    // To be called each time the underlying data has been updated.
     void ProcessControlData(uint16_t const *control_data, std::pair<float, float> const &eq);
 
     std::shared_ptr<musevk::VulkanBuffer> getVulkanBuffer();

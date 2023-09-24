@@ -38,6 +38,7 @@ MuseDecoder::~MuseDecoder() {
 
 bool MuseDecoder::initialize() {
     // Always keep the three latest frames (required for motion detection) -- pretend we have three already
+    // The newest frame is always at index 0
     for (int i = 0; i < 3; i++)
         m_frame_buffers.push_back(new FrameBuffer(m_log, -i,
                                                   m_shaders.createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)));
@@ -111,14 +112,14 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
                 m_frame_buffers[2 - decoded_field_index]->get_field(1 - decoded_field_index),
                 m_frame_buffers[2]->get_field(decoded_field_index)};
 
-        if (m_shaders.decodeInterFrameAndDetectMotion(*m_command_queue, fields) || m_frame_no >= 3) {
+        if (m_shaders.decodeInterFrameAndDetectMotion(*m_command_queue, fields)) {
             m_log.debug(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation success", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_command_queue,
                                                  field_interpolation_mode == eForceIntraField,
                                                  field_interpolation_mode == eForceInterFrame);
         } else {
             m_log.warn(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
-            m_shaders.combineStillAndMovingParts(*m_command_queue, true, false);
+            m_shaders.combineStillAndMovingParts(*m_command_queue, /* force field only */ true, /* force inter frame only */ false);
         }
         needs_queue_submit = true;
     }
