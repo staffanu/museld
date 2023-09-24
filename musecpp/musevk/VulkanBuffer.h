@@ -12,7 +12,7 @@
 namespace musevk {
     class VulkanBuffer final : public VulkanMemoryObject {
     public:
-        VulkanBuffer(vk::PhysicalDevice &physical_device,
+        VulkanBuffer(MemoryAllocator &memory_allocator,
                      vk::Device &device,
                      uint32_t number_of_elements,
                      uint32_t element_size,
@@ -50,7 +50,7 @@ namespace musevk {
         }
 
         [[nodiscard]] uint32_t getMemorySize() const {
-            return m_memory_size;
+            return m_allocated_memory.size;
         }
 
         template<typename T>
@@ -68,7 +68,7 @@ namespace musevk {
         void *m_raw_data;
 
         vk::Buffer m_buffer;
-        vk::DeviceMemory m_device_memory;
+        AllocatedMemory m_allocated_memory;
         vk::DescriptorBufferInfo m_descriptor_buffer_info;
     };
 }

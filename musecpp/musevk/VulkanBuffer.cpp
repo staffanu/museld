@@ -5,13 +5,13 @@
 #include "VulkanBuffer.h"
 
 namespace musevk {
-    VulkanBuffer::VulkanBuffer(vk::PhysicalDevice &physical_device,
+    VulkanBuffer::VulkanBuffer(MemoryAllocator &memory_allocator,
                                vk::Device &device,
                                uint32_t number_of_elements,
                                uint32_t element_size,
                                bool is_host,
                                bool allow_transfers) // only relevant for device local storage buffers
-            : VulkanMemoryObject(physical_device),
+            : VulkanMemoryObject(memory_allocator),
               m_device(device),
               m_size(number_of_elements),
               m_memory_size(number_of_elements * element_size),
@@ -37,29 +37,18 @@ namespace musevk {
 
         allocateAndBindMemory(memory_property_flags);
 
-        if (is_host)
-            m_raw_data = m_device.mapMemory(m_device_memory, 0, m_memory_size, vk::MemoryMapFlags());
-        else
-            m_raw_data = nullptr;
+        m_raw_data = is_host ? m_allocated_memory.host_memory : nullptr;
     }
 
     VulkanBuffer::~VulkanBuffer() {
-        if (m_is_host) {
-            vk::MappedMemoryRange mappedRange(m_device_memory, 0, m_memory_size);
-            m_device.flushMappedMemoryRanges(mappedRange);
-            m_device.unmapMemory(m_device_memory);
-        }
         m_device.destroy(m_buffer);
-        m_device.freeMemory(m_device_memory);
+        m_memory_allocator.free(m_allocated_memory);
     }
 
     void VulkanBuffer::allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags) {
-        vk::MemoryRequirements memoryRequirements = m_device.getBufferMemoryRequirements(m_buffer);
+        vk::MemoryRequirements memory_requirements = m_device.getBufferMemoryRequirements(m_buffer);
 
-        uint32_t memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, memory_property_flags);
-
-        vk::MemoryAllocateInfo memoryAllocateInfo(memoryRequirements.size, memoryTypeIndex);
-        m_device_memory = m_device.allocateMemory(memoryAllocateInfo);
-        m_device.bindBufferMemory(m_buffer, m_device_memory, 0);
+        m_allocated_memory = m_memory_allocator.allocate(memory_requirements, memory_property_flags);
+        m_device.bindBufferMemory(m_buffer, m_allocated_memory.device_memory, m_allocated_memory.offset);
     }
 }

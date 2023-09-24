@@ -111,7 +111,7 @@ namespace musevk {
                 VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
         };
         const std::vector<const char *> c_instance_extensions = {
-                VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+//                VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
 #ifdef __APPLE__
                 VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
 #endif
@@ -125,9 +125,9 @@ namespace musevk {
 
         const std::vector<const char *> c_device_extensions = {
                 VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-                VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME,
-                VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
-                VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME,
+//                VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME,
+//                VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
+//                VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME,
 #ifdef __APPLE__
                 "VK_KHR_portability_subset", // FIXME: should really only add if the extension enumeration includes it
 #endif
@@ -141,6 +141,7 @@ namespace musevk {
         GLFWwindow *m_window;
         bool m_no_sync;
         std::shared_ptr<CommandQueue> m_command_queue;
+        std::shared_ptr<MemoryAllocator> m_memory_allocator;
 
         vk::Instance m_instance;
         vk::DebugUtilsMessengerEXT m_debug_messenger;

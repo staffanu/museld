@@ -68,7 +68,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     {
         auto queue = manager.createCommandQueue(
                 std::vector{vk::Semaphore(image_available_semaphore)},
-                std::vector{vk::PipelineStageFlags(vk::PipelineStageFlagBits::eBottomOfPipe)});
+                std::vector{vk::PipelineStageFlags(vk::PipelineStageFlagBits::eTopOfPipe)});
         Shaders shaders(log, executable_dir, manager);
         auto decoder = MuseDecoder(log,
                                    reader,
@@ -105,7 +105,11 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
 
             // notice this command queue waits for image_available_semaphore
             queue->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Unorm,
-                                                 vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+                                                 vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
+                                                 vk::PipelineStageFlagBits::eTopOfPipe,
+                                                 vk::PipelineStageFlagBits::eTransfer,
+                                                 vk::AccessFlags(),
+                                                 vk::AccessFlagBits::eTransferWrite);
 
             auto extent = manager.getSwapChainExtent();
             vk::ImageBlit region;
@@ -120,7 +124,11 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                                     region);
 
             queue->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Unorm,
-                                                 vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
+                                                 vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR,
+                                                 vk::PipelineStageFlagBits::eTransfer,
+                                                 vk::PipelineStageFlagBits::eBottomOfPipe,
+                                                 vk::AccessFlagBits::eTransferWrite,
+                                                 vk::AccessFlags());
             queue->evalAsync();
             queue->evalAwait();
 

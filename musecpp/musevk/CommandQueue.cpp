@@ -19,8 +19,8 @@ namespace musevk {
               m_wait_semaphores(wait_semaphores),
               m_wait_dst_stage_masks(wait_dst_stage_masks) {
 
-        vk::CommandPoolCreateInfo commandPoolInfo(vk::CommandPoolCreateFlags(
-                vk::CommandPoolCreateFlagBits::eResetCommandBuffer), m_queue_index);
+        vk::CommandPoolCreateInfo commandPoolInfo(vk::CommandPoolCreateFlags(/*
+                vk::CommandPoolCreateFlagBits::eResetCommandBuffer*/), m_queue_index);
         m_command_pool = m_device.createCommandPool(commandPoolInfo);
 
         vk::CommandBufferAllocateInfo commandBufferAllocateInfo(m_command_pool, vk::CommandBufferLevel::ePrimary, 1);
@@ -49,7 +49,9 @@ namespace musevk {
     }
 
     void CommandQueue::enqueueTransitionMemoryLayout(vk::Image image, vk::Format format,
-                                                     vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
+                                                     vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
+                                                     vk::PipelineStageFlagBits srcStage, vk::PipelineStageFlagBits dstStage,
+                                                     vk::AccessFlags srcAccessMask, vk::AccessFlags dstAccessMask) {
         begin();
         vk::ImageMemoryBarrier barrier;
         barrier.oldLayout = oldLayout;
@@ -62,15 +64,15 @@ namespace musevk {
         barrier.subresourceRange.levelCount = 1;
         barrier.subresourceRange.baseArrayLayer = 0;
         barrier.subresourceRange.layerCount = 1;
-        barrier.srcAccessMask = vk::AccessFlags(0);
-        barrier.dstAccessMask = vk::AccessFlags(vk::AccessFlagBits::eTransferWrite);
-        m_command_buffer.pipelineBarrier(vk::PipelineStageFlags(vk::PipelineStageFlagBits::eTopOfPipe),
-                                         vk::PipelineStageFlags(vk::PipelineStageFlagBits::eTransfer),
+        barrier.srcAccessMask = srcAccessMask;
+        barrier.dstAccessMask = dstAccessMask;
+        m_command_buffer.pipelineBarrier(srcStage,
+                                         dstStage,
                                          vk::DependencyFlags(0),
                                          {},
                                          {},
                                          {barrier});
-        maybeTimestamp("transitionImage");
+        maybeTimestamp("transitionImage", dstStage);
     }
 
     void CommandQueue::enqueueCopyBuffer(VulkanBuffer &source, VulkanBuffer &destination) {
@@ -78,7 +80,7 @@ namespace musevk {
         vk::DeviceSize buffer_size(source.getMemorySize());
         vk::BufferCopy copy_region(0, 0, buffer_size);
         m_command_buffer.copyBuffer(source.buffer(), destination.buffer(), copy_region);
-        maybeTimestamp("copy");
+        maybeTimestamp("copy", vk::PipelineStageFlagBits::eTransfer);
     }
 
     void CommandQueue::enqueueCopyBufferToImage(vk::Buffer &bufferFrom,
@@ -87,7 +89,7 @@ namespace musevk {
                                                 vk::BufferImageCopy region) {
         begin();
         m_command_buffer.copyBufferToImage(bufferFrom, imageTo, layout, region);
-        maybeTimestamp("copyToImage");
+        maybeTimestamp("copyToImage", vk::PipelineStageFlagBits::eTransfer);
     }
 
     void CommandQueue::enqueueBlitImage(vk::Image &source, vk::ImageLayout source_layout,
@@ -118,10 +120,10 @@ namespace musevk {
                                          nullptr);
     }
 
-    void CommandQueue::maybeTimestamp(std::string label) {
+    void CommandQueue::maybeTimestamp(std::string label, vk::PipelineStageFlagBits stage) {
         if (m_allocated_timestamp_queries > m_timestamped_operations.size()) {
             m_command_buffer.writeTimestamp(
-                    vk::PipelineStageFlagBits::eAllCommands,
+                    stage,
                     m_timestamp_query_pool,
                     m_timestamped_operations.size());
             m_timestamped_operations.emplace_back(label);
@@ -151,13 +153,14 @@ namespace musevk {
     void CommandQueue::begin() {
         assert(!m_is_running);
         if (!m_recording) {
+            m_device.resetCommandPool(m_command_pool);
             m_command_buffer.begin(vk::CommandBufferBeginInfo());
             m_recording = true;
 
             if (m_allocated_timestamp_queries) {
                 m_command_buffer.resetQueryPool(m_timestamp_query_pool, 0, m_allocated_timestamp_queries);
                 m_timestamped_operations.clear();
-                maybeTimestamp("begin");
+                maybeTimestamp("begin", vk::PipelineStageFlagBits::eTopOfPipe);
             }
         }
     }

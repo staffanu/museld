@@ -5,11 +5,11 @@
 #include "VulkanImage.h"
 
 namespace musevk {
-    VulkanImage::VulkanImage(vk::PhysicalDevice &physical_device,
+    VulkanImage::VulkanImage(MemoryAllocator &memory_allocator,
                                vk::Device &device,
                                uint32_t width,
                                uint32_t height)
-            : VulkanMemoryObject(physical_device),
+            : VulkanMemoryObject(memory_allocator),
               m_device(device),
               m_width(width),
               m_height(height) {
@@ -47,7 +47,7 @@ namespace musevk {
     }
 
     VulkanImage::~VulkanImage() {
-        m_device.freeMemory(m_device_memory);
+        m_memory_allocator.free(m_allocated_memory);
         m_device.destroy(m_view);
         m_device.destroy(m_image);
     }
@@ -55,10 +55,7 @@ namespace musevk {
     void VulkanImage::allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags) {
         vk::MemoryRequirements memoryRequirements = m_device.getImageMemoryRequirements(m_image);
 
-        uint32_t memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, memory_property_flags);
-
-        vk::MemoryAllocateInfo memoryAllocateInfo(memoryRequirements.size, memoryTypeIndex);
-        m_device_memory = m_device.allocateMemory(memoryAllocateInfo);
-        m_device.bindImageMemory(m_image, m_device_memory, 0);
+        m_allocated_memory = m_memory_allocator.allocate(memoryRequirements, memory_property_flags);
+        m_device.bindImageMemory(m_image, m_allocated_memory.device_memory, m_allocated_memory.offset);
     }
 }

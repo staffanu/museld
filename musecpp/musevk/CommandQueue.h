@@ -23,7 +23,9 @@ namespace musevk {
                      uint32_t max_timestamps = 0);
 
         void enqueueTransitionMemoryLayout(vk::Image image, vk::Format format,
-                                           vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
+                                           vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
+                                           vk::PipelineStageFlagBits srcStageMask, vk::PipelineStageFlagBits dstStageMask,
+                                           vk::AccessFlags srcAccessMask, vk::AccessFlags dstAccessMask);
 
         void enqueueCopyBuffer(VulkanBuffer &source, VulkanBuffer &destination);
 
@@ -62,10 +64,10 @@ namespace musevk {
             compute_shader->bindPipelineAndDescriptorSets(m_command_buffer, descriptor_set_index);
             compute_shader->bindPushConstants(m_command_buffer, pushConstants);
             compute_shader->dispatch(m_command_buffer);
-            maybeTimestamp(compute_shader->name());
+            maybeTimestamp(compute_shader->name(), vk::PipelineStageFlagBits::eComputeShader);
         }
 
-        void maybeTimestamp(std::string label);
+        void maybeTimestamp(std::string label, vk::PipelineStageFlagBits stage);
 
         void evalAsync();
 

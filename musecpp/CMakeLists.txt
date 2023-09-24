@@ -40,7 +40,9 @@ add_executable(musecpp
         musevk/VulkanBuffer.cpp musevk/VulkanBuffer.h
         musevk/TimestampStatistics.cpp musevk/TimestampStatistics.h
         musevk/HalfFloatUtil.h
-        )
+        musevk/MemoryAllocator.cpp
+        musevk/MemoryAllocator.h
+)
 target_link_libraries(musecpp
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan

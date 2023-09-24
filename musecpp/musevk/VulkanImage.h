@@ -11,7 +11,7 @@
 namespace musevk {
     class VulkanImage final : public VulkanMemoryObject {
     public:
-        VulkanImage(vk::PhysicalDevice &physical_device,
+        VulkanImage(MemoryAllocator &memory_allocator,
                     vk::Device &device,
                     uint32_t width,
                     uint32_t height);
@@ -51,7 +51,7 @@ namespace musevk {
         uint32_t m_height;
 
         vk::Image m_image;
-        vk::DeviceMemory m_device_memory;
+        AllocatedMemory m_allocated_memory;
         vk::ImageView m_view;
         vk::DescriptorImageInfo m_descriptor_image_info;
     };

@@ -7,6 +7,7 @@
 
 #include <vulkan/vulkan.hpp>
 #include <cstdint>
+#include "MemoryAllocator.h"
 
 namespace musevk {
     enum MemoryObjectType {
@@ -16,8 +17,8 @@ namespace musevk {
 
     class VulkanMemoryObject {
     public:
-        VulkanMemoryObject(vk::PhysicalDevice &physical_device)
-        : m_physical_device(physical_device){
+        VulkanMemoryObject(MemoryAllocator &memory_allocator)
+        : m_memory_allocator(memory_allocator){
         }
 
         virtual MemoryObjectType getType() const = 0;
@@ -25,10 +26,7 @@ namespace musevk {
         makeWriteDescriptorSet(vk::DescriptorSet &descriptor_set, uint32_t binding_index) const = 0;
 
     protected:
-        uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
-
-    private:
-        vk::PhysicalDevice &m_physical_device;
+        MemoryAllocator &m_memory_allocator;
     };
 }
 

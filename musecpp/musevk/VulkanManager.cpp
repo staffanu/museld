@@ -25,6 +25,7 @@ namespace musevk {
         createSurface();
         pickPhysicalDevice();
         createLogicalDevice();
+        m_memory_allocator = make_shared<MemoryAllocator>(m_physical_device, m_logical_device);
         createSwapChain();
     }
 
@@ -103,10 +104,10 @@ namespace musevk {
     }
 
     shared_ptr<VulkanBuffer> VulkanManager::createDeviceBuffer(const vector<float> &data) {
-        auto host_buffer = VulkanBuffer(m_physical_device, m_logical_device, data.size(), 2, true, true /* unused */);
+        auto host_buffer = VulkanBuffer(*m_memory_allocator, m_logical_device, data.size(), 2, true, true /* unused */);
         for (int i = 0; i < data.size(); i++)
             host_buffer.data<ushort>()[i] = HalfFloatUtil::float_to_half(data[i]);
-        auto device_buffer = make_shared<VulkanBuffer>(m_physical_device, m_logical_device, data.size(), 2, false, true);
+        auto device_buffer = make_shared<VulkanBuffer>(*m_memory_allocator, m_logical_device, data.size(), 2, false, true);
         auto sq = createCommandQueue();
         sq->enqueueCopyBuffer(host_buffer, *device_buffer);
         sq->evalAsync();
@@ -119,17 +120,21 @@ namespace musevk {
             uint32_t elementMemorySize,
             bool is_host_visible,
             bool allow_transfers) {
-        return make_shared<VulkanBuffer>(m_physical_device, m_logical_device,
+        return make_shared<VulkanBuffer>(*m_memory_allocator, m_logical_device,
                                               elementTotalCount, elementMemorySize,
                                               is_host_visible, allow_transfers);
     }
 
     shared_ptr<VulkanImage> VulkanManager::createImage(uint32_t width, uint32_t height) {
-        auto image = make_shared<VulkanImage>(m_physical_device, m_logical_device, width, height);
+        auto image = make_shared<VulkanImage>(*m_memory_allocator, m_logical_device, width, height);
 
         auto sq = createCommandQueue();
         sq->enqueueTransitionMemoryLayout(image->image(), vk::Format::eB8G8R8A8Unorm,
-                                          vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral);
+                                          vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral,
+                                          vk::PipelineStageFlagBits::eTopOfPipe,
+                                          vk::PipelineStageFlagBits::eComputeShader,
+                                          vk::AccessFlags(),
+                                          vk::AccessFlagBits::eShaderWrite);
         sq->evalAsync();
         sq->evalAwait();
 
@@ -472,7 +477,7 @@ namespace musevk {
         createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
         createInfo.presentMode = presentMode;
         createInfo.clipped = VK_TRUE;
-        createInfo.oldSwapchain = nullptr; //VK_NULL_HANDLE;
+        createInfo.oldSwapchain = nullptr;
 
         m_swap_chain = m_logical_device.createSwapchainKHR(createInfo);
         m_swap_chain_images = m_logical_device.getSwapchainImagesKHR(m_swap_chain);
