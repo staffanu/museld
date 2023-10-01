@@ -82,7 +82,7 @@ InputReader::getNextInputBuffer() {
         m_filled_muse_input_buffers.pop_front();
 
         auto filled_buffers = m_filled_muse_input_buffers.size();
-        if (filled_buffers == 0) {
+        if (filled_buffers == 0 && !m_reader_thread_finished) {
             m_log.warn(eInput, fmt::format("getNextInputBuffer: no filled buffers after this one"));
             hint = eSlowdown;
         } else if (m_vacant_muse_input_buffers.empty() && m_input_is_fifo) {
