@@ -10,7 +10,7 @@
 #include <optional>
 #include <GLFW/glfw3.h>
 #include "VulkanBuffer.h"
-#include "CommandQueue.h"
+#include "CommandBuffer.h"
 #include "VulkanImage.h"
 #include "../Logger.h"
 
@@ -23,6 +23,7 @@ namespace musevk {
         void initVulkan(GLFWwindow *window, bool no_sync);
         void cleanup();
 
+        vk::PhysicalDevice &getPhysicalDevice() { return m_physical_device; };
         vk::Device &getDevice() { return m_logical_device; };
 
         vk::Image &acquireNextImage(vk::Semaphore image_available_semaphore);
@@ -56,10 +57,9 @@ namespace musevk {
 
         std::shared_ptr<VulkanImage> createImage(uint32_t width, uint32_t height);
 
-        std::shared_ptr<CommandQueue> createCommandQueue(
-                std::vector<vk::Semaphore> wait_semaphores = {},
-                std::vector<vk::PipelineStageFlags> wait_dst_stage_masks = {},
-                uint32_t totalTimestamps = 0);
+        std::shared_ptr<CommandBuffer> createCommandBuffer(
+                TimestampQueryPool *timestamp_query_pool = nullptr);
+
     private:
         void cleanupSwapChain();
         void createInstance();
@@ -140,7 +140,6 @@ namespace musevk {
         Logger &m_log;
         GLFWwindow *m_window;
         bool m_no_sync;
-        std::shared_ptr<CommandQueue> m_command_queue;
         std::shared_ptr<MemoryAllocator> m_memory_allocator;
 
         vk::Instance m_instance;
@@ -155,6 +154,7 @@ namespace musevk {
         std::vector<vk::Image> m_swap_chain_images;
         vk::Format m_swap_chain_image_format;
         vk::Extent2D m_swap_chain_extent;
+        vk::CommandPool m_command_pool;
     };
 }
 

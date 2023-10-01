@@ -73,7 +73,7 @@ namespace musevk {
         }
 
     private:
-        friend class CommandQueue;
+        friend class CommandBuffer;
 
         void createShaderModule();
         void createDescriptorLayout(int number_of_descriptor_sets, const std::vector<MemoryObjectType> &buffer_types);

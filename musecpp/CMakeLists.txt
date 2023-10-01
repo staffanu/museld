@@ -33,7 +33,7 @@ add_executable(musecpp
         InputPll.cpp InputPll.h
         PhaseCorrect16MHzInputReader.cpp PhaseCorrect16MHzInputReader.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
-        musevk/CommandQueue.cpp musevk/CommandQueue.h
+        musevk/CommandBuffer.cpp musevk/CommandBuffer.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h
         musevk/VulkanMemoryObject.cpp musevk/VulkanMemoryObject.h
         musevk/VulkanImage.cpp musevk/VulkanImage.h
@@ -42,6 +42,8 @@ add_executable(musecpp
         musevk/HalfFloatUtil.h
         musevk/MemoryAllocator.cpp
         musevk/MemoryAllocator.h
+        musevk/TimestampQueryPool.cpp
+        musevk/TimestampQueryPool.h
 )
 target_link_libraries(musecpp
         PRIVATE glfw

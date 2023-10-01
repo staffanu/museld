@@ -17,7 +17,7 @@ namespace musevk {
 
         vk::ImageCreateInfo image_info(vk::ImageCreateFlags(),
                                        vk::ImageType::e2D,
-                                       vk::Format::eB8G8R8A8Unorm,
+                                       vk::Format::eB8G8R8A8Srgb,
                                        VkExtent3D {width, height, 1},
                                        1, // mipLevels
                                        1, // arrayLayers
@@ -35,7 +35,7 @@ namespace musevk {
         vk::ImageViewCreateInfo view_info(vk::ImageViewCreateFlags(),
                                           m_image,
                                           vk::ImageViewType::e2D,
-                                          vk::Format::eB8G8R8A8Unorm,
+                                          vk::Format::eB8G8R8A8Srgb,
                                           vk::ComponentMapping(),
                                           vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
         m_view = m_device.createImageView(view_info);

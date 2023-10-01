@@ -17,7 +17,7 @@ public:
     bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) override;
     void cleanup() override;
 
-    void seek(double seconds);
+    void seek(double seconds) override;
 
 protected:
     void threadFunc() override;

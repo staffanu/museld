@@ -11,6 +11,7 @@
 #include "ResamplingInputReader.h"
 #include "PhaseCorrect16MHzInputReader.h"
 #include "Logger.h"
+#include "musevk/TimestampQueryPool.h"
 
 using namespace std;
 
@@ -41,6 +42,8 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
 
     musevk::VulkanManager manager(log);
     manager.initVulkan(window, no_sync);
+    musevk::TimestampQueryPool *timestamp_query_pool =
+            benchmark_shaders ? new musevk::TimestampQueryPool(manager.getPhysicalDevice(), manager.getDevice(), 40) : nullptr;
     vk::Device &device = manager.getDevice();
 
     {
@@ -66,9 +69,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     AudioDecoder::AudioFrame audio_samples[AudioDecoder::c_max_output_samples];
 
     {
-        auto queue = manager.createCommandQueue(
-                std::vector{vk::Semaphore(image_available_semaphore)},
-                std::vector{vk::PipelineStageFlags(vk::PipelineStageFlagBits::eTopOfPipe)});
+        auto command_buffer = manager.createCommandBuffer();
         Shaders shaders(log, executable_dir, manager);
         auto decoder = MuseDecoder(log,
                                    reader,
@@ -77,7 +78,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                                    decode_video,
                                    decode_all_fields,
                                    decode_audio,
-                                   benchmark_shaders);
+                                   timestamp_query_pool);
         if (!decoder.initialize())
             throw runtime_error("MuseDecoder initialization failed");
         auto image = shaders.getResultImage();
@@ -89,7 +90,6 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         MuseDecoder::FieldInterpolationMode field_interpolation_mode = MuseDecoder::eNormal;
         bool redo_last_field = false;
 
-        // We skip calling next every other field if decode_all_fields is false
         while (paused || decoder.next(audio_mode, audio_sample_count, audio_samples, field_interpolation_mode, redo_last_field)) {
             if (!paused)
                 field_count++;
@@ -103,13 +103,13 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
 
             auto swap_chain_image = manager.acquireNextImage(image_available_semaphore);
 
-            // notice this command queue waits for image_available_semaphore
-            queue->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Unorm,
-                                                 vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
-                                                 vk::PipelineStageFlagBits::eTopOfPipe,
-                                                 vk::PipelineStageFlagBits::eTransfer,
-                                                 vk::AccessFlags(),
-                                                 vk::AccessFlagBits::eTransferWrite);
+            command_buffer->begin();
+            command_buffer->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Srgb,
+                                                          vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
+                                                          vk::PipelineStageFlagBits::eTopOfPipe,
+                                                          vk::PipelineStageFlagBits::eTransfer,
+                                                          vk::AccessFlags(),
+                                                          vk::AccessFlagBits::eTransferWrite);
 
             auto extent = manager.getSwapChainExtent();
             vk::ImageBlit region;
@@ -119,18 +119,18 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             region.dstOffsets[0] = vk::Offset3D(0, 0, 0);
             region.dstOffsets[1] = vk::Offset3D((int)extent.width, (int)extent.height, 1);
             region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
-            queue->enqueueBlitImage(image->image(), vk::ImageLayout::eGeneral,
-                                    swap_chain_image, vk::ImageLayout::eTransferDstOptimal,
-                                    region);
+            command_buffer->enqueueBlitImage(image->image(), vk::ImageLayout::eGeneral,
+                                             swap_chain_image, vk::ImageLayout::eTransferDstOptimal,
+                                             region);
 
-            queue->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Unorm,
-                                                 vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR,
-                                                 vk::PipelineStageFlagBits::eTransfer,
-                                                 vk::PipelineStageFlagBits::eBottomOfPipe,
-                                                 vk::AccessFlagBits::eTransferWrite,
-                                                 vk::AccessFlags());
-            queue->evalAsync();
-            queue->evalAwait();
+            command_buffer->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Srgb,
+                                                          vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR,
+                                                          vk::PipelineStageFlagBits::eTransfer,
+                                                          vk::PipelineStageFlagBits::eBottomOfPipe,
+                                                          vk::AccessFlagBits::eTransferWrite,
+                                                          vk::AccessFlags());
+            command_buffer->submit({image_available_semaphore}, {vk::PipelineStageFlagBits::eTopOfPipe}, {});
+            command_buffer->wait();
 
             manager.present(swap_chain_image);
 
@@ -201,6 +201,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             decoder.output_benchmark_results();
     }
 
+    delete timestamp_query_pool;
     device.destroy(image_available_semaphore);
     device.destroy(render_finished_semaphore);
     device.destroy(in_flight_fence);

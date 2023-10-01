@@ -27,9 +27,17 @@ namespace musevk {
         createLogicalDevice();
         m_memory_allocator = make_shared<MemoryAllocator>(m_physical_device, m_logical_device);
         createSwapChain();
+
+        auto indices = findQueueFamilies(m_physical_device);
+        uint32_t queue_index = indices.graphicsAndComputeFamily.value();
+
+        vk::CommandPoolCreateInfo command_pool_info(vk::CommandPoolCreateFlags(
+                vk::CommandPoolCreateFlagBits::eResetCommandBuffer), queue_index);
+        m_command_pool = m_logical_device.createCommandPool(command_pool_info);
     }
 
     void VulkanManager::cleanup() {
+        m_logical_device.destroy(m_command_pool);
         m_logical_device.waitIdle();
         cleanupSwapChain();
         m_logical_device.destroy();
@@ -108,10 +116,11 @@ namespace musevk {
         for (int i = 0; i < data.size(); i++)
             host_buffer.data<ushort>()[i] = HalfFloatUtil::float_to_half(data[i]);
         auto device_buffer = make_shared<VulkanBuffer>(*m_memory_allocator, m_logical_device, data.size(), 2, false, true);
-        auto sq = createCommandQueue();
+        auto sq = createCommandBuffer();
+        sq->begin();
         sq->enqueueCopyBuffer(host_buffer, *device_buffer);
-        sq->evalAsync();
-        sq->evalAwait();
+        sq->submit({}, {}, {});
+        sq->wait();
         return device_buffer;
     }
 
@@ -128,15 +137,16 @@ namespace musevk {
     shared_ptr<VulkanImage> VulkanManager::createImage(uint32_t width, uint32_t height) {
         auto image = make_shared<VulkanImage>(*m_memory_allocator, m_logical_device, width, height);
 
-        auto sq = createCommandQueue();
-        sq->enqueueTransitionMemoryLayout(image->image(), vk::Format::eB8G8R8A8Unorm,
+        auto sq = createCommandBuffer();
+        sq->begin();
+        sq->enqueueTransitionMemoryLayout(image->image(), vk::Format::eB8G8R8A8Srgb,
                                           vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral,
                                           vk::PipelineStageFlagBits::eTopOfPipe,
                                           vk::PipelineStageFlagBits::eComputeShader,
                                           vk::AccessFlags(),
                                           vk::AccessFlagBits::eShaderWrite);
-        sq->evalAsync();
-        sq->evalAwait();
+        sq->submit({}, {}, {});
+        sq->wait();
 
         return image;
     }
@@ -167,20 +177,13 @@ namespace musevk {
                 buffer_types, push_constants_size, spirv, workgroup, max_descriptor_sets);
     }
 
-    shared_ptr<CommandQueue> VulkanManager::createCommandQueue(
-            vector<vk::Semaphore> wait_semaphores,
-            vector<vk::PipelineStageFlags> wait_dst_stage_masks,
-            uint32_t totalTimestamps) {
-        auto indices = findQueueFamilies(m_physical_device);
-        uint32_t queue_index = indices.graphicsAndComputeFamily.value();
-        return make_shared<CommandQueue>(
-                m_physical_device,
+    shared_ptr<CommandBuffer> VulkanManager::createCommandBuffer(
+            TimestampQueryPool *timestamp_query_pool) {
+        return make_shared<CommandBuffer>(
+                m_command_pool,
                 m_logical_device,
                 m_compute_queue,
-                queue_index,
-                wait_semaphores,
-                wait_dst_stage_masks,
-                totalTimestamps);
+                timestamp_query_pool);
     }
 
     void VulkanManager::createInstance() {
@@ -400,7 +403,7 @@ namespace musevk {
         for (const auto &availableFormat: availableFormats) {
             if (availableFormat.format == vk::Format::eB8G8R8A8Srgb &&
                 availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
-                //return availableFormat;
+                return availableFormat;
             }
         }
 

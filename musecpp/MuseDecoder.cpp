@@ -10,12 +10,14 @@
 #include "MuseDecoder.h"
 #include "FrameBuffer.h"
 #include "musevk/VulkanManager.h"
+#include "musevk/TimestampQueryPool.h"
 
 using namespace std;
 
 MuseDecoder::MuseDecoder(
         Logger &log, InputReader &reader, Shaders &shaders, musevk::VulkanManager &manager,
-        bool decode_video, bool decode_all_fields, bool decode_audio, bool benchmark_shaders)
+        bool decode_video, bool decode_all_fields, bool decode_audio,
+        musevk::TimestampQueryPool *timestamp_query_pool)
 : m_log(log),
   m_reader(reader),
   m_shaders(shaders),
@@ -23,9 +25,12 @@ MuseDecoder::MuseDecoder(
   m_decode_video(decode_video),
   m_decode_all_fields(decode_all_fields),
   m_decode_audio(decode_audio),
-  m_benchmark_shaders(benchmark_shaders),
+  m_timestamp_query_pool(timestamp_query_pool),
   m_eq{-1, -1},
-  m_command_queue(m_manager.createCommandQueue({}, {}, benchmark_shaders ? 40 : 0)),
+  m_first_stage_complete_semaphore(manager.getDevice().createSemaphore(vk::SemaphoreCreateInfo())),
+  m_reset_timestamp_query_pool_command_buffer(m_manager.createCommandBuffer(timestamp_query_pool)),
+  m_first_stage_command_buffer(m_manager.createCommandBuffer(timestamp_query_pool)),
+  m_second_stage_command_buffer(m_manager.createCommandBuffer(timestamp_query_pool)),
   m_audio_decoder(log) {
 }
 
@@ -34,6 +39,7 @@ MuseDecoder::~MuseDecoder() {
         delete m_frame_buffers.back();
         m_frame_buffers.pop_back();
     }
+    m_manager.getDevice().destroy(m_first_stage_complete_semaphore);
 }
 
 bool MuseDecoder::initialize() {
@@ -65,7 +71,14 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
         m_field_index = (m_field_index + 1) % 2;
 
     auto t0 = chrono::high_resolution_clock::now();
-    bool needs_queue_submit = false;
+    if (m_timestamp_query_pool != nullptr) {
+        m_reset_timestamp_query_pool_command_buffer->begin();
+        m_timestamp_query_pool->reset(*m_reset_timestamp_query_pool_command_buffer);
+        m_timestamp_query_pool->timestamp(*m_reset_timestamp_query_pool_command_buffer, "begin", vk::PipelineStageFlagBits::eTopOfPipe);
+        m_reset_timestamp_query_pool_command_buffer->submit({}, {}, {});
+        m_reset_timestamp_query_pool_command_buffer->wait();
+    }
+
     shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = nullptr;
     InputReader::PresentationHint presentationHint;
     if (m_field_index == 0 && !redo_last_field) {
@@ -87,24 +100,23 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
         if (m_frame_no % 30 == 0)
             m_log.info(eDecoder, fmt::format("eq: {}, {}", m_eq.first, m_eq.second));
 
-        // Since we really only need to decode the control data when we process the second field,
-        // we should probably delay this until graphics operations are queued. But it is quick.
+        m_first_stage_command_buffer->begin();
+        m_shaders.convertToFloatAndApplyEqAndGamma(*m_first_stage_command_buffer, input_vulkan_buffer, frame_buffer->data(), m_eq);
+        m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame_buffer->data());
+        m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
+
         if (m_decode_video)
             frame_buffer->ProcessControlData(input_vulkan_buffer->data<uint16_t>(), m_eq);
-
-        m_shaders.convertToFloatAndApplyEqAndGamma(*m_command_queue, input_vulkan_buffer, frame_buffer->data(), m_eq);
-
-        m_shaders.convertAudioSampleRate(*m_command_queue, frame_buffer->data());
-
-        needs_queue_submit = true;
     }
 
     // if not decoding all fields, we only decode on field 0 (when we read the data), but
     // actually decode the second field.  For field 1, the same field will be shown again.
+    // Always begin the batch here since it will wait for the first stage semaphore to complete (or it won't be unsignalled)
+    m_second_stage_command_buffer->begin();
     if (m_decode_video && (m_decode_all_fields || m_field_index == 0)) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
-        m_shaders.decodeIntraField(*m_command_queue, m_frame_buffers[0]->get_field(decoded_field_index));
+        m_shaders.decodeIntraField(*m_second_stage_command_buffer, m_frame_buffers[0]->get_field(decoded_field_index));
         auto fields = vector<reference_wrapper<FieldBufferView>>{
                 m_frame_buffers[0]->get_field(decoded_field_index),
                 m_frame_buffers[1 - decoded_field_index]->get_field(1 - decoded_field_index),
@@ -112,31 +124,37 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
                 m_frame_buffers[2 - decoded_field_index]->get_field(1 - decoded_field_index),
                 m_frame_buffers[2]->get_field(decoded_field_index)};
 
-        if (m_shaders.decodeInterFrameAndDetectMotion(*m_command_queue, fields)) {
+        if (m_shaders.decodeInterFrameAndDetectMotion(*m_second_stage_command_buffer, fields)) {
             m_log.debug(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation success", decoded_field_index));
-            m_shaders.combineStillAndMovingParts(*m_command_queue,
+            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
                                                  field_interpolation_mode == eForceIntraField,
                                                  field_interpolation_mode == eForceInterFrame);
         } else {
             m_log.warn(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
-            m_shaders.combineStillAndMovingParts(*m_command_queue, /* force field only */ true, /* force inter frame only */ false);
+            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false);
         }
-        needs_queue_submit = true;
     }
-    if (needs_queue_submit) {
-        m_command_queue->evalAsync();
-        m_command_queue->evalAwait(); // FIXME: remove and add fence
+    if (m_first_stage_command_buffer->isSubmitted())
+        m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});
+    else
+        m_second_stage_command_buffer->submit({}, {}, {});
+
+    assert(input_vulkan_buffer != nullptr == m_first_stage_command_buffer->isSubmitted());
+    if (m_first_stage_command_buffer->isSubmitted()) {
+        m_first_stage_command_buffer->wait();
+        m_reader.returnBuffer(input_vulkan_buffer);
     }
+
     if (m_decode_audio && m_field_index == 0)
         m_audio_decoder.decodeFrame(m_frame_no, m_shaders.getAudioData(), audio_mode, sample_count, output_samples);
     else
         sample_count = 0;
-    //m_command_queue->evalAwait();
-    if (input_vulkan_buffer != nullptr)
-        m_reader.returnBuffer(input_vulkan_buffer);
 
-    if (m_benchmark_shaders)
-        m_timestamp_statistics.add_timestamps(m_command_queue->getTimestamps());
+    if (m_second_stage_command_buffer->isSubmitted())
+        m_second_stage_command_buffer->wait();
+
+    if (m_timestamp_query_pool != nullptr)
+        m_timestamp_statistics.add_timestamps(m_timestamp_query_pool->getTimestamps());
 
     auto t1 = chrono::high_resolution_clock::now();
     long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();

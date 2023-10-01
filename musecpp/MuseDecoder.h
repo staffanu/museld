@@ -13,6 +13,9 @@
 #include "Logger.h"
 
 class FrameBuffer;
+namespace musevk {
+    class TimestampQueryPool;
+}
 
 class MuseDecoder {
 public:
@@ -26,7 +29,7 @@ public:
                 bool decode_video,
                 bool decode_all_fields,
                 bool decode_audio,
-                bool benchmark_shaders);
+                musevk::TimestampQueryPool *timestamp_query_pool);
     ~MuseDecoder();
     [[nodiscard]] bool initialize();
 
@@ -50,10 +53,13 @@ private:
     const bool m_decode_video;
     const bool m_decode_all_fields;
     const bool m_decode_audio;
-    const bool m_benchmark_shaders;
+    musevk::TimestampQueryPool *m_timestamp_query_pool; // if set we use it
 
     std::pair<float, float> m_eq;
-    std::shared_ptr<musevk::CommandQueue> m_command_queue;
+    vk::Semaphore m_first_stage_complete_semaphore;
+    std::shared_ptr<musevk::CommandBuffer> m_reset_timestamp_query_pool_command_buffer;
+    std::shared_ptr<musevk::CommandBuffer> m_first_stage_command_buffer;
+    std::shared_ptr<musevk::CommandBuffer> m_second_stage_command_buffer;
     musevk::TimestampStatistics m_timestamp_statistics;
     int m_frame_no;
     int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field

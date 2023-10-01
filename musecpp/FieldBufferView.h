@@ -9,7 +9,7 @@
 #include "MuseTypes.h"
 #include "ControlSignalDecoder.h"
 #include "MuseBuffer.h"
-#include "musevk/CommandQueue.h"
+#include "musevk/CommandBuffer.h"
 
 class FieldBufferView {
 public:

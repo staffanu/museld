@@ -2,25 +2,28 @@
 // Created by staffanu on 5/25/23.
 //
 
-#ifndef MUSECPP_COMMANDQUEUE_H
-#define MUSECPP_COMMANDQUEUE_H
+#ifndef MUSECPP_COMMANDBUFFER_H
+#define MUSECPP_COMMANDBUFFER_H
 
 #include <vulkan/vulkan.hpp>
 #include "ComputeShader.h"
 
 namespace musevk {
-    class CommandQueue {
-    public:
-        CommandQueue(CommandQueue &other) = delete;
-        void operator=(const CommandQueue &) = delete;
+    class TimestampQueryPool;
 
-        CommandQueue(vk::PhysicalDevice &physicalDevice,
-                     vk::Device &device,
-                     vk::Queue &computeQueue,
-                     uint32_t queueIndex,
-                     std::vector<vk::Semaphore> &wait_semaphores,
-                     std::vector<vk::PipelineStageFlags> &wait_dst_stage_masks,
-                     uint32_t max_timestamps = 0);
+    class CommandBuffer {
+    public:
+        CommandBuffer(CommandBuffer &other) = delete;
+        void operator=(const CommandBuffer &) = delete;
+
+        CommandBuffer(vk::CommandPool &command_pool,
+                      vk::Device &device,
+                      vk::Queue &computeQueue,
+                      TimestampQueryPool *timestamp_query_pool);
+
+        vk::CommandBuffer getCommandBuffer() { return m_command_buffer; }
+
+        void begin();
 
         void enqueueTransitionMemoryLayout(vk::Image image, vk::Format format,
                                            vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
@@ -50,7 +53,6 @@ namespace musevk {
         void enqueueComputeShader(const std::shared_ptr<ComputeShader> &compute_shader,
                                   const std::vector<T> &pushConstants,
                                   int descriptor_set_index = 0) {
-            begin();
             for (const std::shared_ptr<VulkanMemoryObject> &buffer: compute_shader->getMemoryObjects(descriptor_set_index)) {
                 if (buffer->getType() == eBuffer) {
                     enqueueMemoryBarrier((VulkanBuffer &)(*buffer),
@@ -67,39 +69,29 @@ namespace musevk {
             maybeTimestamp(compute_shader->name(), vk::PipelineStageFlagBits::eComputeShader);
         }
 
-        void maybeTimestamp(std::string label, vk::PipelineStageFlagBits stage);
+        void submit(std::vector<vk::Semaphore> const &wait_semaphores,
+                    std::vector<vk::PipelineStageFlags> const &wait_dst_stage_masks,
+                    std::vector<vk::Semaphore> const &signal_semaphores);
+        bool isSubmitted() const;
 
-        void evalAsync();
+        void wait();
 
-        void evalAwait();
-
-        std::vector<std::pair<std::string, int>> getTimestamps();
-
-        ~CommandQueue();
+        ~CommandBuffer();
 
     private:
-        void begin();
+        void maybeTimestamp(std::string const &label, vk::PipelineStageFlagBits stage);
 
-        vk::PhysicalDevice &m_physical_device;
+        vk::CommandPool &m_command_pool;
         vk::Device &m_device;
         vk::Queue &m_compute_queue;
-        uint32_t m_queue_index;
-
-        vk::CommandPool m_command_pool;
+        TimestampQueryPool *m_timestamp_query_pool;
         vk::CommandBuffer m_command_buffer;
 
         vk::Fence m_fence;
-
-        int m_allocated_timestamp_queries;
-        vk::QueryPool m_timestamp_query_pool;
-        std::vector<std::string> m_timestamped_operations;
-
-        std::vector<vk::Semaphore> m_wait_semaphores;
-        std::vector<vk::PipelineStageFlags> m_wait_dst_stage_masks;
 
         bool m_recording = false;
         bool m_is_running = false;
     };
 }
 
-#endif //MUSECPP_COMMANDQUEUE_H
+#endif //MUSECPP_COMMANDBUFFER_H

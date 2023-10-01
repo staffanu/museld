@@ -169,13 +169,13 @@ MuseBuffer Shaders::createMuseBuffer(unsigned int height, unsigned int width, bo
 }
 
 void Shaders::convertToFloatAndApplyEqAndGamma(
-        CommandQueue &sq, shared_ptr<VulkanBuffer> input,
+        CommandBuffer &sq, shared_ptr<VulkanBuffer> input,
         MuseBuffer &buffer, pair<float, float> const &eq) {
     m_convert_to_float_and_apply_eq_and_gamma_algo->updateBufferDescriptorsInSet(0, {input, buffer.getVulkanBuffer()});
     sq.enqueueComputeShader(m_convert_to_float_and_apply_eq_and_gamma_algo, {eq.first, eq.second});
 }
 
-void Shaders::decodeIntraField(CommandQueue &sq, FieldBufferView &field) {
+void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
     m_log.info(eVideo, fmt::format("Decoding frame {} field {}", field.m_frame_no, field.m_field_parity));
     if (field.control_data().has_value())
         field.control_data().value().log_control_data();
@@ -203,7 +203,7 @@ void Shaders::decodeIntraField(CommandQueue &sq, FieldBufferView &field) {
     filterImage(sq, 1, m_color_filter_single_field_buffer, m_intermediate_b_buffer, m_field_b_buffer, 128.0 / 8, 8);
 }
 
-void Shaders::copyYForInterpolation(CommandQueue &sq, int descriptor_set_index,
+void Shaders::copyYForInterpolation(CommandBuffer &sq, int descriptor_set_index,
                                     MuseBuffer &frame, MuseBuffer &output,
                                     unsigned int field_parity, unsigned int frame_phase_y, bool zero_non_copied_entries) {
     m_copy_y_for_interpolation_algo->updateBufferDescriptorsInSet(descriptor_set_index,
@@ -214,7 +214,7 @@ void Shaders::copyYForInterpolation(CommandQueue &sq, int descriptor_set_index,
             descriptor_set_index);
 }
 
-void Shaders::filterImageDiamond(CommandQueue &sq, int descriptor_set_index,
+void Shaders::filterImageDiamond(CommandBuffer &sq, int descriptor_set_index,
                                  int phase, MuseBuffer &buffer) {
     m_diamond_algo->updateBufferDescriptorsInSet(descriptor_set_index,
                                                  {m_diamond_filter_buffer.getVulkanBuffer(), buffer.getVulkanBuffer()});
@@ -225,7 +225,7 @@ void Shaders::filterImageDiamond(CommandQueue &sq, int descriptor_set_index,
             descriptor_set_index);
 }
 
-void Shaders::filterImage(CommandQueue &sq, int descriptor_set_index,
+void Shaders::filterImage(CommandBuffer &sq, int descriptor_set_index,
                           MuseBuffer &filter,
                           MuseBuffer &source, MuseBuffer &dest,
                           float border_value, float multiplier) {
@@ -243,7 +243,7 @@ void Shaders::filterImage(CommandQueue &sq, int descriptor_set_index,
             descriptor_set_index);
 }
 
-void Shaders::decodeC(CommandQueue &sq, int descriptor_set_index,
+void Shaders::decodeC(CommandBuffer &sq, int descriptor_set_index,
                       MuseBuffer &input_frame,
                       int frame_phase_c, int field_parity, bool zero_non_sample_points) {
     m_decode_c_algo->updateBufferDescriptorsInSet(descriptor_set_index,
@@ -255,7 +255,7 @@ void Shaders::decodeC(CommandQueue &sq, int descriptor_set_index,
 }
 
 // There are 5 fields in the vector.  Index 0 is the newest.
-bool Shaders::decodeInterFrameAndDetectMotion(CommandQueue &sq, const vector<reference_wrapper<FieldBufferView>> &fields) {
+bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq, const vector<reference_wrapper<FieldBufferView>> &fields) {
     assert(fields.size() >= 5);
     if (!all_of(fields.cbegin(), fields.cend(),
                 [](const reference_wrapper<FieldBufferView> f) -> bool {
@@ -321,7 +321,7 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandQueue &sq, const vector<ref
     return true;
 }
 
-void Shaders::makeFieldFromConsecutiveFrames(CommandQueue &sq,
+void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
                                              int copy_y_descriptor_set_first_index,
                                              FieldBufferView &field_a, unsigned int field_a_frame_phase_y,
                                              FieldBufferView &field_b, unsigned int field_b_frame_phase_y,
@@ -337,7 +337,7 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandQueue &sq,
                         m_interpolated32_buffer.width(), uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases, 1u});
 }
 
-void Shaders::combineStillAndMovingParts(CommandQueue &sq, bool force_field_only, bool force_inter_frame_only) {
+void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only) {
     sq.enqueueComputeShader(m_combine_still_and_moving_algo,
                             vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u});
 }
@@ -346,7 +346,7 @@ shared_ptr<VulkanImage> Shaders::getResultImage() {
     return m_image_out;
 }
 
-void Shaders::convertAudioSampleRate(musevk::CommandQueue &sq, MuseBuffer &frame) {
+void Shaders::convertAudioSampleRate(musevk::CommandBuffer &sq, MuseBuffer &frame) {
     for (int i = 0; i < 2; i++) {
         m_convert_audio_sample_rate_algo->updateBufferDescriptorsInSet(
                 i,

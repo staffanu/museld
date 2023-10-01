@@ -10,7 +10,7 @@
 #include <csignal>
 #include "MuseBuffer.h"
 #include "musevk/VulkanImage.h"
-#include "musevk/CommandQueue.h"
+#include "musevk/CommandBuffer.h"
 #include "Logger.h"
 
 namespace musevk {
@@ -29,42 +29,42 @@ public:
 
     MuseBuffer createMuseBuffer(unsigned int height, unsigned int width, bool host_visible = false);
 
-    void convertToFloatAndApplyEqAndGamma(musevk::CommandQueue &sq,
+    void convertToFloatAndApplyEqAndGamma(musevk::CommandBuffer &sq,
                                           std::shared_ptr<musevk::VulkanBuffer> input, MuseBuffer &buffer,
                                           std::pair<float, float> const &eq);
 
-    void decodeIntraField(musevk::CommandQueue &sq, FieldBufferView &field);
+    void decodeIntraField(musevk::CommandBuffer &sq, FieldBufferView &field);
 
-    bool decodeInterFrameAndDetectMotion(musevk::CommandQueue &sq,
+    bool decodeInterFrameAndDetectMotion(musevk::CommandBuffer &sq,
                                          const std::vector<std::reference_wrapper<FieldBufferView>> &fields);
 
-    void combineStillAndMovingParts(musevk::CommandQueue &sq, bool force_field_only, bool force_inter_frame_only);
+    void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only);
 
     std::shared_ptr<musevk::VulkanImage> getResultImage();
 
-    void convertAudioSampleRate(musevk::CommandQueue &sq, MuseBuffer &frame);
+    void convertAudioSampleRate(musevk::CommandBuffer &sq, MuseBuffer &frame);
 
     MuseBuffer &getAudioData();
 
 private:
     // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
-    void copyYForInterpolation(musevk::CommandQueue &sq, int descriptor_set_index,
+    void copyYForInterpolation(musevk::CommandBuffer &sq, int descriptor_set_index,
                                MuseBuffer &frame, MuseBuffer &output,
                                unsigned int field_parity, unsigned int frame_phase_y, bool zero_non_copied_entries);
 
-    void filterImageDiamond(musevk::CommandQueue &sq, int descriptor_set_index,
+    void filterImageDiamond(musevk::CommandBuffer &sq, int descriptor_set_index,
                             int phase, MuseBuffer &buffer);
 
-    void filterImage(musevk::CommandQueue &sq, int descriptor_set_index,
+    void filterImage(musevk::CommandBuffer &sq, int descriptor_set_index,
                      MuseBuffer &filter,
                      MuseBuffer &source, MuseBuffer &dest,
                      float border_value, float multiplier);
 
-    void decodeC(musevk::CommandQueue &sq, int descriptor_set_index,
+    void decodeC(musevk::CommandBuffer &sq, int descriptor_set_index,
                  MuseBuffer &input_frame,
                  int frame_phase_c, int field_parity, bool zero_non_sample_points);
 
-    void makeFieldFromConsecutiveFrames(musevk::CommandQueue &sq,
+    void makeFieldFromConsecutiveFrames(musevk::CommandBuffer &sq,
                                         int copy_y_descriptor_set_first_index,
                                         FieldBufferView &field_a, unsigned int field_a_frame_phase_y,
                                         FieldBufferView &field_b, unsigned int field_b_frame_phase_y,

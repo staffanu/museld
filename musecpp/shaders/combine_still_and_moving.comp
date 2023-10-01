@@ -63,9 +63,19 @@ void main() {
     float16_t BmYM = BmYM_field * movement + BmYM_inter_frame * (1.0hf - movement);
     float16_t RmYM = RmYM_field * movement + RmYM_inter_frame * (1.0hf - movement);
 
-    float g = clamp((YM - BmYM / 4.0hf - RmYM / 2.0hf) / 255.f, 0.f, 1.f);
-    float b = clamp((YM + BmYM + BmYM / 4.0hf) / 255.f, 0.f, 1.f);
-    float r = clamp((YM + RmYM) / 255.f, 0.f, 1.f);
+//    float16_t YM = movement_data[row][col] * 255.hf;
+//    float16_t BmYM = 0.hf;
+//    float16_t RmYM = 0.hf;
 
-    imageStore(frame_out_image, ivec2(col, row), vec4(r, g, b, 1.f));
+    float16_t min_value = 16.hf;
+    float16_t range = 235.hf - min_value;
+    float16_t g = clamp((YM - BmYM / 4.0hf - RmYM / 2.0hf - min_value) / range, 0.hf, 1.hf);
+    float16_t b = clamp((YM + BmYM + BmYM / 4.0hf - min_value) / range, 0.hf, 1.hf);
+    float16_t r = clamp((YM + RmYM - min_value) / range, 0.hf, 1.hf);
+
+    r = pow(r, 2.2hf);
+    g = pow(g, 2.2hf);
+    b = pow(b, 2.2hf);
+
+    imageStore(frame_out_image, ivec2(col, row), vec4(float(r), float(g), float(b), 1.f));
 }
