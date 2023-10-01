@@ -26,6 +26,13 @@ AudioPlayback::AudioPlayback(Logger &log)
     auto audio_status = Pa_Initialize();
     if (audio_status != paNoError)
         throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
+
+    PaHostApiIndex count = Pa_GetHostApiCount();
+    for (PaHostApiIndex i = 0; i < count; i++) {
+        auto *info = Pa_GetHostApiInfo(i);
+        m_log.debug(eAudio, fmt::format("Host API {}: type id={}, device ocunt={}, default device={}",
+                                        info->name, (int)info->type, info->deviceCount, (int)info->defaultOutputDevice));
+    }
 }
 
 void AudioPlayback::cleanup() {
@@ -107,6 +114,13 @@ int AudioPlayback::audioCallbackMember(void *output_buffer, unsigned long frames
 }
 
 void AudioPlayback::openStream() {
+    PaDeviceIndex count = Pa_GetDeviceCount();
+    for (PaDeviceIndex i = 0; i < count; i++) {
+        auto *info = Pa_GetDeviceInfo(i);
+        m_log.debug(eAudio, fmt::format("Device {}: maximum {} output channels",
+                                        info->name, info->maxOutputChannels));
+    }
+
     PaDeviceIndex device_index = Pa_GetDefaultOutputDevice();
     auto *info = Pa_GetDeviceInfo(device_index);
     m_channels_used = min(m_current_mode == AudioDecoder::MODE_A ? 4 : 2, info->maxOutputChannels);
