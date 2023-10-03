@@ -26,7 +26,7 @@ namespace musevk {
         m_device.freeCommandBuffers(m_command_pool, m_command_buffer);
     }
 
-    void CommandBuffer::enqueueTransitionMemoryLayout(vk::Image image, vk::Format format,
+    void CommandBuffer::enqueueTransitionMemoryLayout(vk::Image image,
                                                       vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
                                                       vk::PipelineStageFlagBits srcStage, vk::PipelineStageFlagBits dstStage,
                                                       vk::AccessFlags srcAccessMask, vk::AccessFlags dstAccessMask) {

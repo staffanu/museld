@@ -139,7 +139,7 @@ namespace musevk {
 
         auto sq = createCommandBuffer();
         sq->begin();
-        sq->enqueueTransitionMemoryLayout(image->image(), vk::Format::eB8G8R8A8Srgb,
+        sq->enqueueTransitionMemoryLayout(image->image(),
                                           vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral,
                                           vk::PipelineStageFlagBits::eTopOfPipe,
                                           vk::PipelineStageFlagBits::eComputeShader,

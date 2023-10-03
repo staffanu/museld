@@ -26,7 +26,7 @@ namespace musevk {
 
         void begin();
 
-        void enqueueTransitionMemoryLayout(vk::Image image, vk::Format format,
+        void enqueueTransitionMemoryLayout(vk::Image image,
                                            vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
                                            vk::PipelineStageFlagBits srcStageMask, vk::PipelineStageFlagBits dstStageMask,
                                            vk::AccessFlags srcAccessMask, vk::AccessFlags dstAccessMask);

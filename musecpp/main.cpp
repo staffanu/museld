@@ -103,7 +103,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             auto swap_chain_image = manager.acquireNextImage(image_available_semaphore);
 
             command_buffer->begin();
-            command_buffer->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Srgb,
+            command_buffer->enqueueTransitionMemoryLayout(swap_chain_image,
                                                           vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
                                                           vk::PipelineStageFlagBits::eTopOfPipe,
                                                           vk::PipelineStageFlagBits::eTransfer,
@@ -122,7 +122,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                                              swap_chain_image, vk::ImageLayout::eTransferDstOptimal,
                                              region);
 
-            command_buffer->enqueueTransitionMemoryLayout(swap_chain_image, vk::Format::eB8G8R8A8Srgb,
+            command_buffer->enqueueTransitionMemoryLayout(swap_chain_image,
                                                           vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR,
                                                           vk::PipelineStageFlagBits::eTransfer,
                                                           vk::PipelineStageFlagBits::eBottomOfPipe,
