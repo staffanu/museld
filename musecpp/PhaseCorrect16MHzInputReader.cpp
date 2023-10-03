@@ -4,9 +4,12 @@
 
 #include <netinet/in.h>
 #include <map>
+#include <cassert>
 #include <fmt/format.h>
+#include "musevk/VulkanBuffer.h"
 #include "MuseTypes.h"
 #include "PhaseCorrect16MHzInputReader.h"
+#include "Logger.h"
 
 using namespace std;
 

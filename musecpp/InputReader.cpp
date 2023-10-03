@@ -5,7 +5,9 @@
 #include <sys/fcntl.h>
 #include <unistd.h>
 #include <fmt/format.h>
+#include "musevk/VulkanBuffer.h"
 #include "InputReader.h"
+#include "Logger.h"
 
 using namespace std;
 

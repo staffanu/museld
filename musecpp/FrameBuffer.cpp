@@ -4,7 +4,6 @@
 
 #include <numeric>
 #include <utility>
-#include <netinet/in.h>
 #include "FrameBuffer.h"
 #include "FieldBufferView.h"
 

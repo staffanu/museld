@@ -5,7 +5,8 @@
 #ifndef MUSECPP_MUSEBUFFER_H
 #define MUSECPP_MUSEBUFFER_H
 
-#include "musevk/CommandBuffer.h"
+#include <memory>
+#include "musevk/VulkanBuffer.h"
 
 class MuseBuffer {
 public:

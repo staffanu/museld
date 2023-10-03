@@ -9,6 +9,8 @@
 #include <portaudio.h>
 #include "AudioDecoder.h"
 
+class Logger;
+
 class AudioPlayback {
 public:
     AudioPlayback(Logger &log);

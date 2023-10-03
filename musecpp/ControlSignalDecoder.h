@@ -8,8 +8,8 @@
 #include <map>
 #include <array>
 #include <optional>
-#include "MuseTypes.h"
-#include "Logger.h"
+
+class Logger;
 
 enum MotionInformation {
     Normal, CompleteStillPicture, SlightlyInMotion, SceneChange, Motion

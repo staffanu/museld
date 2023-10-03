@@ -5,6 +5,7 @@
 #include <cassert>
 #include <fmt/format.h>
 #include "AudioPlayback.h"
+#include "Logger.h"
 
 using namespace std;
 

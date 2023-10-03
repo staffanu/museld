@@ -7,9 +7,11 @@
 
 #include <cstdint>
 #include "MuseTypes.h"
-#include "ControlSignalDecoder.h"
 #include "MuseBuffer.h"
 #include "musevk/CommandBuffer.h"
+#include "ControlSignalDecoder.h"
+
+class Logger;
 
 class FieldBufferView {
 public:

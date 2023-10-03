@@ -6,6 +6,7 @@
 #include <fmt/format.h>
 #include "InputPll.h"
 #include "MuseTypes.h"
+#include "Logger.h"
 
 using namespace std;
 

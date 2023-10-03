@@ -3,6 +3,7 @@
 //
 
 #include "CommandBuffer.h"
+#include "VulkanBuffer.h"
 #include "TimestampQueryPool.h"
 
 namespace musevk {

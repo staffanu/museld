@@ -7,9 +7,10 @@
 
 #include <vector>
 #include <cstdint>
-#include "MuseTypes.h"
-#include "FieldBufferView.h"
 #include "MuseBuffer.h"
+
+class FieldBufferView;
+class Logger;
 
 class FrameBuffer {
 public:

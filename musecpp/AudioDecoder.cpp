@@ -7,6 +7,8 @@
 #include <fmt/format.h>
 #include "AudioDecoder.h"
 #include "MuseBuffer.h"
+#include "Logger.h"
+#include "musevk/VulkanBuffer.h"
 #include "musevk/HalfFloatUtil.h"
 
 using namespace std;

@@ -8,9 +8,13 @@
 #include <thread>
 #include <condition_variable>
 #include <optional>
+#include <vector>
 #include "InputPll.h"
-#include "musevk/VulkanBuffer.h"
-#include "Logger.h"
+
+namespace musevk {
+    class VulkanBuffer;
+}
+class Logger;
 
 class InputReader {
 public:

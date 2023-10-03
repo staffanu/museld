@@ -6,11 +6,14 @@
 #include <map>
 #include <chrono>
 #include <fmt/format.h>
+#include "musevk/VulkanManager.h"
+#include "musevk/TimestampQueryPool.h"
 #include "MuseTypes.h"
 #include "MuseDecoder.h"
 #include "FrameBuffer.h"
-#include "musevk/VulkanManager.h"
-#include "musevk/TimestampQueryPool.h"
+#include "FieldBufferView.h"
+#include "InputReader.h"
+#include "Shaders.h"
 
 using namespace std;
 

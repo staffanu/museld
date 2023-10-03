@@ -4,6 +4,10 @@
 
 #include "ComputeShader.h"
 
+#define LOCAL_WORKGROUP_SIZE_X 32
+#define LOCAL_WORKGROUP_SIZE_Y 2
+#define LOCAL_WORKGROUP_SIZE_Z 1
+
 using namespace std;
 
 namespace musevk {
@@ -53,6 +57,15 @@ namespace musevk {
         updateDescriptorSet(0);
 
         updateBufferDescriptorsInSet(0, buffers);
+    }
+
+    ComputeShader::~ComputeShader() {
+        m_device.destroy(m_pipeline);
+        m_device.destroy(m_pipeline_cache);
+        m_device.destroy(m_pipeline_layout);
+        m_device.destroy(m_shader_module);
+        m_device.destroy(m_descriptor_set_layout);
+        m_device.destroy(m_descriptor_pool);
     }
 
     void ComputeShader::createShaderModule() {
@@ -162,5 +175,22 @@ namespace musevk {
                                                     vk::Pipeline(),
                                                     0);
         m_pipeline = m_device.createComputePipeline(m_pipeline_cache, pipeline_info).value;
+    }
+
+    void ComputeShader::bindPipelineAndDescriptorSets(const vk::CommandBuffer &commandBuffer, int descriptor_set_index) {
+        commandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_pipeline);
+        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
+                                         m_pipeline_layout,
+                                         0, // First set
+                                         m_descriptor_sets[descriptor_set_index],
+                                         nullptr // Dispatcher
+        );
+    }
+
+    void ComputeShader::dispatch(const vk::CommandBuffer &commandBuffer) {
+        uint32_t group_count_x = (m_workgroup.x_size + LOCAL_WORKGROUP_SIZE_X - 1) / LOCAL_WORKGROUP_SIZE_X;
+        uint32_t group_count_y = (m_workgroup.y_size + LOCAL_WORKGROUP_SIZE_Y - 1) / LOCAL_WORKGROUP_SIZE_Y;
+        uint32_t group_count_z = (m_workgroup.z_size + LOCAL_WORKGROUP_SIZE_Z - 1) / LOCAL_WORKGROUP_SIZE_Z;
+        commandBuffer.dispatch(group_count_x, group_count_y, group_count_z);
     }
 }

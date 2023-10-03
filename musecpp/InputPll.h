@@ -8,7 +8,8 @@
 #include <cstdint>
 #include <cmath>
 #include <deque>
-#include "Logger.h"
+
+class Logger;
 
 class InputPll {
 public:

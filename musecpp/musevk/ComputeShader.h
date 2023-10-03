@@ -6,13 +6,10 @@
 #define MUSECPP_COMPUTESHADER_H
 
 #include <vulkan/vulkan.hpp>
-#include "VulkanBuffer.h"
-
-#define LOCAL_WORKGROUP_SIZE_X 16
-#define LOCAL_WORKGROUP_SIZE_Y 4
-#define LOCAL_WORKGROUP_SIZE_Z 1
+#include "VulkanMemoryObject.h"
 
 namespace musevk {
+
     // Represents the global workgroup size
     struct Workgroup {
         Workgroup(uint32_t x, uint32_t y = 1, uint32_t z = 1)
@@ -42,6 +39,8 @@ namespace musevk {
                       const Workgroup &workgroup,
                       int max_descriptor_sets);
 
+        ~ComputeShader();
+
         std::string &name() {
             return m_name;
         }
@@ -63,15 +62,6 @@ namespace musevk {
             return m_buffers[descriptor_set_index];
         }
 
-        ~ComputeShader() {
-            m_device.destroy(m_pipeline);
-            m_device.destroy(m_pipeline_cache);
-            m_device.destroy(m_pipeline_layout);
-            m_device.destroy(m_shader_module);
-            m_device.destroy(m_descriptor_set_layout);
-            m_device.destroy(m_descriptor_pool);
-        }
-
     private:
         friend class CommandBuffer;
 
@@ -79,15 +69,7 @@ namespace musevk {
         void createDescriptorLayout(int number_of_descriptor_sets, const std::vector<MemoryObjectType> &buffer_types);
         void updateDescriptorSet(int set_index);
         void createPipeline();
-        void bindPipelineAndDescriptorSets(const vk::CommandBuffer &commandBuffer, int descriptor_set_index) {
-            commandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_pipeline);
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
-                                             m_pipeline_layout,
-                                             0, // First set
-                                             m_descriptor_sets[descriptor_set_index],
-                                             nullptr // Dispatcher
-            );
-        }
+        void bindPipelineAndDescriptorSets(const vk::CommandBuffer &commandBuffer, int descriptor_set_index);
 
         template<typename T>
         void bindPushConstants(const vk::CommandBuffer &commandBuffer, const std::vector<T> &push_constants) {
@@ -101,12 +83,7 @@ namespace musevk {
             }
         }
 
-        void dispatch(const vk::CommandBuffer &commandBuffer) {
-            uint32_t group_count_x = (m_workgroup.x_size + LOCAL_WORKGROUP_SIZE_X - 1) / LOCAL_WORKGROUP_SIZE_X;
-            uint32_t group_count_y = (m_workgroup.y_size + LOCAL_WORKGROUP_SIZE_Y - 1) / LOCAL_WORKGROUP_SIZE_Y;
-            uint32_t group_count_z = (m_workgroup.z_size + LOCAL_WORKGROUP_SIZE_Z - 1) / LOCAL_WORKGROUP_SIZE_Z;
-            commandBuffer.dispatch(group_count_x, group_count_y, group_count_z);
-        }
+        void dispatch(const vk::CommandBuffer &commandBuffer);
 
         std::string m_name;
         vk::Device &m_device;

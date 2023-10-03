@@ -10,6 +10,7 @@
 
 namespace musevk {
     class TimestampQueryPool;
+    class VulkanBuffer;
 
     class CommandBuffer {
     public:

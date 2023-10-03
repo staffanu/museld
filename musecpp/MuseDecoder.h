@@ -6,16 +6,17 @@
 #define MUSECPP_MUSEDECODER_H
 
 #include <deque>
-#include "Shaders.h"
 #include "AudioDecoder.h"
 #include "musevk/TimestampStatistics.h"
-#include "InputReader.h"
-#include "Logger.h"
 
-class FrameBuffer;
 namespace musevk {
     class TimestampQueryPool;
 }
+class AudioDecoder;
+class FrameBuffer;
+class InputReader;
+class Logger;
+class Shaders;
 
 class MuseDecoder {
 public:

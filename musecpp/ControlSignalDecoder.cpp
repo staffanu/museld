@@ -8,6 +8,7 @@
 #include <functional>
 #include <cassert>
 #include <sstream>
+#include "Logger.h"
 #include "MuseTypes.h"
 #include "ControlSignalDecoder.h"
 

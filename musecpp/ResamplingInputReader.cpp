@@ -5,8 +5,11 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <fmt/format.h>
+#include <cassert>
+#include "musevk/VulkanBuffer.h"
 #include "MuseTypes.h"
 #include "ResamplingInputReader.h"
+#include "Logger.h"
 
 using namespace std;
 

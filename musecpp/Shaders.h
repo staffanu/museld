@@ -9,12 +9,14 @@
 #include <vector>
 #include <csignal>
 #include "MuseBuffer.h"
-#include "musevk/VulkanImage.h"
-#include "musevk/CommandBuffer.h"
-#include "Logger.h"
+
+class Logger;
 
 namespace musevk {
+    class VulkanImage;
+    class CommandBuffer;
     class VulkanManager;
+    class ComputeShader;
 }
 class FieldBufferView;
 

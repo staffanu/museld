@@ -9,11 +9,12 @@
 #include <deque>
 #include <map>
 #include <string>
+#include <vector>
 #include "BchDecoder.h"
 #include "AudioChannelDecoder.h"
-#include "Logger.h"
 
 class MuseBuffer;
+class Logger;
 
 class AudioDecoder {
 public:
