@@ -217,7 +217,7 @@ void usage() {
     cerr << "usage: musecpp "
             "<--resample-bytes|--resample-shorts|--big-endian> [--sample-freq] "
             "[--fifo] [--full-frames-only] [-all-fields] "
-            "[--full-screen] [--no-video] [no-audio] [--verbose] [--nosync] [--help] "
+            "[--full-screen] [--no-video] [no-audio] [--verbose] [--no-sync] [--help] "
             "<input_file> ...\n";
     exit(EXIT_FAILURE);
 }
@@ -285,6 +285,8 @@ int main(int argc, char *argv[]) {
                 no_sync = true;
             else if (*it == "--help")
                 usage();
+            else if (it -> find("!", 0) == 0)
+                ; // used to ignore options (to easily enable/disable options in debug settings etc.)
             else {
                 if (initial_seek_seconds != 0 && input_is_fifo)
                     throw runtime_error("Initial seek is not compatible with reading from fifo");
