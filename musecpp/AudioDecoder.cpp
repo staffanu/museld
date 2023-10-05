@@ -13,6 +13,8 @@
 
 using namespace std;
 
+#define SQUARE(x) ((x) * (x))
+
 const vector<pair<float, float>> AudioDecoder::c_default_symbol_locations = defaultSymbolLocations();
 
 const array<array<bool, 3>, 8> AudioDecoder::c_symbol_bits = {
@@ -113,8 +115,8 @@ void AudioDecoder::decodeFrame(int frame_no,
             }
 
             if (abs(closest.second - second_closest.second) > 40) {
-                if (pow(xin - c_default_symbol_locations[closest.first].first, 2) +
-                        pow(yin - c_default_symbol_locations[closest.first].second, 2) < 49 * 49 + 49 * 49) {
+                if (SQUARE(xin - c_default_symbol_locations[closest.first].first) +
+                        SQUARE(yin - c_default_symbol_locations[closest.first].second) < 49 * 49 + 49 * 49) {
                     pair<float, float> prev_location = m_symbol_locations[closest.first];
                     float new_x = (prev_location.first * 15 + xin) / 16;
                     float new_y = (prev_location.second * 15 + yin) / 16;
