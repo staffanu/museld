@@ -55,7 +55,8 @@ namespace musevk {
                 const Workgroup &workgroup,
                 int max_descriptor_sets = 1);
 
-        std::shared_ptr<VulkanImage> createImage(uint32_t width, uint32_t height);
+        std::shared_ptr<VulkanImage> createImage(uint32_t width, uint32_t height,
+                                                 std::optional<vk::ImageLayout> initial_layout = std::nullopt);
 
         std::shared_ptr<CommandBuffer> createCommandBuffer(
                 TimestampQueryPool *timestamp_query_pool = nullptr);

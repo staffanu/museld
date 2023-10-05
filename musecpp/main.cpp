@@ -102,7 +102,13 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
 
             auto swap_chain_image = manager.acquireNextImage(image_available_semaphore);
 
+            // The output image written by the decoder is finished since the next() call waits for
+            // all commands to finish.
+
             command_buffer->begin();
+            image->enqueueTransitionLayout(*command_buffer, vk::ImageLayout::eTransferSrcOptimal,
+                                           vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer,
+                                           vk::AccessFlags(), vk::AccessFlagBits::eTransferRead);
             command_buffer->enqueueTransitionMemoryLayout(swap_chain_image,
                                                           vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
                                                           vk::PipelineStageFlagBits::eTopOfPipe,
@@ -118,7 +124,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             region.dstOffsets[0] = vk::Offset3D(0, 0, 0);
             region.dstOffsets[1] = vk::Offset3D((int)extent.width, (int)extent.height, 1);
             region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
-            command_buffer->enqueueBlitImage(image->image(), vk::ImageLayout::eGeneral,
+            command_buffer->enqueueBlitImage(image->image(), vk::ImageLayout::eTransferSrcOptimal,
                                              swap_chain_image, vk::ImageLayout::eTransferDstOptimal,
                                              region);
 

@@ -27,9 +27,9 @@ namespace musevk {
         void begin();
 
         void enqueueTransitionMemoryLayout(vk::Image image,
-                                           vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
-                                           vk::PipelineStageFlagBits srcStageMask, vk::PipelineStageFlagBits dstStageMask,
-                                           vk::AccessFlags srcAccessMask, vk::AccessFlags dstAccessMask);
+                                           vk::ImageLayout old_layout, vk::ImageLayout new_layout,
+                                           vk::PipelineStageFlagBits src_stage, vk::PipelineStageFlagBits dst_stage,
+                                           vk::AccessFlags src_access_mask, vk::AccessFlags dst_access_mask);
 
         void enqueueCopyBuffer(VulkanBuffer &source, VulkanBuffer &destination);
 
@@ -44,25 +44,25 @@ namespace musevk {
                               vk::ImageLayout dest_layout,
                               vk::ImageBlit region);
 
-        void enqueueMemoryBarrier(VulkanBuffer &buffer,
+        void enqueueBufferBarrier(VulkanBuffer &buffer,
                 vk::AccessFlagBits srcAccessMask,
                 vk::AccessFlagBits dstAccessMask,
                 vk::PipelineStageFlagBits srcStageMask,
                 vk::PipelineStageFlagBits dstStageMask);
 
+        void enqueueBarrier(vk::AccessFlagBits srcAccessMask,
+                            vk::AccessFlagBits dstAccessMask,
+                            vk::PipelineStageFlagBits srcStageMask,
+                            vk::PipelineStageFlagBits dstStageMask);
+
         template<typename T = float>
         void enqueueComputeShader(const std::shared_ptr<ComputeShader> &compute_shader,
                                   const std::vector<T> &pushConstants,
                                   int descriptor_set_index = 0) {
-            for (const std::shared_ptr<VulkanMemoryObject> &buffer: compute_shader->getMemoryObjects(descriptor_set_index)) {
-                if (buffer->getType() == eBuffer) {
-                    enqueueMemoryBarrier((VulkanBuffer &)(*buffer),
-                                         vk::AccessFlagBits::eTransferWrite,
-                                         vk::AccessFlagBits::eShaderRead,
-                                         vk::PipelineStageFlagBits::eTransfer,
-                                         vk::PipelineStageFlagBits::eComputeShader);
-                }
-            }
+            enqueueBarrier(vk::AccessFlagBits::eTransferWrite,
+                           vk::AccessFlagBits::eShaderRead,
+                           vk::PipelineStageFlagBits::eComputeShader,
+                           vk::PipelineStageFlagBits::eComputeShader);
 
             compute_shader->bindPipelineAndDescriptorSets(m_command_buffer, descriptor_set_index);
             compute_shader->bindPushConstants(m_command_buffer, pushConstants);

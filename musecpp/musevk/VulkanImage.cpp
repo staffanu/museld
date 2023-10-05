@@ -3,6 +3,7 @@
 //
 
 #include "VulkanImage.h"
+#include "CommandBuffer.h"
 
 namespace musevk {
     VulkanImage::VulkanImage(MemoryAllocator &memory_allocator,
@@ -12,21 +13,23 @@ namespace musevk {
             : VulkanMemoryObject(memory_allocator),
               m_device(device),
               m_width(width),
-              m_height(height) {
+              m_height(height),
+              m_layout(vk::ImageLayout::eUndefined) {
         auto image_usage_flags = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc;
+        auto format = vk::Format::eB8G8R8A8Unorm;
 
         vk::ImageCreateInfo image_info(vk::ImageCreateFlags(),
                                        vk::ImageType::e2D,
-                                       vk::Format::eB8G8R8A8Srgb,
+                                       format,
                                        VkExtent3D {width, height, 1},
                                        1, // mipLevels
                                        1, // arrayLayers
                                        vk::SampleCountFlagBits::e1,
-                                       vk::ImageTiling::eLinear,
+                                       vk::ImageTiling::eOptimal,
                                        image_usage_flags,
                                        vk::SharingMode::eExclusive,
                                        nullptr,
-                                       vk::ImageLayout::eUndefined);
+                                       m_layout);
         m_image = m_device.createImage(image_info);
 
         auto memory_property_flags = vk::MemoryPropertyFlagBits::eDeviceLocal;
@@ -35,7 +38,7 @@ namespace musevk {
         vk::ImageViewCreateInfo view_info(vk::ImageViewCreateFlags(),
                                           m_image,
                                           vk::ImageViewType::e2D,
-                                          vk::Format::eB8G8R8A8Srgb,
+                                          format,
                                           vk::ComponentMapping(),
                                           vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
         m_view = m_device.createImageView(view_info);
@@ -43,13 +46,28 @@ namespace musevk {
         m_descriptor_image_info = vk::DescriptorImageInfo(
                 nullptr,
                 m_view,
-                vk::ImageLayout::eGeneral);
+                m_layout);
     }
 
     VulkanImage::~VulkanImage() {
         m_memory_allocator.free(m_allocated_memory);
         m_device.destroy(m_view);
         m_device.destroy(m_image);
+    }
+
+    void VulkanImage::enqueueTransitionLayout(CommandBuffer &command_buffer, vk::ImageLayout new_layout,
+                                              vk::PipelineStageFlagBits src_stage, vk::PipelineStageFlagBits dst_stage,
+                                              vk::AccessFlags src_access_mask, vk::AccessFlags dst_access_mask) {
+        command_buffer.enqueueTransitionMemoryLayout(m_image,
+                                                     m_layout, new_layout,
+                                                     src_stage, dst_stage,
+                                                     src_access_mask, dst_access_mask);
+        m_layout = new_layout;
+
+        m_descriptor_image_info = vk::DescriptorImageInfo(
+                nullptr,
+                m_view,
+                m_layout);
     }
 
     void VulkanImage::allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags) {

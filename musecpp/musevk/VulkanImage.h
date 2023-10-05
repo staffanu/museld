@@ -9,6 +9,8 @@
 #include "VulkanMemoryObject.h"
 
 namespace musevk {
+    class CommandBuffer;
+
     class VulkanImage final : public VulkanMemoryObject {
     public:
         VulkanImage(MemoryAllocator &memory_allocator,
@@ -30,6 +32,10 @@ namespace musevk {
         MemoryObjectType getType() const final {
             return eImage;
         }
+
+        void enqueueTransitionLayout(CommandBuffer &command_buffer, vk::ImageLayout new_layout,
+                                     vk::PipelineStageFlagBits src_stage, vk::PipelineStageFlagBits dst_stage,
+                                     vk::AccessFlags src_access_mask, vk::AccessFlags dst_access_mask);
 
         vk::WriteDescriptorSet
         makeWriteDescriptorSet(vk::DescriptorSet &descriptor_set, uint32_t binding_index) const final {
@@ -54,6 +60,7 @@ namespace musevk {
         AllocatedMemory m_allocated_memory;
         vk::ImageView m_view;
         vk::DescriptorImageInfo m_descriptor_image_info;
+        vk::ImageLayout m_layout;
     };
 }
 

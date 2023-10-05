@@ -27,12 +27,12 @@ namespace musevk {
     }
 
     void CommandBuffer::enqueueTransitionMemoryLayout(vk::Image image,
-                                                      vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
-                                                      vk::PipelineStageFlagBits srcStage, vk::PipelineStageFlagBits dstStage,
-                                                      vk::AccessFlags srcAccessMask, vk::AccessFlags dstAccessMask) {
+                                                      vk::ImageLayout old_layout, vk::ImageLayout new_layout,
+                                                      vk::PipelineStageFlagBits src_stage, vk::PipelineStageFlagBits dst_stage,
+                                                      vk::AccessFlags src_access_mask, vk::AccessFlags dst_access_mask) {
         vk::ImageMemoryBarrier barrier;
-        barrier.oldLayout = oldLayout;
-        barrier.newLayout = newLayout;
+        barrier.oldLayout = old_layout;
+        barrier.newLayout = new_layout;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = image;
@@ -41,15 +41,15 @@ namespace musevk {
         barrier.subresourceRange.levelCount = 1;
         barrier.subresourceRange.baseArrayLayer = 0;
         barrier.subresourceRange.layerCount = 1;
-        barrier.srcAccessMask = srcAccessMask;
-        barrier.dstAccessMask = dstAccessMask;
-        m_command_buffer.pipelineBarrier(srcStage,
-                                         dstStage,
+        barrier.srcAccessMask = src_access_mask;
+        barrier.dstAccessMask = dst_access_mask;
+        m_command_buffer.pipelineBarrier(src_stage,
+                                         dst_stage,
                                          vk::DependencyFlags(0),
                                          {},
                                          {},
                                          {barrier});
-        maybeTimestamp("transitionImage", dstStage);
+        maybeTimestamp("transitionImage", dst_stage);
     }
 
     void CommandBuffer::enqueueCopyBuffer(VulkanBuffer &source, VulkanBuffer &destination) {
@@ -73,7 +73,7 @@ namespace musevk {
         m_command_buffer.blitImage(source, source_layout, dest, dest_layout, region, vk::Filter::eLinear);
     }
 
-    void CommandBuffer::enqueueMemoryBarrier(VulkanBuffer &buffer,
+    void CommandBuffer::enqueueBufferBarrier(VulkanBuffer &buffer,
                                              vk::AccessFlagBits srcAccessMask,
                                              vk::AccessFlagBits dstAccessMask,
                                              vk::PipelineStageFlagBits srcStageMask,
@@ -91,6 +91,22 @@ namespace musevk {
                                          vk::DependencyFlags(),
                                          nullptr,
                                          bufferMemoryBarrier,
+                                         nullptr);
+    }
+
+    void CommandBuffer::enqueueBarrier(vk::AccessFlagBits srcAccessMask,
+                                       vk::AccessFlagBits dstAccessMask,
+                                       vk::PipelineStageFlagBits srcStageMask,
+                                       vk::PipelineStageFlagBits dstStageMask) {
+        vk::MemoryBarrier memoryBarrier;
+        memoryBarrier.srcAccessMask = srcAccessMask;
+        memoryBarrier.dstAccessMask = dstAccessMask;
+
+        m_command_buffer.pipelineBarrier(srcStageMask,
+                                         dstStageMask,
+                                         vk::DependencyFlags(),
+                                         memoryBarrier,
+                                         nullptr,
                                          nullptr);
     }
 

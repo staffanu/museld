@@ -134,20 +134,17 @@ namespace musevk {
                                               is_host_visible, allow_transfers);
     }
 
-    shared_ptr<VulkanImage> VulkanManager::createImage(uint32_t width, uint32_t height) {
+    shared_ptr<VulkanImage> VulkanManager::createImage(uint32_t width, uint32_t height, std::optional<vk::ImageLayout> initial_layout) {
         auto image = make_shared<VulkanImage>(*m_memory_allocator, m_logical_device, width, height);
-
-        auto sq = createCommandBuffer();
-        sq->begin();
-        sq->enqueueTransitionMemoryLayout(image->image(),
-                                          vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral,
-                                          vk::PipelineStageFlagBits::eTopOfPipe,
-                                          vk::PipelineStageFlagBits::eComputeShader,
-                                          vk::AccessFlags(),
-                                          vk::AccessFlagBits::eShaderWrite);
-        sq->submit({}, {}, {});
-        sq->wait();
-
+        if (initial_layout.has_value()) {
+            auto command_buffer = createCommandBuffer();
+            command_buffer->begin();
+            image->enqueueTransitionLayout(*command_buffer, initial_layout.value(),
+                                           vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eBottomOfPipe,
+                                           vk::AccessFlags(), vk::AccessFlags()); // only command in buffer so synchronization doesn't matter
+            command_buffer->submit({}, {}, {});
+            command_buffer->wait();
+        }
         return image;
     }
 

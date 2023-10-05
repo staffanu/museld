@@ -40,7 +40,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_movement_edge_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_movement_coring_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_movement_enlarged_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
-  m_image_out(m_vulkan_manager.createImage(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)),
+  m_image_out(m_vulkan_manager.createImage(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, vk::ImageLayout::eGeneral)),
   m_diamond_filter_buffer(MuseBuffer(7, 9, m_vulkan_manager.createDeviceBuffer(
           {
                   -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
@@ -338,6 +338,10 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
 }
 
 void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only) {
+    m_image_out->enqueueTransitionLayout(sq, vk::ImageLayout::eGeneral,
+                                         vk::PipelineStageFlagBits::eTopOfPipe,
+                                         vk::PipelineStageFlagBits::eComputeShader,
+                                         vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
     sq.enqueueComputeShader(m_combine_still_and_moving_algo,
                             vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u});
 }
