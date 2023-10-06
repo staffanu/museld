@@ -59,7 +59,7 @@ namespace musevk {
         void enqueueComputeShader(const std::shared_ptr<ComputeShader> &compute_shader,
                                   const std::vector<T> &pushConstants,
                                   int descriptor_set_index = 0) {
-            enqueueBarrier(vk::AccessFlagBits::eTransferWrite,
+            enqueueBarrier(vk::AccessFlagBits::eShaderWrite,
                            vk::AccessFlagBits::eShaderRead,
                            vk::PipelineStageFlagBits::eComputeShader,
                            vk::PipelineStageFlagBits::eComputeShader);
