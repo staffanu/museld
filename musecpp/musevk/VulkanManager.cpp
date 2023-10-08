@@ -47,7 +47,6 @@ namespace musevk {
             m_instance.destroyDebugUtilsMessengerEXT(m_debug_messenger, nullptr, dynamic_loader);
         }
         m_instance.destroy();
-        glfwTerminate();
     }
 
     void VulkanManager::cleanupSwapChain() {
@@ -255,7 +254,8 @@ namespace musevk {
 
     void VulkanManager::createSurface() {
         VkSurfaceKHR surface;
-        if (glfwCreateWindowSurface(m_instance, m_window, nullptr, &surface) != VK_SUCCESS) {
+        auto result = glfwCreateWindowSurface(m_instance, m_window, nullptr, &surface);
+        if (result != VK_SUCCESS) {
             throw runtime_error("failed to create window surface!");
         }
         m_surface = vk::SurfaceKHR(surface);

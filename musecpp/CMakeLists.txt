@@ -15,6 +15,8 @@ find_package(PORTAUDIO REQUIRED)
 #SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Og -pg -g")
 #SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -pg -g")
 
+include_directories("${PORTAUDIO_INCLUDE_DIRS}")
+
 add_executable(musecpp
         main.cpp
         Logger.cpp Logger.h

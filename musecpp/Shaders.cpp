@@ -36,7 +36,9 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_inter_frame_Y_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3)),
   m_inter_frame_r_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_inter_frame_b_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
-  m_movement_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3)),
+  m_current_movement_buffer_index(0),
+  m_movement_buffers({ Shaders::createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3),
+                       Shaders::createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3) }),
   m_movement_edge_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_movement_coring_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_movement_enlarged_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
@@ -144,14 +146,11 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             m_decode_c_spirv, Workgroup(m_intermediate_r_buffer.width(), m_intermediate_r_buffer.height()), 5);
     m_detect_motion_algo = m_vulkan_manager.createComputeShader(
             "detect_motion",
-            {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t),
+            {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 2,
             m_detect_motion_spirv, Workgroup(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT));
     m_combine_still_and_moving_algo = m_vulkan_manager.createComputeShader(
             "combine_still_and_moving",
-            {m_field_Y_buffer.getVulkanBuffer(), m_field_r_buffer.getVulkanBuffer(),
-             m_field_b_buffer.getVulkanBuffer(), m_inter_frame_Y_buffer.getVulkanBuffer(),
-             m_inter_frame_r_buffer.getVulkanBuffer(), m_inter_frame_b_buffer.getVulkanBuffer(),
-             m_movement_buffer.getVulkanBuffer(), m_image_out},
+            {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eImage},
             sizeof(uint32_t) * 2,
             m_combine_still_and_moving_spirv,
             Workgroup(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2));
@@ -255,7 +254,9 @@ void Shaders::decodeC(CommandBuffer &sq, int descriptor_set_index,
 }
 
 // There are 5 fields in the vector.  Index 0 is the newest.
-bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq, const vector<reference_wrapper<FieldBufferView>> &fields) {
+bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
+                                              const vector<reference_wrapper<FieldBufferView>> &fields,
+                                              bool use_prev_motion_info) {
     assert(fields.size() >= 5);
     if (!all_of(fields.cbegin(), fields.cend(),
                 [](const reference_wrapper<FieldBufferView> f) -> bool {
@@ -307,16 +308,18 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq, const vector<re
     filterImage(sq, 2, m_color_filter_inter_frame_buffer, m_intermediate_r_buffer, m_inter_frame_r_buffer, 128.0 / 2, 2);
     filterImage(sq, 3, m_color_filter_inter_frame_buffer, m_intermediate_b_buffer, m_inter_frame_b_buffer, 128.0 / 2, 2);
 
+    m_current_movement_buffer_index = 1 - m_current_movement_buffer_index;
     m_detect_motion_algo->updateBufferDescriptorsInSet(0, {
             fields[0].get().getVulkanBuffer(),
             fields[2].get().getVulkanBuffer(),
             fields[4].get().getVulkanBuffer(),
-            m_movement_buffer.getVulkanBuffer(),
+            m_movement_buffers[1 - m_current_movement_buffer_index].getVulkanBuffer(),
+            m_movement_buffers[m_current_movement_buffer_index].getVulkanBuffer(),
             m_movement_edge_buffer.getVulkanBuffer(),
             m_movement_coring_buffer.getVulkanBuffer(),
             m_movement_enlarged_buffer.getVulkanBuffer(),
     });
-    sq.enqueueComputeShader(m_detect_motion_algo, vector{fields[0].get().m_field_parity});
+    sq.enqueueComputeShader(m_detect_motion_algo, vector{fields[0].get().m_field_parity, use_prev_motion_info ? 1 : 0});
 
     return true;
 }
@@ -342,6 +345,12 @@ void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_onl
                                          vk::PipelineStageFlagBits::eTopOfPipe,
                                          vk::PipelineStageFlagBits::eComputeShader,
                                          vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
+    m_combine_still_and_moving_algo->updateBufferDescriptorsInSet(
+            0,
+            {m_field_Y_buffer.getVulkanBuffer(), m_field_r_buffer.getVulkanBuffer(),
+             m_field_b_buffer.getVulkanBuffer(), m_inter_frame_Y_buffer.getVulkanBuffer(),
+             m_inter_frame_r_buffer.getVulkanBuffer(), m_inter_frame_b_buffer.getVulkanBuffer(),
+             m_movement_buffers[m_current_movement_buffer_index].getVulkanBuffer(), m_image_out});
     sq.enqueueComputeShader(m_combine_still_and_moving_algo,
                             vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u});
 }

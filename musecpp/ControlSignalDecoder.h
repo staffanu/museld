@@ -23,12 +23,24 @@ struct ControlSignalDecoder {
     std::optional<int> vertical_motion_vector;
     std::optional<int> frame_subsampling_phase_Y;
     std::optional<int> frame_subsampling_phase_C;
-    std::optional<int> motion_detector_sensitivity;
+    std::optional<int> motion_sensitivity_ctrl;
     std::optional<int> edge_detection_prohibited;
     std::optional<MotionInformation> motion_information;
     std::optional<int> motion_extent;
+    std::optional<int> still_picture;
 
 private:
+    static std::string motionInformationToString(const MotionInformation &i) {
+        switch (i) {
+            case MotionInformation::Normal: return "normal";
+            case MotionInformation::CompleteStillPicture: return "still picture";
+            case MotionInformation::SlightlyInMotion: return "slight motion";
+            case MotionInformation::SceneChange: return "scene change";
+            case MotionInformation::Motion: return "motion";
+            default: throw std::invalid_argument("Invalid value");
+        }
+    }
+
     static std::array<std::array<int, 8>, 4> s_H;
     static std::map<std::array<int, 4>, int> s_H_column_index;
 

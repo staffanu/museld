@@ -20,13 +20,15 @@ namespace musevk {
 
         void add_timestamps(std::vector<std::pair<std::string, int>> timestamps);
 
-        void print_stats() {
+        void print_stats(int min_samples_threshold) {
             for (auto timestamp_set: m_data) {
-                for (int i = 0; i < timestamp_set.first.size(); i++) {
-                    std::cout << std::setw(30) << timestamp_set.first[i] << ": ";
-                    timestamp_set.second[i].print_stats();
+                if (timestamp_set.second[0].m_total.m_n >= min_samples_threshold) {
+                    for (int i = 0; i < timestamp_set.first.size(); i++) {
+                        std::cout << std::setw(30) << timestamp_set.first[i] << ": ";
+                        timestamp_set.second[i].print_stats();
+                    }
+                    std::cout << std::endl;
                 }
-                std::cout << std::endl;
             }
         }
     private:

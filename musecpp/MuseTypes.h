@@ -5,8 +5,8 @@
 #ifndef MUSECPP_MUSETYPES_H
 #define MUSECPP_MUSETYPES_H
 
+#include <fmt/format.h>
 #include <optional>
-#include <ostream>
 
 // The input file has 10 bit resolution in the range 0...1023.
 // This constant is the relation to the values specified in the MUSE documents.
@@ -18,10 +18,18 @@
 #define MUSE_Y_BUF_WIDTH 374
 #define MUSE_C_BUF_WIDTH 94
 
-template<typename T>
-std::ostream& operator<<(std::ostream& os, std::optional<T> const& opt)
-{
-    return opt ? os << opt.value() : os << "?";
+namespace fmt {
+    template <typename T>
+    struct formatter<std::optional<T>>:fmt::formatter<T> {
+        template <typename FormatContext>
+        auto format(const std::optional<T>& opt, FormatContext& ctx) {
+            if (opt) {
+                fmt::formatter<T>::format(*opt, ctx);
+                return ctx.out();
+            }
+            return fmt::format_to(ctx.out(), "nullopt");
+        }
+    };
 }
 
 #endif //MUSECPP_MUSETYPES_H

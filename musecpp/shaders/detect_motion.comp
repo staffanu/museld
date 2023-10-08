@@ -7,6 +7,7 @@
 
 layout(push_constant) uniform PushConstants {
     uint field_parity;
+    uint use_prev_movement_info;
 };
 
 layout(set = 0, binding = 0) buffer readonly frame0_buffer {
@@ -24,24 +25,30 @@ layout(set = 0, binding = 2) buffer readonly frame2_buffer {
     float16_t frame2[][MUSE_TOTAL_WIDTH];
 };
 
-layout(set = 0, binding = 3) buffer writeonly movement_out_buffer {
+layout(set = 0, binding = 3) buffer readonly prev_movement_buffer {
+    // values are between 0 and 1
+    // Size is the full frame output resolution
+    float16_t prev_movement[][MUSE_Y_BUF_WIDTH * 3];
+};
+
+layout(set = 0, binding = 4) buffer writeonly movement_out_buffer {
     // values are between 0 and 1
     // Size is the full frame output resolution
     float16_t movement_out[][MUSE_Y_BUF_WIDTH * 3];
 };
 
-layout(set = 0, binding = 4) buffer edge_buffer {
-    // values are between 0 and 15
+layout(set = 0, binding = 5) buffer edge_buffer {
+    // temporary storage: values are between 0 and 15
     float16_t edge[][MUSE_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 5) buffer core_out_buffer {
-    // movement values 0-15 before after coring (taking absolute level and edge info into account)
+layout(set = 0, binding = 6) buffer core_out_buffer {
+    // temporary storage: movement values 0-15 before after coring (taking absolute level and edge info into account)
     float16_t core_out[][MUSE_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 6) buffer enlarged_buffer {
-    // movement values 0-1 after enlarging the detected area slightly
+layout(set = 0, binding = 7) buffer enlarged_buffer {
+    // temporary storage: movement values 0-1 after enlarging the detected area slightly
     float16_t enlarged[][MUSE_Y_BUF_WIDTH];
 };
 
@@ -116,11 +123,21 @@ void main() {
     float16_t x0 = 0.5hf * (e00 + e10);
     float16_t x1 = 0.5hf * (e01 + e11);
 
-    movement_out[row * 2][col * 3] = e00;
-    movement_out[row * 2][col * 3 + 1] = 0.667hf * e00 + 0.333hf * e01;
-    movement_out[row * 2][col * 3 + 2] = 0.333hf * e00 + 0.667hf * e01;
+    if (use_prev_movement_info != 0) {
+        movement_out[row * 2][col * 3] = 0.5hf * e00 + 0.5hf * prev_movement[row * 2][col * 3];
+        movement_out[row * 2][col * 3 + 1] = 0.5hf * (0.667hf * e00 + 0.333hf * e01) + 0.5hf * prev_movement[row * 2][col * 3 + 1];
+        movement_out[row * 2][col * 3 + 2] = 0.5hf * (0.333hf * e00 + 0.667hf * e01) + 0.5hf * prev_movement[row * 2][col * 3 + 2];
 
-    movement_out[row * 2 + 1][col * 3] = x0;
-    movement_out[row * 2 + 1][col * 3 + 1] = 0.667hf * x0 + 0.333hf * x1;
-    movement_out[row * 2 + 1][col * 3 + 2] = 0.333hf * x0 + 0.667hf * x1;
+        movement_out[row * 2 + 1][col * 3] = 0.5hf * x0 + 0.5hf * prev_movement[row * 2 + 1][col * 3];
+        movement_out[row * 2 + 1][col * 3 + 1] = 0.5hf * (0.667hf * x0 + 0.333hf * x1) + 0.5hf * prev_movement[row * 2 + 1][col * 3 + 1];
+        movement_out[row * 2 + 1][col * 3 + 2] = 0.5hf * (0.333hf * x0 + 0.667hf * x1) + 0.5hf * prev_movement[row * 2 + 1][col * 3 + 2];
+    } else {
+        movement_out[row * 2][col * 3] = e00;
+        movement_out[row * 2][col * 3 + 1] = 0.667hf * e00 + 0.333hf * e01;
+        movement_out[row * 2][col * 3 + 2] = 0.333hf * e00 + 0.667hf * e01;
+
+        movement_out[row * 2 + 1][col * 3] = x0;
+        movement_out[row * 2 + 1][col * 3 + 1] = 0.667hf * x0 + 0.333hf * x1;
+        movement_out[row * 2 + 1][col * 3 + 2] = 0.333hf * x0 + 0.667hf * x1;
+    }
 }

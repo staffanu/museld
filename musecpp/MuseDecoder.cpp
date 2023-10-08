@@ -127,7 +127,7 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
                 m_frame_buffers[2 - decoded_field_index]->get_field(1 - decoded_field_index),
                 m_frame_buffers[2]->get_field(decoded_field_index)};
 
-        if (m_shaders.decodeInterFrameAndDetectMotion(*m_second_stage_command_buffer, fields)) {
+        if (m_shaders.decodeInterFrameAndDetectMotion(*m_second_stage_command_buffer, fields, true)) {
             m_log.debug(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation success", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
                                                  field_interpolation_mode == eForceIntraField,
@@ -162,9 +162,9 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
     auto t1 = chrono::high_resolution_clock::now();
     long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
     m_total_elapsed_time_us += time_us;
-    m_log.info(ePerformance | eVideo, fmt::format("Field {} elapsed time {} ms; {} ms/frame",
-                                                  m_field_index, time_us / 1000,
-                                                  m_total_elapsed_time_us / 1000 / m_frame_no));
+    m_log.info(ePerformance, fmt::format("Field {} elapsed time {} ms; {} ms/frame",
+                                         m_field_index, time_us / 1000,
+                                         m_total_elapsed_time_us / 1000 / m_frame_no));
 
     m_field_index = (m_field_index + 1) % 2;
 
@@ -172,5 +172,5 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
 }
 
 void MuseDecoder::output_benchmark_results() {
-    m_timestamp_statistics.print_stats();
+    m_timestamp_statistics.print_stats(3);
 }

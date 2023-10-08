@@ -2,12 +2,10 @@
 // Created by staffanu on 4/19/23.
 //
 
-#include <netinet/in.h>
-#include <iostream>
 #include <vector>
-#include <functional>
 #include <cassert>
 #include <sstream>
+#include <fmt/format.h>
 #include "Logger.h"
 #include "MuseTypes.h"
 #include "ControlSignalDecoder.h"
@@ -95,9 +93,13 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, uint16_t const *data, st
             }
         }
     }
-//    for (int i = 0; i < 32; i++)
-//        cout << (result[i].second ? result[i].first ? "1" : "0" : "*");
-//    cout << "  ";
+
+    ostringstream ss;
+    for (int i = 0; i < 32; i++) {
+        if (i != 0 && i % 8 == 0) ss << " ";
+        ss << (result[i].second ? result[i].first ? "1" : "0" : "*");
+    }
+    m_log.debug(eDecoder, ss.str());
 
     auto vector_index_to_bit_opt = [](const vector<pair<bool, bool>> v, int i) -> optional<int> {
         return v[i].second ? optional(v[i].first) : nullopt;
@@ -121,7 +123,7 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, uint16_t const *data, st
     vertical_motion_vector = vector_to_int_opt(vector(result.cbegin() + 5, result.cbegin() + 8));
     frame_subsampling_phase_Y = vector_index_to_bit_opt(result, 8);
     frame_subsampling_phase_C = vector_index_to_bit_opt(result, 9);
-    motion_detector_sensitivity = vector_index_to_bit_opt(result, 13);
+    motion_sensitivity_ctrl = vector_index_to_bit_opt(result, 13);
     edge_detection_prohibited = vector_index_to_bit_opt(result, 14);
 
     auto motion_int_opt = vector_to_int_opt(vector(result.cbegin() + 15, result.cbegin() + 18));
@@ -153,23 +155,30 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, uint16_t const *data, st
         motion_extent = nullopt;
     }
 
+    still_picture = vector_index_to_bit_opt(result, 23);
+
     if (horizontal_motion_vector.has_value() && horizontal_motion_vector.value() != 0 ||
         vertical_motion_vector.has_value() && vertical_motion_vector.value() != 0 ||
-        motion_detector_sensitivity.has_value() && motion_detector_sensitivity.value() != 0 ||
-        edge_detection_prohibited.has_value() && motion_detector_sensitivity.value() != 0)
+        motion_sensitivity_ctrl.has_value() && motion_sensitivity_ctrl.value() != 0 ||
+        edge_detection_prohibited.has_value() && motion_sensitivity_ctrl.value() != 0)
         // Of course this is not an error -- but if we see examples we don't want to miss them!
         throw runtime_error("Actually found non-zero motion vector!");
 }
 
 void ControlSignalDecoder::log_control_data() const {
-    ostringstream ss;
-    ss << "phases (fieldY frameY frameC) = "
-         << field_subsampling_phase_Y << frame_subsampling_phase_Y << frame_subsampling_phase_C
-         << ", hVector=" << horizontal_motion_vector << ", vVector=" << vertical_motion_vector
-         << ", motionSensitivity=" << motion_detector_sensitivity
-         << ", edgeDetectProhibited=" << edge_detection_prohibited
-         << ", motion=" << motion_information << ", extent=" << motion_extent;
-    m_log.info(eVideo, ss.str());
+    m_log.info(eVideo | eDecoder, fmt::format(
+            "phases (fieldY frameY frameC): {}{}{}, "
+            "motion vector: ({}, {}), "
+            "{}{}"
+            "motion: {}, extent: {}, still: {}",
+            field_subsampling_phase_Y, frame_subsampling_phase_Y, frame_subsampling_phase_C,
+            horizontal_motion_vector, vertical_motion_vector,
+            motion_sensitivity_ctrl.has_value() ? motion_sensitivity_ctrl.value() != 0 ? "motion_sensitivity_ctrl set, " : "" : "motion_sensitivity_ctrl unknown, ",
+            edge_detection_prohibited.has_value() ? edge_detection_prohibited.value() != 0 ? "edge_detection_prohibited set, " : "" : "edge_detection_prohibited unknown, ",
+            motion_information.has_value() ? motionInformationToString(motion_information.value()) : "nullopt", motion_extent,
+            still_picture));
+//    if (motion_information.has_value() && motion_information.value() == SceneChange)
+//        m_log.error(eVideo, "***SCENE CHANGE***");
 }
 
 std::array<int, 4> ControlSignalDecoder::multiply(std::array<std::array<int, 8>, 4> m, std::array<int, 8> v) {

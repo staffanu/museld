@@ -38,7 +38,8 @@ public:
     void decodeIntraField(musevk::CommandBuffer &sq, FieldBufferView &field);
 
     bool decodeInterFrameAndDetectMotion(musevk::CommandBuffer &sq,
-                                         const std::vector<std::reference_wrapper<FieldBufferView>> &fields);
+                                         const std::vector<std::reference_wrapper<FieldBufferView>> &fields,
+                                         bool use_prev_motion_info);
 
     void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only);
 
@@ -113,7 +114,8 @@ private:
     MuseBuffer m_inter_frame_r_buffer;
     MuseBuffer m_inter_frame_b_buffer;
 
-    MuseBuffer m_movement_buffer; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
+    int m_current_movement_buffer_index;
+    std::vector<MuseBuffer> m_movement_buffers; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
     MuseBuffer m_movement_edge_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
     MuseBuffer m_movement_coring_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
     MuseBuffer m_movement_enlarged_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
