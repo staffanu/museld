@@ -29,9 +29,14 @@ bool check_glfw_key(GLFWwindow *window, int key) {
     }
 }
 
+void glfw_error_callback(int error, const char* description) {
+    fprintf(stderr, "Error %d: %s\n", error, description); // FIXME: use logging framework
+}
+
 void process_file(Logger &log, const string& executable_dir, InputReader &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
                   bool start_paused, bool decode_video, bool decode_audio, bool benchmark_shaders) {
+    glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
@@ -217,6 +222,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     audio_playback.cleanup();
 
     glfwDestroyWindow(window);
+    glfwTerminate();
 }
 
 void usage() {
