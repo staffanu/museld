@@ -12,6 +12,8 @@
 #include "Logger.h"
 #include "musevk/TimestampQueryPool.h"
 
+#define INPUT_BUFFER_COUNT 6
+
 using namespace std;
 
 static set<int> current_keys_down;
@@ -52,7 +54,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
 
     {
         std::vector<std::shared_ptr<musevk::VulkanBuffer>> input_vulkan_buffers{};
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < INPUT_BUFFER_COUNT; i++)
             input_vulkan_buffers.push_back(
                     manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint16_t), true, true));
         if (!reader.initialize(input_vulkan_buffers))

@@ -21,9 +21,9 @@ public:
     void cleanup();
 
 private:
-    static constexpr int c_audio_buffer_size = 8192;
+    static constexpr int c_audio_buffer_size = 16384;
     static constexpr int c_audio_buffer_optimal_filled = 4096;
-    static constexpr double c_audio_buffer_speed_adjust_constant = 1e-6;
+    static constexpr double c_audio_buffer_speed_adjust_constant = 2e-6;
     static constexpr double c_audio_buffer_max_speed_adjust = 0.01;
 
     Logger &m_log;

@@ -33,7 +33,7 @@ InputPll::InputPll(Logger &log, double sample_rate)
   m_missed_line_pulses(0),
   m_state(eSearching),
   m_error_sum(0) {
-    m_log.info(eInput, fmt::format("m_g1={:.4f} m_g2={:.4f}", m_g1, m_g2));
+    m_log.debug(eInput, fmt::format("m_g1={:.5f} m_g2={:7f}", m_g1, m_g2));
 }
 
 InputPll::PllResult InputPll::process(int sample_count, const uint16_t samples[], uint16_t *output) {

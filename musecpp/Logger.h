@@ -8,7 +8,6 @@
 #include <string>
 #include <algorithm>
 #include <map>
-#include <iostream>
 #include <mutex>
 
 enum LogPriority {

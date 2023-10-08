@@ -36,6 +36,7 @@ bool InputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> 
 
     for (const auto &b : buffers)
         m_vacant_muse_input_buffers.push_back(b);
+    m_log.debug(eInput, fmt::format("Using {} input buffers", m_vacant_muse_input_buffers.size()));
 
     m_reader_thread = new thread(&InputReader::threadFunc, this);
 

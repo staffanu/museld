@@ -3,6 +3,7 @@
 //
 
 #include <chrono>
+#include <iostream>
 #include <fmt/format.h>
 #include <fmt/chrono.h>
 #include <sstream>

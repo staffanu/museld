@@ -78,6 +78,7 @@ void AudioPlayback::add_samples(AudioDecoder::AudioMode &audio_mode, size_t &sam
                                         audio_buffer_size, (double)m_audio_speed_adjust));
     }
 
+    int discard_count = 0;
     for (int i = 0; i < sample_count; i++) {
         auto updated_write_ix = m_next_audio_buffer_write_ix + 1;
         if (updated_write_ix == c_audio_buffer_size)
@@ -85,14 +86,18 @@ void AudioPlayback::add_samples(AudioDecoder::AudioMode &audio_mode, size_t &sam
         if (updated_write_ix != m_next_audio_buffer_read_ix) {
             m_audio_buffer[m_next_audio_buffer_write_ix] = output_samples[i];
             m_next_audio_buffer_write_ix = updated_write_ix;
-        }
+        } else
+            discard_count++;
     }
+    if (discard_count != 0)
+        m_log.error(eAudio, fmt::format("Discarded {} samples", discard_count));
 }
 
 int AudioPlayback::audioCallbackMember(void *output_buffer, unsigned long frames_per_buffer,
                                        const PaStreamCallbackTimeInfo *time_info, PaStreamCallbackFlags status_flags) {
     auto *out = (int16_t *)output_buffer;
     unsigned int i;
+    int underrun_count = 0;
 
     for (i = 0; i < frames_per_buffer; i++) {
         if (m_next_audio_buffer_read_ix != m_next_audio_buffer_write_ix) {
@@ -107,10 +112,13 @@ int AudioPlayback::audioCallbackMember(void *output_buffer, unsigned long frames
             for (int k = 0; k < m_channels_used; k++)
                 *out++ = frame.samples[k]; // TODO: figure out which channel is which
         } else {
+            underrun_count++;
             for (int k = 0; k < m_channels_used; k++)
                 *out++ = 0;
         }
     }
+    if (underrun_count)
+        m_log.error(eAudio, fmt::format("Audio buffer underrun: {} missing samples", underrun_count));
     return 0;
 }
 

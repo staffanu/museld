@@ -83,14 +83,14 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
     }
 
     shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = nullptr;
-    InputReader::PresentationHint presentationHint;
+    InputReader::PresentationHint presentation_hint;
     if (m_field_index == 0 && !redo_last_field) {
         auto frame_buffer = m_frame_buffers.back();
         frame_buffer->set_frame_no(++m_frame_no);
         m_frame_buffers.pop_back();
         m_frame_buffers.push_front(frame_buffer);
 
-        tie(input_vulkan_buffer, presentationHint) = m_reader.getNextInputBuffer();
+        tie(input_vulkan_buffer, presentation_hint) = m_reader.getNextInputBuffer();
         if (input_vulkan_buffer == nullptr) {
             return false;
         }
@@ -114,7 +114,8 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
 
     // if not decoding all fields, we only decode on field 0 (when we read the data), but
     // actually decode the second field.  For field 1, the same field will be shown again.
-    // Always begin the batch here since it will wait for the first stage semaphore to complete (or it won't be unsignalled)
+    // Always begin the batch here since it will wait for the first stage semaphore to complete
+    // (or it won't be unsignaled)
     m_second_stage_command_buffer->begin();
     if (m_decode_video && (m_decode_all_fields || m_field_index == 0)) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
@@ -166,7 +167,10 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
                                          m_field_index, time_us / 1000,
                                          m_total_elapsed_time_us / 1000 / m_frame_no));
 
-    m_field_index = (m_field_index + 1) % 2;
+    if (presentation_hint == InputReader::eSpeedup)
+        m_field_index = 0; // skip second field -- next field will be from the next frame
+    else
+        m_field_index = (m_field_index + 1) % 2;
 
     return true;
 }
