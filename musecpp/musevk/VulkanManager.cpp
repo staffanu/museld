@@ -266,7 +266,7 @@ namespace musevk {
         bool found = false;
         for (auto &device: devices) {
             auto properties = device.getProperties();
-            m_log.debug(eVideo, fmt::format("Checking device {}", properties.deviceName));
+            m_log.debug(eVideo, fmt::format("Checking device {}", string(properties.deviceName)));
             if (isDeviceSuitable(device)) {
                 found = true;
                 m_physical_device = device;
