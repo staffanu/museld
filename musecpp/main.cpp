@@ -171,9 +171,17 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             }
             if (check_glfw_key(window, GLFW_KEY_LEFT)) {
                 reader.seek(-10);
+                if (paused) {
+                    paused = false;
+                    paused_countdown = 5;
+                }
             }
             if (check_glfw_key(window, GLFW_KEY_RIGHT)) {
                 reader.seek(10);
+                if (paused) {
+                    paused = false;
+                    paused_countdown = 5;
+                }
             }
             if (check_glfw_key(window, GLFW_KEY_1)) {
                 field_interpolation_mode = MuseDecoder::eNormal;
