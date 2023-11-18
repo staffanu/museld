@@ -44,7 +44,8 @@ void PhaseCorrect16MHzInputReader::cleanup() {
 
 void PhaseCorrect16MHzInputReader::seek(double seconds) {
     if (!m_input_is_fifo) {
-        // FIXME: make this thread safe!
+        std::unique_lock<std::mutex> lock(m_mutex);
+
         off_t samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
         off_t frames_to_seek = (off_t)(seconds * 30);
 
@@ -58,6 +59,12 @@ void PhaseCorrect16MHzInputReader::seek(double seconds) {
         m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples.",
                                        actual_seek_time, samples_to_seek));
         m_input.seekg(samples_to_seek * 2, ifstream::cur);
+
+        // discard content in existing input buffers
+        copy(m_filled_muse_input_buffers.begin(), m_filled_muse_input_buffers.end(), back_inserter(m_vacant_muse_input_buffers));
+        m_filled_muse_input_buffers.clear();
+        m_log.error(eInput, fmt::format("sizes: {} {}", m_vacant_muse_input_buffers.size(), m_filled_muse_input_buffers.size()));
+        m_cv_vacant.notify_one();
     }
 }
 
