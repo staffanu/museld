@@ -15,7 +15,7 @@ The command line options aren't very well organized and have accumulated over ti
 > --resample-bytes
 > --resample-shorts
 
-Determines the input format; these can not be combined and the names should probably change, possible
+Determines the input format; these can not be combined and the names should probably change, possibly
 when making them more generic and/or refactoring into several independent options.
 
 * --big-endian / -little-endian: inputs are unsigned shorts sampled at the correct phase at 16.2MHz, with only the 10 least significant bits used.
@@ -35,13 +35,13 @@ using, for example, gnuradio: I've tried this to demonstrate that it works but q
 more effort is needed.  Notice that if capturing RF data, the Domesday Duplicator also needs its frequency range increased.
 All my good captures so far have been captured using a digital USB oscilloscope.
 
-Notice that filed in little endian 16 MHz format are smaller than raw captures.
+Files in little endian 16 MHz format are smaller than raw captures.
 
 > --sample-freq
 
 Sets the sample frequency for the oversampled input formats.
 
-> --write
+> --write <filename>
 
 Writes the input stream in the --little-endian format.  This is useful to create small video segments from larger
 files, and also to re-code captures from one of the oversampled formats.
