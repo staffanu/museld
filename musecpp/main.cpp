@@ -314,8 +314,8 @@ int main(int argc, char *argv[]) {
                     throw runtime_error("Initial seek is not compatible with reading from fifo");
                 if (!filesystem::exists(*it))
                     throw runtime_error("File not found: " + string(*it));
-//                Logger log(log_selection);
-                Logger log({{eInput, eWarn}, {eAudio, eWarn}, {eVideo, eInfo}});
+                Logger log(log_selection);
+//                Logger log({{eInput, eWarn}, {eAudio, eWarn}, {eVideo, eWarn}, {ePerformance, eWarn}});
                 InputReader *reader;
                 switch (input_format) {
                     case eOverSampledUnsignedBytes:
