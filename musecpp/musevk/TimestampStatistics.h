@@ -5,7 +5,7 @@
 #ifndef MUSECPP_TIMESTAMPSTATISTICS_H
 #define MUSECPP_TIMESTAMPSTATISTICS_H
 
-
+#include <cstdint>
 #include <vector>
 #include <map>
 #include <string>
