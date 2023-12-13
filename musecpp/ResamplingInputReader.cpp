@@ -21,7 +21,6 @@ ResamplingInputReader::ResamplingInputReader(
         : InputReader(log, filename, input_is_fifo, initial_seek_seconds, output_filename),
           m_input_format(input_format),
           m_input_pll(log, sample_rate),
-          m_input_is_fifo(input_is_fifo),
           m_file_fd(-1),
           m_file_input_buffer{},
           m_t(0),

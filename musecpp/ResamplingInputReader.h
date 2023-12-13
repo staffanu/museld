@@ -32,7 +32,6 @@ private:
     bool readSamples(int sample_count, uint16_t buffer[c_sample_buffer_size], double dt);
 
     InputFormat m_input_format;
-    bool m_input_is_fifo;
     InputPll m_input_pll;
     int m_file_fd;
     uint8_t m_file_input_buffer[c_input_buffer_size];
