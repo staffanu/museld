@@ -270,6 +270,7 @@ namespace musevk {
             if (isDeviceSuitable(device)) {
                 found = true;
                 m_physical_device = device;
+                m_log.info(eVideo, fmt::format("Picked device {}", string(properties.deviceName)));
                 break;
             }
         }
@@ -300,9 +301,14 @@ namespace musevk {
                 vk::PhysicalDeviceVulkan11Features,
                 vk::PhysicalDeviceVulkan12Features>();
 
-        return (features2.get<vk::PhysicalDeviceVulkan11Features>().storageBuffer16BitAccess &&
-                features2.get<vk::PhysicalDeviceVulkan11Features>().uniformAndStorageBuffer16BitAccess &&
-                features2.get<vk::PhysicalDeviceVulkan12Features>().shaderFloat16);
+        bool storageBuffer16BitAccess = features2.get<vk::PhysicalDeviceVulkan11Features>().storageBuffer16BitAccess;
+        bool uniformAndStorageBuffer16BitAccess = features2.get<vk::PhysicalDeviceVulkan11Features>().uniformAndStorageBuffer16BitAccess;
+        bool shaderFloat16 = features2.get<vk::PhysicalDeviceVulkan12Features>().shaderFloat16;
+
+        m_log.debug(eVideo, fmt::format("device features: storageBuffer16BitAccess: {}, uniformAndStorageBuffer16BitAccess: {}, shaderFloat16: {}",
+                                        storageBuffer16BitAccess, uniformAndStorageBuffer16BitAccess, shaderFloat16));
+
+        return storageBuffer16BitAccess && uniformAndStorageBuffer16BitAccess && shaderFloat16;
     }
 
     bool VulkanManager::checkDeviceExtensionSupport(vk::PhysicalDevice &device) {

@@ -93,6 +93,7 @@ void AudioDecoder::decodeFrame(int frame_no,
 
     audio_mode = m_active_audio_mode;
     sample_count = 0;
+    int no_not_updated_symbol_locations = 0;
 
     auto *ptr = audio_converted_freq.getVulkanBuffer()->data<ushort>();
     unsigned width = audio_converted_freq.width();
@@ -121,9 +122,13 @@ void AudioDecoder::decodeFrame(int frame_no,
                     float new_x = (prev_location.first * 15 + xin) / 16;
                     float new_y = (prev_location.second * 15 + yin) / 16;
                     m_symbol_locations[closest.first] = {new_x, new_y};
-                } else
-                    m_log.debug(eAudio, fmt::format("Not updating symbol location due to too far from default location: "
-                                                    "presumed symbol {}=({}, {})", closest.first, xin, yin));
+                } else {
+                    no_not_updated_symbol_locations++;
+                    if (no_not_updated_symbol_locations <= 3)
+                        m_log.debug(eAudio,
+                                    fmt::format("Not updating symbol location due to too far from default location: "
+                                                "presumed symbol {}=({}, {})", closest.first, xin, yin));
+                }
             }
 
             array<bool, 3> bits = c_symbol_bits[closest.first];
@@ -142,6 +147,9 @@ void AudioDecoder::decodeFrame(int frame_no,
             }
         }
     }
+    if (no_not_updated_symbol_locations > 3)
+        m_log.debug(eAudio, fmt::format("Total number of not updated symbol location = {}",
+                                        no_not_updated_symbol_locations));
 
     bool printed_searching = false;
     while (m_queue.size() >= 1350) {

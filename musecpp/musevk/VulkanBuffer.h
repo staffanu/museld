@@ -50,7 +50,7 @@ namespace musevk {
         }
 
         [[nodiscard]] uint32_t getMemorySize() const {
-            return m_allocated_memory.size;
+            return m_memory_size;
         }
 
         template<typename T>

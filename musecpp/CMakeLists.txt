@@ -37,22 +37,20 @@ add_executable(musecpp
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandBuffer.cpp musevk/CommandBuffer.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h
-        musevk/VulkanMemoryObject.cpp musevk/VulkanMemoryObject.h
+        musevk/VulkanMemoryObject.h
         musevk/VulkanImage.cpp musevk/VulkanImage.h
         musevk/VulkanBuffer.cpp musevk/VulkanBuffer.h
         musevk/TimestampStatistics.cpp musevk/TimestampStatistics.h
         musevk/HalfFloatUtil.h
-        musevk/MemoryAllocator.cpp
-        musevk/MemoryAllocator.h
-        musevk/TimestampQueryPool.cpp
-        musevk/TimestampQueryPool.h
+        musevk/MemoryAllocator.cpp musevk/MemoryAllocator.h
+        musevk/TimestampQueryPool.cpp musevk/TimestampQueryPool.h
 )
 target_link_libraries(musecpp
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
         PRIVATE fmt::fmt
-        )
+)
 
 set(GLSLC "glslc")
 file(GLOB GLSL_SOURCE_FILES ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.comp)
