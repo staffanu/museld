@@ -76,7 +76,7 @@ private:
     Logger &m_log;
     musevk::VulkanManager &m_vulkan_manager;
 
-    std::vector<uint32_t> m_convert_to_float_and_apply_eq_and_gamma_spriv;
+    std::vector<uint32_t> m_apply_eq_and_gamma_spriv;
     std::vector<uint32_t> m_copy_y_for_interpolation_spirv;
     std::vector<uint32_t> m_diamond_spirv;
     std::vector<uint32_t> m_filter_image_spirv;

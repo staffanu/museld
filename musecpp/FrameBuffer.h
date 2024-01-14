@@ -16,12 +16,12 @@ class FrameBuffer {
 public:
     FrameBuffer(Logger &log, int frame_no, MuseBuffer data);
 
-    static std::pair<float, float> EstimateEq(uint16_t const *data);
+    static std::pair<float, float> EstimateEq(float const *data);
 
     void set_frame_no(int frame_no);
     MuseBuffer &data();
     FieldBufferView &get_field(int parity);
-    void ProcessControlData(uint16_t const *frame_data, std::pair<float, float> const &eq);
+    void ProcessControlData(float const *frame_data, std::pair<float, float> const &eq);
 
 private:
     static std::pair<float, float> LinearRegression(const std::vector <std::pair<float, float>> &values);

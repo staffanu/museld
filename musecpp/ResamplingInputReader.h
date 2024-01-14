@@ -29,7 +29,7 @@ private:
     static constexpr size_t c_input_buffer_size = 1024 * 256;
     static constexpr int c_input_buffer_lookback = 3; // we look back 3 samples
 
-    bool readSamples(int sample_count, uint16_t buffer[c_sample_buffer_size], double dt);
+    bool readSamples(int sample_count, float buffer[c_sample_buffer_size], double dt);
 
     InputFormat m_input_format;
     InputPll m_input_pll;

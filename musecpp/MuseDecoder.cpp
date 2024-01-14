@@ -95,7 +95,7 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
             return false;
         }
 
-        auto eq_estimate = FrameBuffer::EstimateEq(input_vulkan_buffer->data<uint16_t>());
+        auto eq_estimate = FrameBuffer::EstimateEq(input_vulkan_buffer->data<float>());
         if (m_eq.first == -1 && m_eq.second == -1)
             m_eq = eq_estimate;
         else
@@ -109,7 +109,7 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
         m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
         if (m_decode_video)
-            frame_buffer->ProcessControlData(input_vulkan_buffer->data<uint16_t>(), m_eq);
+            frame_buffer->ProcessControlData(input_vulkan_buffer->data<float>(), m_eq);
     }
 
     // if not decoding all fields, we only decode on field 0 (when we read the data), but

@@ -56,7 +56,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         std::vector<std::shared_ptr<musevk::VulkanBuffer>> input_vulkan_buffers{};
         for (int i = 0; i < INPUT_BUFFER_COUNT; i++)
             input_vulkan_buffers.push_back(
-                    manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint16_t), true, true));
+                    manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), true, true));
         if (!reader.initialize(input_vulkan_buffers))
             throw runtime_error("InputReader initialization failed");
     }

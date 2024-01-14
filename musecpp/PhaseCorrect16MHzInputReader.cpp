@@ -30,9 +30,9 @@ bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::shared_ptr<musevk
 
     off_t samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
     assert(samples_per_frame >= samples_to_skip);
-    vector<uint16_t> skip_buffer(samples_per_frame);
+    vector<float> skip_buffer(samples_per_frame);
     m_log.info(eInput, fmt::format("Skipping {} initial samples", samples_to_skip));
-    readShorts(m_input, skip_buffer.data(), samples_to_skip);
+    readFloats(m_input, skip_buffer.data(), samples_to_skip);
 
     return InputReader::initialize(buffers);
 }
@@ -82,8 +82,8 @@ void PhaseCorrect16MHzInputReader::threadFunc() {
             m_vacant_muse_input_buffers.pop_front();
         }
 
-        auto data = buffer->data<uint16_t>();
-        if (!readShorts(m_input, data, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH))
+        auto data = buffer->data<float>();
+        if (!readFloats(m_input, data, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH))
             break;
 
         std::unique_lock<std::mutex> lock(m_mutex);
@@ -95,11 +95,11 @@ void PhaseCorrect16MHzInputReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
-bool PhaseCorrect16MHzInputReader::readShorts(ifstream &input, uint16_t *out, size_t n) {
-    auto *input_buffer = (uint16_t *)malloc(480 * 1125 * 2 * sizeof(float));
+bool PhaseCorrect16MHzInputReader::readFloats(ifstream &input, float *out, size_t n) {
+    auto *input_buffer = (uint16_t *)malloc(n * sizeof(uint16_t));
     input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(uint16_t));
     for (int i = 0; i < n; i++) {
-        out[i] = m_big_endian ? ntohs(input_buffer[i]) : input_buffer[i];
+        out[i] = (float)(m_big_endian ? ntohs(input_buffer[i]) : input_buffer[i]) / 4.0f;
     }
     free(input_buffer);
     return input.good();
@@ -108,14 +108,14 @@ bool PhaseCorrect16MHzInputReader::readShorts(ifstream &input, uint16_t *out, si
 pair<int, pair<float, float>> PhaseCorrect16MHzInputReader::compute_initial_skip(Logger &log) {
     ifstream input(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
     input.exceptions(ifstream::badbit);
-    vector<uint16_t> buffer(480 * 1125 * 2); // two frames of data
-    readShorts(input, buffer.data(), 480 * 1125 * 2);
+    vector<float> buffer(480 * 1125 * 2); // two frames of data
+    readFloats(input, buffer.data(), 480 * 1125 * 2);
 
     auto sorted(buffer);
     sort(sorted.begin(), sorted.end());
     auto y1 = sorted[500];
     auto y2 = sorted[480 * 1125 * 2 - 500];
-    pair<float, float> eq = {(y2 - y1) / (MUSE_SHORT_INPUT_MULT * (239.0f - 16.0f)), (float)y1 / MUSE_SHORT_INPUT_MULT - 16.0f};
+    pair<float, float> eq = {(y2 - y1) / (239.0f - 16.0f), y1 - 16.0f};
     log.info(eInput, fmt::format("Initial eq: {}, {}", eq.first, eq.second));
 
     // The rest of the code only checks the signal for rising or falling values, and never uses the actual

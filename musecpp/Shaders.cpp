@@ -93,7 +93,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
           })),
   m_audio_data(createMuseBuffer(88, MUSE_TOTAL_WIDTH * 3 / 4, true))
 {
-    m_convert_to_float_and_apply_eq_and_gamma_spriv = loadSpirv(executable_dir, "convert_to_float_and_apply_eq_and_gamma.comp");
+    m_apply_eq_and_gamma_spriv = loadSpirv(executable_dir, "apply_eq_and_gamma.comp");
     m_diamond_spirv = loadSpirv(executable_dir, "filter_diamond.comp");
     m_filter_image_spirv = loadSpirv(executable_dir, "filter_image.comp");
     m_copy_y_for_interpolation_spirv = loadSpirv(executable_dir, "copy_y_for_interpolation.comp");
@@ -106,7 +106,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
     m_convert_to_float_and_apply_eq_and_gamma_algo = m_vulkan_manager.createComputeShader(
             "convert_to_float_and_apply_eq_and_gamma",
             {eBuffer, eBuffer}, sizeof(float) * 2,
-            m_convert_to_float_and_apply_eq_and_gamma_spriv, Workgroup(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT));
+            m_apply_eq_and_gamma_spriv, Workgroup(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT));
     m_copy_y_for_interpolation_algo = m_vulkan_manager.createComputeShader(
             "copy_y_for_interpolation",
             {eBuffer, eBuffer}, sizeof(uint32_t) * 3,

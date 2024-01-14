@@ -23,7 +23,7 @@ protected:
     void threadFunc() override;
 
 private:
-    bool readShorts(std::ifstream &input, uint16_t *out, size_t n);
+    bool readFloats(std::ifstream &input, float *out, size_t n);
     std::pair<int, std::pair<float, float>> compute_initial_skip(Logger &log);
 
     std::ifstream m_input;

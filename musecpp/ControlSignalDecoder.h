@@ -16,7 +16,7 @@ enum MotionInformation {
 };
 
 struct ControlSignalDecoder {
-    explicit ControlSignalDecoder(Logger &log, uint16_t const *data, std::pair<float, float> const &eq);
+    explicit ControlSignalDecoder(Logger &log, float const *data, std::pair<float, float> const &eq);
     void log_control_data() const;
     std::optional<int> field_subsampling_phase_Y;
     std::optional<int> horizontal_motion_vector;

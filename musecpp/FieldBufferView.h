@@ -24,7 +24,7 @@ public:
     void set_prev_field(FieldBufferView *prev_field);
 
     // To be called each time the underlying data has been updated.
-    void ProcessControlData(uint16_t const *control_data, std::pair<float, float> const &eq);
+    void ProcessControlData(float const *control_data, std::pair<float, float> const &eq);
 
     std::shared_ptr<musevk::VulkanBuffer> getVulkanBuffer();
     std::optional<ControlSignalDecoder> const &control_data();

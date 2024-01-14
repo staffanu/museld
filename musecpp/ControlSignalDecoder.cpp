@@ -31,7 +31,7 @@ map<array<int, 4>, int> ControlSignalDecoder::s_H_column_index = [] {
     return ix;
 }();
 
-ControlSignalDecoder::ControlSignalDecoder(Logger &log, uint16_t const *data, std::pair<float, float> const &eq)
+ControlSignalDecoder::ControlSignalDecoder(Logger &log, float const *data, std::pair<float, float> const &eq)
 : m_log(log) {
     auto groups = vector<pair<array<int, 4>, bool>>();
     groups.reserve(25);
@@ -39,8 +39,8 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, uint16_t const *data, st
         for (int col = 7; col < 87; col += 16) { // start of each encoded 4 bit group
             array<int, 8> bits{};
             for (int bit_ix = 0; bit_ix < 8; bit_ix++) {
-                uint8_t d1 = (uint8_t)clamp(((float)data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix] / MUSE_SHORT_INPUT_MULT - eq.second) / eq.first, 0.0f, 255.0f);
-                uint8_t d2 = (uint8_t)clamp(((float)data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix + 1] / MUSE_SHORT_INPUT_MULT - eq.second) / eq.first, 0.0f, 255.0f);
+                float d1 = clamp((data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix] - eq.second) / eq.first, 0.0f, 255.0f);
+                float d2 = clamp((data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix + 1] - eq.second) / eq.first, 0.0f, 255.0f);
                 bits[bit_ix] = d1 + d2 > 256 ? 1 : 0;
             }
 

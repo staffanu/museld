@@ -7,7 +7,6 @@
 #include <fmt/format.h>
 #include <cassert>
 #include "musevk/VulkanBuffer.h"
-#include "MuseTypes.h"
 #include "ResamplingInputReader.h"
 #include "Logger.h"
 
@@ -29,12 +28,12 @@ ResamplingInputReader::ResamplingInputReader(
     switch (m_input_format) {
         case eUnsignedByte:
             m_bytes_per_sample = 1;
-            m_output_multiplier = MUSE_SHORT_INPUT_MULT;
+            m_output_multiplier = 1;
             m_output_add = 0;
             break;
         case eSignedShortLittleEndian:
             m_bytes_per_sample = 2;
-            m_output_multiplier = 1024.0 / 65536.0;
+            m_output_multiplier = 1.0 / 256.0;
             m_output_add = 512;
             break;
         default:
@@ -84,7 +83,7 @@ void ResamplingInputReader::seek(double seconds) {
 void ResamplingInputReader::threadFunc() {
     //pthread_setname_np(m_reader_thread->native_handle(), "musecpp-reader");
 
-    uint16_t sample_buffer[c_sample_buffer_size];
+    float sample_buffer[c_sample_buffer_size];
     double input_samples_per_sample = m_input_pll.getInputSamplesPerSample();
     int samples_to_read = 1;
     shared_ptr<musevk::VulkanBuffer> buffer = nullptr;
@@ -105,7 +104,7 @@ void ResamplingInputReader::threadFunc() {
             m_vacant_muse_input_buffers.pop_front();
         }
 
-        auto data = buffer->data<uint16_t>();
+        auto data = buffer->data<float>();
         InputPll::PllResult pll_result = m_input_pll.process(samples_to_read, sample_buffer, data);
         samples_to_read = pll_result.samples_to_read;
         input_samples_per_sample = pll_result.input_samples_per_sample;
@@ -122,7 +121,7 @@ void ResamplingInputReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
-bool ResamplingInputReader::readSamples(int sample_count, uint16_t buffer[c_sample_buffer_size], double dt) {
+bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_buffer_size], double dt) {
     double t = m_t; // always in [0, 1)
     int read_pos = m_file_input_buffer_read_pos;
     for (int sample_ix = 0; sample_ix < sample_count; sample_ix++) {
@@ -183,8 +182,7 @@ bool ResamplingInputReader::readSamples(int sample_count, uint16_t buffer[c_samp
         // now evaluate at point 1 + p
         double y = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
 
-        auto muse_int = (uint16_t)(y * m_output_multiplier + m_output_add);
-        buffer[sample_ix] = muse_int;
+        buffer[sample_ix] = (float)(y * m_output_multiplier + m_output_add);
     }
     m_t = t;
     m_file_input_buffer_read_pos = read_pos;

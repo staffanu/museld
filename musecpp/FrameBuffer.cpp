@@ -25,21 +25,20 @@ MuseBuffer &FrameBuffer::data() {
     return m_data;
 }
 
-std::pair<float, float> FrameBuffer::EstimateEq(uint16_t const *data) {
-    int line_1_high_sum = 0;
-    int line_2_low_sum = 0;
+std::pair<float, float> FrameBuffer::EstimateEq(float const *data) {
+    float line_1_high_sum = 0;
+    float line_2_low_sum = 0;
     for (int i = 19; i < 259; i++) {
         line_1_high_sum += data[0 * MUSE_TOTAL_WIDTH + i];
         line_2_low_sum += data[1 * MUSE_TOTAL_WIDTH + i];
     }
-    int blanking_sum =  0;
+    float blanking_sum =  0;
     for (int i = 127; i < 383; i++)
-        blanking_sum += data[562 * MUSE_TOTAL_WIDTH + i] +
-                        data[1124 * MUSE_TOTAL_WIDTH + i];
+        blanking_sum += data[562 * MUSE_TOTAL_WIDTH + i] + data[1124 * MUSE_TOTAL_WIDTH + i];
 
-    float avg_high = (float)line_1_high_sum / MUSE_SHORT_INPUT_MULT / 240.0f;
-    float avg_low = (float)line_2_low_sum / MUSE_SHORT_INPUT_MULT/ 240.0f;
-    float avg_blanking = (float)blanking_sum / MUSE_SHORT_INPUT_MULT / 512.0f;
+    float avg_high = (float)line_1_high_sum / 240.0f;
+    float avg_low = (float)line_2_low_sum / 240.0f;
+    float avg_blanking = (float)blanking_sum / 512.0f;
     vector<pair<float, float>> v = {{16.0f , avg_low}, {128.0f, avg_blanking }, {239.0f, avg_high }};
     auto eq = FrameBuffer::LinearRegression(v);
     return eq;
@@ -64,7 +63,7 @@ FieldBufferView &FrameBuffer::get_field(int parity) {
     return m_fields[parity];
 }
 
-void FrameBuffer::ProcessControlData(uint16_t const *frame_data, std::pair<float, float> const &eq) {
+void FrameBuffer::ProcessControlData(float const *frame_data, std::pair<float, float> const &eq) {
     m_fields[0].ProcessControlData(frame_data + 558 * MUSE_TOTAL_WIDTH + 12, eq);
     m_fields[1].ProcessControlData(frame_data + 1120 * MUSE_TOTAL_WIDTH + 12, eq);
 }

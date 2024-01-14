@@ -29,19 +29,19 @@ InputPll::InputPll(Logger &log, double sample_rate)
   m_line1_frame_pulse_sum(0),
   m_line2_frame_pulse_sum(0),
   m_consecutive_good_syncs(0),
-  m_avg_sample_value(128 * MUSE_SHORT_INPUT_MULT),
+  m_avg_sample_value(128),
   m_missed_line_pulses(0),
   m_state(eSearching),
   m_error_sum(0) {
     m_log.debug(eInput, fmt::format("m_g1={:.5f} m_g2={:7f}", m_g1, m_g2));
 }
 
-InputPll::PllResult InputPll::process(int sample_count, const uint16_t samples[], uint16_t *output) {
+InputPll::PllResult InputPll::process(int sample_count, const float samples[], float *output) {
     for (int sample_ix = 0; sample_ix < sample_count; sample_ix++) {
         // if we are at the first pixel we should also not be in the middle of the loop
         assert (!(m_state == eLocked && m_line == 1 && m_pixel == 1) || sample_ix == 0);
 
-        uint16_t sample = samples[sample_ix];
+        float sample = samples[sample_ix];
         m_avg_sample_value = m_avg_sample_value * (1 - 1e-7) + 1e-7 * sample;
 
         // ensure first line is correct when lock is established, so write repeatedly to line 1 if not
@@ -59,18 +59,17 @@ InputPll::PllResult InputPll::process(int sample_count, const uint16_t samples[]
                         ((framePulsePixel < 140 && (framePulsePixel / 4) % 2 == 1) ||
                          (framePulsePixel >= 140 && framePulsePixel < 156)) ? 1 : -1;
                 int line2FramePulseValue = -line1FramePulseValue;
-                m_line1_frame_pulse_sum += line1FramePulseValue * (sample - (int) m_avg_sample_value);
-                m_line2_frame_pulse_sum += line2FramePulseValue * (sample - (int) m_avg_sample_value);
+                m_line1_frame_pulse_sum += line1FramePulseValue * (sample - m_avg_sample_value);
+                m_line2_frame_pulse_sum += line2FramePulseValue * (sample - m_avg_sample_value);
             } else if (m_pixel == 480) {
-                if (m_state == eLockedHoriz && m_line1_frame_pulse_sum > 3000 *
-                                                                         MUSE_SHORT_INPUT_MULT) { // TODO: maybe adjust or make threshold dynamic
+                if (m_state == eLockedHoriz && m_line1_frame_pulse_sum > 3000) { // TODO: maybe adjust or make threshold dynamic
                     m_log.info(eInput, fmt::format("New state eLocked at line {}", m_line));
                     m_line = 1;
                     m_state = eLocked;
                 }
                 if (m_state == eLocked && (m_line == 1 || m_line == 2)) {
-                    if ((m_line == 1 && m_line1_frame_pulse_sum > 3000 * MUSE_SHORT_INPUT_MULT) ||
-                        (m_line == 2 && m_line2_frame_pulse_sum > 3000 * MUSE_SHORT_INPUT_MULT))
+                    if ((m_line == 1 && m_line1_frame_pulse_sum > 3000) ||
+                        (m_line == 2 && m_line2_frame_pulse_sum > 3000))
                         m_missed_line_pulses = 0;
                     else {
                         if (m_missed_line_pulses < 3)
@@ -88,17 +87,16 @@ InputPll::PllResult InputPll::process(int sample_count, const uint16_t samples[]
             // When locked: m_line 1: positive, m_line 2: negative, m_line 3: negative, m_line 4: positive, then alternating up to 1125
             bool sync_should_be_positive = m_line == 1 || (m_line > 3 && m_line % 2 == 0);
 
-            int sample0 = output[output_index - 4]; // (int)m_shift_reg[(m_shift_reg_last_written_ix + 1) % 5];
-            int sample2 = output[output_index - 2]; // (int)m_shift_reg[(m_shift_reg_last_written_ix + 3) % 5];
-            int sample4 = output[output_index]; // (int)m_shift_reg[m_shift_reg_last_written_ix];
+            float sample0 = output[output_index - 4]; // (int)m_shift_reg[(m_shift_reg_last_written_ix + 1) % 5];
+            float sample2 = output[output_index - 2]; // (int)m_shift_reg[(m_shift_reg_last_written_ix + 3) % 5];
+            float sample4 = output[output_index]; // (int)m_shift_reg[m_shift_reg_last_written_ix];
 
             bool m_sync_is_good = (sync_should_be_positive && sample0 < sample2 && sample2 < sample4) ||
                                   (!sync_should_be_positive && sample0 > sample2 && sample2 > sample4);
 
             if (m_sync_is_good) {
-                int avgLevel = (sample0 + sample4) / 2;
-                int new_error = (sync_should_be_positive ? sample2 - avgLevel : avgLevel - sample2) /
-                                MUSE_SHORT_INPUT_MULT; // negative means we sampled too early
+                double avgLevel = (sample0 + sample4) / 2;
+                double new_error = sync_should_be_positive ? sample2 - avgLevel : avgLevel - sample2; // negative means we sampled too early
                 m_error_sum += new_error;
                 m_input_samples_per_sample =
                         m_input_samples_per_sample_ref - new_error * m_g1 - m_error_sum * m_g2;

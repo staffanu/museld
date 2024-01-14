@@ -21,7 +21,7 @@ public:
         int samples_to_read;
         double input_samples_per_sample;
     };
-    PllResult process(int sample_count, const uint16_t samples[], uint16_t *output);
+    PllResult process(int sample_count, const float samples[], float *output);
     double getInputSamplesPerSample();
 
 private:
@@ -40,8 +40,8 @@ private:
 
     int m_pixel;
     int m_line;
-    int m_line1_frame_pulse_sum;
-    int m_line2_frame_pulse_sum;
+    double m_line1_frame_pulse_sum;
+    double m_line2_frame_pulse_sum;
     int m_consecutive_good_syncs;
     double m_avg_sample_value;
     int m_missed_line_pulses;
@@ -50,7 +50,7 @@ private:
         eSearching, eLocked, eLockedHoriz
     };
     State m_state;
-    int m_error_sum;
+    double m_error_sum;
 };
 
 #endif //MUSECPP_INPUTPLL_H

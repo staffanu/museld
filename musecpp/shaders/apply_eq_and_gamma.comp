@@ -2,8 +2,8 @@
 
 // This shader should be invoked with global invocation ids
 // ranging from (0, 0) to (MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT).
-// The input is an array of uint, but it consists of 16 bit shorts,
-// So we do some bit manipulation to extract the correct part.
+// The input are floats, but outputs are float16_t, since all
+// further processing is performed on half floats.
 
 #include "muse.h"
 
@@ -13,7 +13,7 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
-    uint frame_in[];
+    float frame_in[][MUSE_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
@@ -53,12 +53,11 @@ void main() {
     if (row >= MUSE_TOTAL_HEIGHT || col >= MUSE_TOTAL_WIDTH)
         return;
 
-    uint uint32_value = frame_in[row * MUSE_TOTAL_WIDTH / 2 + col / 2];
-    uint uint16_value = col % 2 == 1 ? uint32_value >> 16 : uint32_value & 0xffffu;
+    float16_t float_value = float16_t(frame_in[row][col]);
 
     float16_t eq1 = float16_t(eq1_f);
     float16_t eq2 = float16_t(eq2_f);
-    float16_t equalized = clamp((float16_t(uint16_value) / MUSE_INPUT_MULT - eq2) / eq1, 0.0hf, 255.0hf);
+    float16_t equalized = clamp((float_value - eq2) / eq1, 0.0hf, 255.0hf);
 
     if ((row >= 46 && row < 46 + MUSE_BUF_HEIGHT || (row >= 46 + 562 && row < 46 + 562 + MUSE_BUF_HEIGHT))
         && col >= 106 && col < 106 + MUSE_Y_BUF_WIDTH) {
