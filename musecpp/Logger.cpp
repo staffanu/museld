@@ -86,3 +86,8 @@ void Logger::log(LogPriority priority, LogCategoryFlags categorization, const st
         }
     }
 }
+
+bool Logger::isEnabled(LogPriority priority, LogCategoryFlags category) const {
+    auto it = m_log_priority_per_category.find(category);
+    return it != m_log_priority_per_category.cend() && it->second <= priority;
+}

@@ -64,6 +64,7 @@ public:
     void debug(LogCategoryFlags categorization, const std::string &message) {
         log(eDebug, categorization, message);
     }
+    bool isEnabled(LogPriority priority, LogCategoryFlags categorization) const;
 
 private:
     static const std::map<int, std::string> c_priority_names;

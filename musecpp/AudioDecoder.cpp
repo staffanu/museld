@@ -83,7 +83,7 @@ void AudioDecoder::decodeFrame(int frame_no,
                                AudioMode &audio_mode,
                                size_t &sample_count,
                                AudioFrame output_samples[c_max_output_samples]) {
-    if (frame_no % 30 == 0) {
+    if (frame_no % 30 == 0 && m_log.isEnabled(eDebug, eAudio)) {
         ostringstream ss;
         ss << "Symbol locations: ";
         for (int i = 0; i < 8; i++)
