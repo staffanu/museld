@@ -42,7 +42,7 @@ public:
               size_t &sample_count,
               AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples],
               FieldInterpolationMode field_interpolation_mode,
-              bool redo_last_field);
+              bool redo_last_field, bool enable_non_linear);
 
     void output_benchmark_results();
 

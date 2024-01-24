@@ -31,9 +31,9 @@ public:
 
     MuseBuffer createMuseBuffer(unsigned int height, unsigned int width, bool host_visible = false);
 
-    void convertToFloatAndApplyEqAndGamma(musevk::CommandBuffer &sq,
-                                          std::shared_ptr<musevk::VulkanBuffer> input, MuseBuffer &buffer,
-                                          std::pair<float, float> const &eq);
+    void applyEqAndDeemphasisAndGamma(musevk::CommandBuffer &sq,
+                                      std::shared_ptr <musevk::VulkanBuffer> input, MuseBuffer &buffer,
+                                      const std::pair<float, float> &eq, bool enable_non_linear);
 
     void decodeIntraField(musevk::CommandBuffer &sq, FieldBufferView &field);
 
@@ -76,7 +76,8 @@ private:
     Logger &m_log;
     musevk::VulkanManager &m_vulkan_manager;
 
-    std::vector<uint32_t> m_apply_eq_and_gamma_spriv;
+    std::vector<uint32_t> m_apply_eq_and_non_linear_spirv;
+    std::vector<uint32_t> m_apply_deemphasis_and_gamma_spirv;
     std::vector<uint32_t> m_copy_y_for_interpolation_spirv;
     std::vector<uint32_t> m_diamond_spirv;
     std::vector<uint32_t> m_filter_image_spirv;
@@ -86,7 +87,8 @@ private:
     std::vector<uint32_t> m_detect_motion_spirv;
     std::vector<uint32_t> m_combine_still_and_moving_spirv;
 
-    std::shared_ptr<musevk::ComputeShader> m_convert_to_float_and_apply_eq_and_gamma_algo;
+    std::shared_ptr<musevk::ComputeShader> m_apply_eq_and_non_linear_algo;
+    std::shared_ptr<musevk::ComputeShader> m_apply_deemphasis_and_gamma_algo;
     std::shared_ptr<musevk::ComputeShader> m_copy_y_for_interpolation_algo;
     std::shared_ptr<musevk::ComputeShader> m_diamond_algo;
     std::shared_ptr<musevk::ComputeShader> m_filter_image_algo;
@@ -98,6 +100,9 @@ private:
     std::shared_ptr<musevk::ComputeShader> m_detect_motion_algo;
     std::shared_ptr<musevk::ComputeShader> m_combine_still_and_moving_algo;
     std::shared_ptr<musevk::ComputeShader> m_convert_audio_sample_rate_algo;
+
+    // temporary data used for the output of non-linear processing to the de-emphasis filter
+    MuseBuffer m_non_linear_processed_buffer; // MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH
 
     // temporary data used by the single field decoder and inter-frame interpolation
     MuseBuffer m_interpolated32_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH * 2

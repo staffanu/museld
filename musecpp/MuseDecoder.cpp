@@ -69,7 +69,7 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
                        size_t &sample_count,
                        AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples],
                        FieldInterpolationMode field_interpolation_mode,
-                       bool redo_last_field) {
+                       bool redo_last_field, bool enable_non_linear) {
     if (redo_last_field)
         m_field_index = (m_field_index + 1) % 2;
 
@@ -104,7 +104,8 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
             m_log.info(eDecoder, fmt::format("eq: {}, {}", m_eq.first, m_eq.second));
 
         m_first_stage_command_buffer->begin();
-        m_shaders.convertToFloatAndApplyEqAndGamma(*m_first_stage_command_buffer, input_vulkan_buffer, frame_buffer->data(), m_eq);
+        m_shaders.applyEqAndDeemphasisAndGamma(*m_first_stage_command_buffer, input_vulkan_buffer, frame_buffer->data(),
+                                               m_eq, enable_non_linear);
         m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame_buffer->data());
         m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 

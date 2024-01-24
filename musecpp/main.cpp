@@ -95,8 +95,9 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         int paused_countdown = start_paused ? 5 : 0;
         MuseDecoder::FieldInterpolationMode field_interpolation_mode = MuseDecoder::eNormal;
         bool redo_last_field = false;
+        bool enable_non_linear = true;
 
-        while (paused || decoder.next(audio_mode, audio_sample_count, audio_samples, field_interpolation_mode, redo_last_field)) {
+        while (paused || decoder.next(audio_mode, audio_sample_count, audio_samples, field_interpolation_mode, redo_last_field, enable_non_linear)) {
             if (!paused)
                 field_count++;
             redo_last_field = false;
@@ -209,6 +210,12 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                     paused_countdown = 1;
                 }
                 log.info(eApplication | eVideo | eDecoder, "Inter-frame interpolation forced");
+            }
+            if (check_glfw_key(window, GLFW_KEY_E)) {
+                enable_non_linear = true;
+            }
+            if (check_glfw_key(window, GLFW_KEY_L)) {
+                enable_non_linear = false;
             }
         }
         auto t1 = chrono::high_resolution_clock::now();

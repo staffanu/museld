@@ -7,17 +7,12 @@
 
 #include "muse.h"
 
-layout(push_constant) uniform PushConstants {
-    float eq1_f;
-    float eq2_f;
-};
-
 layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
-    float frame_in[][MUSE_TOTAL_WIDTH];
+    float16_t frame_in[][MUSE_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
-    float16_t frame_out[];
+    float16_t frame_out[][MUSE_TOTAL_WIDTH];
 };
 
 const float16_t min_value = 16.hf;
@@ -53,19 +48,32 @@ void main() {
     if (row >= MUSE_TOTAL_HEIGHT || col >= MUSE_TOTAL_WIDTH)
         return;
 
-    float16_t float_value = float16_t(frame_in[row][col]);
+    // Apply the de-emphasis filter for the picture area
 
-    float16_t eq1 = float16_t(eq1_f);
-    float16_t eq2 = float16_t(eq2_f);
-    float16_t equalized = clamp((float_value - eq2) / eq1, 0.0hf, 255.0hf);
-
-    if ((row >= 46 && row < 46 + MUSE_BUF_HEIGHT || (row >= 46 + 562 && row < 46 + 562 + MUSE_BUF_HEIGHT))
-        && col >= 106 && col < 106 + MUSE_Y_BUF_WIDTH) {
-        equalized = inverse_gamma_y(equalized);
-    } else if ((row >= 42 && row < 42 + MUSE_BUF_HEIGHT || (row >= 42 + 562 && row < 42 + 562 + MUSE_BUF_HEIGHT))
-        && col >= 11 && col < 11 + MUSE_C_BUF_WIDTH) {
-        equalized = inverse_gamma_c(equalized);
+    float16_t deemphasized;
+    if ((row >= 43 && row < 47 || row >= 605 && row < 609) && (col == 1 || col >= 11 && col < 106) ||
+        (row >= 47 && row < 559 || row >= 609 && row < 1121) && (col == 1 || col >= 11) ||
+        (row >= 559 && row < 563 || row >= 1121 && row < 1125) && (col == 1 || col >= 107)) {
+        deemphasized = 0.5hf * frame_in[row][col] +
+            5.hf/32.hf * frame_in[row][col - 1] + 5.hf/32.hf * frame_in[row][col + 1] +
+            1.hf/16.hf * frame_in[row][col - 2] + 1.hf/16.hf * frame_in[row][col + 2] +
+            1.hf/32.hf * frame_in[row][col - 3] + 1.hf/32.hf * frame_in[row][col + 3];
+    } else {
+        deemphasized = frame_in[row][col];
     }
 
-    frame_out[row * MUSE_TOTAL_WIDTH + col] = equalized;
+    // Apply the inverse transmission gamma (different for the color and luma parts of the picture)
+
+    float16_t gamma_adjusted;
+    if ((row >= 46 && row < 46 + MUSE_BUF_HEIGHT || (row >= 46 + 562 && row < 46 + 562 + MUSE_BUF_HEIGHT))
+        && col >= 106 && col < 106 + MUSE_Y_BUF_WIDTH) {
+        gamma_adjusted = inverse_gamma_y(deemphasized);
+    } else if ((row >= 42 && row < 42 + MUSE_BUF_HEIGHT || (row >= 42 + 562 && row < 42 + 562 + MUSE_BUF_HEIGHT))
+        && col >= 11 && col < 11 + MUSE_C_BUF_WIDTH) {
+        gamma_adjusted = inverse_gamma_c(deemphasized);
+    } else {
+        gamma_adjusted = deemphasized;
+    }
+
+    frame_out[row][col] = gamma_adjusted;
 }

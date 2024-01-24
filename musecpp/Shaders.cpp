@@ -27,6 +27,7 @@ vector<uint32_t> Shaders::loadSpirv(string const &executable_dir, string const &
 Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &manager)
 : m_log(log),
   m_vulkan_manager(manager),
+  m_non_linear_processed_buffer(Shaders::createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)),
   m_interpolated32_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
   m_intermediate_r_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_intermediate_b_buffer(Shaders::createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
@@ -93,7 +94,8 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
           })),
   m_audio_data(createMuseBuffer(88, MUSE_TOTAL_WIDTH * 3 / 4, true))
 {
-    m_apply_eq_and_gamma_spriv = loadSpirv(executable_dir, "apply_eq_and_gamma.comp");
+    m_apply_eq_and_non_linear_spirv = loadSpirv(executable_dir, "apply_eq_and_non_linear.comp");
+    m_apply_deemphasis_and_gamma_spirv = loadSpirv(executable_dir, "apply_deemphasis_and_gamma.comp");
     m_diamond_spirv = loadSpirv(executable_dir, "filter_diamond.comp");
     m_filter_image_spirv = loadSpirv(executable_dir, "filter_image.comp");
     m_copy_y_for_interpolation_spirv = loadSpirv(executable_dir, "copy_y_for_interpolation.comp");
@@ -102,11 +104,15 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
     m_decode_c_spirv = loadSpirv(executable_dir, "decode_c.comp");
     m_detect_motion_spirv = loadSpirv(executable_dir, "detect_motion.comp");
     m_combine_still_and_moving_spirv = loadSpirv(executable_dir, "combine_still_and_moving.comp");
-    
-    m_convert_to_float_and_apply_eq_and_gamma_algo = m_vulkan_manager.createComputeShader(
-            "convert_to_float_and_apply_eq_and_gamma",
-            {eBuffer, eBuffer}, sizeof(float) * 2,
-            m_apply_eq_and_gamma_spriv, Workgroup(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT));
+
+    m_apply_eq_and_non_linear_algo = m_vulkan_manager.createComputeShader(
+            "apply_eq_and_non_linear",
+            {eBuffer, eBuffer}, sizeof(float) * 3,
+            m_apply_eq_and_non_linear_spirv, Workgroup(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT));
+    m_apply_deemphasis_and_gamma_algo = m_vulkan_manager.createComputeShader(
+            "apply_deemphasis_and_gamma",
+            {eBuffer, eBuffer}, 0,
+            m_apply_deemphasis_and_gamma_spirv, Workgroup(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT));
     m_copy_y_for_interpolation_algo = m_vulkan_manager.createComputeShader(
             "copy_y_for_interpolation",
             {eBuffer, eBuffer}, sizeof(uint32_t) * 3,
@@ -167,11 +173,14 @@ MuseBuffer Shaders::createMuseBuffer(unsigned int height, unsigned int width, bo
     return buffer;
 }
 
-void Shaders::convertToFloatAndApplyEqAndGamma(
+void Shaders::applyEqAndDeemphasisAndGamma(
         CommandBuffer &sq, shared_ptr<VulkanBuffer> input,
-        MuseBuffer &buffer, pair<float, float> const &eq) {
-    m_convert_to_float_and_apply_eq_and_gamma_algo->updateBufferDescriptorsInSet(0, {input, buffer.getVulkanBuffer()});
-    sq.enqueueComputeShader(m_convert_to_float_and_apply_eq_and_gamma_algo, {eq.first, eq.second});
+        MuseBuffer &buffer, pair<float, float> const &eq, bool enable_non_linear) {
+    m_apply_eq_and_non_linear_algo->updateBufferDescriptorsInSet(0, {input, m_non_linear_processed_buffer.getVulkanBuffer()});
+    sq.enqueueComputeShader(m_apply_eq_and_non_linear_algo, {eq.first, eq.second, enable_non_linear ? 1.0f : 0.0f});
+
+    m_apply_deemphasis_and_gamma_algo->updateBufferDescriptorsInSet(0, {m_non_linear_processed_buffer.getVulkanBuffer(), buffer.getVulkanBuffer()});
+    sq.enqueueComputeShader(m_apply_deemphasis_and_gamma_algo, {});
 }
 
 void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {

@@ -1,0 +1,95 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// ranging from (0, 0) to (MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT).
+// The input are floats, but outputs are float16_t, since all
+// further processing is performed on half floats.
+
+/*
+ * By eq, we mean rescaling the input values to the standard [0, 255] range
+ * of values from the MUSE sepcifications.  The parameters for this are
+ * calculated on the CPU before calling this shader.  Only pixels not affected
+ * by emphasis are included in this calculation.
+ * Notice that some values will be outside the [0, 255] range due to emphasis.
+ * The non-linear processing actually
+ * increases the range further, and finally the de-emphasis filter should
+ * get all values within the [0, 255] range.  The de-emphasis process is split
+ * between this shader and "apply_deemphasis_and_gamma", since the non-linear
+ * processing is a bit costly and the filter needs several neighboring pixels.
+*/
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    float eq1_f;
+    float eq2_f;
+    float enable_non_linear;
+};
+
+layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
+    float frame_in[][MUSE_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
+    float16_t frame_out[][MUSE_TOTAL_WIDTH];
+};
+
+float nl_y1 = 112;
+float nl_x1 = 224;
+float nl_x2 = 512;
+float nl_y2 = 512;
+float nl_h = 96.65;
+float nl_k = 964.23;
+float nl_a = 483.50;
+float nl_a_sq = nl_a * nl_a;
+float nl_b = 883.43;
+float nl_b_sq = nl_b * nl_b;
+
+// Performs non-linear de-emphasis processing.  The calculations overflow in float16 arithmetic
+// so we work with floats.  The total time used by this shader is minimal, so it doesn't really matter.
+float16_t non_linear(float16_t x_unscaled) {
+    float x = (x_unscaled - 128.hf) * 2.hf;
+    float y;
+    if (x > nl_x2) {
+        y = nl_y2;
+    } else if (x > nl_x1) {
+        y = nl_k - sqrt(nl_b_sq * (1 - (x - nl_h) * (x - nl_h) / nl_a_sq));
+    } else if (x < -nl_x2) {
+        y = -nl_y2;
+    } else if (x < -nl_x1) {
+        y = -nl_k + sqrt(nl_b_sq * (1 - (-x - nl_h) * (-x - nl_h) / nl_a_sq));
+    } else {
+        y = x / 2;
+    }
+    return float16_t(y) + 128.hf;
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= MUSE_TOTAL_HEIGHT || col >= MUSE_TOTAL_WIDTH)
+        return;
+
+    float16_t v = float16_t(frame_in[row][col]);
+
+    // Apply eq
+
+    float16_t eq1 = float16_t(eq1_f);
+    float16_t eq2 = float16_t(eq2_f);
+    float16_t equalized = (v - eq2) / eq1;
+
+    // Apply non-linear processing for the picture area
+
+    float16_t processed;
+    if (enable_non_linear != 0 &&
+        ((row >= 43 && row < 47 || row >= 605 && row < 609) && (col == 1 || col >= 11 && col < 106) ||
+         (row >= 47 && row < 559 || row >= 609 && row < 1121) && (col == 1 || col >= 11) ||
+         (row >= 559 && row < 563 || row >= 1121 && row < 1125) && (col == 1 || col >= 107))) {
+        processed = non_linear(equalized);
+    } else {
+        processed = equalized;
+    }
+
+    frame_out[row][col] = processed;
+}
