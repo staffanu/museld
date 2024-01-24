@@ -14,7 +14,8 @@ enum LogPriority {
     eDebug = 1,
     eInfo = 2,
     eWarn = 3,
-    eError = 4
+    eError = 4,
+    eOff = 100,
 };
 
 enum LogCategoryFlags {

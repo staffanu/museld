@@ -94,12 +94,14 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, float const *data, std::
         }
     }
 
-    ostringstream ss;
-    for (int i = 0; i < 32; i++) {
-        if (i != 0 && i % 8 == 0) ss << " ";
-        ss << (result[i].second ? result[i].first ? "1" : "0" : "*");
+    if (m_log.isEnabled(eDebug, eDecoder)) {
+        ostringstream ss;
+        for (int i = 0; i < 32; i++) {
+            if (i != 0 && i % 8 == 0) ss << " ";
+            ss << (result[i].second ? result[i].first ? "1" : "0" : "*");
+        }
+        m_log.debug(eDecoder, ss.str());
     }
-    m_log.debug(eDecoder, ss.str());
 
     auto vector_index_to_bit_opt = [](const vector<pair<bool, bool>> v, int i) -> optional<int> {
         return v[i].second ? optional(v[i].first) : nullopt;

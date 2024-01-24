@@ -75,7 +75,7 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], f
                         if (m_missed_line_pulses < 3)
                             m_missed_line_pulses += 1;
                         else {
-                            m_log.warn(eInput, fmt::format("New state eSearching at line {}", m_line));
+                            m_log.warn(eInput, fmt::format("Missed line pulses: New state eSearching at line {}", m_line));
                             m_state = eSearching;
                         }
                     }
@@ -115,7 +115,8 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], f
                 m_error_sum = 0;
                 m_input_samples_per_sample = m_input_samples_per_sample_ref;
 
-                m_log.info(eInput, fmt::format("New state eSearching at line {}", m_line));
+                if (m_state == eLockedHoriz)
+                    m_log.info(eInput, fmt::format("Locked horizontally, but frame pulses not found: New state eSearching at line {}", m_line));
                 m_state = eSearching; // TODO: add to VHDL
                 m_line = 3;
                 m_pixel = 263; // "random", start search from new position

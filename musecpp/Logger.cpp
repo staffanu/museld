@@ -43,6 +43,7 @@ const map<int, string> Logger::c_priority_names = {
         { eInfo, "INFO " },
         { eWarn, "WARN " },
         { eError, "ERROR" },
+        { eOff, "OFF [NEVER-SHOWN]" },
 };
 
 const map<int, string> Logger::c_category_names = {
@@ -58,10 +59,10 @@ void Logger::log(LogPriority priority, LogCategoryFlags categorization, const st
     int flags = categorization;
     if (priority >= m_minimum_priority) {
         auto tp = chrono::time_point_cast<chrono::milliseconds>(chrono::system_clock::now());
-        auto us = tp.time_since_epoch().count() % micro::den;
+        auto ms = tp.time_since_epoch().count() % milli::den;
         ostringstream ss;
-        ss << fmt::format("{:%Y-%m-%d %H:%M:%S} [{}] (",
-                   tp, c_priority_names.at(priority));
+        ss << fmt::format("{:%Y-%m-%d %H:%M:%S}.{:03d} [{}] (",
+                          tp, ms, c_priority_names.at(priority));
         bool first = true;
         bool do_log = false;
         for (int bit = 1; flags != 0; bit <<= 1, flags >>= 1) {
@@ -75,7 +76,8 @@ void Logger::log(LogPriority priority, LogCategoryFlags categorization, const st
                     ss << cat_str->second;
                 first = false;
                 auto cat_level = m_log_priority_per_category.find((LogCategoryFlags)bit);
-                if (priority == eError || cat_level != m_log_priority_per_category.cend() && priority >= cat_level->second)
+                if (cat_level == m_log_priority_per_category.cend() && priority == eError ||
+                    cat_level != m_log_priority_per_category.cend() && priority >= cat_level->second)
                     do_log = true;
             }
         }
