@@ -34,7 +34,7 @@ ResamplingInputReader::ResamplingInputReader(
         case eSignedShortLittleEndian:
             m_bytes_per_sample = 2;
             m_output_multiplier = 1.0 / 256.0;
-            m_output_add = 512;
+            m_output_add = 128;
             break;
         default:
             throw runtime_error("Unrecognized input format");

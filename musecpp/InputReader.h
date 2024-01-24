@@ -42,6 +42,7 @@ protected:
     const double m_initial_seek_seconds;
     const std::optional<std::string> m_output_filename;
     int m_output_file_fd;
+    int16_t *m_output_short_buffer;
     std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_vacant_muse_input_buffers;
     std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_filled_muse_input_buffers;
     bool m_stop_request;

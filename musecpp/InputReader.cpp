@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fmt/format.h>
 #include "musevk/VulkanBuffer.h"
+#include "MuseTypes.h"
 #include "InputReader.h"
 #include "Logger.h"
 
@@ -47,6 +48,10 @@ bool InputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> 
         if (m_output_file_fd == -1)
             throw runtime_error(fmt::format("Unable to open output file for writing: {}",
                                             strerror(errno)));
+
+        m_output_short_buffer = (int16_t *)malloc(sizeof(uint16_t) * MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT);
+        if (m_output_short_buffer == NULL)
+            throw runtime_error("Cannot allocate memory for file output buffer");
     }
 
     return true;
@@ -62,8 +67,10 @@ void InputReader::cleanup() {
     m_vacant_muse_input_buffers.clear();
     m_filled_muse_input_buffers.clear();
 
-    if (m_output_file_fd != -1)
+    if (m_output_file_fd != -1) {
         close(m_output_file_fd);
+        free(m_output_short_buffer);
+    }
 }
 
 pair<shared_ptr<musevk::VulkanBuffer>, InputReader::PresentationHint>
@@ -95,9 +102,15 @@ InputReader::getNextInputBuffer() {
             m_log.debug(eInput, fmt::format("getNextInputBuffer: {} buffers filled", filled_buffers));
     }
 
-    if (m_output_file_fd != -1)
-        if (write(m_output_file_fd, buffer->data<void>(), buffer->getMemorySize()) != buffer->getMemorySize())
+    if (m_output_file_fd != -1) {
+        int size = buffer->size();
+        float *ptr = buffer->data<float>();
+        for (int i = 0; i < size; i++)
+            m_output_short_buffer[i] = ptr[i] * 4;
+
+        if (write(m_output_file_fd, m_output_short_buffer, size * sizeof(int16_t)) != size * sizeof(int16_t))
             throw runtime_error("Output file write error");
+    }
 
     return {buffer, hint};
 }
