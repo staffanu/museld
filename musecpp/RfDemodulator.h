@@ -18,7 +18,8 @@ public:
     : m_log(log),
     m_filename(filename),
     m_input_fd(-1),
-    m_input_is_fifo(false)
+    m_input_is_fifo(false),
+    m_tmp_input_buffer{}
     {
     }
 
@@ -27,15 +28,13 @@ public:
     void cleanup();
 
 private:
-    static constexpr int c_input_buffer_size = 32768;
-
-    bool readDoubles(double *out, size_t n);
+    bool readFloats(float *out, size_t n);
 
     Logger &m_log;
     const std::string m_filename;
     int m_input_fd;
     const bool m_input_is_fifo;
-    int16_t m_tmp_input_buffer[c_input_buffer_size];
+    int16_t *m_tmp_input_buffer;
 };
 
 
