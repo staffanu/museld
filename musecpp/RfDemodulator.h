@@ -136,19 +136,19 @@ private:
     // we could link against the gnuradio libraries.
     static constexpr int c_decimation_rate = 2;
     static constexpr int c_sample_block_size = 4096;
-
+    static constexpr float c_sample_frequency = 62.5e6f;
+    static constexpr float c_center_frequency = 12.5e6f;
+    static constexpr float c_frequency_deviation = 1.9e6f;
+    static constexpr float c_2pi = 2 * (float)M_PI;
     static constexpr int c_AVX_floats_per_chunk = 8;
 
-    // The AVX code assumed that the filters fulfill the alignment requirements for __m256
-    static constexpr auto __m256_alignment = c_AVX_floats_per_chunk * alignof(float);
-
-    alignas(__m256_alignment) static constexpr std::pair<std::array<float, 32>, std::array<float, 32>> c_bandpass_filter = initializeBandpassFilter();
+    static constexpr std::pair<std::array<float, 32>, std::array<float, 32>> c_bandpass_filter = initializeBandpassFilter();
     static constexpr int c_bandpass_filter_size = c_bandpass_filter.first.size();
 
-    alignas(__m256_alignment) static constexpr std::array<float, 32> c_lowpass_filter = initializeLowpassFilter();
+    static constexpr std::array<float, 32> c_lowpass_filter = initializeLowpassFilter();
     static constexpr int c_lowpass_filter_size = c_lowpass_filter.size();
 
-    alignas(__m256_alignment) static constexpr std::array<float, 16> c_rrc_filter = initializeRrcFilter();
+    static constexpr std::array<float, 16> c_rrc_filter = initializeRrcFilter();
     static constexpr int c_rrc_filter_size = c_rrc_filter.size();
 
     static constexpr int c_input_buffer_size = c_sample_block_size + c_bandpass_filter_size - 1;
@@ -162,6 +162,7 @@ private:
                 const float *input,   // input signal of length at least output_size + filter_length - 1
                 size_t output_size,   // number of output values to compute
                 const std::array<float, filter_size> &filter,  // reversed filter coefficients, needs to be aligned at 32 byte multiple (c_AVX_floats_per_chunk * sizeof(float))
+                int decimation_rate,
                 float *output);
 
     Logger &m_log;

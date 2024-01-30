@@ -60,28 +60,26 @@ void RfDemodulator::demodulate() {
         sample_counter += c_sample_block_size;
 
         // First run the input signal through the bandpass filter that also converts the signal into an analytic signal
-        firFilter(input_buffer, c_sample_block_size, c_bandpass_filter.first, analytic_buffer_re);
-        firFilter(input_buffer, c_sample_block_size, c_bandpass_filter.second, analytic_buffer_im);
+        firFilter(input_buffer, c_sample_block_size, c_bandpass_filter.first, 1, analytic_buffer_re);
+        firFilter(input_buffer, c_sample_block_size, c_bandpass_filter.second, 1, analytic_buffer_im);
 
         // Demodulate the analytic signal
         for (int index = 0; index < c_sample_block_size; index++) {
             float angle = atan2(analytic_buffer_im[index], analytic_buffer_re[index]);
-            float phase_diff = angle > prev_angle ? angle - prev_angle : 2 * (float)M_PI + angle - prev_angle;
+            float phase_diff = angle - prev_angle + (float)(angle < prev_angle) * c_2pi;
             prev_angle = angle;
-            float fm_out = (phase_diff * (62.5e6f / (2.f * (float)M_PI * 12.5e6f)) - 1.f) * (12.5e6f / 1.9e6f);
+            // fm_out will be in the range [-1, 1] when the frequency varies between c_center_frequency - c_frequency_deviation and c_center_frequency + c_frequency_deviation
+            // This expression is probably easier to understand but has one more multiplication:
+            // (phase_diff * (c_sample_frequency / (c_2pi * c_center_frequency)) - 1.f) * (c_center_frequency / c_frequency_deviation);
+            float fm_out = phase_diff * (c_sample_frequency / (c_2pi * c_frequency_deviation)) - c_center_frequency / c_frequency_deviation;
             lowpass_in_buffer[index + c_lowpass_filter_size - 1] = fm_out;
         }
 
-        // Lowpass filter the demodulated signal
-        firFilter(lowpass_in_buffer, c_sample_block_size, c_lowpass_filter, lowpass_out_buffer);
-
-        // Down-sample the signal
-        for (int index = 0, rcc_index = c_rrc_filter_size - 1; index < c_sample_block_size; index += c_decimation_rate, rcc_index++) {
-            rrc_in_buffer[rcc_index] = lowpass_out_buffer[index];
-        }
+        // Lowpass filter the demodulated signal, and down-sample before rrc filtering
+        firFilter(lowpass_in_buffer, c_sample_block_size / 2, c_lowpass_filter, 2, rrc_in_buffer + c_rrc_filter_size - 1);
 
         // Run the down-sampled signal through the root raised cosine pulse-shaping filter
-        firFilter(rrc_in_buffer, c_sample_block_size / 2, c_rrc_filter, rrc_out_buffer);
+        firFilter(rrc_in_buffer, c_sample_block_size / 2, c_rrc_filter, 1, rrc_out_buffer);
 
         // Convert the output to ints and scale -- this step could be avoided since the decoder starts with converting
         // back to floats
@@ -134,20 +132,32 @@ bool RfDemodulator::readFloats(float *out, size_t n) {
 
 template<size_t filter_size> void RfDemodulator::firFilter(
         const float *input,   // input signal of length at least output_size + filter_length - 1
-        size_t output_size,   // number of output values to compute
+        size_t output_size,   // number of output values to compute -- must be even!
         const array<float, filter_size> &filter,  // reversed filter coefficients, needs to be aligned at 32 byte multiple (c_AVX_floats_per_chunk * sizeof(float))
+        int decimation_rate,
         float *output) {
-    array<float, c_AVX_floats_per_chunk> tmp_store{};
+    assert(output_size % 2 == 0);
+    alignas(__m256) array<float, c_AVX_floats_per_chunk> tmp_store0{};
+    alignas(__m256) array<float, c_AVX_floats_per_chunk> tmp_store1{};
 
-    for (int i = 0; i < output_size; i++) {
-        __m256 out_chunk = _mm256_setzero_ps();
+    for (int oi = 0, ii = 0; oi < output_size; oi += 2, ii += 2 * decimation_rate) {
+        __m256 out_chunk0 = _mm256_setzero_ps();
+        __m256 out_chunk1 = _mm256_setzero_ps();
+
         for (int j = 0; j < filter_size; j += c_AVX_floats_per_chunk) {
-            __m256 input_chunk = _mm256_loadu_ps(input + i + j);
-            __m256 filter_chunk = _mm256_load_ps(filter.data() + j); // notice aligned load
-            out_chunk = _mm256_add_ps(out_chunk, _mm256_mul_ps(input_chunk, filter_chunk));
+            __m256 filter_chunk = _mm256_loadu_ps(filter.data() + j);
+
+            __m256 input_chunk0 = _mm256_loadu_ps(input + ii + j);
+            out_chunk0 = _mm256_add_ps(out_chunk0, _mm256_mul_ps(input_chunk0, filter_chunk));
+
+            __m256 input_chunk1 = _mm256_loadu_ps(input + ii + decimation_rate + j);
+            out_chunk1 = _mm256_add_ps(out_chunk1, _mm256_mul_ps(input_chunk1, filter_chunk));
         }
-        _mm256_storeu_ps(tmp_store.data(), out_chunk);
-        output[i] = std::accumulate(tmp_store.begin(), tmp_store.end(), 0.f);
+        _mm256_store_ps(tmp_store0.data(), out_chunk0); // aligned store
+        output[oi] = std::accumulate(tmp_store0.begin(), tmp_store0.end(), 0.f);
+
+        _mm256_store_ps(tmp_store1.data(), out_chunk1); // aligned store
+        output[oi + 1] = std::accumulate(tmp_store1.begin(), tmp_store1.end(), 0.f);
     }
 }
 
@@ -157,11 +167,12 @@ template<size_t filter_size> void RfDemodulator::firFilter(
         const float *input,   // input signal of length output_length + filter_length - 1
         size_t output_size, // usable input (not including the filter_length-1 extra values)
         const array<float, filter_size> &filter,  // reversed filter coefficients
+        int decimation_rate,
         float *output) {
     for (auto i = 0; i < output_size; i++) {
         output[i] = 0;
         for (auto j = 0; j < filter_size; j++) {
-            output[i] += input[i + j] * filter[j];
+            output[i] += input[i * decimation_rate + j] * filter[j];
         }
     }
 }
