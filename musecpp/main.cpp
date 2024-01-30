@@ -11,6 +11,7 @@
 #include "PhaseCorrect16MHzInputReader.h"
 #include "Logger.h"
 #include "musevk/TimestampQueryPool.h"
+#include "RfDemodulator.h"
 
 #define INPUT_BUFFER_COUNT 6
 
@@ -118,7 +119,8 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                                            vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer,
                                            vk::AccessFlags(), vk::AccessFlagBits::eTransferRead);
             command_buffer->enqueueTransitionMemoryLayout(swap_chain_image,
-                                                          vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
+                                                          vk::ImageLayout::eUndefined,
+                                                          vk::ImageLayout::eTransferDstOptimal,
                                                           vk::PipelineStageFlagBits::eTopOfPipe,
                                                           vk::PipelineStageFlagBits::eTransfer,
                                                           vk::AccessFlags(),
@@ -137,7 +139,8 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                                              region);
 
             command_buffer->enqueueTransitionMemoryLayout(swap_chain_image,
-                                                          vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR,
+                                                          vk::ImageLayout::eTransferDstOptimal,
+                                                          vk::ImageLayout::ePresentSrcKHR,
                                                           vk::PipelineStageFlagBits::eTransfer,
                                                           vk::PipelineStageFlagBits::eBottomOfPipe,
                                                           vk::AccessFlagBits::eTransferWrite,
@@ -221,7 +224,8 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         auto t1 = chrono::high_resolution_clock::now();
         auto time_us = (double) chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
         log.info(eApplication | ePerformance,
-            fmt::format("Avg {:.3f} ms/frame ({:.3f} frames/s)",
+            fmt::format("Total {} frames.  Avg {:.3f} ms/frame ({:.3f} frames/s)",
+                        field_count / 2,
                         time_us / 1000.0 / field_count * 2,
                         1000000.0 / time_us * field_count / 2));
         if (benchmark_shaders)
@@ -265,6 +269,7 @@ int main(int argc, char *argv[]) {
     bool decode_all_fields = true;
     bool full_screen = false;
     bool no_sync = false;
+    bool demodulate = false;
     InputFormat input_format = eUnknown;
     double input_sample_frequency = 40e6;
     bool input_is_fifo = false;
@@ -288,6 +293,8 @@ int main(int argc, char *argv[]) {
                 input_format = eLittleEndianShorts;
             else if (*it == "--big-endian")
                 input_format = eBigEndianShorts;
+            else if (*it == "--demodulate")
+                demodulate = true;
             else if (*it == "--fifo")
                 input_is_fifo = true;
             else if (*it == "--full-frames-only")
@@ -323,6 +330,15 @@ int main(int argc, char *argv[]) {
                     throw runtime_error("File not found: " + string(*it));
                 Logger log(log_selection);
 //                Logger log({{eInput, eWarn}, {eAudio, eWarn}, {eVideo, eWarn}, {ePerformance, eWarn}});
+
+                if (demodulate) {
+                    RfDemodulator demodulator(log, *it);
+                    demodulator.initialize();
+                    demodulator.demodulate();
+                    demodulator.cleanup();
+                    exit(0);
+                }
+
                 InputReader *reader;
                 switch (input_format) {
                     case eOverSampledUnsignedBytes:

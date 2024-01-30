@@ -10,12 +10,15 @@ find_package(Vulkan REQUIRED)
 
 SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake-modules" ${CMAKE_MODULE_PATH})
 find_package(PORTAUDIO REQUIRED)
+include_directories("${PORTAUDIO_INCLUDE_DIRS}")
 
 #add_compile_options(-O0 -pg -g)
 #SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Og -pg -g")
 #SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -pg -g")
 
-include_directories("${PORTAUDIO_INCLUDE_DIRS}")
+# -mavx is hopefully implied by -march=native
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} --fast-math -march=native" )
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} --fast-math -march=native" )
 
 add_executable(musecpp
         main.cpp
@@ -34,6 +37,7 @@ add_executable(musecpp
         ResamplingInputReader.cpp ResamplingInputReader.h
         InputPll.cpp InputPll.h
         PhaseCorrect16MHzInputReader.cpp PhaseCorrect16MHzInputReader.h
+        RfDemodulator.cpp RfDemodulator.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandBuffer.cpp musevk/CommandBuffer.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h

@@ -109,6 +109,8 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
         m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame_buffer->data());
         m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
+        // The control signal is decoded from the input directly so we do not have to wait for the completion
+        // of applyEqAndDeemphasisAndGamma
         if (m_decode_video)
             frame_buffer->ProcessControlData(input_vulkan_buffer->data<float>(), m_eq);
     }
