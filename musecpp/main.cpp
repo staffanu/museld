@@ -46,6 +46,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     GLFWwindow *window = glfwCreateWindow(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2,
                                           "MUSE", full_screen ? glfwGetPrimaryMonitor() : nullptr, nullptr);
     glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
 
     musevk::VulkanManager manager(log);
     manager.initVulkan(window, no_sync);
