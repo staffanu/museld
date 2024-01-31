@@ -40,6 +40,9 @@ bool InputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> 
     m_log.debug(eInput, fmt::format("Using {} input buffers", m_vacant_muse_input_buffers.size()));
 
     m_reader_thread = new thread(&InputReader::threadFunc, this);
+#ifdef linux
+    pthread_setname_np(m_reader_thread->native_handle(), "musecpp-reader");
+#endif
 
     if (m_output_filename.has_value()) {
         m_output_file_fd = open(m_output_filename.value().c_str(),

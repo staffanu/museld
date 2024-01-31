@@ -69,8 +69,6 @@ void PhaseCorrect16MHzInputReader::seek(double seconds) {
 }
 
 void PhaseCorrect16MHzInputReader::threadFunc() {
-    //pthread_setname_np(m_reader_thread->native_handle(), "musecpp-reader");
-
     for (;;) {
         shared_ptr<musevk::VulkanBuffer> buffer = nullptr;
         {

@@ -112,8 +112,6 @@ void ResamplingInputReader::seek(double seconds) {
 }
 
 void ResamplingInputReader::threadFunc() {
-    //pthread_setname_np(m_reader_thread->native_handle(), "musecpp-reader");
-
     float sample_buffer[c_sample_buffer_size];
     double input_samples_per_sample = m_input_pll.getInputSamplesPerSample();
     int samples_to_read = 1;

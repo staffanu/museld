@@ -33,6 +33,9 @@ bool RfDemodulator::initialize(int output_fd) {
 #endif
 
     m_demodulator_thread = new thread(&RfDemodulator::demodulate, this);
+#ifdef linux
+    pthread_setname_np(m_demodulator_thread->native_handle(), "musecpp-demod");
+#endif
 
     return true;
 }
