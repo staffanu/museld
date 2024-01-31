@@ -10,10 +10,19 @@
 
 using namespace std;
 
-bool RfDemodulator::initialize() {
+RfDemodulator::RfDemodulator(Logger &log, std::string filename, bool input_is_fifo)
+: m_log(log),
+  m_filename(std::move(filename)),
+  m_input_fd(-1),
+  m_input_is_fifo(input_is_fifo),
+  m_output_fd(-1) {
+}
+
+bool RfDemodulator::initialize(int output_fd) {
+    m_output_fd = output_fd;
     m_input_fd = open(m_filename.c_str(), O_NONBLOCK);
     if (m_input_fd == -1)
-        throw runtime_error("Unable to open file");
+        throw runtime_error(fmt::format("RfDemodulator: Unable to open input file {}", m_filename));
 
 #ifdef linux
     if (m_input_is_fifo) {
@@ -23,41 +32,47 @@ bool RfDemodulator::initialize() {
     }
 #endif
 
+    m_demodulator_thread = new thread(&RfDemodulator::demodulate, this);
+
     return true;
 }
 
+void RfDemodulator::seek(double seconds) {
+    std::unique_lock<std::mutex> lock(m_mutex);
+
+    off_t samples_to_seek = (off_t) (seconds * c_sample_frequency);
+    off_t bytes_to_seek = 2 * samples_to_seek;
+    m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples, {} bytes.",
+                                   seconds, samples_to_seek, bytes_to_seek));
+    lseek(m_input_fd, bytes_to_seek, SEEK_CUR);
+}
+
 void RfDemodulator::cleanup() {
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_stop_request = true;
+    }
+    m_demodulator_thread->join();
     close(m_input_fd);
 }
 
 void RfDemodulator::demodulate() {
-    auto m_out_file_fd = open("outfile",  O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if (m_out_file_fd == -1)
-        throw runtime_error("Unable to open output file");
-
     assert(c_sample_block_size % c_decimation_rate == 0);
     assert(c_bandpass_filter_size % c_AVX_floats_per_chunk == 0);
     assert(c_lowpass_filter_size % c_AVX_floats_per_chunk == 0);
     assert(c_rrc_filter_size % c_AVX_floats_per_chunk == 0);
 
+    // TODO: initialize buffers with 0.f
     float input_buffer[c_input_buffer_size];
     float analytic_buffer_re[c_sample_block_size];
     float analytic_buffer_im[c_sample_block_size];
     float lowpass_in_buffer[c_lowpass_in_buffer_size];
-    float lowpass_out_buffer[c_sample_block_size];
     float rrc_in_buffer[c_rrc_in_buffer_size];
     float rrc_out_buffer[c_sample_block_size / c_decimation_rate];
     int16_t output_buffer[c_output_buffer_size];
 
     float prev_angle;
-    auto t0 = chrono::high_resolution_clock::now();
-
-    if (!readFloats(input_buffer, c_bandpass_filter_size - 1))
-        throw runtime_error("input file too short");
-    long sample_counter = c_bandpass_filter_size - 1;
-
-    while (readFloats(input_buffer + c_bandpass_filter_size - 1, c_sample_block_size) && sample_counter < 62500000 * 10) {
-        sample_counter += c_sample_block_size;
+    while (readFloats(input_buffer + c_bandpass_filter_size - 1, c_sample_block_size)) {
 
         // First run the input signal through the bandpass filter that also converts the signal into an analytic signal
         firFilter(input_buffer, c_sample_block_size, c_bandpass_filter.first, 1, analytic_buffer_re);
@@ -88,7 +103,7 @@ void RfDemodulator::demodulate() {
             output_buffer[index] = value;
         }
 
-        if (write(m_out_file_fd, output_buffer, c_output_buffer_size * sizeof(int16_t)) != c_output_buffer_size * sizeof(int16_t))
+        if (write(m_output_fd, output_buffer, c_output_buffer_size * sizeof(int16_t)) != c_output_buffer_size * sizeof(int16_t))
             throw runtime_error("write failed");
 
         // Copy the end of the filter inputs to the start of the corresponding buffers
@@ -96,16 +111,17 @@ void RfDemodulator::demodulate() {
         memcpy(lowpass_in_buffer, lowpass_in_buffer + c_lowpass_in_buffer_size - c_lowpass_filter_size + 1, (c_lowpass_filter_size - 1) * sizeof(float));
         memcpy(rrc_in_buffer, rrc_in_buffer + c_rrc_in_buffer_size - c_rrc_filter_size + 1, (c_rrc_filter_size - 1) * sizeof(float));
     }
-
-    auto t1 = chrono::high_resolution_clock::now();
-    auto time_us = (double) chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
-    m_log.info(ePerformance, fmt::format("Total time {:.3f} s", time_us / 1e6));
+    // let the reader know we're done
+    close(m_output_fd);
 }
 
 bool RfDemodulator::readFloats(float *out, size_t n) {
     int16_t m_tmp_input_buffer[c_input_buffer_size];
     int filled_bytes = 0;
     do {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        if (m_stop_request)
+            return false;
         ssize_t read_count = read(m_input_fd,
                                   (void *)((char *)m_tmp_input_buffer + filled_bytes),
                                   n * sizeof(int16_t) - filled_bytes);

@@ -331,14 +331,9 @@ int main(int argc, char *argv[]) {
                 Logger log(log_selection);
 //                Logger log({{eInput, eWarn}, {eAudio, eWarn}, {eVideo, eWarn}, {ePerformance, eWarn}});
 
-                if (demodulate) {
-                    RfDemodulator demodulator(log, *it);
-                    demodulator.initialize();
-                    demodulator.demodulate();
-                    demodulator.cleanup();
-                    exit(0);
-                }
 
+                if (demodulate)
+                    input_format = eOverSampledSignedShortsLittleEndian;
                 InputReader *reader;
                 switch (input_format) {
                     case eOverSampledUnsignedBytes:
@@ -346,7 +341,7 @@ int main(int argc, char *argv[]) {
                         reader = new ResamplingInputReader(
                                 log, *it,
                                 input_format == eOverSampledSignedShortsLittleEndian ? ResamplingInputReader::eSignedShortLittleEndian : ResamplingInputReader::eUnsignedByte,
-                                input_sample_frequency, input_is_fifo, initial_seek_seconds,
+                                input_sample_frequency, input_is_fifo, initial_seek_seconds, demodulate,
                                 output_filename);
                         break;
                     case eLittleEndianShorts:

@@ -15,11 +15,12 @@ using namespace std;
 ResamplingInputReader::ResamplingInputReader(
         Logger &log,
         const std::string &filename, InputFormat input_format, double sample_rate,
-        bool input_is_fifo, double initial_seek_seconds,
+        bool input_is_fifo, double initial_seek_seconds, bool demodulate,
         const std::optional<std::string> &output_filename)
         : InputReader(log, filename, input_is_fifo, initial_seek_seconds, output_filename),
           m_input_format(input_format),
-          m_input_pll(log, sample_rate),
+          m_sample_rate(sample_rate),
+          m_input_pll(log),
           m_file_fd(-1),
           m_file_input_buffer{},
           m_t(0),
@@ -39,12 +40,34 @@ ResamplingInputReader::ResamplingInputReader(
         default:
             throw runtime_error("Unrecognized input format");
     }
+
+    if (demodulate)
+        demodulator = new RfDemodulator(log, m_filename, input_is_fifo);
 }
 
 bool ResamplingInputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) {
-    m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
-    if (m_file_fd == -1)
-        throw runtime_error("Unable to open file");
+    if (demodulator == nullptr) {
+        m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
+        if (m_file_fd == -1)
+            throw runtime_error(fmt::format("ResamplingInputReader: Unable to open input file {}", m_filename));
+    } else {
+        m_input_format = eSignedShortLittleEndian;
+        m_bytes_per_sample = 2;
+        m_output_multiplier = 1.0 / 256.0;
+        m_output_add = 128;
+        m_sample_rate = 31.25e6;
+
+        int pipe_fd[2];
+        if (pipe(pipe_fd))
+            throw runtime_error("unable to create pipe");
+        if (fcntl(pipe_fd[0], F_SETFL, O_NONBLOCK) == -1)
+            throw runtime_error(fmt::format("unable to set pipe read end to non-blocking: {}", strerror(errno)));
+
+        m_file_fd = pipe_fd[0];
+        demodulator->initialize(pipe_fd[1]);
+    }
+
+    m_input_pll.initialize(m_sample_rate);
 
 #ifdef linux
     if (m_input_is_fifo) {
@@ -57,6 +80,9 @@ bool ResamplingInputReader::initialize(std::vector<std::shared_ptr<musevk::Vulka
 }
 
 void ResamplingInputReader::cleanup() {
+    if (demodulator != nullptr)
+        demodulator->cleanup();
+
     InputReader::cleanup();
 
     if (m_file_fd != -1)
@@ -65,18 +91,23 @@ void ResamplingInputReader::cleanup() {
 
 void ResamplingInputReader::seek(double seconds) {
     if (!m_input_is_fifo) {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        if (demodulator != nullptr) {
+            demodulator->seek(seconds);
+        } else {
+            std::unique_lock<std::mutex> lock(m_mutex);
 
-        off_t samples_to_seek = (off_t) (seconds * 16.2e6 * m_input_pll.getInputSamplesPerSample());
-        off_t bytes_to_seek = m_bytes_per_sample * samples_to_seek;
-        m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples, {} bytes.",
-                                       seconds, samples_to_seek, bytes_to_seek));
-        lseek(m_file_fd, bytes_to_seek, SEEK_CUR);
+            off_t samples_to_seek = (off_t) (seconds * 16.2e6 * m_input_pll.getInputSamplesPerSample());
+            off_t bytes_to_seek = m_bytes_per_sample * samples_to_seek;
+            m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples, {} bytes.",
+                                           seconds, samples_to_seek, bytes_to_seek));
+            lseek(m_file_fd, bytes_to_seek, SEEK_CUR);
 
-        // discard content in existing input buffers
-        copy(m_filled_muse_input_buffers.begin(), m_filled_muse_input_buffers.end(), back_inserter(m_vacant_muse_input_buffers));
-        m_filled_muse_input_buffers.clear();
-        m_cv_vacant.notify_one();
+            // discard content in existing input buffers
+            copy(m_filled_muse_input_buffers.begin(), m_filled_muse_input_buffers.end(),
+                 back_inserter(m_vacant_muse_input_buffers));
+            m_filled_muse_input_buffers.clear();
+            m_cv_vacant.notify_one();
+        }
     }
 }
 

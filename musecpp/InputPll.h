@@ -13,7 +13,8 @@ class Logger;
 
 class InputPll {
 public:
-    explicit InputPll(Logger &log, double sample_rate);
+    explicit InputPll(Logger &log);
+    void initialize(double sample_rate);
 
     // returns true if output contains a full output frame
     struct PllResult {

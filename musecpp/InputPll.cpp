@@ -13,17 +13,8 @@ using namespace std;
 double InputPll::c_omega = 2 * M_PI * 5000 / 54e6;
 double InputPll::c_zeta = 0.75;
 
-InputPll::InputPll(Logger &log, double sample_rate)
+InputPll::InputPll(Logger &log)
 : m_log(log),
-  m_input_samples_per_sample_ref(sample_rate / 16.2e6),
-  m_input_samples_per_sample(m_input_samples_per_sample_ref),
-  m_Ts(m_input_samples_per_sample_ref * 480),
-  m_G1(1 - exp(-2 * c_zeta * c_omega * m_Ts)),
-  m_G2(1 + exp(-2 * c_omega * c_zeta * m_Ts) -
-    2 * exp(-c_omega * c_zeta * m_Ts) * cos(c_omega * m_Ts * sqrt(1 - c_zeta * c_zeta))),
-  m_GpdGvco(64 * (1 / m_input_samples_per_sample_ref) * 480),
-  m_g1(m_G1 / m_GpdGvco),
-  m_g2(m_G2 / m_GpdGvco),
   m_pixel(1),
   m_line(1),
   m_line1_frame_pulse_sum(0),
@@ -33,6 +24,19 @@ InputPll::InputPll(Logger &log, double sample_rate)
   m_missed_line_pulses(0),
   m_state(eSearching),
   m_error_sum(0) {
+}
+
+void InputPll::initialize(double sample_rate) {
+    m_input_samples_per_sample_ref = sample_rate / 16.2e6;
+    m_input_samples_per_sample = m_input_samples_per_sample_ref;
+    m_Ts = m_input_samples_per_sample_ref * 480;
+    m_G1 = 1 - exp(-2 * c_zeta * c_omega * m_Ts);
+    m_G2 = 1 + exp(-2 * c_omega * c_zeta * m_Ts) -
+           2 * exp(-c_omega * c_zeta * m_Ts) * cos(c_omega * m_Ts * sqrt(1 - c_zeta * c_zeta));
+    m_GpdGvco = 64 * (1 / m_input_samples_per_sample_ref) * 480;
+    m_g1 = m_G1 / m_GpdGvco;
+    m_g2 = m_G2 / m_GpdGvco;
+
     m_log.debug(eInput, fmt::format("m_g1={:.5f} m_g2={:7f}", m_g1, m_g2));
 }
 

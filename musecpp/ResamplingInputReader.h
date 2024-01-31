@@ -6,6 +6,7 @@
 #define MUSECPP_RESAMPLINGINPUTREADER_H
 
 #include "InputReader.h"
+#include "RfDemodulator.h"
 
 class ResamplingInputReader : public InputReader {
 public:
@@ -15,7 +16,7 @@ public:
     };
     explicit ResamplingInputReader(Logger &log, const std::string &filename, InputFormat input_format,
                                    double sample_rate, bool input_is_fifo, double initial_seek_seconds,
-                                   const std::optional<std::string> &output_filename);
+                                   bool demodulate, const std::optional<std::string> &output_filename);
 
     bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) override;
     void cleanup() override;
@@ -34,6 +35,9 @@ private:
     InputFormat m_input_format;
     InputPll m_input_pll;
     int m_file_fd;
+    double m_sample_rate;
+    RfDemodulator *demodulator;
+
     uint8_t m_file_input_buffer[c_input_buffer_size];
     int m_file_input_buffer_bytes;
     int m_file_input_buffer_read_pos;

@@ -120,15 +120,9 @@ using namespace RfDemodulatorHelper;
 
 class RfDemodulator {
 public:
-    RfDemodulator(Logger &log, const std::string &filename)
-    : m_log(log),
-    m_filename(filename),
-    m_input_fd(-1),
-    m_input_is_fifo(false) {
-    }
-
-    bool initialize();
-    void demodulate();
+    RfDemodulator(Logger &log, std::string filename, bool input_is_fifo);
+    bool initialize(int output_fd);
+    void seek(double seconds);
     void cleanup();
 
 private:
@@ -156,6 +150,8 @@ private:
     static constexpr int c_rrc_in_buffer_size = c_sample_block_size / c_decimation_rate + c_rrc_filter_size - 1;
     static constexpr int c_output_buffer_size = c_sample_block_size / c_decimation_rate;
 
+    void demodulate();
+
     bool readFloats(float *out, size_t n);
 
     template<size_t filter_size> void firFilter(
@@ -168,7 +164,11 @@ private:
     Logger &m_log;
     const std::string m_filename;
     int m_input_fd;
-    const bool m_input_is_fifo;
+    bool m_input_is_fifo;
+    int m_output_fd;
+    std::thread *m_demodulator_thread;
+    std::mutex m_mutex;
+    bool m_stop_request;
 };
 
 #endif //MUSECPP_RFDEMODULATOR_H
