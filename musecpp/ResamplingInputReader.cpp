@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fmt/format.h>
 #include <cassert>
+#include <filesystem>
 #include "musevk/VulkanBuffer.h"
 #include "ResamplingInputReader.h"
 #include "Logger.h"
@@ -15,17 +16,26 @@ using namespace std;
 ResamplingInputReader::ResamplingInputReader(
         Logger &log,
         const std::string &filename, InputFormat input_format, double sample_rate,
-        bool input_is_fifo, double initial_seek_seconds, bool demodulate,
+        double initial_seek_seconds, bool demodulate,
         const std::optional<std::string> &output_filename)
-        : InputReader(log, filename, input_is_fifo, initial_seek_seconds, output_filename),
+        : InputReader(log, filename,
+                      filesystem::is_fifo(filename),
+                      initial_seek_seconds, output_filename),
           m_input_format(input_format),
           m_sample_rate(sample_rate),
           m_input_pll(log),
           m_file_fd(-1),
+          m_demodulator(nullptr),
           m_file_input_buffer{},
           m_t(0),
           m_file_input_buffer_bytes(c_input_buffer_lookback),
           m_file_input_buffer_read_pos(c_input_buffer_lookback) {
+    if (demodulate) {
+        m_input_format = eFloat;
+        m_demodulator = new RfDemodulator(log, m_filename);
+        m_sample_rate = 31.25e6;
+    }
+
     switch (m_input_format) {
         case eUnsignedByte:
             m_bytes_per_sample = 1;
@@ -37,62 +47,53 @@ ResamplingInputReader::ResamplingInputReader(
             m_output_multiplier = 1.0 / 256.0;
             m_output_add = 128;
             break;
+        case eFloat:
+            m_bytes_per_sample = 4;
+            m_output_multiplier = 1;
+            m_output_add = 0;
+            break;
         default:
             throw runtime_error("Unrecognized input format");
     }
-
-    if (demodulate)
-        demodulator = new RfDemodulator(log, m_filename, input_is_fifo);
 }
 
 bool ResamplingInputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) {
-    if (demodulator == nullptr) {
+    if (m_demodulator == nullptr) {
         m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
         if (m_file_fd == -1)
             throw runtime_error(fmt::format("ResamplingInputReader: Unable to open input file {}", m_filename));
+#ifdef linux
+        if (filesystem::is_fifo(m_filename)) {
+            m_log.debug(eInput, fmt::format("Pipe size: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
+            fcntl(m_file_fd, F_SETPIPE_SZ, 1024 * 1024);
+            m_log.debug(eInput, fmt::format("Pipe size now: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
+        }
+#endif
     } else {
-        m_input_format = eSignedShortLittleEndian;
-        m_bytes_per_sample = 2;
-        m_output_multiplier = 1.0 / 256.0;
-        m_output_add = 128;
-        m_sample_rate = 31.25e6;
-
-        int pipe_fd[2];
-        if (pipe(pipe_fd))
-            throw runtime_error("unable to create pipe");
-        if (fcntl(pipe_fd[0], F_SETFL, O_NONBLOCK) == -1)
-            throw runtime_error(fmt::format("unable to set pipe read end to non-blocking: {}", strerror(errno)));
-
-        m_file_fd = pipe_fd[0];
-        demodulator->initialize(pipe_fd[1]);
+        m_demodulator->initialize();
     }
 
     m_input_pll.initialize(m_sample_rate);
 
-#ifdef linux
-    if (m_input_is_fifo) {
-        m_log.debug(eInput, fmt::format("Pipe size: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
-        fcntl(m_file_fd, F_SETPIPE_SZ, 1024 * 1024);
-        m_log.debug(eInput, fmt::format("Pipe size now: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
-    }
-#endif
     return InputReader::initialize(buffers);
 }
 
 void ResamplingInputReader::cleanup() {
-    if (demodulator != nullptr)
-        demodulator->cleanup();
-
     InputReader::cleanup();
+
+    if (m_demodulator != nullptr) {
+        m_demodulator->cleanup();
+        delete m_demodulator;
+    }
 
     if (m_file_fd != -1)
         close(m_file_fd);
 }
 
 void ResamplingInputReader::seek(double seconds) {
-    if (!m_input_is_fifo) {
-        if (demodulator != nullptr) {
-            demodulator->seek(seconds);
+    if (!m_input_is_realtime) {
+        if (m_demodulator != nullptr) {
+            m_demodulator->seek(seconds);
         } else {
             std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -119,7 +120,7 @@ void ResamplingInputReader::threadFunc() {
     while (readSamples(samples_to_read, sample_buffer, input_samples_per_sample)) {
         if (buffer == nullptr) {
             std::unique_lock<std::mutex> lock(m_mutex);
-            if (m_input_is_fifo && m_vacant_muse_input_buffers.empty()) {
+            if (m_input_is_realtime && m_vacant_muse_input_buffers.empty()) {
                 // discard a filled buffer -- this is better than having the writer to the fifo wait
                 m_log.warn(eInput, "Discarding filled input buffer due to overrun");
                 assert(!m_filled_muse_input_buffers.empty());
@@ -127,8 +128,10 @@ void ResamplingInputReader::threadFunc() {
                 m_filled_muse_input_buffers.pop_back();
             }
             m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_muse_input_buffers.empty();});
-            if (m_stop_request)
+            if (m_stop_request) {
+                m_log.info(eInput, "ResamplingInputReader: stop requested");
                 break;
+            }
             buffer = m_vacant_muse_input_buffers.front();
             m_vacant_muse_input_buffers.pop_front();
         }
@@ -158,36 +161,61 @@ bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_
         int samples_to_read = (int)t;
         t -= samples_to_read;
 
-        if (read_pos + samples_to_read * m_bytes_per_sample >= m_file_input_buffer_bytes) {
-            // move remaining input to start of buffer
-            int start_copy_pos = read_pos - c_input_buffer_lookback * m_bytes_per_sample;
-            int n = m_file_input_buffer_bytes - start_copy_pos;
-            if (n > 0) // 0 first time, and could be later if we have short reads
-                memcpy(m_file_input_buffer, m_file_input_buffer + start_copy_pos, n);
-            m_file_input_buffer_bytes -= start_copy_pos;
-            read_pos = c_input_buffer_lookback * m_bytes_per_sample;
-
-            do {
-                ssize_t read_count = read(m_file_fd,
-                                          (void *) (m_file_input_buffer + m_file_input_buffer_bytes),
-                                          c_input_buffer_size - m_file_input_buffer_bytes);
-                if (read_count == -1 && errno == EAGAIN)
-                    this_thread::sleep_for(chrono::milliseconds(1));
-                else if (read_count == 0) {
-                    if (!m_input_is_fifo)
-                        return false;
-                } else if (read_count == -1)
-                    throw runtime_error(fmt::format("Error reading from file: {}", strerror(errno)));
-                else
-                    m_file_input_buffer_bytes += (int)read_count;
-            } while (read_pos + samples_to_read * m_bytes_per_sample >= m_file_input_buffer_bytes);
-        }
-        read_pos += samples_to_read * m_bytes_per_sample;
-
         double b0, b1, b2, b3;
+        if (m_demodulator == nullptr) {
+            if (read_pos + samples_to_read * m_bytes_per_sample >= m_file_input_buffer_bytes) {
+                // move remaining input to start of buffer
+                int start_copy_pos = read_pos - c_input_buffer_lookback * m_bytes_per_sample;
+                int n = m_file_input_buffer_bytes - start_copy_pos;
+                memcpy(m_file_input_buffer, m_file_input_buffer + start_copy_pos, n);
+                m_file_input_buffer_bytes -= start_copy_pos;
+                read_pos = c_input_buffer_lookback * m_bytes_per_sample;
+
+                do {
+                    ssize_t read_count = read(m_file_fd,
+                                              (void *) (m_file_input_buffer + m_file_input_buffer_bytes),
+                                              c_input_buffer_size - m_file_input_buffer_bytes);
+                    if (read_count == -1 && errno == EAGAIN)
+                        this_thread::sleep_for(chrono::milliseconds(1));
+                    else if (read_count == 0) {
+                        if (!m_input_is_realtime) {
+                            m_log.info(eInput, "ResamplingInputReader: end of file");
+                            return false;
+                        }
+                    } else if (read_count == -1)
+                        throw runtime_error(fmt::format("Error reading from file: {}", strerror(errno)));
+                    else
+                        m_file_input_buffer_bytes += (int) read_count;
+                } while (read_pos + samples_to_read * m_bytes_per_sample >= m_file_input_buffer_bytes);
+            }
+            read_pos += samples_to_read * m_bytes_per_sample;
+        } else {
+            // TODO: this is quite ugly -- rewrite
+            if (read_pos + samples_to_read * m_bytes_per_sample >= m_file_input_buffer_bytes) {
+                // move remaining input to start of buffer
+                int start_copy_pos = read_pos - c_input_buffer_lookback * m_bytes_per_sample;
+                int n = m_file_input_buffer_bytes - start_copy_pos;
+                memmove(m_file_input_buffer, m_file_input_buffer + start_copy_pos, n);
+                m_file_input_buffer_bytes -= start_copy_pos;
+                read_pos = c_input_buffer_lookback * m_bytes_per_sample;
+
+                auto block = m_demodulator->getNextDemodulatedBlock();
+                if (block == nullptr) {
+                    m_log.info(eInput, "ResamplingInputReader: no more demodulated blocks");
+                    return false;
+                }
+                memcpy(m_file_input_buffer + m_file_input_buffer_bytes, block->data,
+                       block->c_block_size * sizeof(float));
+                m_file_input_buffer_bytes += block->c_block_size * sizeof(float);
+                m_demodulator->returnBlock(block);
+            }
+            assert(read_pos + samples_to_read * m_bytes_per_sample < m_file_input_buffer_bytes);
+            read_pos += samples_to_read * m_bytes_per_sample;
+        }
+
         switch (m_input_format) {
             case eUnsignedByte:
-                b0 = m_file_input_buffer[read_pos - 3];
+                b0 = m_file_input_buffer[read_pos - 3]; // max lookback
                 b1 = m_file_input_buffer[read_pos - 2];
                 b2 = m_file_input_buffer[read_pos - 1];
                 b3 = m_file_input_buffer[read_pos - 0];
@@ -197,6 +225,12 @@ bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_
                 b1 = ((int16_t *)(m_file_input_buffer + read_pos))[-2];
                 b2 = ((int16_t *)(m_file_input_buffer + read_pos))[-1];
                 b3 = ((int16_t *)(m_file_input_buffer + read_pos))[0];
+                break;
+            case eFloat:
+                b0 = ((float *)(m_file_input_buffer + read_pos))[-3];
+                b1 = ((float *)(m_file_input_buffer + read_pos))[-2];
+                b2 = ((float *)(m_file_input_buffer + read_pos))[-1];
+                b3 = ((float *)(m_file_input_buffer + read_pos))[0];
                 break;
             default:
                 throw runtime_error("Unrecognized input format");

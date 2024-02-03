@@ -6,20 +6,22 @@
 #include <thread>
 #include <vector>
 #include <iostream>
+#include <filesystem>
 #include "RfDemodulator.h"
 
 using namespace std;
 
-RfDemodulator::RfDemodulator(Logger &log, std::string filename, bool input_is_fifo)
+RfDemodulator::RfDemodulator(Logger &log, std::string filename)
 : m_log(log),
   m_filename(std::move(filename)),
   m_input_fd(-1),
-  m_input_is_fifo(input_is_fifo),
-  m_output_fd(-1) {
+  m_input_is_fifo(filesystem::is_fifo(filename)),
+  m_demodulator_thread(nullptr),
+  m_stop_request(false),
+  m_reader_thread_finished(false) {
 }
 
-bool RfDemodulator::initialize(int output_fd) {
-    m_output_fd = output_fd;
+bool RfDemodulator::initialize() {
     m_input_fd = open(m_filename.c_str(), O_NONBLOCK);
     if (m_input_fd == -1)
         throw runtime_error(fmt::format("RfDemodulator: Unable to open input file {}", m_filename));
@@ -32,12 +34,34 @@ bool RfDemodulator::initialize(int output_fd) {
     }
 #endif
 
+    for (int i = 0; i < c_number_of_block_buffers; i++)
+        m_vacant_blocks.push_back(make_shared<DemodulatedBlock>());
+
     m_demodulator_thread = new thread(&RfDemodulator::demodulate, this);
 #ifdef linux
     pthread_setname_np(m_demodulator_thread->native_handle(), "musecpp-demod");
 #endif
 
     return true;
+}
+
+std::shared_ptr<DemodulatedBlock> RfDemodulator::getNextDemodulatedBlock() {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_cv_filled.wait(
+            lock,
+            [this] { return m_reader_thread_finished || !m_filled_blocks.empty(); });
+    if (m_filled_blocks.empty())
+        return nullptr;
+
+    auto block = m_filled_blocks.front();
+    m_filled_blocks.pop_front();
+    return block;
+}
+
+void RfDemodulator::returnBlock(std::shared_ptr<DemodulatedBlock> &buffer) {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_cv_vacant.notify_one();
+    m_vacant_blocks.push_back(buffer);
 }
 
 void RfDemodulator::seek(double seconds) {
@@ -53,10 +77,15 @@ void RfDemodulator::seek(double seconds) {
 void RfDemodulator::cleanup() {
     {
         std::unique_lock<std::mutex> lock(m_mutex);
+        m_cv_vacant.notify_one();
         m_stop_request = true;
     }
+    m_log.debug(eInput, "RfDemodulator: requested stop");
     m_demodulator_thread->join();
+    delete m_demodulator_thread;
     close(m_input_fd);
+    m_vacant_blocks.clear();
+    m_filled_blocks.clear();
 }
 
 void RfDemodulator::demodulate() {
@@ -64,18 +93,40 @@ void RfDemodulator::demodulate() {
     assert(c_bandpass_filter_size % c_AVX_floats_per_chunk == 0);
     assert(c_lowpass_filter_size % c_AVX_floats_per_chunk == 0);
     assert(c_rrc_filter_size % c_AVX_floats_per_chunk == 0);
+    assert(c_output_buffer_size == DemodulatedBlock::c_block_size);
 
-    // TODO: initialize buffers with 0.f
-    float input_buffer[c_input_buffer_size];
-    float analytic_buffer_re[c_sample_block_size];
-    float analytic_buffer_im[c_sample_block_size];
-    float lowpass_in_buffer[c_lowpass_in_buffer_size];
-    float rrc_in_buffer[c_rrc_in_buffer_size];
-    float rrc_out_buffer[c_sample_block_size / c_decimation_rate];
-    int16_t output_buffer[c_output_buffer_size];
+    float input_buffer[c_input_buffer_size] = {};
+    float analytic_buffer_re[c_sample_block_size] = {};
+    float analytic_buffer_im[c_sample_block_size] = {};
+    float lowpass_in_buffer[c_lowpass_in_buffer_size] = {};
+    float rrc_in_buffer[c_rrc_in_buffer_size] = {};
+    float dropout_abs_buffer[c_dropout_abs_buffer_size] = {};
+    float dropout_out_buffer[c_dropout_out_buffer_size] = {};
 
     float prev_angle;
-    while (readFloats(input_buffer + c_bandpass_filter_size - 1, c_sample_block_size)) {
+    long total_samples_read = 0;
+
+    while (!m_stop_request && readFloats(input_buffer + c_bandpass_filter_size - 1, c_sample_block_size)) {
+
+        // first get a free output block to write to
+        shared_ptr<DemodulatedBlock> block = nullptr;
+        {
+            std::unique_lock<std::mutex> lock(m_mutex);
+            if (m_input_is_fifo && m_vacant_blocks.empty()) {
+                // discard a filled buffer -- this is better than having the writer to the fifo wait
+                m_log.warn(eInput, "Discarding demodulated block due to overrun");
+                assert(!m_filled_blocks.empty());
+                m_vacant_blocks.push_back(m_filled_blocks.back());
+                m_filled_blocks.pop_back();
+            }
+            m_cv_vacant.wait(lock, [this] { return m_stop_request || !m_vacant_blocks.empty(); });
+            if (m_stop_request) {
+                m_log.info(eInput, "RfDemodulator: stop requested");
+                break;
+            }
+            block = m_vacant_blocks.front();
+            m_vacant_blocks.pop_front();
+        }
 
         // First run the input signal through the bandpass filter that also converts the signal into an analytic signal
         firFilter(input_buffer, c_sample_block_size, c_bandpass_filter.first, 1, analytic_buffer_re);
@@ -84,55 +135,64 @@ void RfDemodulator::demodulate() {
         // Demodulate the analytic signal
         for (int index = 0; index < c_sample_block_size; index++) {
             float angle = atan2(analytic_buffer_im[index], analytic_buffer_re[index]);
-            float phase_diff = angle - prev_angle + (float)(angle < prev_angle) * c_2pi;
+            float phase_diff = angle - prev_angle + (float) (angle < prev_angle) * c_2pi;
             prev_angle = angle;
             // fm_out will be in the range [-1, 1] when the frequency varies between c_center_frequency - c_frequency_deviation and c_center_frequency + c_frequency_deviation
             // This expression is probably easier to understand but has one more multiplication:
             // (phase_diff * (c_sample_frequency / (c_2pi * c_center_frequency)) - 1.f) * (c_center_frequency / c_frequency_deviation);
-            float fm_out = phase_diff * (c_sample_frequency / (c_2pi * c_frequency_deviation)) - c_center_frequency / c_frequency_deviation;
+            float fm_out = phase_diff * (c_sample_frequency / (c_2pi * c_frequency_deviation)) -
+                           c_center_frequency / c_frequency_deviation;
             lowpass_in_buffer[index + c_lowpass_filter_size - 1] = fm_out;
         }
 
         // Lowpass filter the demodulated signal, and down-sample before rrc filtering
-        firFilter(lowpass_in_buffer, c_sample_block_size / 2, c_lowpass_filter, 2, rrc_in_buffer + c_rrc_filter_size - 1);
+        firFilter(lowpass_in_buffer, c_sample_block_size / 2, c_lowpass_filter, 2,
+                  rrc_in_buffer + c_rrc_filter_size - 1);
 
-        // Run the down-sampled signal through the root raised cosine pulse-shaping filter
-        firFilter(rrc_in_buffer, c_sample_block_size / 2, c_rrc_filter, 1, rrc_out_buffer);
+        // Run the down-sampled signal through the root raised cosine pulse-shaping filter and store in the output block
+        firFilter(rrc_in_buffer, c_sample_block_size / 2, c_rrc_filter, 1, block->data);
+        for (int i = 0; i < block->c_block_size; i++)
+            block->data[i] = block->data[i] * 112.f +
+                             128.f; // +/- 1 corresponds to the white/black level, which is 128+/-112 (16, 240) in MUSE
 
-        // Convert the output to ints and scale -- this step could be avoided since the decoder starts with converting
-        // back to floats
-        for (int index = 0; index < c_output_buffer_size; index++) {
-            auto value = (int16_t)clamp(rrc_out_buffer[index] * 15000.0, -32768.0, 32767.0);
-            output_buffer[index] = value;
-        }
-
-        if (write(m_output_fd, output_buffer, c_output_buffer_size * sizeof(int16_t)) != c_output_buffer_size * sizeof(int16_t))
-            throw runtime_error("write failed");
 
         // Copy the end of the filter inputs to the start of the corresponding buffers
-        memcpy(input_buffer, input_buffer + c_input_buffer_size - c_bandpass_filter_size + 1, (c_bandpass_filter_size - 1) * sizeof(float));
-        memcpy(lowpass_in_buffer, lowpass_in_buffer + c_lowpass_in_buffer_size - c_lowpass_filter_size + 1, (c_lowpass_filter_size - 1) * sizeof(float));
-        memcpy(rrc_in_buffer, rrc_in_buffer + c_rrc_in_buffer_size - c_rrc_filter_size + 1, (c_rrc_filter_size - 1) * sizeof(float));
+        memcpy(input_buffer, input_buffer + c_input_buffer_size - c_bandpass_filter_size + 1,
+               (c_bandpass_filter_size - 1) * sizeof(float));
+        memcpy(lowpass_in_buffer, lowpass_in_buffer + c_lowpass_in_buffer_size - c_lowpass_filter_size + 1,
+               (c_lowpass_filter_size - 1) * sizeof(float));
+        memcpy(rrc_in_buffer, rrc_in_buffer + c_rrc_in_buffer_size - c_rrc_filter_size + 1,
+               (c_rrc_filter_size - 1) * sizeof(float));
+
+        // Send away result
+        block->rf_location = total_samples_read;
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_cv_filled.notify_one();
+        m_filled_blocks.push_back(block);
+
+        total_samples_read += c_sample_block_size;
     }
-    // let the reader know we're done
-    close(m_output_fd);
+    m_reader_thread_finished = true;
 }
 
 bool RfDemodulator::readFloats(float *out, size_t n) {
-    int16_t m_tmp_input_buffer[c_input_buffer_size];
+    int16_t m_tmp_input_buffer[n];
     int filled_bytes = 0;
     do {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        if (m_stop_request)
+        if (m_stop_request) {
+            m_log.info(eInput, "RfDemodulator: stop requested");
             return false;
+        }
         ssize_t read_count = read(m_input_fd,
                                   (void *)((char *)m_tmp_input_buffer + filled_bytes),
                                   n * sizeof(int16_t) - filled_bytes);
         if (read_count == -1 && errno == EAGAIN)
             this_thread::sleep_for(chrono::milliseconds(1));
         else if (read_count == 0) {
-            if (!m_input_is_fifo)
+            if (!m_input_is_fifo) {
+                m_log.info(eInput, "RfDemodulator: end of file");
                 return false;
+            }
         } else if (read_count == -1)
             throw runtime_error(fmt::format("Error reading from file: {}", strerror(errno)));
         else

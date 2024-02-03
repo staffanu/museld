@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <optional>
 #include <vector>
+#include <atomic>
 #include "InputPll.h"
 
 namespace musevk {
@@ -31,22 +32,25 @@ public:
     virtual void seek(double seconds) = 0;
 
 protected:
-    InputReader(Logger &log, const std::string &filename, bool input_is_fifo, double initial_seek_seconds,
-                const std::optional<std::string> &output_filename);
+    // input_is_realtime is separate from input_is_fifo since we could have non-real-time input from a pipe
+    // that is written to by someone that reads from a file (the example so far is reading from the FmDemodulator)
+    InputReader(Logger &log, const std::string &filename,
+                bool input_is_realtime,
+                double initial_seek_seconds, const std::optional<std::string> &output_filename);
 
     virtual void threadFunc() = 0;
 
     Logger &m_log;
     const std::string m_filename;
-    const bool m_input_is_fifo;
+    const bool m_input_is_realtime; // if real-time, we tell the player to speed up if all buffers are full
     const double m_initial_seek_seconds;
     const std::optional<std::string> m_output_filename;
     int m_output_file_fd;
     int16_t *m_output_short_buffer;
     std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_vacant_muse_input_buffers;
     std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_filled_muse_input_buffers;
-    bool m_stop_request;
-    bool m_reader_thread_finished;
+    std::atomic<bool> m_stop_request;
+    std::atomic<bool> m_reader_thread_finished;
     std::mutex m_mutex;
     std::condition_variable m_cv_filled;
     std::condition_variable m_cv_vacant;

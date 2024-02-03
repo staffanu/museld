@@ -13,7 +13,11 @@
 #include <complex>
 #include <array>
 #include <algorithm>
+#include <atomic>
+#include <deque>
+#include <condition_variable>
 #include "Logger.h"
+#include "MuseTypes.h"
 
 namespace RfDemodulatorHelper {
     // FIR passband filter to filter out noise over 22.5 MHz and also the pilot signal and EFM.
@@ -118,19 +122,31 @@ namespace RfDemodulatorHelper {
 
 using namespace RfDemodulatorHelper;
 
+struct DemodulatedBlock {
+    static constexpr int c_block_size = 4096 / 2;
+    long rf_location; // offset in the rf input data -- for debugging
+    float data[c_block_size];
+};
+
 class RfDemodulator {
 public:
-    RfDemodulator(Logger &log, std::string filename, bool input_is_fifo);
-    bool initialize(int output_fd);
+    RfDemodulator(Logger &log, std::string filename);
+    bool initialize();
+    std::shared_ptr<DemodulatedBlock> getNextDemodulatedBlock();
+    void returnBlock(std::shared_ptr<DemodulatedBlock> &buffer);
+
     void seek(double seconds);
     void cleanup();
 
 private:
     // The filters assume an input sampling rate of 62.5 MHz.  In order to allow that to be set in runtime
     // we could link against the gnuradio libraries.
-    static constexpr int c_decimation_rate = 2;
-    static constexpr int c_sample_block_size = 4096;
     static constexpr float c_sample_frequency = 62.5e6f;
+    static constexpr int c_decimation_rate = 2;
+    static constexpr int c_dropout_decimation_rate = 4;
+    static constexpr int c_sample_block_size = 4096;
+    // enough buffers for one frame
+    static constexpr int c_number_of_block_buffers = (int)(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH * c_sample_frequency / c_decimation_rate / 16.2e6 / DemodulatedBlock::c_block_size);
     static constexpr float c_center_frequency = 12.5e6f;
     static constexpr float c_frequency_deviation = 1.9e6f;
     static constexpr float c_2pi = 2 * (float)M_PI;
@@ -165,10 +181,14 @@ private:
     const std::string m_filename;
     int m_input_fd;
     bool m_input_is_fifo;
-    int m_output_fd;
     std::thread *m_demodulator_thread;
+    std::deque<std::shared_ptr<DemodulatedBlock>> m_vacant_blocks;
+    std::deque<std::shared_ptr<DemodulatedBlock>> m_filled_blocks;
     std::mutex m_mutex;
-    bool m_stop_request;
+    std::condition_variable m_cv_filled;
+    std::condition_variable m_cv_vacant;
+    std::atomic<bool> m_stop_request;
+    std::atomic<bool> m_reader_thread_finished;
 };
 
 #endif //MUSECPP_RFDEMODULATOR_H

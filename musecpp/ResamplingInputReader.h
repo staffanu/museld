@@ -13,9 +13,10 @@ public:
     enum InputFormat {
         eUnsignedByte,
         eSignedShortLittleEndian,
+        eFloat,
     };
     explicit ResamplingInputReader(Logger &log, const std::string &filename, InputFormat input_format,
-                                   double sample_rate, bool input_is_fifo, double initial_seek_seconds,
+                                   double sample_rate, double initial_seek_seconds,
                                    bool demodulate, const std::optional<std::string> &output_filename);
 
     bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) override;
@@ -36,7 +37,8 @@ private:
     InputPll m_input_pll;
     int m_file_fd;
     double m_sample_rate;
-    RfDemodulator *demodulator;
+
+    RfDemodulator *m_demodulator;
 
     uint8_t m_file_input_buffer[c_input_buffer_size];
     int m_file_input_buffer_bytes;

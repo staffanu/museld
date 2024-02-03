@@ -11,7 +11,7 @@
 class PhaseCorrect16MHzInputReader : public InputReader {
 public:
     explicit PhaseCorrect16MHzInputReader(Logger &log, const std::string &filename, bool big_endian,
-                                          bool input_is_fifo, double initial_seek_seconds,
+                                          double initial_seek_seconds,
                                           const std::optional<std::string> &output_filename);
 
     bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) override;

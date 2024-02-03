@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #include <map>
 #include <cassert>
+#include <filesystem>
 #include <fmt/format.h>
 #include "musevk/VulkanBuffer.h"
 #include "MuseTypes.h"
@@ -15,9 +16,11 @@ using namespace std;
 
 PhaseCorrect16MHzInputReader::PhaseCorrect16MHzInputReader(
         Logger &log,
-        const std::string &filename, bool big_endian, bool input_is_fifo, double initial_seek_seconds,
+        const std::string &filename, bool big_endian, double initial_seek_seconds,
         const std::optional<std::string> &output_filename)
-        : InputReader(log, filename, input_is_fifo, initial_seek_seconds, output_filename),
+        : InputReader(log, filename,
+                      filesystem::is_fifo(filename),
+                      initial_seek_seconds, output_filename),
         m_input{},
         m_big_endian(big_endian) {
 }
@@ -43,7 +46,7 @@ void PhaseCorrect16MHzInputReader::cleanup() {
 }
 
 void PhaseCorrect16MHzInputReader::seek(double seconds) {
-    if (!m_input_is_fifo) {
+    if (!m_input_is_realtime) {
         std::unique_lock<std::mutex> lock(m_mutex);
 
         off_t samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;

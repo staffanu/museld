@@ -12,11 +12,11 @@
 
 using namespace std;
 
-InputReader::InputReader(Logger &log, const std::string &filename, bool input_is_fifo, double initial_seek_seconds,
-                         const std::optional<std::string> &output_filename)
+InputReader::InputReader(Logger &log, const std::string &filename, bool input_is_realtime,
+                         double initial_seek_seconds, const std::optional<std::string> &output_filename)
         : m_log(log),
           m_filename(filename),
-          m_input_is_fifo(input_is_fifo),
+          m_input_is_realtime(input_is_realtime),
           m_initial_seek_seconds(initial_seek_seconds),
           m_output_filename(output_filename),
           m_output_file_fd(-1),
@@ -67,6 +67,7 @@ void InputReader::cleanup() {
         m_stop_request = true;
     }
     m_reader_thread->join();
+    delete m_reader_thread;
     m_vacant_muse_input_buffers.clear();
     m_filled_muse_input_buffers.clear();
 
@@ -98,7 +99,7 @@ InputReader::getNextInputBuffer() {
         if (filled_buffers == 0 && !m_reader_thread_finished) {
             m_log.warn(eInput, fmt::format("getNextInputBuffer: no filled buffers after this one"));
             hint = eSlowdown;
-        } else if (m_vacant_muse_input_buffers.empty() && m_input_is_fifo) {
+        } else if (m_vacant_muse_input_buffers.empty() && m_input_is_realtime) {
             m_log.warn(eInput, fmt::format("getNextInputBuffer: no vacant buffers available"));
             hint = eSpeedup;
         } else if (m_get_input_buffers_count % 30 == 0)
