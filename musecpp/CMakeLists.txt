@@ -18,7 +18,7 @@ include_directories("${PORTAUDIO_INCLUDE_DIRS}")
 
 # -mavx is hopefully implied by -march=native
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math -march=native")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ffast-math -march=native")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ffast-math -march=native") # -fsanitize=address")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -ffast-math -march=native")
 
 add_executable(musecpp
@@ -49,6 +49,11 @@ add_executable(musecpp
         musevk/HalfFloatUtil.h
         musevk/MemoryAllocator.cpp musevk/MemoryAllocator.h
         musevk/TimestampQueryPool.cpp musevk/TimestampQueryPool.h
+        EfmPll.cpp
+        EfmPll.h
+        EfmDecoder.cpp
+        EfmDecoder.h
+        AudioMode.h
 )
 target_link_libraries(musecpp
         PRIVATE glfw

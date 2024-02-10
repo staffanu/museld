@@ -78,6 +78,7 @@ void RfDemodulator::cleanup() {
     {
         std::unique_lock<std::mutex> lock(m_mutex);
         m_cv_vacant.notify_one();
+        m_cv_filled.notify_one();
         m_stop_request = true;
     }
     m_log.debug(eInput, "RfDemodulator: requested stop");
@@ -94,12 +95,14 @@ void RfDemodulator::demodulate() {
     assert(c_lowpass_filter_size % c_AVX_floats_per_chunk == 0);
     assert(c_rrc_filter_size % c_AVX_floats_per_chunk == 0);
     assert(c_output_buffer_size == DemodulatedBlock::c_block_size);
+    assert(c_efm_out_buffer_size == DemodulatedBlock::c_efm_block_size);
 
     float input_buffer[c_input_buffer_size] = {};
     float analytic_buffer_re[c_sample_block_size] = {};
     float analytic_buffer_im[c_sample_block_size] = {};
     float lowpass_in_buffer[c_lowpass_in_buffer_size] = {};
     float rrc_in_buffer[c_rrc_in_buffer_size] = {};
+    float efm_equalization_in_buffer[c_efm_equalization_in_buffer_size] = {};
     float dropout_abs_buffer[c_dropout_abs_buffer_size] = {};
     float dropout_out_buffer[c_dropout_out_buffer_size] = {};
 
@@ -152,8 +155,13 @@ void RfDemodulator::demodulate() {
         // Run the down-sampled signal through the root raised cosine pulse-shaping filter and store in the output block
         firFilter(rrc_in_buffer, c_sample_block_size / 2, c_rrc_filter, 1, block->data);
         for (int i = 0; i < block->c_block_size; i++)
-            block->data[i] = block->data[i] * 112.f +
-                             128.f; // +/- 1 corresponds to the white/black level, which is 128+/-112 (16, 240) in MUSE
+            // +/- 1 corresponds to the white/black level, which is 128+/-112 (16, 240) in MUSE
+            block->data[i] = block->data[i] * 112.f + 128.f;
+
+        // EFM
+        firFilter(input_buffer, c_sample_block_size / c_efm_decimation_rate, c_efm_lowpass_filter,
+                  c_efm_decimation_rate, efm_equalization_in_buffer + c_efm_equalization_filter_size - 1);
+        firFilter(efm_equalization_in_buffer, c_efm_out_buffer_size, c_efm_equalization_filter, 1, block->efm_data);
 
 
         // Copy the end of the filter inputs to the start of the corresponding buffers
@@ -163,6 +171,8 @@ void RfDemodulator::demodulate() {
                (c_lowpass_filter_size - 1) * sizeof(float));
         memcpy(rrc_in_buffer, rrc_in_buffer + c_rrc_in_buffer_size - c_rrc_filter_size + 1,
                (c_rrc_filter_size - 1) * sizeof(float));
+        memcpy(efm_equalization_in_buffer, efm_equalization_in_buffer + c_efm_equalization_in_buffer_size - c_efm_equalization_filter_size + 1,
+               (c_efm_equalization_filter_size - 1) * sizeof(float));
 
         // Send away result
         block->rf_location = total_samples_read;

@@ -36,7 +36,7 @@ bool InputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> 
         seek(m_initial_seek_seconds);
 
     for (const auto &b : buffers)
-        m_vacant_muse_input_buffers.push_back(b);
+        m_vacant_muse_input_buffers.push_back(make_shared<InputReaderBlock>(b));
     m_log.debug(eInput, fmt::format("Using {} input buffers", m_vacant_muse_input_buffers.size()));
 
     m_reader_thread = new thread(&InputReader::threadFunc, this);
@@ -77,13 +77,13 @@ void InputReader::cleanup() {
     }
 }
 
-pair<shared_ptr<musevk::VulkanBuffer>, InputReader::PresentationHint>
+pair<shared_ptr<InputReader::InputReaderBlock>, InputReader::PresentationHint>
 InputReader::getNextInputBuffer() {
     m_get_input_buffers_count++;
-    shared_ptr<musevk::VulkanBuffer> buffer = nullptr;
+    shared_ptr<InputReaderBlock> buffer = nullptr;
     PresentationHint hint = eNormal;
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        unique_lock<std::mutex> lock(m_mutex);
 
         m_cv_filled.wait(
                 lock,
@@ -107,8 +107,8 @@ InputReader::getNextInputBuffer() {
     }
 
     if (m_output_file_fd != -1) {
-        int size = buffer->size();
-        float *ptr = buffer->data<float>();
+        int size = buffer->video_data->size();
+        float *ptr = buffer->video_data->data<float>();
         for (int i = 0; i < size; i++)
             m_output_short_buffer[i] = ptr[i] * 4;
 
@@ -119,7 +119,7 @@ InputReader::getNextInputBuffer() {
     return {buffer, hint};
 }
 
-void InputReader::returnBuffer(std::shared_ptr<musevk::VulkanBuffer> &buffer) {
+void InputReader::returnBuffer(shared_ptr<InputReader::InputReaderBlock> &buffer) {
     std::unique_lock<std::mutex> lock(m_mutex);
     m_cv_vacant.notify_one();
     m_vacant_muse_input_buffers.push_back(buffer);

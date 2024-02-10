@@ -22,13 +22,21 @@ public:
     [[nodiscard]] virtual bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers);
     virtual void cleanup();
 
+    struct InputReaderBlock {
+        InputReaderBlock(std::shared_ptr<musevk::VulkanBuffer> v)
+        : video_data(v) {};
+        std::shared_ptr<musevk::VulkanBuffer> video_data;
+        std::vector<bool> efm_data;
+    };
+
     enum PresentationHint {
         eNormal = 0,
         eSlowdown = 1,
         eSpeedup = 2
     };
-    std::pair<std::shared_ptr<musevk::VulkanBuffer>, PresentationHint> getNextInputBuffer();
-    void returnBuffer(std::shared_ptr<musevk::VulkanBuffer> &buffer);
+
+    std::pair<std::shared_ptr<InputReaderBlock>, PresentationHint> getNextInputBuffer();
+    void returnBuffer(std::shared_ptr<InputReaderBlock> &buffer);
     virtual void seek(double seconds) = 0;
 
 protected:
@@ -47,8 +55,8 @@ protected:
     const std::optional<std::string> m_output_filename;
     int m_output_file_fd;
     int16_t *m_output_short_buffer;
-    std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_vacant_muse_input_buffers;
-    std::deque<std::shared_ptr<musevk::VulkanBuffer>> m_filled_muse_input_buffers;
+    std::deque<std::shared_ptr<InputReaderBlock>> m_vacant_muse_input_buffers;
+    std::deque<std::shared_ptr<InputReaderBlock>> m_filled_muse_input_buffers;
     std::atomic<bool> m_stop_request;
     std::atomic<bool> m_reader_thread_finished;
     std::mutex m_mutex;

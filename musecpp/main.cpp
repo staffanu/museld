@@ -11,7 +11,6 @@
 #include "PhaseCorrect16MHzInputReader.h"
 #include "Logger.h"
 #include "musevk/TimestampQueryPool.h"
-#include "RfDemodulator.h"
 
 #define INPUT_BUFFER_COUNT 6
 
@@ -38,7 +37,7 @@ void glfw_error_callback(int error, const char* description) {
 
 void process_file(Logger &log, const string& executable_dir, InputReader &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
-                  bool start_paused, bool decode_video, bool decode_audio, bool benchmark_shaders) {
+                  bool start_paused, bool decode_video, bool decode_audio, bool efm_audio, bool benchmark_shaders) {
     glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -72,7 +71,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
 
     AudioPlayback audio_playback(log);
 
-    AudioDecoder::AudioMode audio_mode;
+    AudioMode audio_mode;
     size_t audio_sample_count;
     AudioDecoder::AudioFrame audio_samples[AudioDecoder::c_max_output_samples];
 
@@ -99,12 +98,12 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         bool redo_last_field = false;
         bool enable_non_linear = true;
 
-        while (paused || decoder.next(audio_mode, audio_sample_count, audio_samples, field_interpolation_mode, redo_last_field, enable_non_linear)) {
+        while (paused || decoder.next(efm_audio, audio_mode, audio_sample_count, audio_samples, field_interpolation_mode, redo_last_field, enable_non_linear)) {
             if (!paused)
                 field_count++;
             redo_last_field = false;
 
-            if (audio_sample_count != 0 && audio_mode != AudioDecoder::MODE_UNKNOWN && !paused)
+            if (audio_sample_count != 0 && audio_mode != MODE_UNKNOWN && !paused)
                 audio_playback.add_samples(audio_mode, audio_sample_count, audio_samples);
 
             //vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
@@ -158,15 +157,16 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                 break;
             glfwPollEvents();
 
-            if (check_glfw_key(window, GLFW_KEY_Q))
+            if (check_glfw_key(window, GLFW_KEY_ESCAPE))
                 break;
-            if (check_glfw_key(window, GLFW_KEY_ESCAPE) && full_screen) {
-                glfwSetWindowMonitor(window, nullptr, 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
-                full_screen = false;
-            }
-            if (check_glfw_key(window, GLFW_KEY_TAB) && !full_screen) {
-                glfwSetWindowMonitor(window, glfwGetPrimaryMonitor(), 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
-                full_screen = true;
+            if (check_glfw_key(window, GLFW_KEY_TAB)) {
+                if (full_screen) {
+                    glfwSetWindowMonitor(window, nullptr, 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
+                    full_screen = false;
+                } else {
+                    glfwSetWindowMonitor(window, glfwGetPrimaryMonitor(), 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
+                    full_screen = true;
+                }
             }
             if (check_glfw_key(window, GLFW_KEY_SPACE))
                 paused = !paused;
@@ -215,6 +215,9 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                 }
                 log.info(eApplication | eVideo | eDecoder, "Inter-frame interpolation forced");
             }
+            if (check_glfw_key(window, GLFW_KEY_A)) {
+                efm_audio = !efm_audio;
+            }
             if (check_glfw_key(window, GLFW_KEY_E)) {
                 enable_non_linear = true;
             }
@@ -225,7 +228,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         auto t1 = chrono::high_resolution_clock::now();
         auto time_us = (double) chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
         log.info(eApplication | ePerformance,
-            fmt::format("Total {} frames.  Avg {:.3f} ms/frame ({:.3f} frames/s)",
+            fmt::format("Total {} frames.  Avg {:.3f} ms/m_frame ({:.3f} frames/s)",
                         field_count / 2,
                         time_us / 1000.0 / field_count * 2,
                         1000000.0 / time_us * field_count / 2));
@@ -238,10 +241,9 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     device.destroy(render_finished_semaphore);
     device.destroy(in_flight_fence);
 
+    audio_playback.cleanup();
     reader.cleanup();
     manager.cleanup();
-
-    audio_playback.cleanup();
 
     glfwDestroyWindow(window);
     glfwTerminate();
@@ -279,6 +281,7 @@ int main(int argc, char *argv[]) {
     optional<string> output_filename; // always written as little endian unsigned short values
     bool decode_video = true;
     bool decode_audio = true;
+    bool efm_audio = false;
     bool benchmark_shaders = false;
 
     try {
@@ -314,6 +317,8 @@ int main(int argc, char *argv[]) {
                 decode_video = false;
             else if (*it == "--no-audio")
                 decode_audio = false;
+            else if (*it == "--efm")
+                efm_audio = true;
             else if (*it == "--verbose")
                 log_selection = Logger::c_log_all;
             else if (*it == "--benchmark-shaders")
@@ -342,22 +347,20 @@ int main(int argc, char *argv[]) {
                         reader = new ResamplingInputReader(
                                 log, *it,
                                 input_format == eOverSampledSignedShortsLittleEndian ? ResamplingInputReader::eSignedShortLittleEndian : ResamplingInputReader::eUnsignedByte,
-                                input_sample_frequency, input_is_fifo, initial_seek_seconds, demodulate,
-                                output_filename);
+                                input_sample_frequency, initial_seek_seconds, demodulate, output_filename);
                         break;
                     case eLittleEndianShorts:
                     case eBigEndianShorts:
                         reader = new PhaseCorrect16MHzInputReader(log, *it,
                                                                   input_format == eBigEndianShorts,
-                                                                  input_is_fifo, initial_seek_seconds,
-                                                                  output_filename);
+                                                                  initial_seek_seconds, output_filename);
                         break;
                     case eUnknown:
                     default:
                         throw runtime_error("No input format specified");
                 }
                 process_file(log, executable_dir, *reader, decode_all_fields,
-                             full_screen, no_sync, start_paused, decode_video, decode_audio,
+                             full_screen, no_sync, start_paused, decode_video, decode_audio, efm_audio,
                              benchmark_shaders);
             }
         }

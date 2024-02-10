@@ -12,6 +12,7 @@
 #include <vector>
 #include "BchDecoder.h"
 #include "AudioChannelDecoder.h"
+#include "AudioMode.h"
 
 class MuseBuffer;
 class Logger;
@@ -19,7 +20,6 @@ class Logger;
 class AudioDecoder {
 public:
     static const size_t c_max_output_samples = 2048;
-    enum AudioMode { MODE_A, MODE_B, MODE_UNKNOWN };
 
     struct AudioFrame
     {
@@ -69,6 +69,8 @@ private:
     AModeChannelDecoder aModeChannel4Decoder;
     BModeChannelDecoder bModeChannel1Decoder;
     BModeChannelDecoder bModeChannel2Decoder;
+
+    long m_total_time_us;
 };
 
 

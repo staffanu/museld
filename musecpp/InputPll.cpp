@@ -88,7 +88,7 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], f
         }
 
         if (m_pixel == 8) {
-            // When locked: m_line 1: positive, m_line 2: negative, m_line 3: negative, m_line 4: positive, then alternating up to 1125
+            // When locked: line 1: positive, line 2: negative, line 3: negative, m_line 4: positive, then alternating up to 1125
             bool sync_should_be_positive = m_line == 1 || (m_line > 3 && m_line % 2 == 0);
 
             float sample0 = output[output_index - 4]; // (int)m_shift_reg[(m_shift_reg_last_written_ix + 1) % 5];
@@ -137,7 +137,7 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], f
     bool frame_done = m_state == eLocked && m_line == 1 && m_pixel == 1;
 
     int samples_to_read = m_line == 1125 ? 481 - m_pixel : m_pixel < 9 ? 9 - m_pixel : 480 - m_pixel + 9;
-    return {frame_done, samples_to_read, m_input_samples_per_sample};
+    return {frame_done, samples_to_read, m_input_samples_per_sample, m_state == eLocked};
 }
 
 double InputPll::getInputSamplesPerSample() {

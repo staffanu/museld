@@ -15,7 +15,7 @@ class AudioPlayback {
 public:
     AudioPlayback(Logger &log);
     void add_samples(
-            AudioDecoder::AudioMode &audio_mode,
+            AudioMode &audio_mode,
             size_t &sample_count,
             AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples]);
     void cleanup();
@@ -32,7 +32,7 @@ private:
     std::atomic<int> m_next_audio_buffer_read_ix;
     std::atomic<double> m_audio_speed_adjust; // m_audio_buffer to skip per sample -- 0.1 skips every 10th sample
     double m_audio_speed_adjust_sum;
-    AudioDecoder::AudioMode m_current_mode;
+    AudioMode m_current_mode;
     int m_channels_used;
     PaStream *m_audio_stream;
 

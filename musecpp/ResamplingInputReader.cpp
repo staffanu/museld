@@ -114,12 +114,14 @@ void ResamplingInputReader::seek(double seconds) {
 
 void ResamplingInputReader::threadFunc() {
     float sample_buffer[c_sample_buffer_size];
+    float efm_sample_buffer[DemodulatedBlock::c_efm_block_size];
+    bool have_efm;
     double input_samples_per_sample = m_input_pll.getInputSamplesPerSample();
     int samples_to_read = 1;
-    shared_ptr<musevk::VulkanBuffer> buffer = nullptr;
-    while (readSamples(samples_to_read, sample_buffer, input_samples_per_sample)) {
+    shared_ptr<InputReaderBlock> buffer = nullptr;
+    while (readSamples(samples_to_read, sample_buffer, input_samples_per_sample, efm_sample_buffer, have_efm)) {
         if (buffer == nullptr) {
-            std::unique_lock<std::mutex> lock(m_mutex);
+            unique_lock<std::mutex> lock(m_mutex);
             if (m_input_is_realtime && m_vacant_muse_input_buffers.empty()) {
                 // discard a filled buffer -- this is better than having the writer to the fifo wait
                 m_log.warn(eInput, "Discarding filled input buffer due to overrun");
@@ -134,12 +136,25 @@ void ResamplingInputReader::threadFunc() {
             }
             buffer = m_vacant_muse_input_buffers.front();
             m_vacant_muse_input_buffers.pop_front();
+            buffer->efm_data.clear();
         }
 
-        auto data = buffer->data<float>();
-        InputPll::PllResult pll_result = m_input_pll.process(samples_to_read, sample_buffer, data);
+        auto video_data = buffer->video_data->data<float>();
+        InputPll::PllResult pll_result = m_input_pll.process(samples_to_read, sample_buffer, video_data);
         samples_to_read = pll_result.samples_to_read;
         input_samples_per_sample = pll_result.input_samples_per_sample;
+
+        if (pll_result.locked) {
+            if (have_efm) {
+                bool efm_bit_buffer[DemodulatedBlock::c_efm_block_size]; // much bigger than needed
+                int actual_output_size = m_efm_pll.reclock(efm_sample_buffer, DemodulatedBlock::c_efm_block_size,
+                                                           efm_bit_buffer, DemodulatedBlock::c_efm_block_size);
+
+                for (int i = 0; i < actual_output_size; i++)
+                    buffer->efm_data.push_back(efm_bit_buffer[i]);
+            }
+        } else
+            buffer->efm_data.clear();
 
         if (pll_result.frame_done) {
             std::unique_lock<std::mutex> lock(m_mutex);
@@ -153,7 +168,11 @@ void ResamplingInputReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
-bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_buffer_size], double dt) {
+// TODO: This interface isn't very good when reading constant size blocks from the demodulator -- rewrite somehow!
+// This is especially apparent in how EFM is handled.
+bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_buffer_size], double dt,
+                                        float efm_buffer[DemodulatedBlock::c_efm_block_size], bool &have_efm) {
+    have_efm = false;
     double t = m_t; // always in [0, 1)
     int read_pos = m_file_input_buffer_read_pos;
     for (int sample_ix = 0; sample_ix < sample_count; sample_ix++) {
@@ -190,7 +209,6 @@ bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_
             }
             read_pos += samples_to_read * m_bytes_per_sample;
         } else {
-            // TODO: this is quite ugly -- rewrite
             if (read_pos + samples_to_read * m_bytes_per_sample >= m_file_input_buffer_bytes) {
                 // move remaining input to start of buffer
                 int start_copy_pos = read_pos - c_input_buffer_lookback * m_bytes_per_sample;
@@ -207,6 +225,8 @@ bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_
                 memcpy(m_file_input_buffer + m_file_input_buffer_bytes, block->data,
                        block->c_block_size * sizeof(float));
                 m_file_input_buffer_bytes += block->c_block_size * sizeof(float);
+                memcpy(efm_buffer, block->efm_data, block->c_efm_block_size * sizeof(float));
+                have_efm = true;
                 m_demodulator->returnBlock(block);
             }
             assert(read_pos + samples_to_read * m_bytes_per_sample < m_file_input_buffer_bytes);

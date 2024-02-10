@@ -22,7 +22,7 @@ AudioPlayback::AudioPlayback(Logger &log)
   m_next_audio_buffer_read_ix(0),
   m_audio_speed_adjust(0),
   m_audio_speed_adjust_sum(0),
-  m_current_mode(AudioDecoder::MODE_UNKNOWN),
+  m_current_mode(MODE_UNKNOWN),
   m_audio_stream(nullptr) {
     auto audio_status = Pa_Initialize();
     if (audio_status != paNoError)
@@ -45,9 +45,9 @@ void AudioPlayback::cleanup() {
         throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
 }
 
-void AudioPlayback::add_samples(AudioDecoder::AudioMode &audio_mode, size_t &sample_count,
+void AudioPlayback::add_samples(AudioMode &audio_mode, size_t &sample_count,
                                 AudioDecoder::AudioFrame *output_samples) {
-    assert(audio_mode != AudioDecoder::MODE_UNKNOWN);
+    assert(audio_mode != MODE_UNKNOWN);
     if (audio_mode != m_current_mode) {
         m_current_mode = audio_mode;
         if (m_audio_stream != nullptr)
@@ -118,7 +118,7 @@ int AudioPlayback::audioCallbackMember(void *output_buffer, unsigned long frames
         }
     }
     if (underrun_count)
-        m_log.error(eAudio, fmt::format("Audio buffer underrun: {} missing samples", underrun_count));
+        m_log.info(eAudio, fmt::format("Audio buffer underrun: {} missing samples", underrun_count));
     return 0;
 }
 
@@ -132,7 +132,7 @@ void AudioPlayback::openStream() {
 
     PaDeviceIndex device_index = Pa_GetDefaultOutputDevice();
     auto *info = Pa_GetDeviceInfo(device_index);
-    m_channels_used = min(m_current_mode == AudioDecoder::MODE_A ? 4 : 2, info->maxOutputChannels);
+    m_channels_used = min(m_current_mode == MODE_A ? 4 : 2, info->maxOutputChannels);
     m_log.info(eAudio, fmt::format("Using device {}: maximum {} output channels, {} used.",
                                    info->name, info->maxOutputChannels, m_channels_used));
 
@@ -146,7 +146,7 @@ void AudioPlayback::openStream() {
     auto audio_status = Pa_OpenStream(&m_audio_stream,
                                       nullptr, // no input channels
                                       &parameters,
-                                      m_current_mode == AudioDecoder::MODE_A ? 32000.0 : 48000.0,
+                                      m_current_mode == MODE_A ? 32000.0 : m_current_mode == MODE_B ? 48000.0 : 44100,
                                       256ul, // frames per buffer, maybe use paFramesPerBufferUnspecified
                                       paNoFlag, // stream flags
                                       audio_callback,

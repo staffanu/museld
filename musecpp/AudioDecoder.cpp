@@ -33,13 +33,14 @@ const array<bool, 16> AudioDecoder::c_sync_pattern = {
         false, true, false, true, true, true, true, false
 };
 
-AudioDecoder::AudioMode AudioDecoder::detectModeFromControlData(uint32_t control_data) {
+AudioMode AudioDecoder::detectModeFromControlData(uint32_t control_data) {
     // I found no documentation whatsoever for the control signal, so this is just a table of
     // what I have seen in examples.  There is probably more information than just the MODE A/B
     // designation.
     switch (control_data) {
         case 0b0110010000000010100001:
         case 0b0110011001000010101001:
+        case 0b0110010000000010100011: // Cliffhanger
             return MODE_A;
         case 0b1001100000000010100011:
         case 0b1001100000000010100001:
@@ -75,7 +76,8 @@ AudioDecoder::AudioDecoder(Logger &log)
   aModeChannel3Decoder(3),
   aModeChannel4Decoder(4),
   bModeChannel1Decoder(1),
-  bModeChannel2Decoder(2) {
+  bModeChannel2Decoder(2),
+  m_total_time_us(0) {
 }
 
 void AudioDecoder::decodeFrame(int frame_no,
@@ -83,6 +85,8 @@ void AudioDecoder::decodeFrame(int frame_no,
                                AudioMode &audio_mode,
                                size_t &sample_count,
                                AudioFrame output_samples[c_max_output_samples]) {
+    auto t0 = chrono::high_resolution_clock::now();
+
     if (frame_no % 30 == 0 && m_log.isEnabled(eDebug, eAudio)) {
         ostringstream ss;
         ss << "Symbol locations: ";
@@ -272,4 +276,9 @@ void AudioDecoder::decodeFrame(int frame_no,
                 m_log.warn(eAudio, "Unknown audio mode");
         }
     }
+
+    auto t1 = chrono::high_resolution_clock::now();
+    m_total_time_us += chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
+    if (frame_no % 30 == 0 && m_log.isEnabled(eDebug, eAudio))
+        m_log.info(eAudio | ePerformance, fmt::format("Avg audio decoding time: {:.1f} ms/m_frame", (double)m_total_time_us / 1000.0 / frame_no));
 }

@@ -7,6 +7,7 @@
 
 #include "InputReader.h"
 #include "RfDemodulator.h"
+#include "EfmPll.h"
 
 class ResamplingInputReader : public InputReader {
 public:
@@ -31,10 +32,12 @@ private:
     static constexpr size_t c_input_buffer_size = 1024 * 256;
     static constexpr int c_input_buffer_lookback = 3; // we look back 3 samples
 
-    bool readSamples(int sample_count, float buffer[c_sample_buffer_size], double dt);
+    bool readSamples(int sample_count, float buffer[c_sample_buffer_size], double dt,
+                     float efm_buffer[DemodulatedBlock::c_efm_block_size], bool &have_efm);
 
     InputFormat m_input_format;
     InputPll m_input_pll;
+    EfmPll m_efm_pll;
     int m_file_fd;
     double m_sample_rate;
 

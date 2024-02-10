@@ -118,14 +118,41 @@ namespace RfDemodulatorHelper {
                 0.048089, 0, 0, 0, 0, 0 // padding to make size multiple of 8
         };
     }
+
+    // Lowpass filter for EFM
+    // Computed in octave: fir1(7, 1.8e6 / 31.25e6)
+    static constexpr std::array<float, 8> initializeEfmLowpassFilter() {
+        return std::array<float, 8>{
+            0.019637, 0.064191, 0.166359, 0.249813,
+            0.249813, 0.166359, 0.064191, 0.019637
+        };
+    }
+
+    // Equalization filter for EFM.  Works on 1/4 of the original sample frequency
+    // Computed in octave using the script make_efm_filter.m, and then numerically optimized.
+    static constexpr std::array<float, 16> initializeEfmEqualizationFilter() {
+        auto coefficients = std::array<float, 16>{
+                0.037853, 0.121164, 0.173657, 0.300307,
+                0.387234, 0.366450, 0.418596, 0.208327,
+                0.073206, -0.117067, -0.347229, -0.354265,
+                -0.384882, -0.289761, -0.146208, -0.072109
+        };
+        auto reversed = std::array<float, 16>{};
+        for (int i = 0; i < coefficients.size(); i++)
+            reversed[coefficients.size() - 1 - i] = coefficients[i];
+        return reversed;
+    }
+
 }
 
 using namespace RfDemodulatorHelper;
 
 struct DemodulatedBlock {
     static constexpr int c_block_size = 4096 / 2;
+    static constexpr int c_efm_block_size = 4096 / 4;
     long rf_location; // offset in the rf input data -- for debugging
     float data[c_block_size];
+    float efm_data[c_efm_block_size];
 };
 
 class RfDemodulator {
@@ -144,6 +171,7 @@ private:
     static constexpr float c_sample_frequency = 62.5e6f;
     static constexpr int c_decimation_rate = 2;
     static constexpr int c_dropout_decimation_rate = 4;
+    static constexpr int c_efm_decimation_rate = 4;
     static constexpr int c_sample_block_size = 4096;
     // enough buffers for one frame
     static constexpr int c_number_of_block_buffers = (int)(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH * c_sample_frequency / c_decimation_rate / 16.2e6 / DemodulatedBlock::c_block_size);
@@ -161,10 +189,19 @@ private:
     static constexpr std::array<float, 16> c_rrc_filter = initializeRrcFilter();
     static constexpr int c_rrc_filter_size = c_rrc_filter.size();
 
+    static constexpr std::array<float, 8> c_efm_lowpass_filter = initializeEfmLowpassFilter();
+    static constexpr int c_efm_lowpass_filter_size = c_efm_lowpass_filter.size();
+
+    static constexpr std::array<float, 16> c_efm_equalization_filter = initializeEfmEqualizationFilter();
+    static constexpr int c_efm_equalization_filter_size = c_efm_equalization_filter.size();
+
     static constexpr int c_input_buffer_size = c_sample_block_size + c_bandpass_filter_size - 1;
     static constexpr int c_lowpass_in_buffer_size = c_sample_block_size + c_lowpass_filter_size - 1;
     static constexpr int c_rrc_in_buffer_size = c_sample_block_size / c_decimation_rate + c_rrc_filter_size - 1;
     static constexpr int c_output_buffer_size = c_sample_block_size / c_decimation_rate;
+
+    static constexpr int c_efm_equalization_in_buffer_size = c_sample_block_size / c_efm_decimation_rate + c_efm_equalization_filter_size - 1;
+    static constexpr int c_efm_out_buffer_size = c_sample_block_size / c_efm_decimation_rate;
 
     void demodulate();
 

@@ -73,7 +73,7 @@ void PhaseCorrect16MHzInputReader::seek(double seconds) {
 
 void PhaseCorrect16MHzInputReader::threadFunc() {
     for (;;) {
-        shared_ptr<musevk::VulkanBuffer> buffer = nullptr;
+        shared_ptr<InputReaderBlock> buffer = nullptr;
         {
             std::unique_lock<std::mutex> lock(m_mutex);
             m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_muse_input_buffers.empty();});
@@ -83,7 +83,7 @@ void PhaseCorrect16MHzInputReader::threadFunc() {
             m_vacant_muse_input_buffers.pop_front();
         }
 
-        auto data = buffer->data<float>();
+        auto data = buffer->video_data->data<float>();
         if (!readFloats(m_input, data, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH))
             break;
 

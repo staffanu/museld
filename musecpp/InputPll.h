@@ -21,6 +21,7 @@ public:
         bool frame_done;
         int samples_to_read;
         double input_samples_per_sample;
+        bool locked;
     };
     PllResult process(int sample_count, const float samples[], float *output);
     double getInputSamplesPerSample();

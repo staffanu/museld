@@ -8,6 +8,7 @@
 #include <deque>
 #include "AudioDecoder.h"
 #include "musevk/TimestampStatistics.h"
+#include "EfmDecoder.h"
 
 namespace musevk {
     class TimestampQueryPool;
@@ -38,7 +39,7 @@ public:
         eNormal, eForceIntraField, eForceInterFrame
     };
 
-    bool next(AudioDecoder::AudioMode &audio_mode,
+    bool next(bool efm_audio, AudioMode &audio_mode,
               size_t &sample_count,
               AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples],
               FieldInterpolationMode field_interpolation_mode,
@@ -66,6 +67,7 @@ private:
     int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field
     long m_total_elapsed_time_us;
     AudioDecoder m_audio_decoder;
+    EfmDecoder m_efm_decoder;
     std::deque<FrameBuffer *> m_frame_buffers; // The front (index 0) is the newest received frame
 };
 

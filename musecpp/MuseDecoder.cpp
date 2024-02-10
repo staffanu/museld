@@ -34,7 +34,8 @@ MuseDecoder::MuseDecoder(
   m_reset_timestamp_query_pool_command_buffer(m_manager.createCommandBuffer(timestamp_query_pool)),
   m_first_stage_command_buffer(m_manager.createCommandBuffer(timestamp_query_pool)),
   m_second_stage_command_buffer(m_manager.createCommandBuffer(timestamp_query_pool)),
-  m_audio_decoder(log) {
+  m_audio_decoder(log),
+  m_efm_decoder(log) {
 }
 
 MuseDecoder::~MuseDecoder() {
@@ -65,9 +66,9 @@ bool MuseDecoder::initialize() {
     return true;
 }
 
-bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
+bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
                        size_t &sample_count,
-                       AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples],
+                       AudioDecoder::AudioFrame output_samples[max(AudioDecoder::c_max_output_samples, EfmDecoder::c_max_output_samples)],
                        FieldInterpolationMode field_interpolation_mode,
                        bool redo_last_field, bool enable_non_linear) {
     if (redo_last_field)
@@ -82,6 +83,7 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
         m_reset_timestamp_query_pool_command_buffer->wait();
     }
 
+    std::shared_ptr<InputReader::InputReaderBlock> input_block = nullptr;
     shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = nullptr;
     InputReader::PresentationHint presentation_hint;
     if (m_field_index == 0 && !redo_last_field) {
@@ -90,10 +92,11 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
         m_frame_buffers.pop_back();
         m_frame_buffers.push_front(frame_buffer);
 
-        tie(input_vulkan_buffer, presentation_hint) = m_reader.getNextInputBuffer();
-        if (input_vulkan_buffer == nullptr) {
+        tie(input_block, presentation_hint) = m_reader.getNextInputBuffer();
+        if (input_block == nullptr) {
             return false;
         }
+        input_vulkan_buffer = input_block->video_data;
 
         auto eq_estimate = FrameBuffer::EstimateEq(input_vulkan_buffer->data<float>());
         if (m_eq.first == -1 && m_eq.second == -1)
@@ -109,7 +112,7 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
         m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame_buffer->data());
         m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
-        // The control signal is decoded from the input directly so we do not have to wait for the completion
+        // The control signal is decoded from the input directly so that we do not have to wait for the completion
         // of applyEqAndDeemphasisAndGamma
         if (m_decode_video)
             frame_buffer->ProcessControlData(input_vulkan_buffer->data<float>(), m_eq);
@@ -149,12 +152,16 @@ bool MuseDecoder::next(AudioDecoder::AudioMode &audio_mode,
     assert(input_vulkan_buffer != nullptr == m_first_stage_command_buffer->isSubmitted());
     if (m_first_stage_command_buffer->isSubmitted()) {
         m_first_stage_command_buffer->wait();
-        m_reader.returnBuffer(input_vulkan_buffer);
+        m_reader.returnBuffer(input_block);
     }
 
-    if (m_decode_audio && m_field_index == 0)
-        m_audio_decoder.decodeFrame(m_frame_no, m_shaders.getAudioData(), audio_mode, sample_count, output_samples);
-    else
+    if (m_decode_audio && m_field_index == 0) {
+        if (efm_audio) {
+            m_efm_decoder.decode(input_block->efm_data, sample_count, output_samples);
+            audio_mode = MODE_EFM;
+        } else // MUSE audio
+            m_audio_decoder.decodeFrame(m_frame_no, m_shaders.getAudioData(), audio_mode, sample_count, output_samples);
+    } else
         sample_count = 0;
 
     if (m_second_stage_command_buffer->isSubmitted())
