@@ -6,7 +6,7 @@
 #define MUSECPP_EFMDECODER_H
 
 #include <array>
-#include "AudioDecoder.h"
+#include "../AudioDecoder.h"
 #include "ReedSolomon.h"
 class Logger;
 
