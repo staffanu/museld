@@ -8,7 +8,7 @@
 
 using namespace std;
 
-std::array<ByteWithErasureStatus, 1 << 14> EfmDecoder::makeEfmInversionTable() {
+std::array<ByteWithErasureFlag, 1 << 14> EfmDecoder::makeEfmInversionTable() {
     auto byte_to_efm = std::array<int, 256>{
             0x1220, 0x2100, 0x2420, 0x2220, 0x1100, 0x0110, 0x0420, 0x0900,
             0x1240, 0x2040, 0x2440, 0x2240, 0x1040, 0x0040, 0x0440, 0x0840,
@@ -62,7 +62,7 @@ std::array<ByteWithErasureStatus, 1 << 14> EfmDecoder::makeEfmInversionTable() {
             return 1000;
     };
 
-    std::array<ByteWithErasureStatus, 1 << 14> table{};
+    std::array<ByteWithErasureFlag, 1 << 14> table{};
 
     for (int i = 0; i < table.size(); i++) {
         int nearest = 0;
@@ -75,14 +75,14 @@ std::array<ByteWithErasureStatus, 1 << 14> EfmDecoder::makeEfmInversionTable() {
             }
         }
         if (nearest_distance >= 2)
-            table[i] = ByteWithErasureStatus{0, true};
+            table[i] = ByteWithErasureFlag(0, true);
         else
-            table[i] = ByteWithErasureStatus{(uint8_t)nearest, false};
+            table[i] = ByteWithErasureFlag(nearest);
     }
 
     return table;
 };
-std::array<ByteWithErasureStatus, 1 << 14> EfmDecoder::c_efm_to_byte_table = makeEfmInversionTable();
+const std::array<ByteWithErasureFlag, 1 << 14> EfmDecoder::c_efm_to_byte_table = makeEfmInversionTable();
 
 std::array<std::pair<int, bool>, 32> EfmDecoder::makeInitialDelays() {
     std::array<std::pair<int, bool>, 32> delays{};
@@ -90,7 +90,7 @@ std::array<std::pair<int, bool>, 32> EfmDecoder::makeInitialDelays() {
         delays[i] = make_pair(i % 2, i >= 12 && i < 16 || i >= 28);
     return delays;
 }
-std::array<std::pair<int, bool>, 32> EfmDecoder::c_initial_delays = makeInitialDelays();
+const std::array<std::pair<int, bool>, 32> EfmDecoder::c_initial_delays = makeInitialDelays();
 
 std::array<int, 28> EfmDecoder::makeC1ToC2Delays() {
     std::array<int, 28> delays{};
@@ -98,7 +98,7 @@ std::array<int, 28> EfmDecoder::makeC1ToC2Delays() {
         delays[i] = (27 - i) * 4;
     return delays;
 }
-std::array<int, 28> EfmDecoder::c_c1_to_c2_delays = makeC1ToC2Delays();
+const std::array<int, 28> EfmDecoder::c_c1_to_c2_delays = makeC1ToC2Delays();
 
 std::array<int, 24> EfmDecoder::makeOutputDelays() {
     std::array<int, 24> delays{};
@@ -106,11 +106,11 @@ std::array<int, 24> EfmDecoder::makeOutputDelays() {
         delays[i] = i >= 12 ? 2 : 0;
     return delays;
 }
-std::array<int, 24> EfmDecoder::c_output_delays = makeOutputDelays();
+const std::array<int, 24> EfmDecoder::c_output_delays = makeOutputDelays();
 
-std::array<std::pair<int, int>, 6> EfmDecoder::c_left_output_map =
+const std::array<std::pair<int, int>, 6> EfmDecoder::c_left_output_map =
         array<pair<int, int>, 6> { pair{0, 1}, pair{12, 13}, pair{2, 3}, pair{14, 15}, pair{4, 5}, pair{16, 17}};
-std::array<std::pair<int, int>, 6> EfmDecoder::c_right_output_map =
+const std::array<std::pair<int, int>, 6> EfmDecoder::c_right_output_map =
         array<pair<int, int>, 6> { pair{6, 7}, pair{18, 19}, pair{8, 9}, pair{20, 21}, pair{10, 11}, pair{22, 23}};
 
 EfmDecoder::EfmDecoder(Logger &log)
@@ -124,21 +124,22 @@ EfmDecoder::EfmDecoder(Logger &log)
           m_locked(false),
           m_consecutive_sync_failures(0), // if not at the exact expected place
           m_frame{},
-          m_c1(),
-          m_c2(),
+          m_c1(32, 28, 0, true),
+          m_c2(28, 24, 0, false),
           m_initial_delay_lines{},
           m_initial_delay_lines_ix{},
           m_c1_to_c2_delay_lines{},
           m_c1_to_c2_delay_lines_ix{},
           m_output_delay_lines{},
-          m_output_delay_lines_ix{}
+          m_output_delay_lines_ix{},
+          m_total_time_us(0)
 {
     for (int i = 0; i < m_initial_delay_lines.size(); i++)
-        m_initial_delay_lines[i] = new ByteWithErasureStatus[c_initial_delays[i].first + 1];
+        m_initial_delay_lines[i] = new ByteWithErasureFlag[c_initial_delays[i].first + 1];
     for (int i = 0; i < m_c1_to_c2_delay_lines.size(); i++)
-        m_c1_to_c2_delay_lines[i] = new ByteWithErasureStatus[c_c1_to_c2_delays[i] + 1];
+        m_c1_to_c2_delay_lines[i] = new ByteWithErasureFlag[c_c1_to_c2_delays[i] + 1];
     for (int i = 0; i < m_output_delay_lines.size(); i++)
-        m_output_delay_lines[i] = new ByteWithErasureStatus[c_output_delays[i] + 1];
+        m_output_delay_lines[i] = new ByteWithErasureFlag[c_output_delays[i] + 1];
 }
 
 EfmDecoder::~EfmDecoder() {
@@ -150,9 +151,17 @@ EfmDecoder::~EfmDecoder() {
         delete[] p;
 }
 
-void EfmDecoder::decode(const vector<bool> &data, size_t &sample_count, AudioDecoder::AudioFrame output_samples[c_max_output_samples]) {
-    sample_count = 0;
+void EfmDecoder::decode(int frame_no, const vector<bool> &data, size_t &sample_count, AudioDecoder::AudioFrame output_samples[c_max_output_samples]) {
+    auto t0 = chrono::high_resolution_clock::now();
 
+    if (frame_no % 30 == 0 && m_log.isEnabled(eDebug, eAudio)) {
+        m_c1.printStatistics(m_log, "C1");
+        m_c1.resetStatistics();
+        m_c2.printStatistics(m_log, "C2");
+        m_c2.resetStatistics();
+    }
+
+    sample_count = 0;
     for (auto bool_bit: data) {
         m_total_bits += 1;
         int bit = bool_bit ? 1 : 0;
@@ -168,7 +177,7 @@ void EfmDecoder::decode(const vector<bool> &data, size_t &sample_count, AudioDec
             m_consecutive_syncs += 1;
             if (m_consecutive_syncs >= 3 && !m_locked) {
                 m_locked = true;
-                m_log.debug(eAudio, fmt::format("efm m_locked index {}", m_total_bits));
+                m_log.debug(eAudio, fmt::format("efm locked index {}", m_total_bits));
             }
         } else if (m_bits_since_sync == 588 && m_locked) {
             m_bit_index = 0;
@@ -184,7 +193,7 @@ void EfmDecoder::decode(const vector<bool> &data, size_t &sample_count, AudioDec
             if (m_byte_index > 0) {
                 if (m_bit_index == 16) {
                     int efm_value = m_shift_register & 0x3fff; // 14 bits
-                    ByteWithErasureStatus octet = c_efm_to_byte_table[efm_value];
+                    ByteWithErasureFlag octet = c_efm_to_byte_table[efm_value];
                     m_frame[m_byte_index] = octet;
 
                     if (m_byte_index == 32) {
@@ -199,38 +208,44 @@ void EfmDecoder::decode(const vector<bool> &data, size_t &sample_count, AudioDec
                 m_bit_index = m_bit_index + 1;
         }
     }
+
+    auto t1 = chrono::high_resolution_clock::now();
+    m_total_time_us += chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
+    if (frame_no % 30 == 0) {
+        m_log.info(eAudio | ePerformance,
+                   fmt::format("Avg audio decoding time last second: {:.1f} ms/frame", (double) m_total_time_us / 1000.0/ 30));
+        m_total_time_us = 0;
+    }
 }
 
 void EfmDecoder::handleFrame(size_t &sample_count, AudioDecoder::AudioFrame output_samples[2048]) {
-    ByteWithErasureStatus c1_in[32];
+    ByteWithErasureFlag c1_data[32];
 
     for (int i = 0; i < 32; i++) {
         m_initial_delay_lines[i][m_initial_delay_lines_ix[i]++] = m_frame[i + 1];
         if (m_initial_delay_lines_ix[i] == c_initial_delays[i].first + 1)
             m_initial_delay_lines_ix[i] = 0;
         auto v = m_initial_delay_lines[i][m_initial_delay_lines_ix[i]];
-        c1_in[i] = c_initial_delays[i].second ? v : ByteWithErasureStatus{(uint8_t)~v.value, v.erased};
+        c1_data[i] = c_initial_delays[i].second ? v : ByteWithErasureFlag{(uint8_t)~v.value, v.erased};
     }
 
-    ByteWithErasureStatus c1_out[28];
-    m_c1.decode(c1_in, c1_out);
+    m_c1.decode(c1_data);
 
-    ByteWithErasureStatus c2_in[28];
+    ByteWithErasureFlag c2_data[28];
 
     for (int i = 1; i < 28; i++) {
-        m_c1_to_c2_delay_lines[i][m_c1_to_c2_delay_lines_ix[i]++] = c1_out[i];
+        m_c1_to_c2_delay_lines[i][m_c1_to_c2_delay_lines_ix[i]++] = c1_data[i];
         if (m_c1_to_c2_delay_lines_ix[i] == c_c1_to_c2_delays[i] + 1)
             m_c1_to_c2_delay_lines_ix[i] = 0;
-        c2_in[i] = m_c1_to_c2_delay_lines[i][m_c1_to_c2_delay_lines_ix[i]];
+        c2_data[i] = m_c1_to_c2_delay_lines[i][m_c1_to_c2_delay_lines_ix[i]];
     }
 
-    ByteWithErasureStatus c2_out[24];
-    m_c2.decode(c2_in, c2_out);
+    m_c2.decode(c2_data);
 
-    ByteWithErasureStatus out[24];
+    ByteWithErasureFlag out[24];
 
     for (int i = 1; i < 24; i++) {
-        m_output_delay_lines[i][m_output_delay_lines_ix[i]++] = c2_out[i];
+        m_output_delay_lines[i][m_output_delay_lines_ix[i]++] = c2_data[i < 12 ? i : i + 4];
         if (m_output_delay_lines_ix[i] == c_output_delays[i] + 1)
             m_output_delay_lines_ix[i] = 0;
         out[i] = m_output_delay_lines[i][m_output_delay_lines_ix[i]];

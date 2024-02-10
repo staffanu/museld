@@ -157,7 +157,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                 break;
             glfwPollEvents();
 
-            if (check_glfw_key(window, GLFW_KEY_ESCAPE))
+            if (check_glfw_key(window, GLFW_KEY_ESCAPE) || check_glfw_key(window, GLFW_KEY_Q))
                 break;
             if (check_glfw_key(window, GLFW_KEY_TAB)) {
                 if (full_screen) {

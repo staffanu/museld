@@ -49,17 +49,15 @@ add_executable(musecpp
         musevk/HalfFloatUtil.h
         musevk/MemoryAllocator.cpp musevk/MemoryAllocator.h
         musevk/TimestampQueryPool.cpp musevk/TimestampQueryPool.h
-        EfmPll.cpp
-        EfmPll.h
-        EfmDecoder.cpp
-        EfmDecoder.h
         AudioMode.h
 )
+add_subdirectory(efm)
 target_link_libraries(musecpp
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
         PRIVATE fmt::fmt
+        PRIVATE efm_lib
 )
 
 set(GLSLC "glslc")
@@ -78,3 +76,5 @@ endforeach(GLSL)
 
 add_custom_target(Shaders DEPENDS ${SPIRV_BINARY_FILES})
 add_dependencies(musecpp Shaders)
+
+add_subdirectory(Catch_tests)

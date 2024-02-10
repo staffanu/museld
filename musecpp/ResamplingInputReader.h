@@ -7,7 +7,7 @@
 
 #include "InputReader.h"
 #include "RfDemodulator.h"
-#include "EfmPll.h"
+#include "efm/EfmPll.h"
 
 class ResamplingInputReader : public InputReader {
 public:

@@ -8,7 +8,6 @@
 #include "AudioDecoder.h"
 #include "MuseBuffer.h"
 #include "Logger.h"
-#include "musevk/VulkanBuffer.h"
 #include "musevk/HalfFloatUtil.h"
 
 using namespace std;
@@ -93,6 +92,11 @@ void AudioDecoder::decodeFrame(int frame_no,
         for (int i = 0; i < 8; i++)
             ss << "(" << (int)m_symbol_locations[i].first << ", " << (int)m_symbol_locations[i].second << ") ";
         m_log.debug(eAudio, ss.str());
+
+        m_bch_decoder.printStatistics(m_log, "Audio BchDecoder");
+        m_bch_decoder.resetStatistics();
+        m_range_bch_decoder.printStatistics(m_log, "Range bits BchDecoder");
+        m_range_bch_decoder.resetStatistics();
     }
 
     audio_mode = m_active_audio_mode;
@@ -279,6 +283,9 @@ void AudioDecoder::decodeFrame(int frame_no,
 
     auto t1 = chrono::high_resolution_clock::now();
     m_total_time_us += chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
-    if (frame_no % 30 == 0 && m_log.isEnabled(eDebug, eAudio))
-        m_log.info(eAudio | ePerformance, fmt::format("Avg audio decoding time: {:.1f} ms/m_frame", (double)m_total_time_us / 1000.0 / frame_no));
+    if (frame_no % 30 == 0) {
+        m_log.info(eAudio | ePerformance, fmt::format("Avg audio decoding time last second: {:.1f} ms/frame",
+                                                      (double) m_total_time_us / 1000.0/ 30));
+        m_total_time_us = 0;
+    }
 }

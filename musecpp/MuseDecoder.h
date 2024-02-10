@@ -8,7 +8,7 @@
 #include <deque>
 #include "AudioDecoder.h"
 #include "musevk/TimestampStatistics.h"
-#include "EfmDecoder.h"
+#include "efm/EfmDecoder.h"
 
 namespace musevk {
     class TimestampQueryPool;
