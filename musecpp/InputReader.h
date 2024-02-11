@@ -23,8 +23,8 @@ public:
     virtual void cleanup();
 
     struct InputReaderBlock {
-        InputReaderBlock(std::shared_ptr<musevk::VulkanBuffer> v)
-        : video_data(v) {};
+        explicit InputReaderBlock(std::shared_ptr<musevk::VulkanBuffer> v)
+        : video_data(std::move(v)) {};
         std::shared_ptr<musevk::VulkanBuffer> video_data;
         std::vector<bool> efm_data;
     };

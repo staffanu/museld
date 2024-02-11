@@ -64,46 +64,87 @@ namespace GfComputerHelper {
 
 using namespace GfComputerHelper;
 
-// Makes computations in GF[2^bits] mod the given irreducible polynomial
-template <int bits, int irreducible_poly, int alpha> class GFComputer {
+// An element with operations in GF[2^bits] mod the given irreducible polynomial
+// and a primitive element (the primitive element is used to compute logs and powers
+// for thw pow() function.
+template <int bits, int irreducible_poly, int alpha> class GFValue {
 public:
-    static int add(int a, int b) {
-        return a ^ b;
+    GFValue() : m_value(0) {};
+    explicit GFValue(int v) : m_value(v) {};
+
+    [[nodiscard]] bool isZero() const {
+        return m_value == 0;
     }
 
-    static int multiply(int a, int b) {
-        return multiply_impl<bits, irreducible_poly>(a, b);
+    [[nodiscard]] bool nonZero() const {
+        return m_value != 0;
     }
 
-    static int inverse(int a) {
-        assert(a != 0);
-        return inverse_table[a];
-    }
-    static int log(int a) {
-        assert(a != 0);
-        return log_table[a];
-    }
-    static int alpha_pow(int i) {
-        return pow_table[i % ((1 << bits) - 1)];
+    [[nodiscard]] int getInt() const {
+        return m_value;
     }
 
-    static int pow(int a, int b) {
-        return alpha_pow(b * log(a));
+    bool operator==(GFValue<bits, irreducible_poly, alpha> b) const {
+        return m_value == b.m_value;
+    }
+
+    bool operator!=(GFValue<bits, irreducible_poly, alpha> b) const {
+        return m_value != b.m_value;
+    }
+
+    GFValue<bits, irreducible_poly, alpha> operator+(GFValue<bits, irreducible_poly, alpha> b) const {
+        return GFValue<bits, irreducible_poly, alpha>(m_value ^ b.m_value);
+    }
+
+    void operator+=(GFValue<bits, irreducible_poly, alpha> b) {
+        m_value = m_value ^ b.m_value;
+    }
+
+    GFValue<bits, irreducible_poly, alpha> operator*(GFValue<bits, irreducible_poly, alpha> b) const {
+        return GFValue<bits, irreducible_poly, alpha>(multiply_impl<bits, irreducible_poly>(m_value, b.m_value));
+    }
+
+    void operator*=(GFValue<bits, irreducible_poly, alpha> b) {
+        m_value = multiply_impl<bits, irreducible_poly>(m_value, b.m_value);
+    }
+
+    GFValue<bits, irreducible_poly, alpha> inverse() const {
+        assert(this->m_value != 0 && m_value < (1 << bits));
+        return GFValue<bits, irreducible_poly, alpha>(c_inverse_table[m_value]);
+    }
+
+    GFValue<bits, irreducible_poly, alpha> pow(int a) const {
+        return alpha_pow(a * log(*this));
+    }
+
+    [[nodiscard]] int log() const {
+        assert(this->m_value != 0 && m_value < (1 << bits));
+        return c_log_table[m_value];
+    }
+
+    static int log(GFValue<bits, irreducible_poly, alpha> a) {
+        return a.log();
+    }
+
+    static GFValue<bits, irreducible_poly, alpha> alpha_pow(int i) {
+        return GFValue<bits, irreducible_poly, alpha>(c_alpha_pow_table[i % ((1 << bits) - 1)]);
     }
 
 private:
-    static const std::array<int, 1 << bits> inverse_table;
-    static const std::array<int, 1 << bits> log_table;
-    static const std::array<int, 1 << bits> pow_table;
+    static const std::array<int, 1 << bits> c_inverse_table;
+    static const std::array<int, 1 << bits> c_log_table;
+    static const std::array<int, 1 << bits> c_alpha_pow_table;
+
+    int m_value;
 };
 
 template <int bits, int irreducible_poly, int alpha>
-const std::array<int, 1 << bits> GFComputer<bits, irreducible_poly, alpha>::inverse_table = make_inverse_table<bits, irreducible_poly>();
+const std::array<int, 1 << bits> GFValue<bits, irreducible_poly, alpha>::c_inverse_table = make_inverse_table<bits, irreducible_poly>();
 
 template <int bits, int irreducible_poly, int alpha>
-const std::array<int, 1 << bits> GFComputer<bits, irreducible_poly, alpha>::log_table = make_log_table<bits, irreducible_poly>(alpha);
+const std::array<int, 1 << bits> GFValue<bits, irreducible_poly, alpha>::c_log_table = make_log_table<bits, irreducible_poly>(alpha);
 
 template <int bits, int irreducible_poly, int alpha>
-const std::array<int, 1 << bits> GFComputer<bits, irreducible_poly, alpha>::pow_table = make_pow_table<bits, irreducible_poly>(alpha);
+const std::array<int, 1 << bits> GFValue<bits, irreducible_poly, alpha>::c_alpha_pow_table = make_pow_table<bits, irreducible_poly>(alpha);
 
 #endif //MUSECPP_GFCOMPUTER_H

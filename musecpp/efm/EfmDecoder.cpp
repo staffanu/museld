@@ -64,6 +64,8 @@ std::array<ByteWithErasureFlag, 1 << 14> EfmDecoder::makeEfmInversionTable() {
 
     std::array<ByteWithErasureFlag, 1 << 14> table{};
 
+    auto t0 = chrono::high_resolution_clock::now();
+
     for (int i = 0; i < table.size(); i++) {
         int nearest = 0;
         int nearest_distance = 1000;
@@ -125,7 +127,7 @@ EfmDecoder::EfmDecoder(Logger &log)
           m_consecutive_sync_failures(0), // if not at the exact expected place
           m_frame{},
           m_c1(32, 28, 0, true),
-          m_c2(28, 24, 0, false),
+          m_c2(28, 24, 0, true),
           m_initial_delay_lines{},
           m_initial_delay_lines_ix{},
           m_c1_to_c2_delay_lines{},
@@ -219,19 +221,19 @@ void EfmDecoder::decode(int frame_no, const vector<bool> &data, size_t &sample_c
 }
 
 void EfmDecoder::handleFrame(size_t &sample_count, AudioDecoder::AudioFrame output_samples[2048]) {
-    ByteWithErasureFlag c1_data[32];
+    std::vector<ByteWithErasureFlag> c1_data(32);
 
     for (int i = 0; i < 32; i++) {
         m_initial_delay_lines[i][m_initial_delay_lines_ix[i]++] = m_frame[i + 1];
         if (m_initial_delay_lines_ix[i] == c_initial_delays[i].first + 1)
             m_initial_delay_lines_ix[i] = 0;
         auto v = m_initial_delay_lines[i][m_initial_delay_lines_ix[i]];
-        c1_data[i] = c_initial_delays[i].second ? v : ByteWithErasureFlag{(uint8_t)~v.value, v.erased};
+        c1_data[i] = c_initial_delays[i].second ? v : ByteWithErasureFlag{(uint8_t)~v.byteValue(), v.isErased()};
     }
 
     m_c1.decode(c1_data);
 
-    ByteWithErasureFlag c2_data[28];
+    std::vector<ByteWithErasureFlag> c2_data(28);
 
     for (int i = 1; i < 28; i++) {
         m_c1_to_c2_delay_lines[i][m_c1_to_c2_delay_lines_ix[i]++] = c1_data[i];
@@ -253,10 +255,10 @@ void EfmDecoder::handleFrame(size_t &sample_count, AudioDecoder::AudioFrame outp
 
     for (int i = 0; i < 6; i++) {
         auto [lh, ll] = c_left_output_map[i];
-        output_samples[sample_count].samples[0] = (int16_t) ((out[lh].value << 8) | out[ll].value);
+        output_samples[sample_count].samples[0] = (int16_t) ((out[lh].byteValue() << 8) | out[ll].byteValue());
 
         auto [rh, rl] = c_right_output_map[i];
-        output_samples[sample_count].samples[1] = (int16_t) ((out[rh].value << 8) | out[rl].value);
+        output_samples[sample_count].samples[1] = (int16_t) ((out[rh].byteValue() << 8) | out[rl].byteValue());
 
         sample_count++;
         assert(sample_count <= c_max_output_samples);

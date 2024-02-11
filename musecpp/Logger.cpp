@@ -11,7 +11,7 @@
 
 using namespace std;
 
-const map<LogCategoryFlags, LogPriority>  Logger::c_log_all = {
+const map<LogCategoryFlags, LogPriority> Logger::c_log_all = {
         { eApplication, eDebug },
         { ePerformance, eDebug },
         { eAudio, eDebug },
@@ -20,7 +20,7 @@ const map<LogCategoryFlags, LogPriority>  Logger::c_log_all = {
         { eInput, eDebug },
 };
 
-const map<LogCategoryFlags, LogPriority>  Logger::c_log_info = {
+const map<LogCategoryFlags, LogPriority> Logger::c_log_info = {
         { eApplication, eInfo },
         { ePerformance, eInfo },
         { eAudio, eInfo },
@@ -29,7 +29,7 @@ const map<LogCategoryFlags, LogPriority>  Logger::c_log_info = {
         { eInput, eInfo },
 };
 
-const map<LogCategoryFlags, LogPriority>  Logger::c_log_warn = {
+const map<LogCategoryFlags, LogPriority> Logger::c_log_warn = {
         { eApplication, eWarn },
         { ePerformance, eWarn },
         { eAudio, eWarn },
