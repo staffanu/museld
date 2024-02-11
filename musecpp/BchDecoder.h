@@ -8,7 +8,10 @@
 #include <map>
 #include <vector>
 #include <iostream>
+#include <sstream>
+#include "Logger.h"
 
+class Logger;
 /** BCH SEC-DED decoder.  We assume that the distance d of the code is 4.
  *
  * @param n the codeword length
@@ -33,9 +36,12 @@ public:
         m_statistics.clear();
     }
 
-    void printStatistics() {
+    void printStatistics(Logger &log, std::string const &message) {
+        std::ostringstream ss;
+        ss << message << ": ";
         for (const auto &el: m_statistics)
-            std::cout << el.first << ": " << el.second << std::endl;
+            ss << el.first << ": " << el.second << ", ";
+        log.info(eAudio, ss.str());
     }
 
 private:
