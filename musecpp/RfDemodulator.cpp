@@ -108,8 +108,11 @@ void RfDemodulator::demodulate() {
 
     float prev_angle;
     long total_samples_read = 0;
+    long total_samples_read_last_log = 0;
+    long total_time_since_last_log_us = 0;
 
     while (!m_stop_request && readFloats(input_buffer + c_bandpass_filter_size - 1, c_sample_block_size)) {
+        auto t0 = chrono::high_resolution_clock::now();
 
         // first get a free output block to write to
         shared_ptr<DemodulatedBlock> block = nullptr;
@@ -174,6 +177,9 @@ void RfDemodulator::demodulate() {
         memcpy(efm_equalization_in_buffer, efm_equalization_in_buffer + c_efm_equalization_in_buffer_size - c_efm_equalization_filter_size + 1,
                (c_efm_equalization_filter_size - 1) * sizeof(float));
 
+        auto t1 = chrono::high_resolution_clock::now();
+        total_time_since_last_log_us += chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
+
         // Send away result
         block->rf_location = total_samples_read;
         std::unique_lock<std::mutex> lock(m_mutex);
@@ -181,6 +187,12 @@ void RfDemodulator::demodulate() {
         m_filled_blocks.push_back(block);
 
         total_samples_read += c_sample_block_size;
+        if (total_samples_read - total_samples_read_last_log > (long)c_sample_frequency) {
+            m_log.info(eInput | ePerformance,
+                       fmt::format("Total demodulation time last second: {:.1f} ms", (double)total_time_since_last_log_us / 1000.0));
+            total_time_since_last_log_us = 0;
+            total_samples_read_last_log = total_samples_read;
+        }
     }
     m_reader_thread_finished = true;
 }
@@ -250,8 +262,43 @@ template<size_t filter_size> void RfDemodulator::firFilter(
     }
 }
 
+#elif __ARM_NEON == 1
+#include <arm_neon.h>
+#include <numeric>
+
+template<size_t filter_size> void RfDemodulator::firFilter(
+        const float *input,   // input signal of length at least output_size + filter_length - 1
+        size_t output_size,   // number of output values to compute -- must be even!
+        const array<float, filter_size> &filter,  // reversed filter coefficients
+        int decimation_rate,
+        float *output) {
+    assert(output_size % 2 == 0);
+    alignas(float32x4_t) array<float, c_NEON_floats_per_chunk> tmp_store0{};
+    alignas(float32x4_t) array<float, c_NEON_floats_per_chunk> tmp_store1{};
+
+    for (int oi = 0, ii = 0; oi < output_size; oi += 2, ii += 2 * decimation_rate) {
+        float32x4_t out_chunk0 = vdupq_n_f32(0);
+        float32x4_t out_chunk1 = vdupq_n_f32(0);
+
+        for (int j = 0; j < filter_size; j += c_NEON_floats_per_chunk) {
+            float32x4_t filter_chunk = vld1q_f32(filter.data() + j);
+
+            float32x4_t input_chunk0 = vld1q_f32(input + ii + j);
+            out_chunk0 = vmlaq_f32(out_chunk0, input_chunk0, filter_chunk);
+
+            float32x4_t input_chunk1 = vld1q_f32(input + ii + decimation_rate + j);
+            out_chunk1 = vmlaq_f32(out_chunk1, input_chunk1, filter_chunk);
+        }
+        vst1q_f32(tmp_store0.data(), out_chunk0); // aligned store
+        output[oi] = std::accumulate(tmp_store0.begin(), tmp_store0.end(), 0.f);
+
+        vst1q_f32(tmp_store1.data(), out_chunk1); // aligned store
+        output[oi + 1] = std::accumulate(tmp_store1.begin(), tmp_store1.end(), 0.f);
+    }
+}
+
 #else
-#warning "AVX not detected"
+#warning "SIMD architecture not detected"
 template<size_t filter_size> void RfDemodulator::firFilter(
         const float *input,   // input signal of length output_length + filter_length - 1
         size_t output_size, // usable input (not including the filter_length-1 extra values)

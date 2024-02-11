@@ -179,6 +179,7 @@ private:
     static constexpr float c_frequency_deviation = 1.9e6f;
     static constexpr float c_2pi = 2 * (float)M_PI;
     static constexpr int c_AVX_floats_per_chunk = 8;
+    static constexpr int c_NEON_floats_per_chunk = 4;
 
     static constexpr std::pair<std::array<float, 32>, std::array<float, 32>> c_bandpass_filter = initializeBandpassFilter();
     static constexpr int c_bandpass_filter_size = c_bandpass_filter.first.size();

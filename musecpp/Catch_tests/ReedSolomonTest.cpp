@@ -76,3 +76,27 @@ TEST_CASE("Reed solomon corrects one error and erasures") {
         }));
     }
 }
+
+TEST_CASE("Correct 1 error, 2 erasures problem example") {
+    ReedSolomon<0x11d, 2> rs(32, 28, 0, true);
+
+    std::vector<ByteWithErasureFlag> data{
+            {0x53, false}, {0xb9, false}, {0x41, false}, {0x24, false},
+            {0x61, false}, {0x2,  false}, {0xfb, false}, {0x23, false},
+            {0x66, false}, {0xff, true}, {0x3c, false}, {0xfe, false},
+            {0xb3, false}, {0x2,  false}, {0xcd, false}, {0x0,  false},
+            {0x67, false}, {0x8f, false}, {0x79, false}, {0xa8, false},
+            {0x11, false}, {0xff, true}, {0x98, false}, {0x3,  false},
+            {0xa5, false}, {0xfc, false}, {0xcf, false}, {0x1,  false},
+            {0xe2, false}, {0xff, false}, {0xf3, false}, {0x1,  false},
+    };
+    
+    rs.decode(data);
+
+    Logger log(Logger::c_log_all);
+    rs.printStatistics(log, "");
+
+    REQUIRE(std::all_of(data.cbegin(), data.cend(), [](ByteWithErasureFlag b) -> bool {
+        return b.byteValue() == 0 && !b.isErased();
+    }));
+}

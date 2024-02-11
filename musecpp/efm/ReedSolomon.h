@@ -202,11 +202,11 @@ private:
     }
 
     bool tryDecodeOneErrorTwoErasures(std::vector<GFValue<8, irreducible_poly, alpha_decimal>> const &syndromes, std::vector<ByteWithErasureFlag> &data) {
-        std::vector<int> errorPositions;
+        std::vector<int> erasure_positions;
         for (int i = 0; i < m_n; i++)
             if (data[i].isErased())
-                errorPositions.push_back(i);
-        if (errorPositions.size() != 2) {
+                erasure_positions.push_back(i);
+        if (erasure_positions.size() != 2) {
             m_statistics["one error two erasures needs two erasures"]++;
             return false;
         } else {
@@ -215,21 +215,21 @@ private:
 
             // Think of y0 and y1 being the erased errors at locators x0 and x1
             auto alphaInv = m_alpha_inverse;
-            auto s0prime = syndromes[0] + syndromes[1] * alphaInv.pow(errorPositions[0]);
-            auto s1prime = syndromes[1] * alphaInv.pow(errorPositions[0]) +
-                          syndromes[2] * alphaInv.pow(2 * errorPositions[0]);
-            auto s2prime = syndromes[2] * alphaInv.pow(2 * errorPositions[0]) +
-                          syndromes[3] * alphaInv.pow(3 * errorPositions[0]);
-            int posDiff = errorPositions[1] - errorPositions[0]; // positive
+            auto s0prime = syndromes[0] + syndromes[1] * alphaInv.pow(erasure_positions[0]);
+            auto s1prime = syndromes[1] * alphaInv.pow(erasure_positions[0]) +
+                          syndromes[2] * alphaInv.pow(2 * erasure_positions[0]);
+            auto s2prime = syndromes[2] * alphaInv.pow(2 * erasure_positions[0]) +
+                          syndromes[3] * alphaInv.pow(3 * erasure_positions[0]);
+            int posDiff = erasure_positions[1] - erasure_positions[0]; // positive
             auto s0bis = s0prime + s1prime * alphaInv.pow(posDiff);
             auto s1bis = s1prime * alphaInv.pow(posDiff) + s2prime * alphaInv.pow(2 * posDiff);
 
             auto x2prime = s1bis * s0bis.inverse();
             int errorPos2prime = x2prime.log(); // this is errorPos2 - errorPos1
-            int errorPos2 = (errorPos2prime + errorPositions[1]) % 255;
-            if (errorPos2 >=0  && errorPos2 < m_n) {
+            int errorPos2 = (errorPos2prime + erasure_positions[1]) % 255;
+            if (errorPos2 >= 0  && errorPos2 < m_n) {
                 auto y2prime = s0bis;
-                auto x0 = GFValue<8, irreducible_poly, alpha_decimal>::alpha_pow(errorPositions[0]);
+                auto x0 = GFValue<8, irreducible_poly, alpha_decimal>::alpha_pow(erasure_positions[0]);
                 auto x2 = GFValue<8, irreducible_poly, alpha_decimal>::alpha_pow(errorPos2);
                 auto y2BeforeFcrAdjust =
                         y2prime * (m_unit + x0.inverse() * x2).inverse() * (m_unit + x2prime).inverse();

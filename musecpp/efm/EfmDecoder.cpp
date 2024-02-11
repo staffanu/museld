@@ -45,21 +45,31 @@ std::array<ByteWithErasureFlag, 1 << 14> EfmDecoder::makeEfmInversionTable() {
     };
 
     auto dist = [](int a, int b) -> int {
-        vector<int> a_bits;
-        vector<int> b_bits;
+        auto hamming = [](int n) -> int {
+            n = ((n & 0xAAAA) >> 1) + (n & 0x5555);
+            n = ((n & 0xCCCC) >> 2) + (n & 0x3333);
+            n = ((n & 0xF0F0) >> 4) + (n & 0x0F0F);
+            n = ((n & 0xFF00) >> 8) + (n & 0x00FF);
+            return n;
+        };
+
+        if (hamming(a) != hamming(b))
+            return 1000;
+        int a_bits[14];
+        int a_bits_count = 0;
+        int b_bits[14];
+        int b_bits_count = 0;
         for (int i = 0; i < 14; i++) {
             if (a & (1 << i))
-                a_bits.push_back(i);
+                a_bits[a_bits_count++] = i;
             if (b & (1 << i))
-                b_bits.push_back(i);
+                b_bits[b_bits_count++] = i;
         }
-        if (a_bits.size() == b_bits.size()) {
+        assert(a_bits_count == b_bits_count);
             int sum = 0;
-            for (int i = 0; i < a_bits.size(); i++)
+        for (int i = 0; i < a_bits_count; i++)
                 sum += abs(a_bits[i] - b_bits[i]);
             return sum;
-        } else
-            return 1000;
     };
 
     std::array<ByteWithErasureFlag, 1 << 14> table{};
