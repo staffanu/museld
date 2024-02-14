@@ -23,7 +23,7 @@ misfit = (sum((distances - closest).^2) / length(distances))^(1/2);
 
 if do_plot
   figure(1);
-  plot(longefm(1:2500));
+  plot(longefm(1:500));
 
   figure(2)
   hist(distances, 500)

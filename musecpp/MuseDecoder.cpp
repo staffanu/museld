@@ -84,7 +84,6 @@ bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
     }
 
     std::shared_ptr<InputReader::InputReaderBlock> input_block = nullptr;
-    shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = nullptr;
     InputReader::PresentationHint presentation_hint;
     if (m_field_index == 0 && !redo_last_field) {
         auto frame_buffer = m_frame_buffers.back();
@@ -96,7 +95,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
         if (input_block == nullptr) {
             return false;
         }
-        input_vulkan_buffer = input_block->video_data;
+        shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
 
         auto eq_estimate = FrameBuffer::EstimateEq(input_vulkan_buffer->data<float>());
         if (m_eq.first == -1 && m_eq.second == -1)
@@ -149,20 +148,21 @@ bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
     else
         m_second_stage_command_buffer->submit({}, {}, {});
 
-    assert(input_vulkan_buffer != nullptr == m_first_stage_command_buffer->isSubmitted());
-    if (m_first_stage_command_buffer->isSubmitted()) {
+    assert(input_block != nullptr == m_first_stage_command_buffer->isSubmitted());
+    if (m_first_stage_command_buffer->isSubmitted())
         m_first_stage_command_buffer->wait();
-        m_reader.returnBuffer(input_block);
-    }
 
     if (m_decode_audio && m_field_index == 0) {
         if (efm_audio) {
-            m_efm_decoder.decode(m_frame_no, input_block->efm_data, sample_count, output_samples);
+            m_efm_decoder.decode(m_frame_no, input_block->efm_data, input_block->efm_data_size, sample_count, output_samples);
             audio_mode = MODE_EFM;
         } else // MUSE audio
             m_audio_decoder.decodeFrame(m_frame_no, m_shaders.getAudioData(), audio_mode, sample_count, output_samples);
     } else
         sample_count = 0;
+
+    if (input_block != nullptr)
+        m_reader.returnBuffer(input_block); // EFM audio uses the buffer, so we cannot return it until now
 
     if (m_second_stage_command_buffer->isSubmitted())
         m_second_stage_command_buffer->wait();

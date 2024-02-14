@@ -11,42 +11,28 @@
 #include <algorithm>
 #include <sstream>
 #include <fmt/format.h>
-#include "GFComputer.h"
+#include "GFValue.h"
+#include "ByteWithErasureFlag.h"
 #include "../Logger.h"
-
-class ByteWithErasureFlag {
-public:
-    ByteWithErasureFlag() : m_value(0), m_erased(false) {}
-    explicit ByteWithErasureFlag(int v) : m_value(v), m_erased(false) {}
-    template<int irreducible_poly, int alpha> explicit ByteWithErasureFlag(GFValue<8, irreducible_poly, alpha> v) : m_value(v.getInt()), m_erased(false) {}
-    ByteWithErasureFlag(int v, bool e) : m_value(v), m_erased(e) {}
-    template<int irreducible_poly, int alpha> GFValue<8, irreducible_poly, alpha> gfValue() const {
-        return GFValue<8, irreducible_poly, alpha>(m_value);
-    }
-    [[nodiscard]] uint8_t byteValue() const { return m_value; }
-    [[nodiscard]] bool isErased() const { return m_erased; }
-    void setErased(bool e) { m_erased = e; }
-private:
-    uint8_t m_value;
-    bool m_erased;
-};
 
 template<int irreducible_poly, int alpha_decimal> class ReedSolomon {
 public:
+    typedef GFValue<8, irreducible_poly, alpha_decimal> GF;
+
     // Notice this is only tested for k = n - 4.
-    ReedSolomon(int n, int k, int fcr, bool make_corrections)
-            : m_alpha(GFValue<8, irreducible_poly, alpha_decimal>(alpha_decimal)),
+    ReedSolomon(int n, int k, int fcr, bool make_corrections, bool create_diagnotics)
+            : m_alpha(GF(alpha_decimal)),
               m_n(n),
               m_k(k),
               m_fcr(fcr),
               m_make_corrections(make_corrections),
-              m_unit(GFValue<8, irreducible_poly, alpha_decimal>(1)),
+              m_create_diagnotics(create_diagnotics),
               m_alpha_inverse(m_alpha.inverse()),
               m_alpha_squared(m_alpha * m_alpha) {
         for (int row = 0; row < n - k; row++) {
-            std::vector<GFValue<8, irreducible_poly, alpha_decimal>> h_row;
+            std::vector<GF> h_row;
             for (int col = 0; col < n; col++) {
-                h_row.push_back(GFValue<8, irreducible_poly, alpha_decimal>::alpha_pow((row + fcr) * col));
+                h_row.push_back(GF::alpha_pow((row + fcr) * col));
             }
             H.push_back(h_row);
         }
@@ -57,35 +43,51 @@ public:
 
     void resetStatistics() {
         m_statistics.clear();
+        m_diagnostics.clear();
     }
 
     void printStatistics(Logger &log, std::string const &message) {
-        std::ostringstream ss;
-        ss << message << ": ";
-        for (const auto &el: m_statistics)
-            ss << el.first << ": " << el.second << ", ";
-        log.info(eAudio, ss.str());
+        {
+            std::ostringstream ss;
+            ss << message << ": ";
+            for (const auto &el: m_statistics)
+                ss << el.first << ": " << el.second << ", ";
+            log.debug(eAudio, ss.str());
+        }
+        if (m_create_diagnotics) {
+            std::ostringstream ss;
+            ss << message << " diagnostics: ";
+            for (const auto &el: m_diagnostics)
+                ss << el.first << ": " << el.second << ", ";
+            log.debug(eAudio, ss.str());
+        }
     }
 
 private:
-    GFValue<8, irreducible_poly, alpha_decimal> m_alpha;
+    GF m_alpha;
     int m_n;
     int m_k;
     int m_fcr;
     bool m_make_corrections;
-    GFValue<8, irreducible_poly, alpha_decimal> m_unit;
-    GFValue<8, irreducible_poly, alpha_decimal> m_alpha_inverse;
-    GFValue<8, irreducible_poly, alpha_decimal> m_alpha_squared;
+    bool m_create_diagnotics;
+    GF m_alpha_inverse;
+    GF m_alpha_squared;
 
-    std::vector<std::vector<GFValue<8, irreducible_poly, alpha_decimal>>> H;
+    std::vector<std::vector<GF>> H;
     std::map<std::string, int> m_statistics;
+    std::map<std::string, int> m_diagnostics;
+
+    inline void addDiagnosticCounter(std::string const &name) {
+        if (m_create_diagnotics)
+            m_diagnostics[name]++;
+    }
 
     void doDecode(std::vector<ByteWithErasureFlag> &data);
 
-    std::vector<GFValue<8, irreducible_poly, alpha_decimal>> computeSyndromes(std::vector<ByteWithErasureFlag> const &data) {
-        std::vector<GFValue<8, irreducible_poly, alpha_decimal>> syndromes;
+    std::vector<GF> computeSyndromes(std::vector<ByteWithErasureFlag> const &data) {
+        std::vector<GF> syndromes;
         for (int i = 0; i < m_n - m_k; i++) {
-            GFValue<8, irreducible_poly, alpha_decimal> s = GFValue<8, irreducible_poly, alpha_decimal>(0);
+            GF s = GF(0);
             for (int j = 0; j < m_n; j++)
                 s = s + H[i][j] * data[j].gfValue<irreducible_poly, alpha_decimal>();
             syndromes.push_back(s);
@@ -99,14 +101,14 @@ private:
     }
 
     void uneraseAll(std::vector<ByteWithErasureFlag> &data) {
-        for (auto b: data)
+        for (auto &b: data)
             b.setErased(false);
-        m_statistics["unerased all"]++;
+        addDiagnosticCounter("unerased all");
     }
 
-    bool tryCorrectOneError(std::vector<GFValue<8, irreducible_poly, alpha_decimal>> const &syndromes, std::vector<ByteWithErasureFlag> &data) {
-            if (std::count_if(syndromes.cbegin(), syndromes.cend(), [](GFValue<8, irreducible_poly, alpha_decimal> a) -> bool { return a.isZero(); })) {
-                m_statistics["single error some syndrome zero"]++;
+    bool tryCorrectOneError(std::vector<GF> const &syndromes, std::vector<ByteWithErasureFlag> &data) {
+            if (std::count_if(syndromes.cbegin(), syndromes.cend(), [](GF a) -> bool { return a.isZero(); })) {
+                addDiagnosticCounter("single error some syndrome zero");
                 return false;
             } else {
                 auto x0 = syndromes[1] * syndromes[0].inverse();
@@ -114,34 +116,34 @@ private:
                 auto y0 = syndromes[0] * m_alpha.pow(errorPos0 * m_fcr).inverse();
 
                 if (errorPos0 < 0 || errorPos0 >= m_n) {
-                    m_statistics["single error outside range"] += 1;
+                    addDiagnosticCounter("single error outside range");
                     return false;
                 } else if (syndromes[2] * syndromes[1].inverse() != x0 ||
                            syndromes[3] * syndromes[2].inverse() != x0) {
-                    m_statistics["single error inconsistent syndromes"] += 1;
+                    addDiagnosticCounter("single error inconsistent syndromes");
                     return false;
                 } else {
                     data[errorPos0] = ByteWithErasureFlag(data[errorPos0].gfValue<irreducible_poly, alpha_decimal>() + y0);
-                    m_statistics["single correction count"] += 1;
+                    addDiagnosticCounter("single correction count");
                     return true;
                 }
             }
     }
 
-    bool tryCorrectTwoErrors(std::vector<GFValue<8, irreducible_poly, alpha_decimal>> const &syndromes, std::vector<ByteWithErasureFlag> &data) {
+    bool tryCorrectTwoErrors(std::vector<GF> const &syndromes, std::vector<ByteWithErasureFlag> &data) {
             auto determinant = syndromes[1] * syndromes[1] + syndromes[0] * syndromes[2];
             if (determinant.isZero()) {
-                m_statistics["dual determinant zero"];
+                addDiagnosticCounter("dual determinant zero");
                 return false;
             } else {
                 auto detInv = determinant.inverse();
                 auto lambda1 = (syndromes[1] * syndromes[2] + syndromes[0] * syndromes[3]) * detInv;
                 auto lambda2 = (syndromes[2] * syndromes[2] + syndromes[1] * syndromes[3]) * detInv;
 
-                std::vector<std::pair<GFValue<8, irreducible_poly, alpha_decimal>, int>> roots;
-                auto alphaPowI = m_unit;
+                std::vector<std::pair<GF, int>> roots;
+                auto alphaPowI = GF(1);
                 auto lambda1TimesAlphaPowI = lambda1; // for i == 0
-                auto lambda2TimesAlphaPow2I = m_unit; // we swap lambda0 (which is 1) and lambda2 in order to get the error locations directly without inversion
+                auto lambda2TimesAlphaPow2I = GF(1); // we swap lambda0 (which is 1) and lambda2 in order to get the error locations directly without inversion
                 for (int i = 0; i < m_n; i++) {
                     if (lambda1TimesAlphaPowI + lambda2TimesAlphaPow2I == lambda2)
                         roots.emplace_back(alphaPowI, i);
@@ -152,7 +154,7 @@ private:
                 }
 
                 if (roots.size() != 2) {
-                    m_statistics["dual too few roots"] += 1;
+                    addDiagnosticCounter("dual too few roots");
                     return false;
                 } else {
                     auto [x0, errorPos0] = roots[0];
@@ -168,46 +170,57 @@ private:
                     data[errorPos0] = ByteWithErasureFlag(data0.gfValue<irreducible_poly, alpha_decimal>() + y0);
                     data[errorPos1] = ByteWithErasureFlag(data1.gfValue<irreducible_poly, alpha_decimal>() + y1);
 
-                    m_statistics["dual correction count"] += 1;
+                    addDiagnosticCounter("dual correction count");
                     return true;
                 }
-                m_statistics["dual correction not implemented"] += 1;
-                return false;
             }
     }
 
-    bool tryDecodeErasures(std::vector<GFValue<8, irreducible_poly, alpha_decimal>> const &syndromes, std::vector<ByteWithErasureFlag> &data) {
-        std::vector<int> errorPositions;
+    bool tryDecodeErasures(std::vector<GF> const &syndromes, std::vector<ByteWithErasureFlag> &data) {
+        std::vector<int> erasure_positions;
         for (int i = 0; i < m_n; i++)
             if (data[i].isErased())
-                errorPositions.push_back(i);
-        if (errorPositions.size() > syndromes.size()) {
-            m_statistics["erasure decoding failed with ${errorPositions.size} erasures"]++;
+                erasure_positions.push_back(i);
+        if (erasure_positions.size() > syndromes.size()) {
+            addDiagnosticCounter(fmt::format("erasure decoding not performed for {} erasures", erasure_positions.size()));
             return false;
         } else {
-            std::vector<GFValue<8, irreducible_poly, alpha_decimal>> x(errorPositions.size());
-            std::transform(errorPositions.begin(), errorPositions.end(), x.begin(), [this](int b) -> GFValue<8, irreducible_poly, alpha_decimal> { return m_alpha.pow(b); });
+            std::vector<GF> x(erasure_positions.size());
+            std::transform(erasure_positions.begin(), erasure_positions.end(), x.begin(), [this](int b) -> GF { return m_alpha.pow(b); });
             auto s = syndromes;
-            s.resize(errorPositions.size());
-            std::vector<GFValue<8, irreducible_poly, alpha_decimal>> y = solveSyndromeEquations(x, s);
+            s.resize(erasure_positions.size());
+            std::vector<GF> y = solveSyndromeEquations(x, s);
 
-            for (int i = 0; i < errorPositions.size(); i++) {
-                int errorPos = errorPositions[i];
+            for (int i = 0; i < erasure_positions.size(); i++) {
+                int errorPos = erasure_positions[i];
                 auto error = y[i];
                 data[errorPos] = ByteWithErasureFlag(data[errorPos].gfValue<irreducible_poly, alpha_decimal>() + error * m_alpha.pow(errorPos * m_fcr).inverse());
             }
-            m_statistics[fmt::format("corrected {} erasures", errorPositions.size())]++;
-            return true;
+
+            auto new_syndromes = computeSyndromes(data);
+            if (std::count_if(new_syndromes.cbegin(), new_syndromes.cend(), [](GF a) -> bool { return a.nonZero(); }) != 0) {
+                // undo incorrect changes
+                for (int i = 0; i < erasure_positions.size(); i++) {
+                    int errorPos = erasure_positions[i];
+                    auto error = y[i];
+                    data[errorPos] = ByteWithErasureFlag(data[errorPos].gfValue<irreducible_poly, alpha_decimal>() + error * m_alpha.pow(errorPos * m_fcr).inverse(), true);
+                }
+                addDiagnosticCounter(fmt::format("erasure decoding failed for {} erasures", erasure_positions.size()));
+                return false;
+            } else {
+                addDiagnosticCounter(fmt::format("corrected {} erasures", erasure_positions.size()));
+                return true;
+            }
         }
     }
 
-    bool tryDecodeOneErrorTwoErasures(std::vector<GFValue<8, irreducible_poly, alpha_decimal>> const &syndromes, std::vector<ByteWithErasureFlag> &data) {
+    bool tryDecodeOneErrorTwoErasures(std::vector<GF> const &syndromes, std::vector<ByteWithErasureFlag> &data) {
         std::vector<int> erasure_positions;
         for (int i = 0; i < m_n; i++)
             if (data[i].isErased())
                 erasure_positions.push_back(i);
         if (erasure_positions.size() != 2) {
-            m_statistics["one error two erasures needs two erasures"]++;
+            addDiagnosticCounter("one error two erasures needs two erasures");
             return false;
         } else {
             // See "Method for correcting both errors and erasures of RS codes using error-only and erasure-only decoding algorithms"
@@ -224,35 +237,54 @@ private:
             auto s0bis = s0prime + s1prime * alphaInv.pow(posDiff);
             auto s1bis = s1prime * alphaInv.pow(posDiff) + s2prime * alphaInv.pow(2 * posDiff);
 
-            auto x2prime = s1bis * s0bis.inverse();
-            int errorPos2prime = x2prime.log(); // this is errorPos2 - errorPos1
-            int errorPos2 = (errorPos2prime + erasure_positions[1]) % 255;
-            if (errorPos2 >= 0  && errorPos2 < m_n) {
-                auto y2prime = s0bis;
-                auto x0 = GFValue<8, irreducible_poly, alpha_decimal>::alpha_pow(erasure_positions[0]);
-                auto x2 = GFValue<8, irreducible_poly, alpha_decimal>::alpha_pow(errorPos2);
-                auto y2BeforeFcrAdjust =
-                        y2prime * (m_unit + x0.inverse() * x2).inverse() * (m_unit + x2prime).inverse();
-                auto y2 = y2BeforeFcrAdjust *
-                          GFValue<8, irreducible_poly, alpha_decimal>::alpha_pow(errorPos2 * m_fcr).inverse();
-
-                data[errorPos2] = ByteWithErasureFlag(data[errorPos2].gfValue<irreducible_poly, alpha_decimal>() + y2);
-
-                auto fixedSyndromes = std::vector<GFValue<8, irreducible_poly, alpha_decimal>>{
-                        syndromes[0] + y2BeforeFcrAdjust,
-                        syndromes[1] +
-                        y2BeforeFcrAdjust * GFValue<8, irreducible_poly, alpha_decimal>::alpha_pow(errorPos2)
-                };
-
-                bool c = tryDecodeErasures(fixedSyndromes, data);
-                if (c)
-                    m_statistics["single correction with two erasures"]++;
-                else
-                    m_statistics["single correction with two erasures failed on erasures"]++;
-                return c;
-            } else {
-                m_statistics["single correction with two erasures failed errorPos2 out of range"]++;
+            if (s0bis == GF(0)) {
+                addDiagnosticCounter("single correction with two erasures failed s0bis zero");
                 return false;
+            } else {
+                auto x2prime = s1bis * s0bis.inverse();
+                int errorPos2prime = x2prime.log(); // this is errorPos2 - errorPos1
+                int errorPos2 = (errorPos2prime + erasure_positions[1]) % 255;
+                if (errorPos2 < 0 || errorPos2 >= m_n)  {
+                    addDiagnosticCounter("single correction with two erasures failed errorPos2 out of range");
+                    return false;
+                } else {
+                    auto y2prime = s0bis;
+                    auto x0 = GF::alpha_pow(erasure_positions[0]);
+                    auto x2 = GF::alpha_pow(errorPos2);
+
+                    auto check1 = GF(1) + x0.inverse() * x2;
+                    auto check2 = GF(1) + x2prime;
+                    if (check1 == GF(0) || check2 == GF(0)) {
+                        addDiagnosticCounter(fmt::format("single correction with two erasures failed zero inverse {} {}",
+                                                 check1.getInt(), check2.getInt()));
+                        return false;
+                    } else {
+                        auto y2BeforeFcrAdjust =
+                                y2prime * (GF(1) + x0.inverse() * x2).inverse() * (GF(1) + x2prime).inverse();
+                        auto y2 = y2BeforeFcrAdjust *
+                                  GF::alpha_pow(errorPos2 * m_fcr).inverse();
+
+                        data[errorPos2] = ByteWithErasureFlag(
+                                data[errorPos2].gfValue<irreducible_poly, alpha_decimal>() + y2);
+
+                        auto fixedSyndromes = std::vector<GF>{
+                                syndromes[0] + y2BeforeFcrAdjust,
+                                syndromes[1] +
+                                y2BeforeFcrAdjust * GF::alpha_pow(errorPos2)
+                        };
+
+                        bool c = tryDecodeErasures(fixedSyndromes, data);
+                        if (c) {
+                            addDiagnosticCounter("single correction with two erasures");
+                        } else {
+                            // undo incorrect "correction"
+                            data[errorPos2] = ByteWithErasureFlag(
+                                    data[errorPos2].gfValue<irreducible_poly, alpha_decimal>() + y2);
+                            addDiagnosticCounter("single correction with two erasures failed");
+                        }
+                        return c;
+                    }
+                }
             }
         }
     }
@@ -262,18 +294,18 @@ private:
      *
      * x(0)^k y(0) + ... + x(n-1)^k y(n-1) = s(k), for all k = 0...n-1
      */
-    std::vector<GFValue<8, irreducible_poly, alpha_decimal>>
-    solveSyndromeEquations(std::vector<GFValue<8, irreducible_poly, alpha_decimal>> const &x, std::vector<GFValue<8, irreducible_poly, alpha_decimal>> const &s) {
+    std::vector<GF>
+    solveSyndromeEquations(std::vector<GF> const &x, std::vector<GF> const &s) {
         int m = (int)x.size();
         assert(s.size() == m);
-        assert(std::count_if(x.cbegin(), x.cend(), [](GFValue<8, irreducible_poly, alpha_decimal> a) -> bool { return a.isZero(); }) == 0);
+        assert(std::count_if(x.cbegin(), x.cend(), [](GF a) -> bool { return a.isZero(); }) == 0);
 
         // compute the matrix by multiplying x element wise to the previous rows
-        std::vector<GFValue<8, irreducible_poly, alpha_decimal>> row;
+        std::vector<GF> row;
         row.resize(m);
-        std::fill(row.begin(), row.end(), GFValue<8, irreducible_poly, alpha_decimal>(1));
+        std::fill(row.begin(), row.end(), GF(1));
 
-        std::vector<std::vector<GFValue<8, irreducible_poly, alpha_decimal>>> mat;
+        std::vector<std::vector<GF>> mat;
         mat.resize(m);
         for (int i = 0; i < m; i++) {
             mat[i] = row;
@@ -284,7 +316,7 @@ private:
         auto y = s;
         for (int i = 0; i < m - 1; i++) { // for each row, clear column i under it
             auto leadingInverse = mat[i][i].inverse();
-            for (int j = i; j < m; j++) // make first element unit
+            for (int j = i; j < m; j++) // makeMyType first element unit
                 mat[i][j] = mat[i][j] * leadingInverse;
             y[i] *= leadingInverse;
 
@@ -327,33 +359,67 @@ void ReedSolomon<irreducible_poly, alpha>::decode(std::vector<ByteWithErasureFla
 
 template<int irreducible_poly, int alpha>
 void ReedSolomon<irreducible_poly, alpha>::doDecode(std::vector<ByteWithErasureFlag> &data) {
+    assert(data.size() == m_n);
     int number_of_erasures = std::count_if(data.cbegin(), data.cend(), [](ByteWithErasureFlag b) -> bool { return b.isErased(); });
     auto syndromes = computeSyndromes(data);
 
+    auto data_copy = data; // save to print original if we think we decoded correctly but didn't
+
     if (std::all_of(syndromes.cbegin(), syndromes.cend(), [](GFValue<8, irreducible_poly, alpha> s) -> bool { return s.isZero(); })) {
         if (number_of_erasures == 0) {
-            m_statistics["input ok"] += 1;
+            m_statistics["input ok"]++;
         } else {
             uneraseAll(data);
-            m_statistics[fmt::format("syndromes zero with {} erasures, un-erased", number_of_erasures)]++;
+            addDiagnosticCounter(fmt::format("syndromes zero with {} erasures, un-erased", number_of_erasures));
+            m_statistics["input ok despite erasures"]++;
         }
     } else {
         auto determinant = syndromes[1] * syndromes[1] + syndromes[0] * syndromes[2];
 
-        bool corrected = (determinant.isZero()) ? tryCorrectOneError(syndromes, data) : tryCorrectTwoErrors(syndromes, data);
-        if (!corrected) {
-            if (number_of_erasures == 2)
-                corrected = tryDecodeOneErrorTwoErasures(syndromes, data);
-            else if (number_of_erasures > 2)
-                corrected = tryDecodeErasures(syndromes, data);
+        bool corrected;
+        if (number_of_erasures >= 1) {
+            if (tryDecodeErasures(syndromes, data)) {
+                corrected = true;
+                m_statistics["corrected erasures"]++;
+            } else {
+                if (number_of_erasures == 2) // since erasure decoding failed we know we have at least one error
+                    corrected = tryDecodeOneErrorTwoErasures(syndromes, data);
+                else if (number_of_erasures == 1 && determinant != GF(0))
+                    corrected = tryCorrectTwoErrors(syndromes, data);
+                else if (number_of_erasures == 1 && determinant == GF(0)) // in this case the erasure is wrong -- risk of incorrect decoding?
+                    corrected = tryCorrectOneError(syndromes, data);
+                else
+                    corrected = false;
+                if (corrected)
+                    m_statistics["corrected errors/erasures"]++;
+                else
+                    m_statistics["failed"]++;
+            }
+        } else {
+            if (determinant != GF(0))
+                corrected = tryCorrectTwoErrors(syndromes, data);
+            else
+                corrected = tryCorrectOneError(syndromes, data);
+            if (corrected)
+                m_statistics["corrected errors"]++;
+            else
+                m_statistics["failed"]++;
         }
 
         if (corrected) {
             auto s = computeSyndromes(data);
             int number_of_non_zero = std::count_if(s.cbegin(), s.cend(), [](GFValue<8, irreducible_poly, alpha> s) -> bool { return s.nonZero(); });
-            if (number_of_non_zero != 0)
-                printf("Still %d non-zero syndromes after correction", number_of_non_zero);
-            uneraseAll(data);
+            if (number_of_non_zero != 0) {
+                printf("Still %d non-zero syndromes after correction\n", number_of_non_zero);
+                for (int i = 0; i < data_copy.size(); i++) {
+                    printf("{0x%x, %s}, ", data_copy[i].byteValue(), data_copy[i].isErased() ? "true" : "false");
+                    if (i % 4 == 3)
+                        printf("\n");
+                }
+                printf("\n");
+            }
+            if (number_of_erasures != 0)
+                uneraseAll(data);
         } else
             eraseAll(data);
     }

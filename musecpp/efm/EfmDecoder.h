@@ -7,6 +7,7 @@
 
 #include <array>
 #include "../AudioDecoder.h"
+#include "../InputReader.h"
 #include "ReedSolomon.h"
 class Logger;
 
@@ -18,7 +19,9 @@ public:
     ~EfmDecoder();
 
     // output samples are written to the first two channels
-    void decode(int frame_no, const std::vector<bool> &data, size_t &sample_count, AudioDecoder::AudioFrame output_samples[c_max_output_samples]);
+    void decode(int frame_no,
+                const std::array<bool, InputReader::InputReaderBlock::c_max_efm_data_size> &data, int input_data_size,
+                size_t &sample_count, AudioDecoder::AudioFrame output_samples[c_max_output_samples]);
 
 private:
     static const std::array<ByteWithErasureFlag, 1 << 14> c_efm_to_byte_table;
@@ -45,7 +48,7 @@ private:
     bool m_locked;
     int m_consecutive_sync_failures; // if not at the exact expected place
 
-    ByteWithErasureFlag m_frame[33]; // first byte is the control data
+    std::array<ByteWithErasureFlag, 33> m_frame; // first byte is the control data
 
     ReedSolomon<0x11d, 2> m_c1;
     ReedSolomon<0x11d, 2> m_c2;
@@ -56,7 +59,11 @@ private:
     std::array<ByteWithErasureFlag *, 24> m_output_delay_lines;
     std::array<int, 24> m_output_delay_lines_ix;
 
-    long m_total_time_us;
+    int m_efm_frame_count_last_second;
+    long m_total_time_us_last_second;
+    int m_total_erasures_in_last_second;
+    int m_total_erasures_past_c1_last_second;
+    int m_total_erasures_out_last_second;
 };
 
 #endif //MUSECPP_EFMDECODER_H

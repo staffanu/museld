@@ -44,53 +44,11 @@ std::array<ByteWithErasureFlag, 1 << 14> EfmDecoder::makeEfmInversionTable() {
             0x1212, 0x2012, 0x2412, 0x2212, 0x1012, 0x0212, 0x0412, 0x0812
     };
 
-    auto dist = [](int a, int b) -> int {
-        auto hamming = [](int n) -> int {
-            n = ((n & 0xAAAA) >> 1) + (n & 0x5555);
-            n = ((n & 0xCCCC) >> 2) + (n & 0x3333);
-            n = ((n & 0xF0F0) >> 4) + (n & 0x0F0F);
-            n = ((n & 0xFF00) >> 8) + (n & 0x00FF);
-            return n;
-        };
-
-        if (hamming(a) != hamming(b))
-            return 1000;
-        int a_bits[14];
-        int a_bits_count = 0;
-        int b_bits[14];
-        int b_bits_count = 0;
-        for (int i = 0; i < 14; i++) {
-            if (a & (1 << i))
-                a_bits[a_bits_count++] = i;
-            if (b & (1 << i))
-                b_bits[b_bits_count++] = i;
-        }
-        assert(a_bits_count == b_bits_count);
-            int sum = 0;
-        for (int i = 0; i < a_bits_count; i++)
-                sum += abs(a_bits[i] - b_bits[i]);
-            return sum;
-    };
-
     std::array<ByteWithErasureFlag, 1 << 14> table{};
+    table.fill(ByteWithErasureFlag(0, true));
 
-    auto t0 = chrono::high_resolution_clock::now();
-
-    for (int i = 0; i < table.size(); i++) {
-        int nearest = 0;
-        int nearest_distance = 1000;
-        for (int j = 0; j < 256; j++) {
-            auto d = dist(i, byte_to_efm[j]);
-            if (d < nearest_distance) {
-                nearest_distance = d;
-                nearest = j;
-            }
-        }
-        if (nearest_distance >= 2)
-            table[i] = ByteWithErasureFlag(0, true);
-        else
-            table[i] = ByteWithErasureFlag(nearest);
-    }
+    for (int i = 0; i < 256; i++)
+        table[byte_to_efm[i]] = ByteWithErasureFlag(i, false);
 
     return table;
 };
@@ -136,15 +94,19 @@ EfmDecoder::EfmDecoder(Logger &log)
           m_locked(false),
           m_consecutive_sync_failures(0), // if not at the exact expected place
           m_frame{},
-          m_c1(32, 28, 0, true),
-          m_c2(28, 24, 0, true),
+          m_c1(32, 28, 0, true, false),
+          m_c2(28, 24, 0, true, false),
           m_initial_delay_lines{},
           m_initial_delay_lines_ix{},
           m_c1_to_c2_delay_lines{},
           m_c1_to_c2_delay_lines_ix{},
           m_output_delay_lines{},
           m_output_delay_lines_ix{},
-          m_total_time_us(0)
+          m_efm_frame_count_last_second(0),
+          m_total_time_us_last_second(0),
+          m_total_erasures_in_last_second(0),
+          m_total_erasures_past_c1_last_second(0),
+          m_total_erasures_out_last_second(0)
 {
     for (int i = 0; i < m_initial_delay_lines.size(); i++)
         m_initial_delay_lines[i] = new ByteWithErasureFlag[c_initial_delays[i].first + 1];
@@ -163,7 +125,9 @@ EfmDecoder::~EfmDecoder() {
         delete[] p;
 }
 
-void EfmDecoder::decode(int frame_no, const vector<bool> &data, size_t &sample_count, AudioDecoder::AudioFrame output_samples[c_max_output_samples]) {
+void EfmDecoder::decode(int frame_no,
+                        const std::array<bool, InputReader::InputReaderBlock::c_max_efm_data_size> &data, int input_data_size,
+                        size_t &sample_count, AudioDecoder::AudioFrame output_samples[c_max_output_samples]) {
     auto t0 = chrono::high_resolution_clock::now();
 
     if (frame_no % 30 == 0 && m_log.isEnabled(eDebug, eAudio)) {
@@ -174,9 +138,9 @@ void EfmDecoder::decode(int frame_no, const vector<bool> &data, size_t &sample_c
     }
 
     sample_count = 0;
-    for (auto bool_bit: data) {
+    for (int i = 0; i < input_data_size; i++) {
+        int bit = data[i] ? 1 : 0;
         m_total_bits += 1;
-        int bit = bool_bit ? 1 : 0;
         m_shift_register = m_shift_register << 1 | bit;
         m_bits_since_sync += 1;
         bool sync = (m_shift_register & 0xffffff) == 0x801002; // 1000 0000 0001 0000 0000 0010
@@ -202,31 +166,41 @@ void EfmDecoder::decode(int frame_no, const vector<bool> &data, size_t &sample_c
                 m_log.debug(eAudio, fmt::format("efm lock lost index {}", m_total_bits));
             }
         } else if (m_byte_index < 33) {
-            if (m_byte_index > 0) {
-                if (m_bit_index == 16) {
-                    int efm_value = m_shift_register & 0x3fff; // 14 bits
-                    ByteWithErasureFlag octet = c_efm_to_byte_table[efm_value];
-                    m_frame[m_byte_index] = octet;
-
-                    if (m_byte_index == 32) {
-                        handleFrame(sample_count, output_samples);
-                    }
-                }
-            }
             if (m_bit_index == 16) {
+                int efm_value = m_shift_register & 0x3fff; // 14 bits
+                ByteWithErasureFlag octet = c_efm_to_byte_table[efm_value];
+                m_frame[m_byte_index] = octet;
+                if (octet.isErased())
+                    m_total_erasures_in_last_second++;
+
+                if (m_byte_index == 32) {
+                    handleFrame(sample_count, output_samples);
+                    m_efm_frame_count_last_second++;
+                }
                 m_bit_index = 0;
-                m_byte_index = m_byte_index + 1;
+                m_byte_index++;
             } else
-                m_bit_index = m_bit_index + 1;
+                m_bit_index++;
         }
     }
 
     auto t1 = chrono::high_resolution_clock::now();
-    m_total_time_us += chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
+    m_total_time_us_last_second += chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
+
     if (frame_no % 30 == 0) {
         m_log.info(eAudio | ePerformance,
-                   fmt::format("Avg audio decoding time last second: {:.1f} ms/frame", (double) m_total_time_us / 1000.0/ 30));
-        m_total_time_us = 0;
+                   fmt::format("Time spent decoding last second: {:.1f} ms; efm frame count: {}, "
+                               "input erasure rate: {} ppm, past c1 erasure rate: {} ppm, output erasure rate: {} ppm",
+                               (double)m_total_time_us_last_second / 1000.0 / 30,
+                               m_efm_frame_count_last_second,
+                               1000000L * m_total_erasures_in_last_second / m_efm_frame_count_last_second / 33,
+                               1000000L * m_total_erasures_past_c1_last_second / m_efm_frame_count_last_second / 28,
+                               1000000L * m_total_erasures_out_last_second / m_efm_frame_count_last_second / 24));
+        m_efm_frame_count_last_second = 0;
+        m_total_time_us_last_second = 0;
+        m_total_erasures_in_last_second = 0;
+        m_total_erasures_past_c1_last_second = 0;
+        m_total_erasures_out_last_second = 0;
     }
 }
 
@@ -238,29 +212,33 @@ void EfmDecoder::handleFrame(size_t &sample_count, AudioDecoder::AudioFrame outp
         if (m_initial_delay_lines_ix[i] == c_initial_delays[i].first + 1)
             m_initial_delay_lines_ix[i] = 0;
         auto v = m_initial_delay_lines[i][m_initial_delay_lines_ix[i]];
-        c1_data[i] = c_initial_delays[i].second ? v : ByteWithErasureFlag{(uint8_t)~v.byteValue(), v.isErased()};
+        c1_data[i] = c_initial_delays[i].second ? ByteWithErasureFlag{(uint8_t)~v.byteValue(), v.isErased()} : v;
     }
 
     m_c1.decode(c1_data);
 
     std::vector<ByteWithErasureFlag> c2_data(28);
 
-    for (int i = 1; i < 28; i++) {
+    for (int i = 0; i < 28; i++) {
         m_c1_to_c2_delay_lines[i][m_c1_to_c2_delay_lines_ix[i]++] = c1_data[i];
         if (m_c1_to_c2_delay_lines_ix[i] == c_c1_to_c2_delays[i] + 1)
             m_c1_to_c2_delay_lines_ix[i] = 0;
         c2_data[i] = m_c1_to_c2_delay_lines[i][m_c1_to_c2_delay_lines_ix[i]];
+        if (c2_data[i].isErased())
+            m_total_erasures_past_c1_last_second++;
     }
 
     m_c2.decode(c2_data);
 
     ByteWithErasureFlag out[24];
 
-    for (int i = 1; i < 24; i++) {
+    for (int i = 0; i < 24; i++) {
         m_output_delay_lines[i][m_output_delay_lines_ix[i]++] = c2_data[i < 12 ? i : i + 4];
         if (m_output_delay_lines_ix[i] == c_output_delays[i] + 1)
             m_output_delay_lines_ix[i] = 0;
         out[i] = m_output_delay_lines[i][m_output_delay_lines_ix[i]];
+        if (out[i].isErased())
+            m_total_erasures_out_last_second++;
     }
 
     for (int i = 0; i < 6; i++) {

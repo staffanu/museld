@@ -6,7 +6,7 @@ fclose(fid);
 
 Fs=62.5e6;
 
-lp=fir1(n_taps, 1.7e6 / (Fs/2));
+lp=fir1(n_taps, 1.5e6 / (Fs/2));
 convoluted=conv(unfiltered, lp, 'valid');
 
 filtered=convoluted(1:filter_decim:end);

@@ -193,7 +193,7 @@ void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
                         field.control_data().value().frame_subsampling_phase_Y.value_or(0) : 0;
     int frame_phase_c = field.control_data().has_value() ?
                         field.control_data().value().frame_subsampling_phase_C.value_or(0) : 0;
-    // int field_phase = field.m_control.value().field_subsampling_phase_Y.value_or(0);
+//    int field_phase = field.control_data().value().field_subsampling_phase_Y.value_or(0);
 
     copyYForInterpolation(sq, 0, field.m_data, m_interpolated32_buffer, field_parity, frame_phase_y, true);
     filterImageDiamond(sq, 0, frame_phase_y, m_interpolated32_buffer);

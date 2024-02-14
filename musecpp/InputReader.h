@@ -23,10 +23,12 @@ public:
     virtual void cleanup();
 
     struct InputReaderBlock {
+        static constexpr int c_max_efm_data_size = 150000; // a bit above 7350 / 30 * 588;
         explicit InputReaderBlock(std::shared_ptr<musevk::VulkanBuffer> v)
         : video_data(std::move(v)) {};
         std::shared_ptr<musevk::VulkanBuffer> video_data;
-        std::vector<bool> efm_data;
+        int efm_data_size;
+        std::array<bool, c_max_efm_data_size> efm_data;
     };
 
     enum PresentationHint {

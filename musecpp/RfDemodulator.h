@@ -121,23 +121,33 @@ namespace RfDemodulatorHelper {
 
     // Lowpass filter for EFM
     // Computed in octave: fir1(7, 1.8e6 / 31.25e6)
-    static constexpr std::array<float, 8> initializeEfmLowpassFilter() {
-        return std::array<float, 8>{
-            0.019637, 0.064191, 0.166359, 0.249813,
-            0.249813, 0.166359, 0.064191, 0.019637
+    static constexpr std::array<float, 16> initializeEfmLowpassFilter() {
+        return std::array<float, 16>{
+            0.007487, 0.012178, 0.025290, 0.045819,
+            0.070755, 0.095684, 0.115788, 0.127000,
+            0.127000, 0.115788, 0.095684, 0.070755,
+            0.045819, 0.025290, 0.012178, 0.007487
         };
     }
 
     // Equalization filter for EFM.  Works on 1/4 of the original sample frequency
     // Computed in octave using the script make_efm_filter.m, and then numerically optimized.
-    static constexpr std::array<float, 16> initializeEfmEqualizationFilter() {
-        auto coefficients = std::array<float, 16>{
-                0.037853, 0.121164, 0.173657, 0.300307,
-                0.387234, 0.366450, 0.418596, 0.208327,
-                0.073206, -0.117067, -0.347229, -0.354265,
-                -0.384882, -0.289761, -0.146208, -0.072109
+    static constexpr std::array<float, 32> initializeEfmEqualizationFilter() {
+        auto coefficients = std::array<float, 32>{
+//                0.030164, 0.065937, 0.101987, 0.129844,
+//                0.141895, 0.133502, 0.104427, 0.059129,
+//                0.005797, -0.045620, -0.085850, -0.108520,
+//                -0.111545, -0.097331, -0.071798, -0.042551
+                -0.397856, 0.094957, -0.285097, 0.002505,
+                -0.056853, -0.263420, 0.394114, 0.005008,
+                0.740662, 0.616144, 0.817413, 0.888591,
+                0.858024, 0.612603, 0.227419, -0.712161,
+                -0.817860, -0.999957, -0.996745, -0.902156,
+                -0.252263, 0.132426, -0.169630, 0.821285,
+                -0.095913, 0.166130, 0.376055, -0.558495,
+                0.204774, -0.273269, 0.229580, 0.054656
         };
-        auto reversed = std::array<float, 16>{};
+        auto reversed = std::array<float, 32>{};
         for (int i = 0; i < coefficients.size(); i++)
             reversed[coefficients.size() - 1 - i] = coefficients[i];
         return reversed;
@@ -190,10 +200,10 @@ private:
     static constexpr std::array<float, 16> c_rrc_filter = initializeRrcFilter();
     static constexpr int c_rrc_filter_size = c_rrc_filter.size();
 
-    static constexpr std::array<float, 8> c_efm_lowpass_filter = initializeEfmLowpassFilter();
+    static constexpr std::array<float, 16> c_efm_lowpass_filter = initializeEfmLowpassFilter();
     static constexpr int c_efm_lowpass_filter_size = c_efm_lowpass_filter.size();
 
-    static constexpr std::array<float, 16> c_efm_equalization_filter = initializeEfmEqualizationFilter();
+    static constexpr std::array<float, 32> c_efm_equalization_filter = initializeEfmEqualizationFilter();
     static constexpr int c_efm_equalization_filter_size = c_efm_equalization_filter.size();
 
     static constexpr int c_input_buffer_size = c_sample_block_size + c_bandpass_filter_size - 1;

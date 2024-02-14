@@ -5,20 +5,11 @@
 #ifndef MUSECPP_EFMPLL_H
 #define MUSECPP_EFMPLL_H
 
-#include <cassert>
-#include <cmath>
-#include <cstdio>
+class Logger;
 
 class EfmPll {
 public:
-    EfmPll()
-    : m_clk_counter(0),
-      m_prev_in(false),
-      m_error_sum(0),
-      m_filter_out(0),
-      m_toggle_count(0),
-      m_toggle_pos(0) {
-    }
+    EfmPll(Logger &log);
 
     int reclock(const float *input, int input_size, bool *output, int max_output_size);
 
@@ -30,8 +21,8 @@ private:
     static constexpr double c_max_error_sum = 0x7fffff;
     static constexpr double c_min_error_sum = -0x800000;
 
-    static constexpr double c_omega = 2 * M_PI * 15000; // undampened frequency
-    static constexpr double c_zeta = 0.7; // damping factor
+    static constexpr double c_omega = 2 * M_PI * 10000; // un-dampened frequency
+    static constexpr double c_zeta = 0.71; // damping factor
     static constexpr double c_Ts = 1 / c_sample_frequency;
     static const double c_G1;
     static const double c_G2;

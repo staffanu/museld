@@ -2,15 +2,15 @@
 // Created by Staffan Ulfberg on 2/8/24.
 //
 
-#ifndef MUSECPP_GFCOMPUTER_H
-#define MUSECPP_GFCOMPUTER_H
+#ifndef MUSECPP_GFVALUE_H
+#define MUSECPP_GFVALUE_H
 
 #include <cassert>
 #include <array>
 #include <vector>
 #include <stdexcept>
 
-namespace GfComputerHelper {
+namespace GfValueHelper {
     template<int bits, int irreducible_poly> int multiply_impl(int a, int b) {
         int aa = a;
         int bb = b;
@@ -62,7 +62,7 @@ namespace GfComputerHelper {
     }
 }
 
-using namespace GfComputerHelper;
+using namespace GfValueHelper;
 
 // An element with operations in GF[2^bits] mod the given irreducible polynomial
 // and a primitive element (the primitive element is used to compute logs and powers
@@ -84,37 +84,37 @@ public:
         return m_value;
     }
 
-    bool operator==(GFValue<bits, irreducible_poly, alpha> b) const {
+    bool operator==(GFValue b) const {
         return m_value == b.m_value;
     }
 
-    bool operator!=(GFValue<bits, irreducible_poly, alpha> b) const {
+    bool operator!=(GFValue b) const {
         return m_value != b.m_value;
     }
 
-    GFValue<bits, irreducible_poly, alpha> operator+(GFValue<bits, irreducible_poly, alpha> b) const {
-        return GFValue<bits, irreducible_poly, alpha>(m_value ^ b.m_value);
+    GFValue operator+(GFValue b) const {
+        return GFValue(m_value ^ b.m_value);
     }
 
-    void operator+=(GFValue<bits, irreducible_poly, alpha> b) {
+    void operator+=(GFValue b) {
         m_value = m_value ^ b.m_value;
     }
 
-    GFValue<bits, irreducible_poly, alpha> operator*(GFValue<bits, irreducible_poly, alpha> b) const {
-        return GFValue<bits, irreducible_poly, alpha>(multiply_impl<bits, irreducible_poly>(m_value, b.m_value));
+    GFValue operator*(GFValue b) const {
+        return GFValue(multiply_impl<bits, irreducible_poly>(m_value, b.m_value));
     }
 
-    void operator*=(GFValue<bits, irreducible_poly, alpha> b) {
+    void operator*=(GFValue b) {
         m_value = multiply_impl<bits, irreducible_poly>(m_value, b.m_value);
     }
 
-    GFValue<bits, irreducible_poly, alpha> inverse() const {
+    GFValue inverse() const {
         assert(this->m_value != 0 && m_value < (1 << bits));
-        return GFValue<bits, irreducible_poly, alpha>(c_inverse_table[m_value]);
+        return GFValue(c_inverse_table[m_value]);
     }
 
-    GFValue<bits, irreducible_poly, alpha> pow(int a) const {
-        return alpha_pow(a * log(*this));
+    GFValue pow(int a) const {
+        return m_value == 0 ? GFValue(0) : alpha_pow(a * log(*this));
     }
 
     [[nodiscard]] int log() const {
@@ -122,12 +122,12 @@ public:
         return c_log_table[m_value];
     }
 
-    static int log(GFValue<bits, irreducible_poly, alpha> a) {
+    static int log(GFValue a) {
         return a.log();
     }
 
-    static GFValue<bits, irreducible_poly, alpha> alpha_pow(int i) {
-        return GFValue<bits, irreducible_poly, alpha>(c_alpha_pow_table[i % ((1 << bits) - 1)]);
+    static GFValue alpha_pow(int i) {
+        return GFValue(c_alpha_pow_table[i % ((1 << bits) - 1)]);
     }
 
 private:
@@ -147,4 +147,4 @@ const std::array<int, 1 << bits> GFValue<bits, irreducible_poly, alpha>::c_log_t
 template <int bits, int irreducible_poly, int alpha>
 const std::array<int, 1 << bits> GFValue<bits, irreducible_poly, alpha>::c_alpha_pow_table = make_pow_table<bits, irreducible_poly>(alpha);
 
-#endif //MUSECPP_GFCOMPUTER_H
+#endif //MUSECPP_GFVALUE_H

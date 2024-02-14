@@ -50,14 +50,17 @@ add_executable(musecpp
         musevk/MemoryAllocator.cpp musevk/MemoryAllocator.h
         musevk/TimestampQueryPool.cpp musevk/TimestampQueryPool.h
         AudioMode.h
+        efm/ReedSolomon.h
+        efm/GFValue.h
+        efm/EfmPll.cpp efm/EfmPll.h
+        efm/EfmDecoder.cpp efm/EfmDecoder.h
+        efm/ByteWithErasureFlag.h
 )
-add_subdirectory(efm)
 target_link_libraries(musecpp
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
         PRIVATE fmt::fmt
-        PRIVATE efm_lib
 )
 
 set(GLSLC "glslc")

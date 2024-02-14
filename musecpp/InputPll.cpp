@@ -37,7 +37,7 @@ void InputPll::initialize(double sample_rate) {
     m_g1 = m_G1 / m_GpdGvco;
     m_g2 = m_G2 / m_GpdGvco;
 
-    m_log.debug(eInput, fmt::format("m_g1={:.5f} m_g2={:7f}", m_g1, m_g2));
+    m_log.debug(eInput, fmt::format("m_g1={:.5f} m_g2={:.7f}", m_g1, m_g2));
 }
 
 InputPll::PllResult InputPll::process(int sample_count, const float samples[], float *output) {

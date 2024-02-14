@@ -24,6 +24,7 @@ ResamplingInputReader::ResamplingInputReader(
           m_input_format(input_format),
           m_sample_rate(sample_rate),
           m_input_pll(log),
+          m_efm_pll(log),
           m_file_fd(-1),
           m_demodulator(nullptr),
           m_file_input_buffer{},
@@ -136,7 +137,7 @@ void ResamplingInputReader::threadFunc() {
             }
             buffer = m_vacant_muse_input_buffers.front();
             m_vacant_muse_input_buffers.pop_front();
-            buffer->efm_data.clear();
+            buffer->efm_data_size = 0;;
         }
 
         auto video_data = buffer->video_data->data<float>();
@@ -151,10 +152,11 @@ void ResamplingInputReader::threadFunc() {
                                                            efm_bit_buffer, DemodulatedBlock::c_efm_block_size);
 
                 for (int i = 0; i < actual_output_size; i++)
-                    buffer->efm_data.push_back(efm_bit_buffer[i]);
+                    buffer->efm_data[buffer->efm_data_size++] = efm_bit_buffer[i];
+                assert(buffer->efm_data_size <= buffer->c_max_efm_data_size);
             }
         } else
-            buffer->efm_data.clear();
+            buffer->efm_data_size = 0;;
 
         if (pll_result.frame_done) {
             std::unique_lock<std::mutex> lock(m_mutex);
