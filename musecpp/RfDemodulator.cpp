@@ -264,7 +264,6 @@ template<size_t filter_size> void RfDemodulator::firFilter(
 
 #elif __ARM_NEON == 1
 #include <arm_neon.h>
-#include <numeric>
 
 template<size_t filter_size> void RfDemodulator::firFilter(
         const float *input,   // input signal of length at least output_size + filter_length - 1
@@ -289,11 +288,9 @@ template<size_t filter_size> void RfDemodulator::firFilter(
             float32x4_t input_chunk1 = vld1q_f32(input + ii + decimation_rate + j);
             out_chunk1 = vmlaq_f32(out_chunk1, input_chunk1, filter_chunk);
         }
-        vst1q_f32(tmp_store0.data(), out_chunk0); // aligned store
-        output[oi] = std::accumulate(tmp_store0.begin(), tmp_store0.end(), 0.f);
 
-        vst1q_f32(tmp_store1.data(), out_chunk1); // aligned store
-        output[oi + 1] = std::accumulate(tmp_store1.begin(), tmp_store1.end(), 0.f);
+        output[oi] = vaddvq_f32(out_chunk0);
+        output[oi + 1] = vaddvq_f32(out_chunk1);
     }
 }
 
