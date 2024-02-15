@@ -28,9 +28,9 @@ ResamplingInputReader::ResamplingInputReader(
           m_file_fd(-1),
           m_demodulator(nullptr),
           m_file_input_buffer{},
-          m_t(0),
-          m_file_input_buffer_bytes(c_input_buffer_lookback),
-          m_file_input_buffer_read_pos(c_input_buffer_lookback) {
+          m_file_input_buffer_bytes(c_input_buffer_lookback * 4), // 4 >= input bytes per sample
+          m_file_input_buffer_read_pos(c_input_buffer_lookback * 4),
+          m_t(0) {
     if (demodulate) {
         m_input_format = eFloat;
         m_demodulator = new RfDemodulator(log, m_filename);

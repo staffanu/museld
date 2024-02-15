@@ -20,8 +20,9 @@ namespace musevk {
         VulkanMemoryObject(MemoryAllocator &memory_allocator)
         : m_memory_allocator(memory_allocator){
         }
+        virtual ~VulkanMemoryObject() = default;
 
-        virtual MemoryObjectType getType() const = 0;
+        [[nodiscard]] virtual MemoryObjectType getType() const = 0;
         virtual vk::WriteDescriptorSet
         makeWriteDescriptorSet(vk::DescriptorSet &descriptor_set, uint32_t binding_index) const = 0;
 

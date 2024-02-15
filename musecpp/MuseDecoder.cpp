@@ -34,8 +34,13 @@ MuseDecoder::MuseDecoder(
   m_reset_timestamp_query_pool_command_buffer(m_manager.createCommandBuffer(timestamp_query_pool)),
   m_first_stage_command_buffer(m_manager.createCommandBuffer(timestamp_query_pool)),
   m_second_stage_command_buffer(m_manager.createCommandBuffer(timestamp_query_pool)),
+  m_timestamp_statistics(),
+  m_frame_no(-1),
+  m_field_index(0),
+  m_total_elapsed_time_us(0),
   m_audio_decoder(log),
-  m_efm_decoder(log) {
+  m_efm_decoder(log),
+  m_frame_buffers() {
 }
 
 MuseDecoder::~MuseDecoder() {

@@ -38,7 +38,9 @@ namespace musevk {
         MemoryAllocator(vk::PhysicalDevice &physical_device,
                         vk::Device &device)
                 : m_physical_device(physical_device),
-                  m_device(device) {}
+                  m_device(device),
+                  m_memory_pools() {
+        }
 
         MemoryAllocator(MemoryAllocator &other) = delete;
 

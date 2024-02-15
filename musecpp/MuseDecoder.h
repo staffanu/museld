@@ -33,6 +33,9 @@ public:
                 bool decode_audio,
                 musevk::TimestampQueryPool *timestamp_query_pool);
     ~MuseDecoder();
+    MuseDecoder(const MuseDecoder&) = delete;
+    void operator=(const MuseDecoder&) = delete;
+
     [[nodiscard]] bool initialize();
 
     enum FieldInterpolationMode {

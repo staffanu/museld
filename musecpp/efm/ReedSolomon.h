@@ -28,7 +28,10 @@ public:
               m_make_corrections(make_corrections),
               m_create_diagnotics(create_diagnotics),
               m_alpha_inverse(m_alpha.inverse()),
-              m_alpha_squared(m_alpha * m_alpha) {
+              m_alpha_squared(m_alpha * m_alpha),
+              H(),
+              m_statistics(),
+              m_diagnostics() {
         for (int row = 0; row < n - k; row++) {
             std::vector<GF> h_row;
             for (int col = 0; col < n; col++) {

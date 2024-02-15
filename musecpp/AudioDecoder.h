@@ -26,7 +26,10 @@ public:
         int16_t samples[4];
     };
 
-    AudioDecoder(Logger &log);
+    explicit AudioDecoder(Logger &log);
+    AudioDecoder(const AudioDecoder &) = delete;
+    void operator=(const AudioDecoder &) = delete;
+
 
     // output samples are written to the first two or all four channels depending on the detected mode
     void decodeFrame(int frame_no,

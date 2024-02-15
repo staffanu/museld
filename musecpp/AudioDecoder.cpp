@@ -66,6 +66,8 @@ AudioDecoder::AudioDecoder(Logger &log)
   m_q(0),
   m_consecutive_failed_syncs(100), // start by searching for sync pattern
   m_symbol_locations(defaultSymbolLocations()),
+  m_queue(),
+  m_control_signals(),
   m_active_control_signal(0),
   m_active_audio_mode(MODE_UNKNOWN),
   m_bch_decoder(82, 74, 137),

@@ -324,7 +324,7 @@ namespace musevk {
     }
 
     VulkanManager::QueueFamilyIndices VulkanManager::findQueueFamilies(vk::PhysicalDevice &device) {
-        QueueFamilyIndices indices;
+        QueueFamilyIndices indices{};
         auto queueFamilies = device.getQueueFamilyProperties();
 
         int i = 0;

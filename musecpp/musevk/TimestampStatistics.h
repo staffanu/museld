@@ -16,7 +16,9 @@
 namespace musevk {
     class TimestampStatistics {
     public:
-        TimestampStatistics() = default;
+        TimestampStatistics() :
+        m_data() {
+        };
 
         void add_timestamps(std::vector<std::pair<std::string, int>> timestamps);
 
@@ -63,6 +65,11 @@ namespace musevk {
         };
 
         struct TimestampStats {
+            TimestampStats() :
+            m_total(),
+            m_elapsed_since_prev() {
+            }
+
             SingleStatistic m_total;
             SingleStatistic m_elapsed_since_prev;
 

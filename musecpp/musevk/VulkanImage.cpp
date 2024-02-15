@@ -14,6 +14,10 @@ namespace musevk {
               m_device(device),
               m_width(width),
               m_height(height),
+              m_image(),
+              m_allocated_memory(),
+              m_view(),
+              m_descriptor_image_info(),
               m_layout(vk::ImageLayout::eUndefined) {
         auto image_usage_flags = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc;
         auto format = vk::Format::eB8G8R8A8Unorm;

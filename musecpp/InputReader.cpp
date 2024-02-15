@@ -20,6 +20,7 @@ InputReader::InputReader(Logger &log, const std::string &filename, bool input_is
           m_initial_seek_seconds(initial_seek_seconds),
           m_output_filename(output_filename),
           m_output_file_fd(-1),
+          m_output_short_buffer(nullptr),
           m_vacant_muse_input_buffers{},
           m_filled_muse_input_buffers{},
           m_reader_thread(nullptr),

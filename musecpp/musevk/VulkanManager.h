@@ -20,6 +20,8 @@ namespace musevk {
     public:
         VulkanManager(Logger &log);
         VulkanManager(VulkanManager &other) = delete;
+        void operator=(const musevk::VulkanManager &) = delete;
+
         void initVulkan(GLFWwindow *window, bool no_sync);
         void cleanup();
 

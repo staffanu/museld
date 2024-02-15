@@ -15,7 +15,10 @@ namespace musevk {
               m_device(device),
               m_size(number_of_elements),
               m_memory_size(number_of_elements * element_size),
-              m_is_host(is_host) {
+              m_is_host(is_host),
+              m_allocated_memory(),
+              m_raw_data(nullptr) {
+
         auto buffer_usage_flags = m_is_host || allow_transfers ?
                                   vk::BufferUsageFlagBits::eStorageBuffer |
                                   vk::BufferUsageFlagBits::eTransferSrc |

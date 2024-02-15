@@ -168,6 +168,9 @@ struct DemodulatedBlock {
 class RfDemodulator {
 public:
     RfDemodulator(Logger &log, std::string filename);
+    RfDemodulator(const RfDemodulator&) = delete;
+    void operator=(const RfDemodulator&) = delete;
+
     bool initialize();
     std::shared_ptr<DemodulatedBlock> getNextDemodulatedBlock();
     void returnBlock(std::shared_ptr<DemodulatedBlock> &buffer);

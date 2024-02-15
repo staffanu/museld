@@ -19,6 +19,8 @@ public:
     explicit ResamplingInputReader(Logger &log, const std::string &filename, InputFormat input_format,
                                    double sample_rate, double initial_seek_seconds,
                                    bool demodulate, const std::optional<std::string> &output_filename);
+    ResamplingInputReader(const ResamplingInputReader&) = delete;
+    void operator=(const ResamplingInputReader&) = delete;
 
     bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) override;
     void cleanup() override;

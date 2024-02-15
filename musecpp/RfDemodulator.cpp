@@ -17,6 +17,11 @@ RfDemodulator::RfDemodulator(Logger &log, std::string filename)
   m_input_fd(-1),
   m_input_is_fifo(filesystem::is_fifo(filename)),
   m_demodulator_thread(nullptr),
+  m_vacant_blocks(),
+  m_filled_blocks(),
+  m_mutex(),
+  m_cv_filled(),
+  m_cv_vacant(),
   m_stop_request(false),
   m_reader_thread_finished(false) {
 }
