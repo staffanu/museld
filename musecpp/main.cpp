@@ -362,6 +362,7 @@ int main(int argc, char *argv[]) {
                 process_file(log, executable_dir, *reader, decode_all_fields,
                              full_screen, no_sync, start_paused, decode_video, decode_audio, efm_audio,
                              benchmark_shaders);
+                delete reader;
             }
         }
     } catch (const exception &x) {
