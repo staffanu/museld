@@ -168,7 +168,7 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, float const *data, std::
 }
 
 void ControlSignalDecoder::log_control_data() const {
-    m_log.info(eVideo | eDecoder, fmt::format(
+    m_log.info(eVideo, fmt::format(
             "phases (fieldY frameY frameC): {}{}{}, "
             "motion vector: ({}, {}), "
             "{}{}"

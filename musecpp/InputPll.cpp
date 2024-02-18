@@ -51,9 +51,7 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], f
         m_upper_percentile_filter.update(sample);
         m_lower_percentile_filter.update(sample);
 
-        // ensure first line is correct when lock is established, so write repeatedly to line 1 if not
-        int output_index = m_state == eLocked ?
-                           MUSE_TOTAL_WIDTH * (m_line - 1) + m_pixel - 1 : m_pixel - 1;
+        int output_index = MUSE_TOTAL_WIDTH * (m_line - 1) + m_pixel - 1;
         output[output_index] = sample;
 
         if (m_state == eLockedHoriz || m_state == eLocked && m_line <= 2) {
@@ -79,6 +77,11 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], f
 
                         m_log.info(eInput, fmt::format("New state eLocked at line {}, diff={}, threshold={}",
                                                        m_line, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold));
+                        // copy the two last lines to lines 1 and 2 so that the first frame is complete
+                        for (int i = 0; i < MUSE_TOTAL_WIDTH; i++) {
+                            output[i] = output[(m_line - 2) * MUSE_TOTAL_WIDTH + i];
+                            output[i + MUSE_TOTAL_WIDTH] = output[(m_line - 1) * MUSE_TOTAL_WIDTH + i];
+                        }
                         m_line = 2;
                         m_state = eLocked;
                     }
