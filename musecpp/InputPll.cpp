@@ -19,8 +19,10 @@ InputPll::InputPll(Logger &log)
   m_line(1),
   m_line1_frame_pulse_sum(0),
   m_line2_frame_pulse_sum(0),
+  m_upper_percentile_filter(0.995f, 239.f),
+  m_lower_percentile_filter(0.005f, 16.f),
+  m_max_frame_pulse_sum_difference(0),
   m_consecutive_good_syncs(0),
-  m_avg_sample_value(128),
   m_missed_line_pulses(0),
   m_state(eSearching),
   m_error_sum(0) {
@@ -46,7 +48,8 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], f
         assert (!(m_state == eLocked && m_line == 1 && m_pixel == 1) || sample_ix == 0);
 
         float sample = samples[sample_ix];
-        m_avg_sample_value = m_avg_sample_value * (1 - 1e-7) + 1e-7 * sample;
+        m_upper_percentile_filter.update(sample);
+        m_lower_percentile_filter.update(sample);
 
         // ensure first line is correct when lock is established, so write repeatedly to line 1 if not
         int output_index = m_state == eLocked ?
@@ -54,32 +57,42 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], f
         output[output_index] = sample;
 
         if (m_state == eLockedHoriz || m_state == eLocked && m_line <= 2) {
-            if (m_pixel == 316) {
-                m_line1_frame_pulse_sum = 0;
+            if (m_pixel == 312) {
+                m_line1_frame_pulse_sum = m_line2_frame_pulse_sum;
                 m_line2_frame_pulse_sum = 0;
-            } else if (m_pixel >= 317 && m_pixel < 480) { // notice we ignore m_pixel 480
-                int framePulsePixel = m_pixel - 317;
-                int line1FramePulseValue =
-                        ((framePulsePixel < 140 && (framePulsePixel / 4) % 2 == 1) ||
-                         (framePulsePixel >= 140 && framePulsePixel < 156)) ? 1 : -1;
-                int line2FramePulseValue = -line1FramePulseValue;
-                m_line1_frame_pulse_sum += line1FramePulseValue * (sample - m_avg_sample_value);
-                m_line2_frame_pulse_sum += line2FramePulseValue * (sample - m_avg_sample_value);
-            } else if (m_pixel == 480) {
-                if (m_state == eLockedHoriz && m_line1_frame_pulse_sum > 3000) { // TODO: maybe adjust or make threshold dynamic
-                    m_log.info(eInput, fmt::format("New state eLocked at line {}", m_line));
-                    m_line = 1;
-                    m_state = eLocked;
+            } else if (m_pixel >= 313 && m_pixel <= 478) { // skip the two last pixels: especially line 2 often have bad values
+                int pulsePixel = m_pixel - 313;
+                float pulseValue = (pulsePixel < 144 ? pulsePixel / 4 % 2 == 0 : pulsePixel < 160) ? 1.f : -1.f;
+                m_line2_frame_pulse_sum += pulseValue * sample;
+            }
+            // We calculate the sums over 164 pixels, so if the signal levels of the high and low parts of the signal
+            // differ by d, a perfect fit with the frame sync signals should have a difference between line 1 and line 2
+            // of 166 * d.  If the input is scaled according to the MUSE specification, d = 239 - 16 = 223,
+            // so the difference should be 37018.  In practice, for a correctly scaled input signal we get around 27000,
+            // or 73 % of the theoretical value.  The percentile filters estimate the upper/lower signal values, but there
+            // is some variation due to the content of the rest of the signal, so we set the thresholds lower.
+            if (m_pixel == 480) {
+                if (m_state == eLockedHoriz) {
+                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
+                    m_max_frame_pulse_sum_difference = max(m_max_frame_pulse_sum_difference, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum);
+                    if (m_line1_frame_pulse_sum - m_line2_frame_pulse_sum > threshold) {
+
+                        m_log.info(eInput, fmt::format("New state eLocked at line {}, diff={}, threshold={}",
+                                                       m_line, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold));
+                        m_line = 2;
+                        m_state = eLocked;
+                    }
                 }
-                if (m_state == eLocked && (m_line == 1 || m_line == 2)) {
-                    if ((m_line == 1 && m_line1_frame_pulse_sum > 3000) ||
-                        (m_line == 2 && m_line2_frame_pulse_sum > 3000))
+                if (m_state == eLocked && m_line == 2) {
+                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
+                    if (m_line1_frame_pulse_sum - m_line2_frame_pulse_sum > threshold)
                         m_missed_line_pulses = 0;
                     else {
                         if (m_missed_line_pulses < 3)
                             m_missed_line_pulses += 1;
                         else {
-                            m_log.warn(eInput, fmt::format("Missed line pulses: New state eSearching at line {}", m_line));
+                            m_log.warn(eInput, fmt::format("Missed line pulses (diff={}, threshold={}): New state eSearching at line {}",
+                                                           m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold, m_line));
                             m_state = eSearching;
                         }
                     }
@@ -111,6 +124,8 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], f
                 if (m_consecutive_good_syncs >= 50) {
                     m_log.info(eInput, fmt::format("New state eLockedHoriz at line {}", m_line));
                     m_state = eLockedHoriz;
+                    m_line2_frame_pulse_sum = 0;
+                    m_max_frame_pulse_sum_difference = 0;
                 }
             }
             if ((m_state == eSearching && ((m_consecutive_good_syncs < 5 && m_line == 50) || m_line == 100)) ||
@@ -119,8 +134,12 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], f
                 m_error_sum = 0;
                 m_input_samples_per_sample = m_input_samples_per_sample_ref;
 
-                if (m_state == eLockedHoriz)
-                    m_log.info(eInput, fmt::format("Locked horizontally, but frame pulses not found: New state eSearching at line {}", m_line));
+                if (m_state == eLockedHoriz) {
+                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
+                    m_log.info(eInput, fmt::format(
+                            "Locked horizontally, but frame pulses not found (max sum={}, threshold={}): New state eSearching at line {}",
+                            m_max_frame_pulse_sum_difference, threshold, m_line));
+                }
                 m_state = eSearching; // TODO: add to VHDL
                 m_line = 3;
                 m_pixel = 263; // "random", start search from new position
@@ -140,6 +159,12 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], f
     return {frame_done, samples_to_read, m_input_samples_per_sample, m_state == eLocked};
 }
 
-double InputPll::getInputSamplesPerSample() {
+double InputPll::getInputSamplesPerSample() const {
     return m_input_samples_per_sample;
+}
+
+void InputPll::setUnlocked() {
+    m_state = eSearching;
+    m_line = 333; // make sure we do not recognize old data and immediately re-lock
+    m_log.info(eInput, "state externally set to eSearching");
 }

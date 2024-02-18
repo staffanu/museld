@@ -77,6 +77,7 @@ TEST_CASE("Reed solomon corrects one error and erasures") {
     }
 }
 
+// This test just checks that the decoder doesn't crash on the provided example -- it is not a correctable error
 TEST_CASE("Correct 1 error, 2 erasures problem example") {
     ReedSolomon<0x11d, 2> rs(32, 28, 0, true, true);
 
@@ -108,7 +109,7 @@ TEST_CASE("Correct 1 error, 2 erasures problem example") {
     Logger log(Logger::c_log_all);
     rs.printStatistics(log, "");
 
-//    REQUIRE(std::all_of(data.cbegin(), data.cend(), [](ByteWithErasureFlag b) -> bool {
+//    REQUIRE(std::all_of(video_data.cbegin(), video_data.cend(), [](ByteWithErasureFlag b) -> bool {
 //        return b.byteValue() == 0 && !b.isErased();
 //    }));
 }

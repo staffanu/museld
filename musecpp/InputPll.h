@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cmath>
 #include <deque>
+#include "PercentileFilter.h"
 
 class Logger;
 
@@ -24,7 +25,8 @@ public:
         bool locked;
     };
     PllResult process(int sample_count, const float samples[], float *output);
-    double getInputSamplesPerSample();
+    [[nodiscard]] double getInputSamplesPerSample() const;
+    void setUnlocked();
 
 private:
     static double c_omega; // undamped frequency
@@ -42,10 +44,12 @@ private:
 
     int m_pixel;
     int m_line;
-    double m_line1_frame_pulse_sum;
-    double m_line2_frame_pulse_sum;
+    float m_line1_frame_pulse_sum;
+    float m_line2_frame_pulse_sum;
+    PercentileFilter m_upper_percentile_filter;
+    PercentileFilter m_lower_percentile_filter;
+    float m_max_frame_pulse_sum_difference;
     int m_consecutive_good_syncs;
-    double m_avg_sample_value;
     int m_missed_line_pulses;
 
     enum State {

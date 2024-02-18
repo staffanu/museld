@@ -19,7 +19,8 @@ RfDemodulator::RfDemodulator(Logger &log, std::string filename)
   m_demodulator_thread(nullptr),
   m_vacant_blocks(),
   m_filled_blocks(),
-  m_mutex(),
+  m_demodulated_block_mutex(),
+  m_input_file_mutex(),
   m_cv_filled(),
   m_cv_vacant(),
   m_stop_request(false),
@@ -51,7 +52,7 @@ bool RfDemodulator::initialize() {
 }
 
 std::shared_ptr<DemodulatedBlock> RfDemodulator::getNextDemodulatedBlock() {
-    std::unique_lock<std::mutex> lock(m_mutex);
+    std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
     m_cv_filled.wait(
             lock,
             [this] { return m_reader_thread_finished || !m_filled_blocks.empty(); });
@@ -64,24 +65,33 @@ std::shared_ptr<DemodulatedBlock> RfDemodulator::getNextDemodulatedBlock() {
 }
 
 void RfDemodulator::returnBlock(std::shared_ptr<DemodulatedBlock> &buffer) {
-    std::unique_lock<std::mutex> lock(m_mutex);
+    std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
     m_cv_vacant.notify_one();
     m_vacant_blocks.push_back(buffer);
 }
 
 void RfDemodulator::seek(double seconds) {
-    std::unique_lock<std::mutex> lock(m_mutex);
+    if (!m_input_is_fifo) {
+        std::unique_lock<std::mutex> lock(m_input_file_mutex);
 
-    off_t samples_to_seek = (off_t) (seconds * c_sample_frequency);
-    off_t bytes_to_seek = 2 * samples_to_seek;
-    m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples, {} bytes.",
-                                   seconds, samples_to_seek, bytes_to_seek));
-    lseek(m_input_fd, bytes_to_seek, SEEK_CUR);
+        off_t samples_to_seek = (off_t) (seconds * c_sample_frequency);
+        off_t bytes_to_seek = 2 * samples_to_seek;
+        m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples, {} bytes.",
+                                       seconds, samples_to_seek, bytes_to_seek));
+        lseek(m_input_fd, bytes_to_seek, SEEK_CUR);
+
+        // Discard any filled buffers
+        std::unique_lock<std::mutex> lock2(m_demodulated_block_mutex);
+        for (auto &b : m_filled_blocks)
+            m_vacant_blocks.push_back(b);
+        m_filled_blocks.clear();
+        m_cv_vacant.notify_one();
+    }
 }
 
 void RfDemodulator::cleanup() {
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
+        std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
         m_cv_vacant.notify_one();
         m_cv_filled.notify_one();
         m_stop_request = true;
@@ -95,11 +105,11 @@ void RfDemodulator::cleanup() {
 }
 
 void RfDemodulator::demodulate() {
-    assert(c_sample_block_size % c_decimation_rate == 0);
+    assert(c_sample_block_size % c_video_decimation_rate == 0);
     assert(c_bandpass_filter_size % c_AVX_floats_per_chunk == 0);
     assert(c_lowpass_filter_size % c_AVX_floats_per_chunk == 0);
     assert(c_rrc_filter_size % c_AVX_floats_per_chunk == 0);
-    assert(c_output_buffer_size == DemodulatedBlock::c_block_size);
+    assert(c_output_buffer_size == DemodulatedBlock::c_video_block_size);
     assert(c_efm_out_buffer_size == DemodulatedBlock::c_efm_block_size);
 
     float input_buffer[c_input_buffer_size] = {};
@@ -108,8 +118,6 @@ void RfDemodulator::demodulate() {
     float lowpass_in_buffer[c_lowpass_in_buffer_size] = {};
     float rrc_in_buffer[c_rrc_in_buffer_size] = {};
     float efm_equalization_in_buffer[c_efm_equalization_in_buffer_size] = {};
-    float dropout_abs_buffer[c_dropout_abs_buffer_size] = {};
-    float dropout_out_buffer[c_dropout_out_buffer_size] = {};
 
     float prev_angle;
     long total_samples_read = 0;
@@ -119,10 +127,10 @@ void RfDemodulator::demodulate() {
     while (!m_stop_request && readFloats(input_buffer + c_bandpass_filter_size - 1, c_sample_block_size)) {
         auto t0 = chrono::high_resolution_clock::now();
 
-        // first get a free output block to write to
+        // First get a free output block to write to
         shared_ptr<DemodulatedBlock> block = nullptr;
         {
-            std::unique_lock<std::mutex> lock(m_mutex);
+            std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
             if (m_input_is_fifo && m_vacant_blocks.empty()) {
                 // discard a filled buffer -- this is better than having the writer to the fifo wait
                 m_log.warn(eInput, "Discarding demodulated block due to overrun");
@@ -139,7 +147,7 @@ void RfDemodulator::demodulate() {
             m_vacant_blocks.pop_front();
         }
 
-        // First run the input signal through the bandpass filter that also converts the signal into an analytic signal
+        // Run the input signal through the bandpass filter that also converts the signal into an analytic signal
         firFilter(input_buffer, c_sample_block_size, c_bandpass_filter.first, 1, analytic_buffer_re);
         firFilter(input_buffer, c_sample_block_size, c_bandpass_filter.second, 1, analytic_buffer_im);
 
@@ -161,10 +169,12 @@ void RfDemodulator::demodulate() {
                   rrc_in_buffer + c_rrc_filter_size - 1);
 
         // Run the down-sampled signal through the root raised cosine pulse-shaping filter and store in the output block
-        firFilter(rrc_in_buffer, c_sample_block_size / 2, c_rrc_filter, 1, block->data);
-        for (int i = 0; i < block->c_block_size; i++)
-            // +/- 1 corresponds to the white/black level, which is 128+/-112 (16, 240) in MUSE
-            block->data[i] = block->data[i] * 112.f + 128.f;
+        firFilter(rrc_in_buffer, c_sample_block_size / 2, c_rrc_filter, 1, block->video_data);
+
+        // Scale the values to the standard MUSE range
+        // +/- 1 corresponds to the white/black level, which is 128+/-112 (16, 240) in MUSE
+        for (int i = 0; i < block->c_video_block_size; i++)
+            block->video_data[i] = block->video_data[i] * 112.f + 128.f;
 
         // EFM
         firFilter(input_buffer, c_sample_block_size / c_efm_decimation_rate, c_efm_lowpass_filter,
@@ -186,20 +196,20 @@ void RfDemodulator::demodulate() {
         total_time_since_last_log_us += chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
 
         // Send away result
-        block->rf_location = total_samples_read;
-        std::unique_lock<std::mutex> lock(m_mutex);
+        std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
         m_cv_filled.notify_one();
         m_filled_blocks.push_back(block);
 
         total_samples_read += c_sample_block_size;
         if (total_samples_read - total_samples_read_last_log > (long)c_sample_frequency) {
             m_log.info(eInput | ePerformance,
-                       fmt::format("Total demodulation time last second: {:.1f} ms", (double)total_time_since_last_log_us / 1000.0));
+                       fmt::format("Total demodulation time last second worth of video_data: {:.1f} ms", (double)total_time_since_last_log_us / 1000.0));
             total_time_since_last_log_us = 0;
             total_samples_read_last_log = total_samples_read;
         }
     }
     m_reader_thread_finished = true;
+    m_cv_filled.notify_one();
 }
 
 bool RfDemodulator::readFloats(float *out, size_t n) {
@@ -210,6 +220,7 @@ bool RfDemodulator::readFloats(float *out, size_t n) {
             m_log.info(eInput, "RfDemodulator: stop requested");
             return false;
         }
+        std::unique_lock<std::mutex> lock(m_input_file_mutex);
         ssize_t read_count = read(m_input_fd,
                                   (void *)((char *)m_tmp_input_buffer + filled_bytes),
                                   n * sizeof(int16_t) - filled_bytes);

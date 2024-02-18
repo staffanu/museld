@@ -190,12 +190,12 @@ void EfmDecoder::decode(int frame_no,
     if (frame_no % 30 == 0) {
         m_log.info(eAudio | ePerformance,
                    fmt::format("Time spent decoding last second: {:.1f} ms; efm frame count: {}, "
-                               "input erasure rate: {} ppm, past c1 erasure rate: {} ppm, output erasure rate: {} ppm",
+                               "input erasure rate: {:.0f} ppm, past c1 erasure rate: {:.0f} ppm, output erasure rate: {:.0f} ppm",
                                (double)m_total_time_us_last_second / 1000.0 / 30,
                                m_efm_frame_count_last_second,
-                               1000000L * m_total_erasures_in_last_second / m_efm_frame_count_last_second / 33,
-                               1000000L * m_total_erasures_past_c1_last_second / m_efm_frame_count_last_second / 28,
-                               1000000L * m_total_erasures_out_last_second / m_efm_frame_count_last_second / 24));
+                               1000000.0 * m_total_erasures_in_last_second / m_efm_frame_count_last_second / 33,
+                               1000000.0 * m_total_erasures_past_c1_last_second / m_efm_frame_count_last_second / 28,
+                               1000000.0 * m_total_erasures_out_last_second / m_efm_frame_count_last_second / 24));
         m_efm_frame_count_last_second = 0;
         m_total_time_us_last_second = 0;
         m_total_erasures_in_last_second = 0;
@@ -243,10 +243,18 @@ void EfmDecoder::handleFrame(size_t &sample_count, AudioDecoder::AudioFrame outp
 
     for (int i = 0; i < 6; i++) {
         auto [lh, ll] = c_left_output_map[i];
-        output_samples[sample_count].samples[0] = (int16_t) ((out[lh].byteValue() << 8) | out[ll].byteValue());
+        bool lErased = out[lh].isErased() || out[ll].isErased();
+        if (lErased && sample_count > 0) // simplest imaginable recovery -- just repeat the previous sample
+            output_samples[sample_count].samples[0] = output_samples[sample_count - 1].samples[0];
+        else
+            output_samples[sample_count].samples[0] = (int16_t) ((out[lh].byteValue() << 8) | out[ll].byteValue());
 
         auto [rh, rl] = c_right_output_map[i];
-        output_samples[sample_count].samples[1] = (int16_t) ((out[rh].byteValue() << 8) | out[rl].byteValue());
+        bool rErased = out[rh].isErased() || out[rl].isErased();
+        if (rErased && sample_count > 0)
+            output_samples[sample_count].samples[1] = output_samples[sample_count - 1].samples[1];
+        else
+            output_samples[sample_count].samples[1] = (int16_t) ((out[rh].byteValue() << 8) | out[rl].byteValue());
 
         sample_count++;
         assert(sample_count <= c_max_output_samples);

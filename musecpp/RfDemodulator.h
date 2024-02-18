@@ -13,15 +13,23 @@
 #include <complex>
 #include <array>
 #include <algorithm>
+#include <thread>
 #include <atomic>
 #include <deque>
 #include <condition_variable>
 #include "Logger.h"
 #include "MuseTypes.h"
 
-namespace RfDemodulatorHelper {
-    // FIR passband filter to filter out noise over 22.5 MHz and also the pilot signal and EFM.
-    // The pilot signal isn't completely supressed but that doesn't seem to matter.
+namespace RfDemodulatorConstants {
+    // The filters assume an input sampling rate of 62.5 MHz.  In order to allow that to be set in runtime
+    // we could link against the gnuradio libraries.
+    static constexpr float c_sample_frequency = 62.5e6f;
+    static constexpr int c_sample_block_size = 4096;
+    static constexpr int c_video_decimation_rate = 2;
+    static constexpr int c_efm_decimation_rate = 4;
+
+    // FIR band-pass filter to filter out noise over 22.5 MHz and also the pilot signal and EFM.
+    // The pilot signal isn't completely suppressed but that doesn't seem to matter.
     // Computed using gnuradio:
     // firdes.complex_band_pass(1.0, 62.5e6, 2.7e6, 22.3e6, 2e6, window.WIN_RECTANGULAR)
     static constexpr std::pair<std::array<float, 32>, std::array<float, 32>> initializeBandpassFilter() {
@@ -74,38 +82,14 @@ namespace RfDemodulatorHelper {
     // Computed using gnuradio: firdes.low_pass(1.0, 62.5e6, 9.8e6, 2e6, window.WIN_RECTANGULAR)
     static constexpr std::array<float, 32> initializeLowpassFilter() {
         return std::array<float, 32>{
-                0.021318137645721436,
-                0.005827637854963541,
-                -0.01789254881441593,
-                -0.028463421389460564,
-                -0.013138349168002605,
-                0.01865200139582157,
-                0.03961782529950142,
-                0.02606804110109806,
-                -0.01920594647526741,
-                -0.061971265822649,
-                -0.0568188801407814,
-                0.019542962312698364,
-                0.14604157209396362,
-                0.26423606276512146,
-                0.3123723268508911,
-                0.26423606276512146,
-                0.14604157209396362,
-                0.019542962312698364,
-                -0.0568188801407814,
-                -0.061971265822649,
-                -0.01920594647526741,
-                0.02606804110109806,
-                0.03961782529950142,
-                0.01865200139582157,
-                -0.013138349168002605,
-                -0.028463421389460564,
-                -0.01789254881441593,
-                0.005827637854963541,
-                0.021318137645721436,
-                0, // padding to make size multiple of 8
-                0,
-                0,
+                0.021318137645721436, 0.005827637854963541, -0.01789254881441593, -0.028463421389460564,
+                -0.013138349168002605, 0.01865200139582157, 0.03961782529950142, 0.02606804110109806,
+                -0.01920594647526741, -0.061971265822649, -0.0568188801407814, 0.019542962312698364,
+                0.14604157209396362, 0.26423606276512146, 0.3123723268508911, 0.26423606276512146,
+                0.14604157209396362, 0.019542962312698364, -0.0568188801407814, -0.061971265822649,
+                -0.01920594647526741, 0.02606804110109806, 0.03961782529950142, 0.01865200139582157,
+                -0.013138349168002605, -0.028463421389460564, -0.01789254881441593, 0.005827637854963541,
+                0.021318137645721436, 0, 0, 0 // padding to make size multiple of 8
         };
     }
 
@@ -120,48 +104,37 @@ namespace RfDemodulatorHelper {
     }
 
     // Lowpass filter for EFM
-    // Computed in octave: fir1(7, 1.8e6 / 31.25e6)
     static constexpr std::array<float, 16> initializeEfmLowpassFilter() {
         return std::array<float, 16>{
-            0.007487, 0.012178, 0.025290, 0.045819,
-            0.070755, 0.095684, 0.115788, 0.127000,
-            0.127000, 0.115788, 0.095684, 0.070755,
-            0.045819, 0.025290, 0.012178, 0.007487
+                // Computed in octave: fir1(15, 2.0e6 / 31.25e6)
+                0.006975, 0.011610, 0.024555, 0.045128, 0.070453, 0.096031, 0.116806, 0.128442,
+                0.128442, 0.116806, 0.096031, 0.070453, 0.045128, 0.024555, 0.011610, 0.006975
         };
     }
 
     // Equalization filter for EFM.  Works on 1/4 of the original sample frequency
-    // Computed in octave using the script make_efm_filter.m, and then numerically optimized.
+    // Computed in octave using the script make_efm_filter.m, and then numerically
+    // optimized using nonlin_min(samin), for decimation factor 4, lowpass 2.0 MHz
     static constexpr std::array<float, 32> initializeEfmEqualizationFilter() {
         auto coefficients = std::array<float, 32>{
-//                0.030164, 0.065937, 0.101987, 0.129844,
-//                0.141895, 0.133502, 0.104427, 0.059129,
-//                0.005797, -0.045620, -0.085850, -0.108520,
-//                -0.111545, -0.097331, -0.071798, -0.042551
-                -0.397856, 0.094957, -0.285097, 0.002505,
-                -0.056853, -0.263420, 0.394114, 0.005008,
-                0.740662, 0.616144, 0.817413, 0.888591,
-                0.858024, 0.612603, 0.227419, -0.712161,
-                -0.817860, -0.999957, -0.996745, -0.902156,
-                -0.252263, 0.132426, -0.169630, 0.821285,
-                -0.095913, 0.166130, 0.376055, -0.558495,
-                0.204774, -0.273269, 0.229580, 0.054656
+                -0.037621, -0.032380, -0.152833, 0.016591, -0.181817, -0.042276, -0.011685, 0.017400,
+                0.112888, 0.095248, 0.226369, 0.508954, 0.470778, 0.771520, 0.435198, 0.410012,
+                -0.035066, -0.222377, -0.554291, -0.691465, -0.670789, -0.418965, -0.299890, 0.022324,
+                0.139150, 0.209963, 0.198224, 0.001872,-0.033351, 0.040845, -0.023787, 0.024088
         };
         auto reversed = std::array<float, 32>{};
         for (int i = 0; i < coefficients.size(); i++)
             reversed[coefficients.size() - 1 - i] = coefficients[i];
         return reversed;
     }
-
 }
 
-using namespace RfDemodulatorHelper;
+using namespace RfDemodulatorConstants;
 
 struct DemodulatedBlock {
-    static constexpr int c_block_size = 4096 / 2;
-    static constexpr int c_efm_block_size = 4096 / 4;
-    long rf_location; // offset in the rf input data -- for debugging
-    float data[c_block_size];
+    static constexpr int c_video_block_size = c_sample_block_size / c_video_decimation_rate;
+    static constexpr int c_efm_block_size = c_sample_block_size / c_efm_decimation_rate;
+    float video_data[c_video_block_size];
     float efm_data[c_efm_block_size];
 };
 
@@ -179,15 +152,9 @@ public:
     void cleanup();
 
 private:
-    // The filters assume an input sampling rate of 62.5 MHz.  In order to allow that to be set in runtime
-    // we could link against the gnuradio libraries.
-    static constexpr float c_sample_frequency = 62.5e6f;
-    static constexpr int c_decimation_rate = 2;
-    static constexpr int c_dropout_decimation_rate = 4;
-    static constexpr int c_efm_decimation_rate = 4;
-    static constexpr int c_sample_block_size = 4096;
     // enough buffers for one frame
-    static constexpr int c_number_of_block_buffers = (int)(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH * c_sample_frequency / c_decimation_rate / 16.2e6 / DemodulatedBlock::c_block_size);
+    static constexpr int c_number_of_block_buffers = (int)(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH
+            * c_sample_frequency / c_video_decimation_rate / 16.2e6 / DemodulatedBlock::c_video_block_size);
     static constexpr float c_center_frequency = 12.5e6f;
     static constexpr float c_frequency_deviation = 1.9e6f;
     static constexpr float c_2pi = 2 * (float)M_PI;
@@ -211,8 +178,8 @@ private:
 
     static constexpr int c_input_buffer_size = c_sample_block_size + c_bandpass_filter_size - 1;
     static constexpr int c_lowpass_in_buffer_size = c_sample_block_size + c_lowpass_filter_size - 1;
-    static constexpr int c_rrc_in_buffer_size = c_sample_block_size / c_decimation_rate + c_rrc_filter_size - 1;
-    static constexpr int c_output_buffer_size = c_sample_block_size / c_decimation_rate;
+    static constexpr int c_rrc_in_buffer_size = c_sample_block_size / c_video_decimation_rate + c_rrc_filter_size - 1;
+    static constexpr int c_output_buffer_size = c_sample_block_size / c_video_decimation_rate;
 
     static constexpr int c_efm_equalization_in_buffer_size = c_sample_block_size / c_efm_decimation_rate + c_efm_equalization_filter_size - 1;
     static constexpr int c_efm_out_buffer_size = c_sample_block_size / c_efm_decimation_rate;
@@ -235,7 +202,8 @@ private:
     std::thread *m_demodulator_thread;
     std::deque<std::shared_ptr<DemodulatedBlock>> m_vacant_blocks;
     std::deque<std::shared_ptr<DemodulatedBlock>> m_filled_blocks;
-    std::mutex m_mutex;
+    std::mutex m_demodulated_block_mutex; // used to synchronize access to the vacant / filled blocks
+    std::mutex m_input_file_mutex; // used to make sure we do not seek during a file read
     std::condition_variable m_cv_filled;
     std::condition_variable m_cv_vacant;
     std::atomic<bool> m_stop_request;

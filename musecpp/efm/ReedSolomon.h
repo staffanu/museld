@@ -240,8 +240,8 @@ private:
             auto s0bis = s0prime + s1prime * alphaInv.pow(posDiff);
             auto s1bis = s1prime * alphaInv.pow(posDiff) + s2prime * alphaInv.pow(2 * posDiff);
 
-            if (s0bis == GF(0)) {
-                addDiagnosticCounter("single correction with two erasures failed s0bis zero");
+            if (s0bis == GF(0) || s1bis == GF(0)) {
+                addDiagnosticCounter("single correction with two erasures failed s0bis or s1bis zero");
                 return false;
             } else {
                 auto x2prime = s1bis * s0bis.inverse();
