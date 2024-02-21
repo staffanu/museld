@@ -110,6 +110,7 @@ void ResamplingInputReader::seek(double seconds) {
             m_filled_muse_input_buffers.clear();
             m_cv_vacant.notify_one();
         }
+        m_input_pll.setUnlocked(); // do not wait to discover that we lost sync
     }
 }
 
