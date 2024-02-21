@@ -58,7 +58,7 @@ ResamplingInputReader::ResamplingInputReader(
     }
 }
 
-bool ResamplingInputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) {
+bool ResamplingInputReader::initialize(std::vector<std::shared_ptr<InputReader::InputReaderBlock>> &buffers) {
     if (m_demodulator == nullptr) {
         m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
         if (m_file_fd == -1)
@@ -224,9 +224,8 @@ bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_
                     m_log.info(eInput, "ResamplingInputReader: no more demodulated blocks");
                     return false;
                 }
-                memcpy(m_file_input_buffer + m_file_input_buffer_bytes, block->data,
-                       block->c_block_size * sizeof(float));
-                m_file_input_buffer_bytes += block->c_block_size * sizeof(float);
+                memcpy(m_file_input_buffer + m_file_input_buffer_bytes, block->video_data, sizeof(block->video_data));
+                m_file_input_buffer_bytes += sizeof(block->video_data);
                 memcpy(efm_buffer, block->efm_data, block->c_efm_block_size * sizeof(float));
                 have_efm = true;
                 m_demodulator->returnBlock(block);

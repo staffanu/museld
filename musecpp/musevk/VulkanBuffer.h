@@ -23,13 +23,13 @@ namespace musevk {
         VulkanBuffer(VulkanBuffer &&other) = delete;
         VulkanBuffer &operator=(VulkanBuffer &&other) = delete;
 
-        ~VulkanBuffer();
+        ~VulkanBuffer() override;
 
         vk::Buffer &buffer() {
             return m_buffer;
         }
 
-        MemoryObjectType getType() const final {
+        [[nodiscard]] MemoryObjectType getType() const final {
             return eBuffer;
         }
 

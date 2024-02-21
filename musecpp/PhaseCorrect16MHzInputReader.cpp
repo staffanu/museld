@@ -25,7 +25,7 @@ PhaseCorrect16MHzInputReader::PhaseCorrect16MHzInputReader(
         m_big_endian(big_endian) {
 }
 
-bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) {
+bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::shared_ptr<InputReader::InputReaderBlock>> &buffers) {
     auto [samples_to_skip, eq] = compute_initial_skip(m_log);
 
     m_input = ifstream(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);

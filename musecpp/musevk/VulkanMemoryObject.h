@@ -17,7 +17,7 @@ namespace musevk {
 
     class VulkanMemoryObject {
     public:
-        VulkanMemoryObject(MemoryAllocator &memory_allocator)
+        explicit VulkanMemoryObject(MemoryAllocator &memory_allocator)
         : m_memory_allocator(memory_allocator){
         }
         virtual ~VulkanMemoryObject() = default;

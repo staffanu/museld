@@ -32,12 +32,12 @@ InputReader::InputReader(Logger &log, const std::string &filename, bool input_is
           m_get_input_buffers_count(0) {
 }
 
-bool InputReader::initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) {
+bool InputReader::initialize(std::vector<std::shared_ptr<InputReaderBlock>> &buffers) {
     if (m_initial_seek_seconds != 0)
         seek(m_initial_seek_seconds);
 
     for (const auto &b : buffers)
-        m_vacant_muse_input_buffers.push_back(make_shared<InputReaderBlock>(b));
+        m_vacant_muse_input_buffers.push_back(b);
     m_log.debug(eInput, fmt::format("Using {} input buffers", m_vacant_muse_input_buffers.size()));
 
     m_reader_thread = new thread(&InputReader::threadFunc, this);

@@ -22,7 +22,7 @@ public:
     ResamplingInputReader(const ResamplingInputReader&) = delete;
     void operator=(const ResamplingInputReader&) = delete;
 
-    bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers) override;
+    bool initialize(std::vector<std::shared_ptr<InputReader::InputReaderBlock>> &buffers) override;
     void cleanup() override;
     void seek(double seconds) override;
 

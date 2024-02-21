@@ -23,13 +23,13 @@ namespace musevk {
         VulkanImage(VulkanImage &&other) = delete;
         VulkanImage &operator=(VulkanImage &&other) = delete;
 
-        ~VulkanImage();
+        ~VulkanImage() override;
 
         vk::Image &image() {
             return m_image;
         }
 
-        MemoryObjectType getType() const final {
+        [[nodiscard]] MemoryObjectType getType() const final {
             return eImage;
         }
 

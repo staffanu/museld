@@ -19,23 +19,24 @@ class Logger;
 
 class InputReader {
 public:
-    void operator=(const InputReader&) = delete;
-    InputReader(const InputReader&) = delete;
-    virtual ~InputReader() = default;
-    [[nodiscard]] virtual bool initialize(std::vector<std::shared_ptr<musevk::VulkanBuffer>> const &buffers);
-    virtual void cleanup();
-
     struct InputReaderBlock {
         static constexpr int c_max_efm_data_size = 150000; // a bit above 7350 / 30 * 588;
         explicit InputReaderBlock(std::shared_ptr<musevk::VulkanBuffer> v)
-        : video_data(std::move(v)),
-          efm_data_size(0),
-          efm_data() {
+                : video_data(std::move(v)),
+                  efm_data_size(0),
+                  efm_data() {
         };
         std::shared_ptr<musevk::VulkanBuffer> video_data;
         int efm_data_size;
         std::array<bool, c_max_efm_data_size> efm_data;
     };
+
+    void operator=(const InputReader&) = delete;
+    InputReader(const InputReader&) = delete;
+    virtual ~InputReader() = default;
+
+    [[nodiscard]] virtual bool initialize(std::vector<std::shared_ptr<InputReaderBlock>> &buffers);
+    virtual void cleanup();
 
     enum PresentationHint {
         eNormal = 0,

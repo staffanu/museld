@@ -54,10 +54,11 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     vk::Device &device = manager.getDevice();
 
     {
-        std::vector<std::shared_ptr<musevk::VulkanBuffer>> input_vulkan_buffers{};
+        std::vector<std::shared_ptr<InputReader::InputReaderBlock>> input_vulkan_buffers{};
         for (int i = 0; i < INPUT_BUFFER_COUNT; i++)
             input_vulkan_buffers.push_back(
-                    manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), true, true));
+                    make_shared<InputReader::InputReaderBlock>(
+                            manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), true, true)));
         if (!reader.initialize(input_vulkan_buffers))
             throw runtime_error("InputReader initialization failed");
     }
