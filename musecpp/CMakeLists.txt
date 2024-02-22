@@ -37,8 +37,8 @@ add_executable(musecpp
         InputPll.cpp InputPll.h
         PhaseCorrect16MHzInputReader.cpp PhaseCorrect16MHzInputReader.h
         RfDemodulator.cpp RfDemodulator.h
-        util/PercentileFilter.cpp util/PercentileFilter.h
         AudioMode.h
+        util/PercentileFilter.cpp util/PercentileFilter.h
         util/Logger.cpp util/Logger.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandBuffer.cpp musevk/CommandBuffer.h

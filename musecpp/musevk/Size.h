@@ -18,6 +18,10 @@ namespace musevk {
         uint32_t y_size;
         uint32_t z_size;
 
+        bool operator==(const Size &other) const {
+            return x_size == other.x_size && y_size == other.y_size && z_size == other.z_size;
+        }
+
         [[nodiscard]] uint32_t numberOfElements() const {
             return x_size * y_size * z_size;
         }
