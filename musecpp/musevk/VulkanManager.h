@@ -12,7 +12,7 @@
 #include "VulkanBuffer.h"
 #include "CommandBuffer.h"
 #include "VulkanImage.h"
-#include "../Logger.h"
+#include "../util/Logger.h"
 
 namespace musevk {
 

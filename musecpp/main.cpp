@@ -9,7 +9,7 @@
 #include "InputReader.h"
 #include "ResamplingInputReader.h"
 #include "PhaseCorrect16MHzInputReader.h"
-#include "Logger.h"
+#include "util/Logger.h"
 #include "musevk/TimestampQueryPool.h"
 
 #define INPUT_BUFFER_COUNT 6

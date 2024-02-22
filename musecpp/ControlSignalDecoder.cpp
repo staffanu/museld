@@ -6,7 +6,7 @@
 #include <cassert>
 #include <sstream>
 #include <fmt/format.h>
-#include "Logger.h"
+#include "util/Logger.h"
 #include "MuseTypes.h"
 #include "ControlSignalDecoder.h"
 

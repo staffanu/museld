@@ -13,7 +13,7 @@
 #include <fmt/format.h>
 #include "GFValue.h"
 #include "ByteWithErasureFlag.h"
-#include "../Logger.h"
+#include "../util/Logger.h"
 
 template<int irreducible_poly, int alpha_decimal> class ReedSolomon {
 public:

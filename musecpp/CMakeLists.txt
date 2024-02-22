@@ -23,7 +23,6 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -ffast-mat
 
 add_executable(musecpp
         main.cpp
-        Logger.cpp Logger.h
         MuseBuffer.h
         FrameBuffer.cpp FrameBuffer.h
         FieldBufferView.cpp FieldBufferView.h
@@ -41,6 +40,7 @@ add_executable(musecpp
         RfDemodulator.cpp RfDemodulator.h
         PercentileFilter.cpp PercentileFilter.h
         AudioMode.h
+        util/Logger.cpp util/Logger.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandBuffer.cpp musevk/CommandBuffer.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h

@@ -1,0 +1,59 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// ranging from (0, 0) to (MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT).
+// The input frame is modified in place.
+
+#include "muse.h"
+
+layout(set = 0, binding = 0) buffer frame_buffer {
+    float16_t frame[][MUSE_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 1) buffer readonly dropout_data_buffer {
+    uint8_t dropout_data[][MUSE_TOTAL_WIDTH];
+};
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    // notice row and col start at 0 -- in the muse spec numbreing starts at 1
+    bool is_picture_area = (row >= 46 && row < 562 || row >= 608 && row < 1124) && col >= 106;
+    bool is_color_area = (row >= 42 && row < 558 || row >= 604 && row < 1120) && col >= 11 && col < 105;
+
+    // The other shaders simply return early if row or col are outside the MUSE rectangle, but here
+    // we leave also if outside the picture / color areas.  This means the col +/- 3 indexing below is safe.
+    if (!is_picture_area && !is_color_area)
+        return;
+
+    bool is_dropout = false;
+    for (int i = -3; i <= 3; i++)
+        if (dropout_data[row][col + i] != 0)
+            is_dropout = true;
+
+    if (is_picture_area && is_dropout) {
+        frame[row][col] = 0.5hf * (frame[row - 1][col] + frame[row + 1][col]);
+//        for (int i = -3; i <= 3; i++) {
+//            for (int j = -3; j <= 3; j++) {
+//                if ((row + i) % 2 == 0)
+//                    frame[row + i - 4][(col - 106) / 4 + 11 + j] = 255.hf;
+//                else
+//                    frame[row + i - 4][(col - 106) / 4 + 11 + j] = 0.hf;
+//            }
+//        }
+    }
+
+    if (is_color_area && is_dropout) {
+        frame[row][col] = 0.5hf * (frame[row - 2][col] + frame[row + 2][col]);
+
+//        for (int i = -3; i <= 3; i++) {
+//            for (int j = -3; j <= 3; j++) {
+//                if ((row + i) % 2 == 0)
+//                    frame[row + i][col + j] = 255.hf;
+//                else
+//                    frame[row + i][col + j] = 0.hf;
+//            }
+//        }
+    }
+}

@@ -3,7 +3,7 @@ find_package(Catch2 2.13 REQUIRED)
 include_directories("..")
 add_executable(Catch_tests_run
         ReedSolomonTest.cpp
-        ../Logger.cpp
+        ../util/Logger.cpp
         ../efm/ReedSolomon.h
         ../efm/GFValue.h
         ../efm/ByteWithErasureFlag.h)

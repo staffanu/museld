@@ -5,7 +5,7 @@
 #include <catch2/catch.hpp>
 #include <algorithm>
 #include "efm/ReedSolomon.h"
-#include "Logger.h"
+#include "util/Logger.h"
 
 void printData(std::vector<ByteWithErasureFlag> const &data) {
     for (int i = 0; i < 32; i++) {

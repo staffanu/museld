@@ -9,7 +9,7 @@
 #include <vector>
 #include <iostream>
 #include <sstream>
-#include "Logger.h"
+#include "util/Logger.h"
 
 class Logger;
 /** BCH SEC-DED decoder.  We assume that the distance d of the code is 4.
