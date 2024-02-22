@@ -302,13 +302,16 @@ namespace musevk {
                 vk::PhysicalDeviceVulkan12Features>();
 
         bool storageBuffer16BitAccess = features2.get<vk::PhysicalDeviceVulkan11Features>().storageBuffer16BitAccess;
+        bool uniformAndStorageBuffer8BitAccess = features2.get<vk::PhysicalDeviceVulkan12Features>().uniformAndStorageBuffer8BitAccess;
         bool uniformAndStorageBuffer16BitAccess = features2.get<vk::PhysicalDeviceVulkan11Features>().uniformAndStorageBuffer16BitAccess;
         bool shaderFloat16 = features2.get<vk::PhysicalDeviceVulkan12Features>().shaderFloat16;
 
-        m_log.debug(eVideo, fmt::format("device features: storageBuffer16BitAccess: {}, uniformAndStorageBuffer16BitAccess: {}, shaderFloat16: {}",
-                                        storageBuffer16BitAccess, uniformAndStorageBuffer16BitAccess, shaderFloat16));
+        m_log.debug(eVideo, fmt::format("device features: storageBuffer16BitAccess: {}, uniformAndStorageBuffer8BitAccess: {}, "
+                                        "uniformAndStorageBuffer16BitAccess: {}, shaderFloat16: {}",
+                                        storageBuffer16BitAccess, uniformAndStorageBuffer16BitAccess,
+                                        uniformAndStorageBuffer16BitAccess, shaderFloat16));
 
-        return storageBuffer16BitAccess && uniformAndStorageBuffer16BitAccess && shaderFloat16;
+        return storageBuffer16BitAccess && uniformAndStorageBuffer8BitAccess && uniformAndStorageBuffer16BitAccess && shaderFloat16;
     }
 
     bool VulkanManager::checkDeviceExtensionSupport(vk::PhysicalDevice &device) {
@@ -363,6 +366,7 @@ namespace musevk {
         }
 
         auto device_vulkan_12_features = vk::PhysicalDeviceVulkan12Features();
+        device_vulkan_12_features.uniformAndStorageBuffer8BitAccess = VK_TRUE;
         device_vulkan_12_features.shaderFloat16 = VK_TRUE;
 
         auto device_vulkan_11_features = vk::PhysicalDeviceVulkan11Features();
