@@ -7,7 +7,7 @@
 using namespace std;
 
 FieldBufferView::FieldBufferView(
-        Logger &log, int frame_no, MuseBuffer &data, int field_parity)
+        Logger &log, int frame_no, shared_ptr<musevk::VulkanBuffer> const &data, int field_parity)
 : m_log(log),
   m_frame_no(frame_no),
   m_data(data),
@@ -29,7 +29,7 @@ void FieldBufferView::ProcessControlData(float const *control_data, std::pair<fl
 }
 
 shared_ptr<musevk::VulkanBuffer> FieldBufferView::getVulkanBuffer() {
-    return m_data.getVulkanBuffer();
+    return m_data;
 }
 
 optional<ControlSignalDecoder> const &FieldBufferView::control_data() {

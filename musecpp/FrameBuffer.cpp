@@ -4,12 +4,13 @@
 
 #include <numeric>
 #include <utility>
+#include "musevk/VulkanBuffer.h"
 #include "FrameBuffer.h"
 #include "FieldBufferView.h"
 
 using namespace std;
 
-FrameBuffer::FrameBuffer(Logger &log, int frame_no, MuseBuffer data)
+FrameBuffer::FrameBuffer(Logger &log, int frame_no, std::shared_ptr<musevk::VulkanBuffer> const &data)
 : m_frame_no(frame_no),
   m_data(std::move(data)),
   m_fields({FieldBufferView(log, frame_no, m_data, 0), FieldBufferView(log, frame_no, m_data, 1) }) {
@@ -21,7 +22,7 @@ void FrameBuffer::set_frame_no(int frame_no) {
     m_fields[1].set_frame_no(frame_no);
 }
 
-MuseBuffer &FrameBuffer::data() {
+std::shared_ptr<musevk::VulkanBuffer> &FrameBuffer::data() {
     return m_data;
 }
 

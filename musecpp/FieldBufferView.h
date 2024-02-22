@@ -7,15 +7,15 @@
 
 #include <cstdint>
 #include "MuseTypes.h"
-#include "MuseBuffer.h"
 #include "musevk/CommandBuffer.h"
+#include "musevk/VulkanBuffer.h"
 #include "ControlSignalDecoder.h"
 
 class Logger;
 
 class FieldBufferView {
 public:
-    FieldBufferView(Logger &log, int frame_no, MuseBuffer &data, int field_parity);
+    FieldBufferView(Logger &log, int frame_no, std::shared_ptr<musevk::VulkanBuffer> const &data, int field_parity);
 
     void set_frame_no(int frame_no);
 
@@ -32,7 +32,7 @@ public:
     int m_frame_no;
     int m_field_parity;
 
-    MuseBuffer &m_data;
+    std::shared_ptr<musevk::VulkanBuffer> m_data;
 
 private:
     Logger &m_log;

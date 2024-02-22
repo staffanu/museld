@@ -110,11 +110,12 @@ namespace musevk {
             throw runtime_error("presentKHR failed");
     }
 
-    shared_ptr<VulkanBuffer> VulkanManager::createDeviceBuffer(const vector<float> &data) {
-        auto host_buffer = VulkanBuffer(*m_memory_allocator, m_logical_device, data.size(), 2, true, true /* unused */);
+    shared_ptr<VulkanBuffer> VulkanManager::createDeviceBuffer(Size const &size, const vector<float> &data) {
+        assert(size.numberOfElements() == data.size());
+        auto host_buffer = VulkanBuffer(*m_memory_allocator, m_logical_device, size, 2, true, true /* unused */);
         for (int i = 0; i < data.size(); i++)
             host_buffer.data<ushort>()[i] = HalfFloatUtil::float_to_half(data[i]);
-        auto device_buffer = make_shared<VulkanBuffer>(*m_memory_allocator, m_logical_device, data.size(), 2, false, true);
+        auto device_buffer = make_shared<VulkanBuffer>(*m_memory_allocator, m_logical_device, size, 2, false, true);
         auto sq = createCommandBuffer();
         sq->begin();
         sq->enqueueCopyBuffer(host_buffer, *device_buffer);
@@ -124,12 +125,12 @@ namespace musevk {
     }
 
     shared_ptr<VulkanBuffer> VulkanManager::createBuffer(
-            uint32_t elementTotalCount,
+            Size const &size,
             uint32_t elementMemorySize,
             bool is_host_visible,
             bool allow_transfers) {
         return make_shared<VulkanBuffer>(*m_memory_allocator, m_logical_device,
-                                              elementTotalCount, elementMemorySize,
+                                              size, elementMemorySize,
                                               is_host_visible, allow_transfers);
     }
 
@@ -152,7 +153,7 @@ namespace musevk {
             const vector<shared_ptr<VulkanMemoryObject>> &buffers,
             int32_t push_constants_size,
             const vector<uint32_t> &spirv,
-            const Workgroup &workgroup,
+            const Size &workgroup,
             int max_descriptor_sets) {
         return make_shared<ComputeShader>(
                 name,
@@ -165,7 +166,7 @@ namespace musevk {
             const vector<MemoryObjectType> &buffer_types,
             int32_t push_constants_size,
             const vector<uint32_t> &spirv,
-            const Workgroup &workgroup,
+            const Size &workgroup,
             int max_descriptor_sets) {
         return make_shared<ComputeShader>(
                 name,

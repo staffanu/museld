@@ -10,6 +10,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include "musevk/VulkanBuffer.h"
 #include "BchDecoder.h"
 #include "AudioChannelDecoder.h"
 #include "AudioMode.h"
@@ -33,7 +34,7 @@ public:
 
     // output samples are written to the first two or all four channels depending on the detected mode
     void decodeFrame(int frame_no,
-                     MuseBuffer &audio_converted_freq,
+                     std::shared_ptr<musevk::VulkanBuffer> const &audio_converted_freq,
                      AudioMode &audio_mode,
                      size_t &sample_count,
                      AudioFrame output_samples[c_max_output_samples]);

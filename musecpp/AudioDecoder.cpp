@@ -6,7 +6,6 @@
 #include <bitset>
 #include <fmt/format.h>
 #include "AudioDecoder.h"
-#include "MuseBuffer.h"
 #include "util/Logger.h"
 #include "musevk/HalfFloatUtil.h"
 
@@ -82,7 +81,7 @@ AudioDecoder::AudioDecoder(Logger &log)
 }
 
 void AudioDecoder::decodeFrame(int frame_no,
-                               MuseBuffer &audio_converted_freq,
+                               shared_ptr<musevk::VulkanBuffer> const &audio_converted_freq,
                                AudioMode &audio_mode,
                                size_t &sample_count,
                                AudioFrame output_samples[c_max_output_samples]) {
@@ -105,8 +104,8 @@ void AudioDecoder::decodeFrame(int frame_no,
     sample_count = 0;
     int no_not_updated_symbol_locations = 0;
 
-    auto *ptr = audio_converted_freq.getVulkanBuffer()->data<ushort>();
-    unsigned width = audio_converted_freq.width();
+    auto *ptr = audio_converted_freq->data<ushort>();
+    unsigned width = audio_converted_freq->size().x_size;
     for (int row = 0; row < 88; row++) {
         int start_col = 9 + (row >= 40 && row < 44 || row >= 84 ? 78 : 0);
         int end_col = 9 + 348;

@@ -7,14 +7,14 @@
 namespace musevk {
     VulkanBuffer::VulkanBuffer(MemoryAllocator &memory_allocator,
                                vk::Device &device,
-                               uint32_t number_of_elements,
+                               Size size,
                                uint32_t element_size,
                                bool is_host,
                                bool allow_transfers) // only relevant for device local storage buffers
             : VulkanMemoryObject(memory_allocator),
               m_device(device),
-              m_size(number_of_elements),
-              m_memory_size(number_of_elements * element_size),
+              m_size(size),
+              m_memory_size(size.numberOfElements() * element_size),
               m_is_host(is_host),
               m_allocated_memory(),
               m_raw_data(nullptr) {

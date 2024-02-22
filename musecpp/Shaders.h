@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 #include <csignal>
-#include "MuseBuffer.h"
+#include "musevk/VulkanBuffer.h"
 
 class Logger;
 
@@ -29,12 +29,12 @@ public:
     Shaders(Shaders &other) = delete;
     void operator=(const Shaders &) = delete;
 
-    MuseBuffer createMuseBuffer(unsigned int height, unsigned int width, bool host_visible = false);
+    std::shared_ptr<musevk::VulkanBuffer> createMuseBuffer(unsigned int height, unsigned int width, bool host_visible = false);
 
     void applyEqAndDeemphasisAndGamma(musevk::CommandBuffer &sq,
                                       std::shared_ptr <musevk::VulkanBuffer> const &video_input,
                                       std::shared_ptr <musevk::VulkanBuffer> const &dropout_input,
-                                      MuseBuffer &buffer,
+                                      std::shared_ptr <musevk::VulkanBuffer> const &buffer,
                                       const std::pair<float, float> &eq,
                                       bool enable_non_linear,  bool enable_dropout_compensation);
 
@@ -48,26 +48,28 @@ public:
 
     std::shared_ptr<musevk::VulkanImage> getResultImage();
 
-    void convertAudioSampleRate(musevk::CommandBuffer &sq, MuseBuffer &frame);
+    void convertAudioSampleRate(musevk::CommandBuffer &sq, std::shared_ptr<musevk::VulkanBuffer> const &frame);
 
-    MuseBuffer &getAudioData();
+    [[nodiscard]] std::shared_ptr<musevk::VulkanBuffer> getAudioData() const;
 
 private:
     // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
     void copyYForInterpolation(musevk::CommandBuffer &sq, int descriptor_set_index,
-                               MuseBuffer &frame, MuseBuffer &output,
+                               std::shared_ptr<musevk::VulkanBuffer> const &frame,
+                               std::shared_ptr<musevk::VulkanBuffer> const &output,
                                unsigned int field_parity, unsigned int frame_phase_y, bool zero_non_copied_entries);
 
     void filterImageDiamond(musevk::CommandBuffer &sq, int descriptor_set_index,
-                            int phase, MuseBuffer &buffer);
+                            int phase, std::shared_ptr<musevk::VulkanBuffer> const &buffer);
 
     void filterImage(musevk::CommandBuffer &sq, int descriptor_set_index,
-                     MuseBuffer &filter,
-                     MuseBuffer &source, MuseBuffer &dest,
+                     std::shared_ptr<musevk::VulkanBuffer> const &filter,
+                     std::shared_ptr<musevk::VulkanBuffer> const &source,
+                     std::shared_ptr<musevk::VulkanBuffer> const &dest,
                      float border_value, float multiplier);
 
     void decodeC(musevk::CommandBuffer &sq, int descriptor_set_index,
-                 MuseBuffer &input_frame,
+                 std::shared_ptr<musevk::VulkanBuffer> const &input_frame,
                  int frame_phase_c, int field_parity, bool zero_non_sample_points);
 
     void makeFieldFromConsecutiveFrames(musevk::CommandBuffer &sq,
@@ -107,39 +109,39 @@ private:
     std::shared_ptr<musevk::ComputeShader> m_convert_audio_sample_rate_algo;
 
     // temporary data used for the output of non-linear processing to the de-emphasis filter
-    MuseBuffer m_non_linear_processed_buffer; // MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH
+    std::shared_ptr<musevk::VulkanBuffer> m_non_linear_processed_buffer; // MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH
 
     // temporary data used by the single field decoder and inter-frame interpolation
-    MuseBuffer m_interpolated32_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH * 2
-    MuseBuffer m_intermediate_r_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
-    MuseBuffer m_intermediate_b_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
+    std::shared_ptr<musevk::VulkanBuffer> m_interpolated32_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH * 2
+    std::shared_ptr<musevk::VulkanBuffer> m_intermediate_r_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
+    std::shared_ptr<musevk::VulkanBuffer> m_intermediate_b_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
 
     // output from single field decoder -- when combining the two results
-    MuseBuffer m_field_Y_buffer;
-    MuseBuffer m_field_r_buffer;
-    MuseBuffer m_field_b_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_field_Y_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_field_r_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_field_b_buffer;
 
     // output from inter-frame interpolation
-    MuseBuffer m_inter_frame_Y_buffer; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
-    MuseBuffer m_inter_frame_r_buffer;
-    MuseBuffer m_inter_frame_b_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_Y_buffer; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
+    std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_r_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_b_buffer;
 
     int m_current_movement_buffer_index;
-    std::vector<MuseBuffer> m_movement_buffers; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
-    MuseBuffer m_movement_edge_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
-    MuseBuffer m_movement_coring_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
-    MuseBuffer m_movement_enlarged_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
+    std::vector<std::shared_ptr<musevk::VulkanBuffer>> m_movement_buffers; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
+    std::shared_ptr<musevk::VulkanBuffer> m_movement_edge_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
+    std::shared_ptr<musevk::VulkanBuffer> m_movement_coring_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
+    std::shared_ptr<musevk::VulkanBuffer> m_movement_enlarged_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
 
     // used for final result
     std::shared_ptr<musevk::VulkanImage> m_image_out;
 
     // sample rate converted audio data
-    MuseBuffer m_audio_data;
+    std::shared_ptr<musevk::VulkanBuffer> m_audio_data;
 
     // filter definitions
-    MuseBuffer m_diamond_filter_buffer;
-    MuseBuffer m_color_filter_single_field_buffer;
-    MuseBuffer m_color_filter_inter_frame_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_diamond_filter_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_color_filter_single_field_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_color_filter_inter_frame_buffer;
 
     std::shared_ptr<musevk::VulkanBuffer> m_filter_2_to_3_buffer;
     std::shared_ptr<musevk::VulkanBuffer> m_filter_4_to_3_buffer;

@@ -108,7 +108,7 @@ InputReader::getNextInputBuffer() {
     }
 
     if (m_output_file_fd != -1) {
-        int size = buffer->video_data->size();
+        int size = buffer->video_data->size().numberOfElements();
         float *ptr = buffer->video_data->data<float>();
         for (int i = 0; i < size; i++)
             m_output_short_buffer[i] = ptr[i] * 4;

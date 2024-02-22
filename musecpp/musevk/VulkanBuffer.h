@@ -8,13 +8,14 @@
 #include <vulkan/vulkan.hpp>
 #include <memory>
 #include "VulkanMemoryObject.h"
+#include "Size.h"
 
 namespace musevk {
     class VulkanBuffer final : public VulkanMemoryObject {
     public:
         VulkanBuffer(MemoryAllocator &memory_allocator,
                      vk::Device &device,
-                     uint32_t number_of_elements,
+                     Size size,
                      uint32_t element_size,
                      bool is_host,
                      bool allow_transfers);  // only relevant for device local storage buffers
@@ -45,7 +46,7 @@ namespace musevk {
             };
         }
 
-        [[nodiscard]] uint32_t size() const {
+        [[nodiscard]] Size size() const {
             return m_size;
         }
 
@@ -62,7 +63,7 @@ namespace musevk {
         void allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags);
 
         vk::Device &m_device;
-        uint32_t m_size;
+        Size m_size;
         uint32_t m_memory_size;
         bool m_is_host;
         void *m_raw_data;

@@ -9,6 +9,7 @@
 #include <string>
 #include <optional>
 #include <GLFW/glfw3.h>
+#include "Size.h"
 #include "VulkanBuffer.h"
 #include "CommandBuffer.h"
 #include "VulkanImage.h"
@@ -33,10 +34,10 @@ namespace musevk {
         vk::Extent2D getSwapChainExtent() { return m_swap_chain_extent; };
         void recreateSwapChain();
 
-        std::shared_ptr<VulkanBuffer> createDeviceBuffer(const std::vector<float> &data);
+        std::shared_ptr<VulkanBuffer> createDeviceBuffer(Size const &size, const std::vector<float> &data);
 
         std::shared_ptr<VulkanBuffer> createBuffer(
-                uint32_t elementTotalCount,
+                Size const &size,
                 uint32_t elementMemorySize,
                 bool is_host_visible = false,
                 bool allow_transfers = false);
@@ -46,7 +47,7 @@ namespace musevk {
                 const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
                 int32_t push_constants_size,
                 const std::vector<uint32_t> &spirv,
-                const Workgroup &workgroup,
+                const Size &workgroup,
                 int max_descriptor_sets = 1);
 
         std::shared_ptr<ComputeShader> createComputeShader(
@@ -54,7 +55,7 @@ namespace musevk {
                 const std::vector<MemoryObjectType> &buffer_types,
                 int32_t push_constants_size,
                 const std::vector<uint32_t> &spirv,
-                const Workgroup &workgroup,
+                const Size &workgroup,
                 int max_descriptor_sets = 1);
 
         std::shared_ptr<VulkanImage> createImage(uint32_t width, uint32_t height,
