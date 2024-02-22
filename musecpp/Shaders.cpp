@@ -132,7 +132,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             m_diamond_spirv, Size(0), 2);
     m_filter_image_algo = m_vulkan_manager.createComputeShader(
             "filter_image",
-            {eBuffer, eBuffer, eBuffer}, sizeof(float) * 6,
+            {eBuffer, eBuffer, eBuffer}, sizeof(float) * 5,
             m_filter_image_spirv, Size(0), 4);
     m_fill_empty_lines_algo = m_vulkan_manager.createComputeShader(
             "fill_empty_lines",
@@ -225,8 +225,8 @@ void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
                             vector{m_field_Y_buffer->size().y_size, m_field_Y_buffer->size().x_size, (unsigned)field_parity});
 
     decodeC(sq, 0, field.m_data, frame_phase_c, field_parity, true);
-    filterImage(sq, 0, m_color_filter_single_field_buffer, m_intermediate_r_buffer, m_field_r_buffer, 128.0 / 8, 8);
-    filterImage(sq, 1, m_color_filter_single_field_buffer, m_intermediate_b_buffer, m_field_b_buffer, 128.0 / 8, 8);
+    filterImage(sq, 0, m_color_filter_single_field_buffer, m_intermediate_r_buffer, m_field_r_buffer, 8);
+    filterImage(sq, 1, m_color_filter_single_field_buffer, m_intermediate_b_buffer, m_field_b_buffer, 8);
 }
 
 void Shaders::copyYForInterpolation(CommandBuffer &sq, int descriptor_set_index,
@@ -255,7 +255,7 @@ void Shaders::filterImage(CommandBuffer &sq, int descriptor_set_index,
                           shared_ptr<musevk::VulkanBuffer> const &filter,
                           shared_ptr<musevk::VulkanBuffer> const &source,
                           shared_ptr<musevk::VulkanBuffer> const &dest,
-                          float border_value, float multiplier) {
+                          float multiplier) {
     assert(source->size() == dest->size());
 
     m_filter_image_algo->updateBufferDescriptorsInSet(
@@ -265,7 +265,7 @@ void Shaders::filterImage(CommandBuffer &sq, int descriptor_set_index,
     sq.enqueueComputeShader(
             m_filter_image_algo,
             vector{(float)filter->size().y_size, (float)filter->size().x_size, (float)source->size().y_size,
-                        (float)source->size().x_size, border_value, multiplier},
+                        (float)source->size().x_size, multiplier},
             descriptor_set_index);
 }
 
@@ -332,8 +332,8 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
 
     for (int i = 0; i < 4; i++)
         decodeC(sq, 1 + i, fields[i].get().m_data, frame_phases_c[i], field_parities[i], i == 0);
-    filterImage(sq, 2, m_color_filter_inter_frame_buffer, m_intermediate_r_buffer, m_inter_frame_r_buffer, 128.0 / 2, 2);
-    filterImage(sq, 3, m_color_filter_inter_frame_buffer, m_intermediate_b_buffer, m_inter_frame_b_buffer, 128.0 / 2, 2);
+    filterImage(sq, 2, m_color_filter_inter_frame_buffer, m_intermediate_r_buffer, m_inter_frame_r_buffer, 2);
+    filterImage(sq, 3, m_color_filter_inter_frame_buffer, m_intermediate_b_buffer, m_inter_frame_b_buffer, 2);
 
     m_current_movement_buffer_index = 1 - m_current_movement_buffer_index;
     m_detect_motion_algo->updateBufferDescriptorsInSet(0, {

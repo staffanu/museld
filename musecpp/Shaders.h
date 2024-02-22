@@ -66,7 +66,7 @@ private:
                      std::shared_ptr<musevk::VulkanBuffer> const &filter,
                      std::shared_ptr<musevk::VulkanBuffer> const &source,
                      std::shared_ptr<musevk::VulkanBuffer> const &dest,
-                     float border_value, float multiplier);
+                     float multiplier);
 
     void decodeC(musevk::CommandBuffer &sq, int descriptor_set_index,
                  std::shared_ptr<musevk::VulkanBuffer> const &input_frame,

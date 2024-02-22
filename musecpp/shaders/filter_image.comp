@@ -1,7 +1,7 @@
 #version 450
 
 // This shader should be invoked with global invocation ids
-// from (0, 0) to (source_height, source_width * 3 / 2)
+// from (0, 0) to (image_width - 1, image_height - 1)
 
 #include "muse.h"
 
@@ -10,7 +10,6 @@ layout(push_constant) uniform PushConstants {
     float filter_width_f;
     float image_height_f;
     float image_width_f;
-    float border_value_f;
     float multiplier_f;
 };
 
@@ -26,12 +25,6 @@ layout(set = 0, binding = 2) buffer writeonly dest_buffer {
     float16_t dest[];
 };
 
-// Convert to 3/2 of the input sample rate by inserting two zeros between samples to up-sample 3x,
-// low-pass filter at 0.5 times the new Nyquist rate and then select every 2nd sample
-
-// We do not represent the up-sampled signal explicitly, and also do not represent the entire filter output
-// since we only need every 2nd sample
-
 void main() {
     int row = int(gl_GlobalInvocationID.y);
     int col = int(gl_GlobalInvocationID.x);
@@ -39,7 +32,6 @@ void main() {
     int image_width = int(image_width_f);
     int filter_height = int(filter_height_f);
     int filter_width = int(filter_width_f);
-    float16_t border_value = float16_t(border_value_f);
     float16_t multiplier = float16_t(multiplier_f);
 
     if (row >= image_height || col >= image_width)
@@ -53,8 +45,13 @@ void main() {
         int read_row = row + i;
         for (int j = -W; j <= W; j ++) {
             int read_col = col + j;
-            float16_t v = read_row >= 0 && read_row < image_height && read_col >= 0 && read_col < image_width ?
-                source[read_row * image_width + read_col] : border_value;
+
+            int rc = read_col < 0 ? -read_col : read_col >= image_width ? image_width - 1 - (read_col - image_width - 1) : read_col;
+            // This filter is only used for the color area.  Outside the bottom, due to the geometry of the color pixels, it looks better to
+            // repeat the last four rows than does reflection.
+            int rr = read_row < 0 ? -read_row : read_row >= image_height ? image_height - 4 + (read_row - image_height) % 4 : read_row;
+
+            float16_t v = source[rr * image_width + rc];
             s += v * image_filter[(i + H) * filter_width + j + W];
         }
     }
