@@ -48,12 +48,13 @@ void main() {
     if (row >= MUSE_TOTAL_HEIGHT || col >= MUSE_TOTAL_WIDTH)
         return;
 
-    // Apply the de-emphasis filter for the picture area
+    // Apply the de-emphasis filter for the picture / color area
+    // notice row and col start at 0 -- in the muse spec numbering starts at 1
+    bool is_picture_area = (row >= 46 && row < 562 || row >= 608 && row < 1124) && col >= 106;
+    bool is_color_area = (row >= 42 && row < 558 || row >= 604 && row < 1120) && col >= 11 && col < 105;
 
     float16_t deemphasized;
-    if ((row >= 43 && row < 47 || row >= 605 && row < 609) && (col == 1 || col >= 11 && col < 106) ||
-        (row >= 47 && row < 559 || row >= 609 && row < 1121) && (col == 1 || col >= 11) ||
-        (row >= 559 && row < 563 || row >= 1121 && row < 1125) && (col == 1 || col >= 107)) {
+    if (is_picture_area || is_color_area) {
         deemphasized = 0.5hf * frame_in[row][col] +
             5.hf/32.hf * frame_in[row][col - 1] + 5.hf/32.hf * frame_in[row][col + 1] +
             1.hf/16.hf * frame_in[row][col - 2] + 1.hf/16.hf * frame_in[row][col + 2] +
@@ -65,11 +66,9 @@ void main() {
     // Apply the inverse transmission gamma (different for the color and luma parts of the picture)
 
     float16_t gamma_adjusted;
-    if ((row >= 46 && row < 46 + MUSE_BUF_HEIGHT || (row >= 46 + 562 && row < 46 + 562 + MUSE_BUF_HEIGHT))
-        && col >= 106 && col < 106 + MUSE_Y_BUF_WIDTH) {
+    if (is_picture_area) {
         gamma_adjusted = inverse_gamma_y(deemphasized);
-    } else if ((row >= 42 && row < 42 + MUSE_BUF_HEIGHT || (row >= 42 + 562 && row < 42 + 562 + MUSE_BUF_HEIGHT))
-        && col >= 11 && col < 11 + MUSE_C_BUF_WIDTH) {
+    } else if (is_color_area) {
         gamma_adjusted = inverse_gamma_c(deemphasized);
     } else {
         gamma_adjusted = deemphasized;

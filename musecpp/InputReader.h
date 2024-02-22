@@ -21,12 +21,14 @@ class InputReader {
 public:
     struct InputReaderBlock {
         static constexpr int c_max_efm_data_size = 150000; // a bit above 7350 / 30 * 588;
-        explicit InputReaderBlock(std::shared_ptr<musevk::VulkanBuffer> v)
+        InputReaderBlock(std::shared_ptr<musevk::VulkanBuffer> v, std::shared_ptr<musevk::VulkanBuffer> d)
                 : video_data(std::move(v)),
+                  dropout_data(std::move(d)),
                   efm_data_size(0),
                   efm_data() {
         };
         std::shared_ptr<musevk::VulkanBuffer> video_data;
+        std::shared_ptr<musevk::VulkanBuffer> dropout_data;
         int efm_data_size;
         std::array<bool, c_max_efm_data_size> efm_data;
     };

@@ -42,17 +42,19 @@ void InputPll::initialize(double sample_rate) {
     m_log.debug(eInput, fmt::format("m_g1={:.5f} m_g2={:.7f}", m_g1, m_g2));
 }
 
-InputPll::PllResult InputPll::process(int sample_count, const float samples[], float *output) {
+InputPll::PllResult InputPll::process(int sample_count, const float samples[], const uint8_t dropouts[], float *output, uint8_t *dropout_output) {
     for (int sample_ix = 0; sample_ix < sample_count; sample_ix++) {
         // if we are at the first pixel we should also not be in the middle of the loop
         assert (!(m_state == eLocked && m_line == 1 && m_pixel == 1) || sample_ix == 0);
 
         float sample = samples[sample_ix];
+        bool dropout = dropouts[sample_ix];
         m_upper_percentile_filter.update(sample);
         m_lower_percentile_filter.update(sample);
 
         int output_index = MUSE_TOTAL_WIDTH * (m_line - 1) + m_pixel - 1;
         output[output_index] = sample;
+        dropout_output[output_index] = dropout;
 
         if (m_state == eLockedHoriz || m_state == eLocked && m_line <= 2) {
             if (m_pixel == 312) {
@@ -77,7 +79,7 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], f
 
                         m_log.info(eInput, fmt::format("New state eLocked at line {}, diff={}, threshold={}",
                                                        m_line, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold));
-                        // copy the two last lines to lines 1 and 2 so that the first frame is complete
+                        // copy the two last lines to lines 1 and 2 so that the first frame is complete -- ignore dropouts
                         for (int i = 0; i < MUSE_TOTAL_WIDTH; i++) {
                             output[i] = output[(m_line - 2) * MUSE_TOTAL_WIDTH + i];
                             output[i + MUSE_TOTAL_WIDTH] = output[(m_line - 1) * MUSE_TOTAL_WIDTH + i];

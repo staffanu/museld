@@ -135,6 +135,7 @@ struct DemodulatedBlock {
     static constexpr int c_video_block_size = c_sample_block_size / c_video_decimation_rate;
     static constexpr int c_efm_block_size = c_sample_block_size / c_efm_decimation_rate;
     float video_data[c_video_block_size];
+    uint8_t dropouts[c_video_block_size]; // 1-to-1 with the video_data array. 0 or 1 for now, but could indicate how certain we are in the future
     float efm_data[c_efm_block_size];
 };
 
@@ -180,6 +181,10 @@ private:
     static constexpr int c_lowpass_in_buffer_size = c_sample_block_size + c_lowpass_filter_size - 1;
     static constexpr int c_rrc_in_buffer_size = c_sample_block_size / c_video_decimation_rate + c_rrc_filter_size - 1;
     static constexpr int c_output_buffer_size = c_sample_block_size / c_video_decimation_rate;
+
+    // We need to delay the output of the detected dropouts as much as the rest of the filter chain delays the video signal
+    static constexpr int c_dropout_delay = c_lowpass_filter_size / c_video_decimation_rate / 2 + c_rrc_filter_size / 2;
+    static constexpr int c_dropout_buffer_size = c_output_buffer_size + c_dropout_delay;
 
     static constexpr int c_efm_equalization_in_buffer_size = c_sample_block_size / c_efm_decimation_rate + c_efm_equalization_filter_size - 1;
     static constexpr int c_efm_out_buffer_size = c_sample_block_size / c_efm_decimation_rate;

@@ -24,7 +24,7 @@ public:
         double input_samples_per_sample;
         bool locked;
     };
-    PllResult process(int sample_count, const float samples[], float *output);
+    PllResult process(int sample_count, const float samples[], const uint8_t dropouts[], float *output, uint8_t *dropout_output);
     [[nodiscard]] double getInputSamplesPerSample() const;
     void setUnlocked();
 

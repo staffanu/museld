@@ -34,7 +34,8 @@ private:
     static constexpr size_t c_input_buffer_size = 1024 * 256;
     static constexpr int c_input_buffer_lookback = 3; // we look back 3 samples
 
-    bool readSamples(int sample_count, float buffer[c_sample_buffer_size], double dt,
+    bool readSamples(int sample_count, float buffer[c_sample_buffer_size],
+                     uint8_t dropout_buffer[c_sample_buffer_size], double dt,
                      float efm_buffer[DemodulatedBlock::c_efm_block_size], bool &have_efm);
 
     InputFormat m_input_format;
@@ -48,6 +49,7 @@ private:
     uint8_t m_file_input_buffer[c_input_buffer_size];
     int m_file_input_buffer_bytes;
     int m_file_input_buffer_read_pos;
+    uint8_t m_dropout_input_buffer[c_input_buffer_size]{};
     double m_t; // the time of the previous read
     int m_bytes_per_sample;
     double m_output_multiplier;

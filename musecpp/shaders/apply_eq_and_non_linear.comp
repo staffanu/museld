@@ -80,12 +80,12 @@ void main() {
     float16_t equalized = (v - eq2) / eq1;
 
     // Apply non-linear processing for the picture area
+    // notice row and col start at 0 -- in the muse spec numbering starts at 1
+    bool is_picture_area = (row >= 46 && row < 562 || row >= 608 && row < 1124) && col >= 106;
+    bool is_color_area = (row >= 42 && row < 558 || row >= 604 && row < 1120) && col >= 11 && col < 105;
 
     float16_t processed;
-    if (enable_non_linear != 0 &&
-        ((row >= 43 && row < 47 || row >= 605 && row < 609) && (col == 1 || col >= 11 && col < 106) ||
-         (row >= 47 && row < 559 || row >= 609 && row < 1121) && (col == 1 || col >= 11) ||
-         (row >= 559 && row < 563 || row >= 1121 && row < 1125) && (col == 1 || col >= 107))) {
+    if (enable_non_linear != 0 && (is_picture_area || is_color_area)) {
         processed = non_linear(equalized);
     } else {
         processed = equalized;

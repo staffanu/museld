@@ -30,6 +30,7 @@ ResamplingInputReader::ResamplingInputReader(
           m_file_input_buffer{},
           m_file_input_buffer_bytes(c_input_buffer_lookback * 4), // 4 >= input bytes per sample
           m_file_input_buffer_read_pos(c_input_buffer_lookback * 4),
+          m_dropout_input_buffer{},
           m_t(0) {
     if (demodulate) {
         m_input_format = eFloat;
@@ -63,6 +64,7 @@ bool ResamplingInputReader::initialize(std::vector<std::shared_ptr<InputReader::
         m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
         if (m_file_fd == -1)
             throw runtime_error(fmt::format("ResamplingInputReader: Unable to open input file {}", m_filename));
+        memset(m_dropout_input_buffer, 0, sizeof(m_dropout_input_buffer));
 #ifdef linux
         if (filesystem::is_fifo(m_filename)) {
             m_log.debug(eInput, fmt::format("Pipe size: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
@@ -116,12 +118,13 @@ void ResamplingInputReader::seek(double seconds) {
 
 void ResamplingInputReader::threadFunc() {
     float sample_buffer[c_sample_buffer_size];
+    uint8_t dropout_buffer[c_sample_buffer_size];
     float efm_sample_buffer[DemodulatedBlock::c_efm_block_size];
     bool have_efm;
     double input_samples_per_sample = m_input_pll.getInputSamplesPerSample();
     int samples_to_read = 1;
     shared_ptr<InputReaderBlock> buffer = nullptr;
-    while (readSamples(samples_to_read, sample_buffer, input_samples_per_sample, efm_sample_buffer, have_efm)) {
+    while (readSamples(samples_to_read, sample_buffer, dropout_buffer, input_samples_per_sample, efm_sample_buffer, have_efm)) {
         if (buffer == nullptr) {
             unique_lock<std::mutex> lock(m_mutex);
             if (m_input_is_realtime && m_vacant_muse_input_buffers.empty()) {
@@ -142,7 +145,8 @@ void ResamplingInputReader::threadFunc() {
         }
 
         auto video_data = buffer->video_data->data<float>();
-        InputPll::PllResult pll_result = m_input_pll.process(samples_to_read, sample_buffer, video_data);
+        auto dropout_data = buffer->dropout_data->data<uint8_t>();
+        InputPll::PllResult pll_result = m_input_pll.process(samples_to_read, sample_buffer, dropout_buffer, video_data, dropout_data);
         samples_to_read = pll_result.samples_to_read;
         input_samples_per_sample = pll_result.input_samples_per_sample;
 
@@ -173,7 +177,8 @@ void ResamplingInputReader::threadFunc() {
 
 // TODO: This interface isn't very good when reading constant size blocks from the demodulator -- rewrite somehow!
 // This is especially apparent in how EFM is handled.
-bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_buffer_size], double dt,
+bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_buffer_size],
+                                        uint8_t dropout_buffer[c_sample_buffer_size], double dt,
                                         float efm_buffer[DemodulatedBlock::c_efm_block_size], bool &have_efm) {
     have_efm = false;
     double t = m_t; // always in [0, 1)
@@ -217,6 +222,7 @@ bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_
                 int start_copy_pos = read_pos - c_input_buffer_lookback * m_bytes_per_sample;
                 int n = m_file_input_buffer_bytes - start_copy_pos;
                 memmove(m_file_input_buffer, m_file_input_buffer + start_copy_pos, n);
+                memmove(m_dropout_input_buffer, m_dropout_input_buffer + start_copy_pos / m_bytes_per_sample, n / m_bytes_per_sample);
                 m_file_input_buffer_bytes -= start_copy_pos;
                 read_pos = c_input_buffer_lookback * m_bytes_per_sample;
 
@@ -226,8 +232,9 @@ bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_
                     return false;
                 }
                 memcpy(m_file_input_buffer + m_file_input_buffer_bytes, block->video_data, sizeof(block->video_data));
+                memcpy(m_dropout_input_buffer + m_file_input_buffer_bytes / m_bytes_per_sample, block->dropouts, sizeof(block->dropouts));
                 m_file_input_buffer_bytes += sizeof(block->video_data);
-                memcpy(efm_buffer, block->efm_data, block->c_efm_block_size * sizeof(float));
+                memcpy(efm_buffer, block->efm_data, sizeof(block->efm_data));
                 have_efm = true;
                 m_demodulator->returnBlock(block);
             }
@@ -268,6 +275,7 @@ bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_
         double y = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
 
         buffer[sample_ix] = (float)(y * m_output_multiplier + m_output_add);
+        dropout_buffer[sample_ix] = m_dropout_input_buffer[read_pos / 4];
     }
     m_t = t;
     m_file_input_buffer_read_pos = read_pos;

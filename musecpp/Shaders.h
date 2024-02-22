@@ -32,8 +32,11 @@ public:
     MuseBuffer createMuseBuffer(unsigned int height, unsigned int width, bool host_visible = false);
 
     void applyEqAndDeemphasisAndGamma(musevk::CommandBuffer &sq,
-                                      std::shared_ptr <musevk::VulkanBuffer> input, MuseBuffer &buffer,
-                                      const std::pair<float, float> &eq, bool enable_non_linear);
+                                      std::shared_ptr <musevk::VulkanBuffer> const &video_input,
+                                      std::shared_ptr <musevk::VulkanBuffer> const &dropout_input,
+                                      MuseBuffer &buffer,
+                                      const std::pair<float, float> &eq,
+                                      bool enable_non_linear,  bool enable_dropout_compensation);
 
     void decodeIntraField(musevk::CommandBuffer &sq, FieldBufferView &field);
 
@@ -77,6 +80,7 @@ private:
     musevk::VulkanManager &m_vulkan_manager;
 
     std::vector<uint32_t> m_apply_eq_and_non_linear_spirv;
+    std::vector<uint32_t> m_apply_dropout_compensation_spirv;
     std::vector<uint32_t> m_apply_deemphasis_and_gamma_spirv;
     std::vector<uint32_t> m_copy_y_for_interpolation_spirv;
     std::vector<uint32_t> m_diamond_spirv;
@@ -88,6 +92,7 @@ private:
     std::vector<uint32_t> m_combine_still_and_moving_spirv;
 
     std::shared_ptr<musevk::ComputeShader> m_apply_eq_and_non_linear_algo;
+    std::shared_ptr<musevk::ComputeShader> m_apply_dropout_compensation_algo;
     std::shared_ptr<musevk::ComputeShader> m_apply_deemphasis_and_gamma_algo;
     std::shared_ptr<musevk::ComputeShader> m_copy_y_for_interpolation_algo;
     std::shared_ptr<musevk::ComputeShader> m_diamond_algo;

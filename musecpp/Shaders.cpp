@@ -95,6 +95,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_audio_data(createMuseBuffer(88, MUSE_TOTAL_WIDTH * 3 / 4, true))
 {
     m_apply_eq_and_non_linear_spirv = loadSpirv(executable_dir, "apply_eq_and_non_linear.comp");
+    m_apply_dropout_compensation_spirv = loadSpirv(executable_dir, "apply_dropout_compensation.comp");
     m_apply_deemphasis_and_gamma_spirv = loadSpirv(executable_dir, "apply_deemphasis_and_gamma.comp");
     m_diamond_spirv = loadSpirv(executable_dir, "filter_diamond.comp");
     m_filter_image_spirv = loadSpirv(executable_dir, "filter_image.comp");
@@ -109,6 +110,10 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             "apply_eq_and_non_linear",
             {eBuffer, eBuffer}, sizeof(float) * 3,
             m_apply_eq_and_non_linear_spirv, Workgroup(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT));
+    m_apply_dropout_compensation_algo = m_vulkan_manager.createComputeShader(
+            "apply_dropout_compensation",
+            {eBuffer, eBuffer}, 0,
+            m_apply_dropout_compensation_spirv, Workgroup(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT));
     m_apply_deemphasis_and_gamma_algo = m_vulkan_manager.createComputeShader(
             "apply_deemphasis_and_gamma",
             {eBuffer, eBuffer}, 0,
@@ -174,10 +179,19 @@ MuseBuffer Shaders::createMuseBuffer(unsigned int height, unsigned int width, bo
 }
 
 void Shaders::applyEqAndDeemphasisAndGamma(
-        CommandBuffer &sq, shared_ptr<VulkanBuffer> input,
-        MuseBuffer &buffer, pair<float, float> const &eq, bool enable_non_linear) {
-    m_apply_eq_and_non_linear_algo->updateBufferDescriptorsInSet(0, {input, m_non_linear_processed_buffer.getVulkanBuffer()});
-    sq.enqueueComputeShader(m_apply_eq_and_non_linear_algo, {eq.first, eq.second, enable_non_linear ? 1.0f : 0.0f});
+        CommandBuffer &sq,
+        shared_ptr<musevk::VulkanBuffer> const &video_input,
+        shared_ptr<musevk::VulkanBuffer> const &dropout_input,
+        MuseBuffer &buffer, pair<float, float> const &eq, bool enable_non_linear, bool enable_dropout_compensation) {
+    m_apply_eq_and_non_linear_algo->updateBufferDescriptorsInSet(0, {video_input, m_non_linear_processed_buffer.getVulkanBuffer()});
+    sq.enqueueComputeShader(m_apply_eq_and_non_linear_algo,
+                            {eq.first, eq.second, enable_non_linear ? 1.0f : 0.0f});
+
+    if (enable_dropout_compensation) {
+        m_apply_dropout_compensation_algo->
+            updateBufferDescriptorsInSet(0, {m_non_linear_processed_buffer.getVulkanBuffer(), dropout_input});
+        sq.enqueueComputeShader(m_apply_dropout_compensation_algo, {});
+    }
 
     m_apply_deemphasis_and_gamma_algo->updateBufferDescriptorsInSet(0, {m_non_linear_processed_buffer.getVulkanBuffer(), buffer.getVulkanBuffer()});
     sq.enqueueComputeShader(m_apply_deemphasis_and_gamma_algo, {});

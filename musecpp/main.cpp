@@ -37,7 +37,7 @@ void glfw_error_callback(int error, const char* description) {
 
 void process_file(Logger &log, const string& executable_dir, InputReader &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
-                  bool start_paused, bool decode_video, bool decode_audio, bool efm_audio, bool benchmark_shaders) {
+                  bool start_paused, bool decode_video, bool enable_dropout_correction, bool decode_audio, bool efm_audio, bool benchmark_shaders) {
     glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -58,7 +58,9 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         for (int i = 0; i < INPUT_BUFFER_COUNT; i++)
             input_vulkan_buffers.push_back(
                     make_shared<InputReader::InputReaderBlock>(
-                            manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), true, true)));
+                            manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), true, true),
+                            manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint8_t), true, true)
+                    ));
         if (!reader.initialize(input_vulkan_buffers))
             throw runtime_error("InputReader initialization failed");
     }
@@ -99,7 +101,10 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         bool redo_last_field = false;
         bool enable_non_linear = true;
 
-        while (paused || decoder.next(efm_audio, audio_mode, audio_sample_count, audio_samples, field_interpolation_mode, redo_last_field, enable_non_linear)) {
+        while (paused ||
+            decoder.next(efm_audio, audio_mode, audio_sample_count, audio_samples, field_interpolation_mode,
+                         redo_last_field, enable_non_linear, enable_dropout_correction)) {
+
             if (!paused)
                 field_count++;
             redo_last_field = false;
@@ -196,7 +201,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                     redo_last_field = true;
                     paused_countdown = 1;
                 }
-                log.info(eApplication | eVideo | eDecoder, "Field interpolation determined by motion detection");
+                log.info(eApplication | eVideo, "Field interpolation determined by motion detection");
             }
             if (check_glfw_key(window, GLFW_KEY_2)) {
                 field_interpolation_mode = MuseDecoder::eForceIntraField;
@@ -205,7 +210,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                     redo_last_field = true;
                     paused_countdown = 1;
                 }
-                log.info(eApplication | eVideo | eDecoder, "Field interpolation forced to intra field only");
+                log.info(eApplication | eVideo, "Field interpolation forced to intra field only");
             }
             if (check_glfw_key(window, GLFW_KEY_3)) {
                 field_interpolation_mode = MuseDecoder::eForceInterFrame;
@@ -214,10 +219,13 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                     redo_last_field = true;
                     paused_countdown = 1;
                 }
-                log.info(eApplication | eVideo | eDecoder, "Inter-frame interpolation forced");
+                log.info(eApplication | eVideo, "Inter-frame interpolation forced");
             }
             if (check_glfw_key(window, GLFW_KEY_A)) {
                 efm_audio = !efm_audio;
+            }
+            if (check_glfw_key(window, GLFW_KEY_D)) {
+                enable_dropout_correction = !enable_dropout_correction;
             }
             if (check_glfw_key(window, GLFW_KEY_E)) {
                 enable_non_linear = true;
@@ -281,6 +289,7 @@ int main(int argc, char *argv[]) {
     bool start_paused = false;
     optional<string> output_filename; // always written as little endian unsigned short values
     bool decode_video = true;
+    bool dropout_detect = true;
     bool decode_audio = true;
     bool efm_audio = false;
     bool benchmark_shaders = false;
@@ -316,6 +325,8 @@ int main(int argc, char *argv[]) {
                 output_filename = *(++it);
             else if (*it == "--no-video")
                 decode_video = false;
+            else if (*it == "--no-dropout")
+                dropout_detect = false;
             else if (*it == "--no-audio")
                 decode_audio = false;
             else if (*it == "--efm")
@@ -361,7 +372,7 @@ int main(int argc, char *argv[]) {
                         throw runtime_error("No input format specified");
                 }
                 process_file(log, executable_dir, *reader, decode_all_fields,
-                             full_screen, no_sync, start_paused, decode_video, decode_audio, efm_audio,
+                             full_screen, no_sync, start_paused, decode_video, dropout_detect, decode_audio, efm_audio,
                              benchmark_shaders);
                 delete reader;
             }

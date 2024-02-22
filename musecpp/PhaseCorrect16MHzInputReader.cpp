@@ -86,6 +86,7 @@ void PhaseCorrect16MHzInputReader::threadFunc() {
         auto data = buffer->video_data->data<float>();
         if (!readFloats(m_input, data, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH))
             break;
+        memset(buffer->dropout_data->data<uint8_t>(), 0, sizeof(buffer->dropout_data->size()));
 
         std::unique_lock<std::mutex> lock(m_mutex);
         m_cv_filled.notify_one();

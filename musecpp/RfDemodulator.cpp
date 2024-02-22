@@ -119,10 +119,15 @@ void RfDemodulator::demodulate() {
     float rrc_in_buffer[c_rrc_in_buffer_size] = {};
     float efm_equalization_in_buffer[c_efm_equalization_in_buffer_size] = {};
 
+    uint8_t dropout_buffer[c_dropout_buffer_size] = {};
+
     float prev_angle;
     long total_samples_read = 0;
     long total_samples_read_last_log = 0;
     long total_time_since_last_log_us = 0;
+
+    float positive_amplitude_estimate = 0;
+    float negative_amplitude_estimate = 0;
 
     while (!m_stop_request && readFloats(input_buffer + c_bandpass_filter_size - 1, c_sample_block_size)) {
         auto t0 = chrono::high_resolution_clock::now();
@@ -181,6 +186,26 @@ void RfDemodulator::demodulate() {
                   c_efm_decimation_rate, efm_equalization_in_buffer + c_efm_equalization_filter_size - 1);
         firFilter(efm_equalization_in_buffer, c_efm_out_buffer_size, c_efm_equalization_filter, 1, block->efm_data);
 
+        // Dropout detection -- very simplistic for now
+        for (int index = 0; index < c_sample_block_size; index += 8) {
+            positive_amplitude_estimate = analytic_buffer_re[index] > positive_amplitude_estimate ?
+                                          analytic_buffer_re[index] : positive_amplitude_estimate * 0.9999f;
+            negative_amplitude_estimate = analytic_buffer_re[index] < negative_amplitude_estimate ?
+                                          analytic_buffer_re[index] : negative_amplitude_estimate * 0.9999f;
+            float min = 1e10;
+            float max = -1e10;
+            for (int j = 0; j < 8; j++) {
+                if (analytic_buffer_re[index + j] > max)
+                    max = analytic_buffer_re[index + j];
+                if (analytic_buffer_re[index + j] < min)
+                    min = analytic_buffer_re[index + j];
+            }
+            bool dropout = max < positive_amplitude_estimate / 2 || min > negative_amplitude_estimate / 2;
+            for (int j = 0; j < 8 / c_video_decimation_rate; j++)
+                dropout_buffer[c_dropout_delay + index / c_video_decimation_rate + j] = dropout;
+
+        }
+        memcpy(block->dropouts, dropout_buffer, sizeof(block->dropouts));
 
         // Copy the end of the filter inputs to the start of the corresponding buffers
         memcpy(input_buffer, input_buffer + c_input_buffer_size - c_bandpass_filter_size + 1,
@@ -191,6 +216,7 @@ void RfDemodulator::demodulate() {
                (c_rrc_filter_size - 1) * sizeof(float));
         memcpy(efm_equalization_in_buffer, efm_equalization_in_buffer + c_efm_equalization_in_buffer_size - c_efm_equalization_filter_size + 1,
                (c_efm_equalization_filter_size - 1) * sizeof(float));
+        memcpy(dropout_buffer, dropout_buffer + c_dropout_buffer_size - c_dropout_delay, c_dropout_delay);
 
         auto t1 = chrono::high_resolution_clock::now();
         total_time_since_last_log_us += chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
