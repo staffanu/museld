@@ -1,12 +1,3 @@
-% The following constructs a quite small filter for efm,
-% using a lowpass filter of only 15 taps, followed by decimation by 4
-% and then a 16 tap efm filter:
-%
-% data = read_efm_data(10000000, 15, 4);
-% coeffs=make_efm_filter(256, 4);
-% c=coeffs(122:137); plot(c);
-% eval_efm_fir_filter(c, data, 4, true)
-%
 % L is the size of the ifft
 # decimation tells how much the input was decimated from 62.5 MHz
 function coeffs = make_efm_filter(L, decimation)
