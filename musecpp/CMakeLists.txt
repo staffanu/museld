@@ -23,7 +23,6 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -ffast-mat
 
 add_executable(musecpp
         main.cpp
-        MuseBuffer.h
         FrameBuffer.cpp FrameBuffer.h
         FieldBufferView.cpp FieldBufferView.h
         AudioDecoder.cpp AudioDecoder.h
@@ -56,6 +55,7 @@ add_executable(musecpp
         efm/EfmPll.cpp efm/EfmPll.h
         efm/EfmDecoder.cpp efm/EfmDecoder.h
         efm/ByteWithErasureFlag.h
+        musevk/Size.h
 )
 target_link_libraries(musecpp
         PRIVATE glfw

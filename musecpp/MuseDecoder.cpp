@@ -88,7 +88,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
         m_reset_timestamp_query_pool_command_buffer->wait();
     }
 
-    std::shared_ptr<InputReader::InputReaderBlock> input_block = nullptr;
+    std::unique_ptr<InputReader::InputReaderBlock> input_block = nullptr;
     InputReader::PresentationHint presentation_hint;
     if (m_field_index == 0 && !redo_last_field) {
         auto frame_buffer = m_frame_buffers.back();

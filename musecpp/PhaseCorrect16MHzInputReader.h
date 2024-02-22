@@ -14,7 +14,7 @@ public:
                                           double initial_seek_seconds,
                                           const std::optional<std::string> &output_filename);
 
-    bool initialize(std::vector<std::shared_ptr<InputReader::InputReaderBlock>> &buffers) override;
+    bool initialize(std::vector<std::unique_ptr<InputReader::InputReaderBlock>> &buffers) override;
     void cleanup() override;
 
     void seek(double seconds) override;

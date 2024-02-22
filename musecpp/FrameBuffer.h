@@ -14,7 +14,7 @@ class Logger;
 
 class FrameBuffer {
 public:
-    FrameBuffer(Logger &log, int frame_no, std::shared_ptr<musevk::VulkanBuffer> const &data);
+    FrameBuffer(Logger &log, int frame_no, std::shared_ptr<musevk::VulkanBuffer> data);
 
     static std::pair<float, float> EstimateEq(float const *data);
 

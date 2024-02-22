@@ -32,12 +32,16 @@ InputReader::InputReader(Logger &log, const std::string &filename, bool input_is
           m_get_input_buffers_count(0) {
 }
 
-bool InputReader::initialize(std::vector<std::shared_ptr<InputReaderBlock>> &buffers) {
+bool InputReader::initialize(std::vector<std::unique_ptr<InputReaderBlock>> &buffers) {
     if (m_initial_seek_seconds != 0)
         seek(m_initial_seek_seconds);
 
-    for (const auto &b : buffers)
-        m_vacant_muse_input_buffers.push_back(b);
+    // We take ownership of the input blocks here -- the only reason not to create them here is that
+    // we do not have access to the VulkanManager.
+    for (auto &b : buffers)
+        m_vacant_muse_input_buffers.push_back(std::move(b));
+    buffers.clear();
+
     m_log.debug(eInput, fmt::format("Using {} input buffers", m_vacant_muse_input_buffers.size()));
 
     m_reader_thread = new thread(&InputReader::threadFunc, this);
@@ -78,10 +82,10 @@ void InputReader::cleanup() {
     }
 }
 
-pair<shared_ptr<InputReader::InputReaderBlock>, InputReader::PresentationHint>
+pair<unique_ptr<InputReader::InputReaderBlock>, InputReader::PresentationHint>
 InputReader::getNextInputBuffer() {
     m_get_input_buffers_count++;
-    shared_ptr<InputReaderBlock> buffer = nullptr;
+    unique_ptr<InputReaderBlock> buffer = nullptr;
     PresentationHint hint = eNormal;
     {
         unique_lock<std::mutex> lock(m_mutex);
@@ -93,7 +97,7 @@ InputReader::getNextInputBuffer() {
         if (m_filled_muse_input_buffers.empty())
             return {nullptr, eNormal};
 
-        buffer = m_filled_muse_input_buffers.front();
+        buffer = std::move(m_filled_muse_input_buffers.front());
         m_filled_muse_input_buffers.pop_front();
 
         auto filled_buffers = m_filled_muse_input_buffers.size();
@@ -117,11 +121,11 @@ InputReader::getNextInputBuffer() {
             throw runtime_error("Output file write error");
     }
 
-    return {buffer, hint};
+    return {std::move(buffer), hint};
 }
 
-void InputReader::returnBuffer(shared_ptr<InputReader::InputReaderBlock> &buffer) {
+void InputReader::returnBuffer(unique_ptr<InputReader::InputReaderBlock> &buffer) {
     std::unique_lock<std::mutex> lock(m_mutex);
     m_cv_vacant.notify_one();
-    m_vacant_muse_input_buffers.push_back(buffer);
+    m_vacant_muse_input_buffers.push_back(std::move(buffer));
 }

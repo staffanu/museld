@@ -37,7 +37,7 @@ public:
     InputReader(const InputReader&) = delete;
     virtual ~InputReader() = default;
 
-    [[nodiscard]] virtual bool initialize(std::vector<std::shared_ptr<InputReaderBlock>> &buffers);
+    [[nodiscard]] virtual bool initialize(std::vector<std::unique_ptr<InputReaderBlock>> &buffers);
     virtual void cleanup();
 
     enum PresentationHint {
@@ -46,8 +46,8 @@ public:
         eSpeedup = 2
     };
 
-    std::pair<std::shared_ptr<InputReaderBlock>, PresentationHint> getNextInputBuffer();
-    void returnBuffer(std::shared_ptr<InputReaderBlock> &buffer);
+    std::pair<std::unique_ptr<InputReaderBlock>, PresentationHint> getNextInputBuffer();
+    void returnBuffer(std::unique_ptr<InputReaderBlock> &buffer);
     virtual void seek(double seconds) = 0;
 
 protected:
@@ -66,8 +66,8 @@ protected:
     const std::optional<std::string> m_output_filename;
     int m_output_file_fd;
     int16_t *m_output_short_buffer;
-    std::deque<std::shared_ptr<InputReaderBlock>> m_vacant_muse_input_buffers;
-    std::deque<std::shared_ptr<InputReaderBlock>> m_filled_muse_input_buffers;
+    std::deque<std::unique_ptr<InputReaderBlock>> m_vacant_muse_input_buffers;
+    std::deque<std::unique_ptr<InputReaderBlock>> m_filled_muse_input_buffers;
     std::atomic<bool> m_stop_request;
     std::atomic<bool> m_reader_thread_finished;
     std::mutex m_mutex;

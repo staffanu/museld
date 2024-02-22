@@ -34,9 +34,9 @@ namespace musevk {
         vk::Extent2D getSwapChainExtent() { return m_swap_chain_extent; };
         void recreateSwapChain();
 
-        std::shared_ptr<VulkanBuffer> createDeviceBuffer(Size const &size, const std::vector<float> &data);
+        std::unique_ptr<VulkanBuffer> createDeviceBuffer(Size const &size, const std::vector<float> &data);
 
-        std::shared_ptr<VulkanBuffer> createBuffer(
+        std::unique_ptr<VulkanBuffer> createBuffer(
                 Size const &size,
                 uint32_t elementMemorySize,
                 bool is_host_visible = false,
@@ -144,7 +144,7 @@ namespace musevk {
         Logger &m_log;
         GLFWwindow *m_window;
         bool m_no_sync;
-        std::shared_ptr<MemoryAllocator> m_memory_allocator;
+        std::unique_ptr<MemoryAllocator> m_memory_allocator;
 
         vk::Instance m_instance;
         vk::DebugUtilsMessengerEXT m_debug_messenger;

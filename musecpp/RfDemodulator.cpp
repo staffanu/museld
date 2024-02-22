@@ -41,7 +41,7 @@ bool RfDemodulator::initialize() {
 #endif
 
     for (int i = 0; i < c_number_of_block_buffers; i++)
-        m_vacant_blocks.push_back(make_shared<DemodulatedBlock>());
+        m_vacant_blocks.push_back(make_unique<DemodulatedBlock>());
 
     m_demodulator_thread = new thread(&RfDemodulator::demodulate, this);
 #ifdef linux
@@ -51,7 +51,7 @@ bool RfDemodulator::initialize() {
     return true;
 }
 
-std::shared_ptr<DemodulatedBlock> RfDemodulator::getNextDemodulatedBlock() {
+std::unique_ptr<DemodulatedBlock> RfDemodulator::getNextDemodulatedBlock() {
     std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
     m_cv_filled.wait(
             lock,
@@ -59,15 +59,15 @@ std::shared_ptr<DemodulatedBlock> RfDemodulator::getNextDemodulatedBlock() {
     if (m_filled_blocks.empty())
         return nullptr;
 
-    auto block = m_filled_blocks.front();
+    auto block = std::move(m_filled_blocks.front());
     m_filled_blocks.pop_front();
     return block;
 }
 
-void RfDemodulator::returnBlock(std::shared_ptr<DemodulatedBlock> &buffer) {
+void RfDemodulator::returnBlock(std::unique_ptr<DemodulatedBlock> &buffer) {
     std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
     m_cv_vacant.notify_one();
-    m_vacant_blocks.push_back(buffer);
+    m_vacant_blocks.push_back(std::move(buffer));
 }
 
 void RfDemodulator::seek(double seconds) {
@@ -83,7 +83,7 @@ void RfDemodulator::seek(double seconds) {
         // Discard any filled buffers
         std::unique_lock<std::mutex> lock2(m_demodulated_block_mutex);
         for (auto &b : m_filled_blocks)
-            m_vacant_blocks.push_back(b);
+            m_vacant_blocks.push_back(std::move(b));
         m_filled_blocks.clear();
         m_cv_vacant.notify_one();
     }
@@ -133,14 +133,14 @@ void RfDemodulator::demodulate() {
         auto t0 = chrono::high_resolution_clock::now();
 
         // First get a free output block to write to
-        shared_ptr<DemodulatedBlock> block = nullptr;
+        unique_ptr<DemodulatedBlock> block = nullptr;
         {
             std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
             if (m_input_is_fifo && m_vacant_blocks.empty()) {
                 // discard a filled buffer -- this is better than having the writer to the fifo wait
                 m_log.warn(eInput, "Discarding demodulated block due to overrun");
                 assert(!m_filled_blocks.empty());
-                m_vacant_blocks.push_back(m_filled_blocks.back());
+                m_vacant_blocks.push_back(std::move(m_filled_blocks.back()));
                 m_filled_blocks.pop_back();
             }
             m_cv_vacant.wait(lock, [this] { return m_stop_request || !m_vacant_blocks.empty(); });
@@ -148,7 +148,7 @@ void RfDemodulator::demodulate() {
                 m_log.info(eInput, "RfDemodulator: stop requested");
                 break;
             }
-            block = m_vacant_blocks.front();
+            block = std::move(m_vacant_blocks.front());
             m_vacant_blocks.pop_front();
         }
 
@@ -224,7 +224,7 @@ void RfDemodulator::demodulate() {
         // Send away result
         std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
         m_cv_filled.notify_one();
-        m_filled_blocks.push_back(block);
+        m_filled_blocks.push_back(std::move(block));
 
         total_samples_read += c_sample_block_size;
         if (total_samples_read - total_samples_read_last_log > (long)c_sample_frequency) {

@@ -59,7 +59,7 @@ ResamplingInputReader::ResamplingInputReader(
     }
 }
 
-bool ResamplingInputReader::initialize(std::vector<std::shared_ptr<InputReader::InputReaderBlock>> &buffers) {
+bool ResamplingInputReader::initialize(std::vector<std::unique_ptr<InputReader::InputReaderBlock>> &buffers) {
     if (m_demodulator == nullptr) {
         m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
         if (m_file_fd == -1)
@@ -107,7 +107,7 @@ void ResamplingInputReader::seek(double seconds) {
             lseek(m_file_fd, bytes_to_seek, SEEK_CUR);
 
             // discard content in existing input buffers
-            copy(m_filled_muse_input_buffers.begin(), m_filled_muse_input_buffers.end(),
+            move(m_filled_muse_input_buffers.begin(), m_filled_muse_input_buffers.end(),
                  back_inserter(m_vacant_muse_input_buffers));
             m_filled_muse_input_buffers.clear();
             m_cv_vacant.notify_one();
@@ -123,7 +123,7 @@ void ResamplingInputReader::threadFunc() {
     bool have_efm;
     double input_samples_per_sample = m_input_pll.getInputSamplesPerSample();
     int samples_to_read = 1;
-    shared_ptr<InputReaderBlock> buffer = nullptr;
+    unique_ptr<InputReaderBlock> buffer = nullptr;
     while (readSamples(samples_to_read, sample_buffer, dropout_buffer, input_samples_per_sample, efm_sample_buffer, have_efm)) {
         if (buffer == nullptr) {
             unique_lock<std::mutex> lock(m_mutex);
@@ -131,7 +131,7 @@ void ResamplingInputReader::threadFunc() {
                 // discard a filled buffer -- this is better than having the writer to the fifo wait
                 m_log.warn(eInput, "Discarding filled input buffer due to overrun");
                 assert(!m_filled_muse_input_buffers.empty());
-                m_vacant_muse_input_buffers.push_back(m_filled_muse_input_buffers.back());
+                m_vacant_muse_input_buffers.push_back(std::move(m_filled_muse_input_buffers.back()));
                 m_filled_muse_input_buffers.pop_back();
             }
             m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_muse_input_buffers.empty();});
@@ -139,7 +139,7 @@ void ResamplingInputReader::threadFunc() {
                 m_log.info(eInput, "ResamplingInputReader: stop requested");
                 break;
             }
-            buffer = m_vacant_muse_input_buffers.front();
+            buffer = std::move(m_vacant_muse_input_buffers.front());
             m_vacant_muse_input_buffers.pop_front();
             buffer->efm_data_size = 0;;
         }
@@ -166,7 +166,7 @@ void ResamplingInputReader::threadFunc() {
         if (pll_result.frame_done) {
             std::unique_lock<std::mutex> lock(m_mutex);
             m_cv_filled.notify_one();
-            m_filled_muse_input_buffers.push_back(buffer);
+            m_filled_muse_input_buffers.push_back(std::move(buffer));
             buffer = nullptr;
         }
     }

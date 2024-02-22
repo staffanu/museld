@@ -7,20 +7,9 @@
 
 #include <vulkan/vulkan.hpp>
 #include "VulkanMemoryObject.h"
+#include "Size.h"
 
 namespace musevk {
-
-    // Represents the global workgroup size
-    struct Workgroup {
-        Workgroup(uint32_t x, uint32_t y = 1, uint32_t z = 1)
-        : x_size(x),
-          y_size(y),
-          z_size(z) {};
-        uint32_t x_size;
-        uint32_t y_size;
-        uint32_t z_size;
-    };
-
     class ComputeShader {
     public:
         ComputeShader(std::string &name,
@@ -28,7 +17,7 @@ namespace musevk {
                       const std::vector<MemoryObjectType> &buffer_types,
                       int32_t push_constants_size,
                       const std::vector<uint32_t> &spirv,
-                      const Workgroup &workgroup,
+                      const Size &workgroup_size,
                       int max_descriptor_sets);
 
         ComputeShader(std::string &name,
@@ -36,7 +25,7 @@ namespace musevk {
                       const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
                       int32_t push_constants_size,
                       const std::vector<uint32_t> &spirv,
-                      const Workgroup &workgroup,
+                      const Size &workgroup_size,
                       int max_descriptor_sets);
 
         ~ComputeShader();
@@ -48,14 +37,14 @@ namespace musevk {
         // A descriptor set can be used only once for a single command queue submit.  If we
         // re-use the same shader for several inputs, we create multiple descriptor sets.
         // They all have to conform to the same layout.
-        void updateBufferDescriptorsInSet(int set_index, const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers) {
+        void updateBufferDescriptorsInSet(int set_index, const std::vector<std::shared_ptr<VulkanMemoryObject>> buffers) {
             assert(buffers.size() == m_descriptor_count);
             m_buffers[set_index] = buffers;
             updateDescriptorSet(set_index);
         }
 
-        void updateWorkgroup(Workgroup const &workgroup) {
-            m_workgroup = workgroup;
+        void updateWorkgroup(Size const &workgroup) {
+            m_workgroup_size = workgroup;
         }
 
         const std::vector<std::shared_ptr<VulkanMemoryObject>> &getMemoryObjects(int descriptor_set_index) {
@@ -100,7 +89,7 @@ namespace musevk {
         vk::Pipeline m_pipeline;
 
         std::vector<uint32_t> m_spirv;
-        Workgroup m_workgroup;
+        Size m_workgroup_size;
     };
 }
 

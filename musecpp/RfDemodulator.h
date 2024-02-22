@@ -146,8 +146,8 @@ public:
     void operator=(const RfDemodulator&) = delete;
 
     bool initialize();
-    std::shared_ptr<DemodulatedBlock> getNextDemodulatedBlock();
-    void returnBlock(std::shared_ptr<DemodulatedBlock> &buffer);
+    std::unique_ptr<DemodulatedBlock> getNextDemodulatedBlock();
+    void returnBlock(std::unique_ptr<DemodulatedBlock> &buffer);
 
     void seek(double seconds);
     void cleanup();
@@ -205,8 +205,8 @@ private:
     int m_input_fd;
     bool m_input_is_fifo;
     std::thread *m_demodulator_thread;
-    std::deque<std::shared_ptr<DemodulatedBlock>> m_vacant_blocks;
-    std::deque<std::shared_ptr<DemodulatedBlock>> m_filled_blocks;
+    std::deque<std::unique_ptr<DemodulatedBlock>> m_vacant_blocks;
+    std::deque<std::unique_ptr<DemodulatedBlock>> m_filled_blocks;
     std::mutex m_demodulated_block_mutex; // used to synchronize access to the vacant / filled blocks
     std::mutex m_input_file_mutex; // used to make sure we do not seek during a file read
     std::condition_variable m_cv_filled;

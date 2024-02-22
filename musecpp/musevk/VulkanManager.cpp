@@ -25,7 +25,7 @@ namespace musevk {
         createSurface();
         pickPhysicalDevice();
         createLogicalDevice();
-        m_memory_allocator = make_shared<MemoryAllocator>(m_physical_device, m_logical_device);
+        m_memory_allocator = make_unique<MemoryAllocator>(m_physical_device, m_logical_device);
         createSwapChain();
 
         auto indices = findQueueFamilies(m_physical_device);
@@ -110,12 +110,12 @@ namespace musevk {
             throw runtime_error("presentKHR failed");
     }
 
-    shared_ptr<VulkanBuffer> VulkanManager::createDeviceBuffer(Size const &size, const vector<float> &data) {
+    unique_ptr<VulkanBuffer> VulkanManager::createDeviceBuffer(Size const &size, const vector<float> &data) {
         assert(size.numberOfElements() == data.size());
         auto host_buffer = VulkanBuffer(*m_memory_allocator, m_logical_device, size, 2, true, true /* unused */);
         for (int i = 0; i < data.size(); i++)
             host_buffer.data<ushort>()[i] = HalfFloatUtil::float_to_half(data[i]);
-        auto device_buffer = make_shared<VulkanBuffer>(*m_memory_allocator, m_logical_device, size, 2, false, true);
+        auto device_buffer = make_unique<VulkanBuffer>(*m_memory_allocator, m_logical_device, size, 2, false, true);
         auto sq = createCommandBuffer();
         sq->begin();
         sq->enqueueCopyBuffer(host_buffer, *device_buffer);
@@ -124,18 +124,18 @@ namespace musevk {
         return device_buffer;
     }
 
-    shared_ptr<VulkanBuffer> VulkanManager::createBuffer(
+    unique_ptr<VulkanBuffer> VulkanManager::createBuffer(
             Size const &size,
             uint32_t elementMemorySize,
             bool is_host_visible,
             bool allow_transfers) {
-        return make_shared<VulkanBuffer>(*m_memory_allocator, m_logical_device,
+        return make_unique<VulkanBuffer>(*m_memory_allocator, m_logical_device,
                                               size, elementMemorySize,
                                               is_host_visible, allow_transfers);
     }
 
     shared_ptr<VulkanImage> VulkanManager::createImage(uint32_t width, uint32_t height, std::optional<vk::ImageLayout> initial_layout) {
-        auto image = make_shared<VulkanImage>(*m_memory_allocator, m_logical_device, width, height);
+        auto image = make_unique<VulkanImage>(*m_memory_allocator, m_logical_device, width, height);
         if (initial_layout.has_value()) {
             auto command_buffer = createCommandBuffer();
             command_buffer->begin();
@@ -168,7 +168,7 @@ namespace musevk {
             const vector<uint32_t> &spirv,
             const Size &workgroup,
             int max_descriptor_sets) {
-        return make_shared<ComputeShader>(
+        return make_unique<ComputeShader>(
                 name,
                 m_logical_device,
                 buffer_types, push_constants_size, spirv, workgroup, max_descriptor_sets);
@@ -176,7 +176,7 @@ namespace musevk {
 
     shared_ptr<CommandBuffer> VulkanManager::createCommandBuffer(
             TimestampQueryPool *timestamp_query_pool) {
-        return make_shared<CommandBuffer>(
+        return make_unique<CommandBuffer>(
                 m_command_pool,
                 m_logical_device,
                 m_compute_queue,

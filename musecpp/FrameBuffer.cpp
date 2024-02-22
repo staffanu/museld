@@ -10,7 +10,7 @@
 
 using namespace std;
 
-FrameBuffer::FrameBuffer(Logger &log, int frame_no, std::shared_ptr<musevk::VulkanBuffer> const &data)
+FrameBuffer::FrameBuffer(Logger &log, int frame_no, std::shared_ptr<musevk::VulkanBuffer> data)
 : m_frame_no(frame_no),
   m_data(std::move(data)),
   m_fields({FieldBufferView(log, frame_no, m_data, 0), FieldBufferView(log, frame_no, m_data, 1) }) {

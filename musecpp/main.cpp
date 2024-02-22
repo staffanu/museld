@@ -54,10 +54,10 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     vk::Device &device = manager.getDevice();
 
     {
-        std::vector<std::shared_ptr<InputReader::InputReaderBlock>> input_vulkan_buffers{};
+        std::vector<std::unique_ptr<InputReader::InputReaderBlock>> input_vulkan_buffers{};
         for (int i = 0; i < INPUT_BUFFER_COUNT; i++)
             input_vulkan_buffers.push_back(
-                    make_shared<InputReader::InputReaderBlock>(
+                    make_unique<InputReader::InputReaderBlock>(
                             manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), true, true),
                             manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint8_t), true, true)
                     ));

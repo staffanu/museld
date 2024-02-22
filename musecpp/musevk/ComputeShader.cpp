@@ -16,14 +16,14 @@ namespace musevk {
                                  const std::vector<MemoryObjectType> &buffer_types,
                                  int32_t push_constants_size,
                                  const std::vector<uint32_t> &spirv,
-                                 const Workgroup &workgroup,
+                                 const Size &workgroup_size,
                                  int max_descriptor_sets)
 : m_name(name),
   m_device(device),
   m_descriptor_count(buffer_types.size()),
   m_push_constants_size(push_constants_size),
   m_spirv(spirv),
-  m_workgroup(workgroup) {
+  m_workgroup_size(workgroup_size) {
         m_buffers.resize(max_descriptor_sets);
         createShaderModule();
         createDescriptorLayout(max_descriptor_sets, buffer_types);
@@ -36,14 +36,14 @@ namespace musevk {
                                  const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
                                  int32_t push_constants_size,
                                  const std::vector<uint32_t> &spirv,
-                                 const Workgroup &workgroup,
+                                 const Size &workgroup_size,
                                  int max_descriptor_sets)
 : m_name(name),
   m_device(device),
   m_descriptor_count(buffers.size()),
   m_push_constants_size(push_constants_size),
   m_spirv(spirv),
-  m_workgroup(workgroup)
+  m_workgroup_size(workgroup_size)
     {
         std::vector<MemoryObjectType> buffer_types;
         buffer_types.reserve(buffers.size());
@@ -188,9 +188,9 @@ namespace musevk {
     }
 
     void ComputeShader::dispatch(const vk::CommandBuffer &commandBuffer) {
-        uint32_t group_count_x = (m_workgroup.x_size + LOCAL_WORKGROUP_SIZE_X - 1) / LOCAL_WORKGROUP_SIZE_X;
-        uint32_t group_count_y = (m_workgroup.y_size + LOCAL_WORKGROUP_SIZE_Y - 1) / LOCAL_WORKGROUP_SIZE_Y;
-        uint32_t group_count_z = (m_workgroup.z_size + LOCAL_WORKGROUP_SIZE_Z - 1) / LOCAL_WORKGROUP_SIZE_Z;
+        uint32_t group_count_x = (m_workgroup_size.x_size + LOCAL_WORKGROUP_SIZE_X - 1) / LOCAL_WORKGROUP_SIZE_X;
+        uint32_t group_count_y = (m_workgroup_size.y_size + LOCAL_WORKGROUP_SIZE_Y - 1) / LOCAL_WORKGROUP_SIZE_Y;
+        uint32_t group_count_z = (m_workgroup_size.z_size + LOCAL_WORKGROUP_SIZE_Z - 1) / LOCAL_WORKGROUP_SIZE_Z;
         commandBuffer.dispatch(group_count_x, group_count_y, group_count_z);
     }
 }
