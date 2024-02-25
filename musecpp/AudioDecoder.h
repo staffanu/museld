@@ -15,7 +15,6 @@
 #include "AudioChannelDecoder.h"
 #include "AudioMode.h"
 
-class MuseBuffer;
 class Logger;
 
 class AudioDecoder {

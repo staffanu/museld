@@ -7,50 +7,50 @@
 
 #include <map>
 #include <vector>
-#include <iostream>
 #include <sstream>
 #include "util/Logger.h"
 
 class Logger;
-/** BCH SEC-DED decoder.  We assume that the distance d of the code is 4.
+
+/** BCH decoder.
+ * if correct_two_errors is false, this is a SEC-DED decoder: We assume that the distance d of the base code is 3
+ * and that one additional bit is used to ensure that all codewords have even parity.
+ * If correct_two_errors is true, we correct two errors and detect three errors: We assume the distance of the
+ * base code is 5, and again that one bit is used to ensure that all codewords have even parity.
  *
  * @param n the codeword length
- * @param k the number of information symbols; there are n-k bits for error correction
- * @param generator FIXME rename
- * @param primPoly the primitive polynomial
+ * @param primitive_polynomial
+ * @param correct_two_errors
+ * Notice that k, the number of information bits, is not needed -- the parity bits are discarded by the caller.
+ * Also, the generator polynomial for the code is not actually used by the decoder: it is enough to know
+ * the primitive polynomial for the Galois field for computations.
  *
  * The degree of the primitive polynomial is m.
  * We have n <= 2 ** m - 1
- * Assume n > 2 ** (m - 1) - 1 => 2 ** (m - 1) < n + 1 <= 2 ** m => m - 1 < log2(n+1) <= m => m = ceil(log2(n+1))
- *
- * The generator polynomial has degree k.
  */
 class BchDecoder {
 public:
-    BchDecoder(int n, int k, int generator);
+    BchDecoder(int n, int primitive_polynomial, bool correct_two_errors);
 
-    // bits are left to right with msb first -- we therefore index bit i (0 based) as bits(n - i - 1)
+    // In MUSE, bits are left to right with msb first, so that is what this decoder assumes.
     bool decode(int bits[]);
-
-    void resetStatistics() {
-        m_statistics.clear();
-    }
-
-    void printStatistics(Logger &log, std::string const &message) {
-        std::ostringstream ss;
-        ss << message << ": ";
-        for (const auto &el: m_statistics)
-            ss << el.first << ": " << el.second << ", ";
-        log.info(eAudio, ss.str());
-    }
+    void resetStatistics();
+    void printStatistics(Logger &log, std::string const &message);
 
 private:
+    int alphaPower(int a);
+    int log(int a);
+    int inv(int a);
+    int multiply(int a, int b);
+    void assertSyndromesZero(int bits[]);
+
     int m_n;
-    int m_k;
-    int m_generator;
+    int m_primitive_polynomial;
+    int m_correct_two_errors;
+    int m_highest_bit_in_primitive_polynomial;
     std::map<std::string, int> m_statistics;
     std::vector<int> m_alpha_powers;
-    std::map<int, int> m_logs;
+    std::vector<int> m_logs;
 };
 
 #endif //MUSECPP_BCHDECODER_H

@@ -69,8 +69,8 @@ AudioDecoder::AudioDecoder(Logger &log)
   m_control_signals(),
   m_active_control_signal(0),
   m_active_audio_mode(MODE_UNKNOWN),
-  m_bch_decoder(82, 74, 137),
-  m_range_bch_decoder(7, 3, 11),
+  m_bch_decoder(82, 137, true), // prim poly = x^7+x^3+1; all the specs say MUSE uses a SEC-DED code, but it is in fact DEC-TED
+  m_range_bch_decoder(7, 11, false), // prim poly = x^3+x+1
   aModeChannel1Decoder(1),
   aModeChannel2Decoder(2),
   aModeChannel3Decoder(3),
