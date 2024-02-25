@@ -160,7 +160,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
         m_first_stage_command_buffer->wait();
 
     if (m_decode_audio && m_field_index == 0) {
-        if (efm_audio) {
+        if (efm_audio && input_block != nullptr) {
             m_efm_decoder.decode(m_frame_no, input_block->efm_data, input_block->efm_data_size, sample_count, output_samples);
             audio_mode = MODE_EFM;
         } else // MUSE audio
