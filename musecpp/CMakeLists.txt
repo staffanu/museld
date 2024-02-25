@@ -37,6 +37,7 @@ add_executable(musecpp
         InputPll.cpp InputPll.h
         PhaseCorrect16MHzInputReader.cpp PhaseCorrect16MHzInputReader.h
         RfDemodulator.cpp RfDemodulator.h
+        TextRenderer.cpp TextRenderer.h
         AudioMode.h
         util/PercentileFilter.cpp util/PercentileFilter.h
         util/Logger.cpp util/Logger.h
@@ -50,6 +51,7 @@ add_executable(musecpp
         musevk/HalfFloatUtil.h
         musevk/MemoryAllocator.cpp musevk/MemoryAllocator.h
         musevk/TimestampQueryPool.cpp musevk/TimestampQueryPool.h
+        musevk/VulkanUtil.cpp musevk/VulkanUtil.h
         efm/ReedSolomon.h
         efm/GFValue.h
         efm/EfmPll.cpp efm/EfmPll.h

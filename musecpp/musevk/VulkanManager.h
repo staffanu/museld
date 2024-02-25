@@ -14,6 +14,7 @@
 #include "CommandBuffer.h"
 #include "VulkanImage.h"
 #include "../util/Logger.h"
+#include "HalfFloatUtil.h"
 
 namespace musevk {
 
@@ -34,7 +35,28 @@ namespace musevk {
         vk::Extent2D getSwapChainExtent() { return m_swap_chain_extent; };
         void recreateSwapChain();
 
-        std::unique_ptr<VulkanBuffer> createDeviceBuffer(Size const &size, const std::vector<float> &data);
+        template<typename T>
+        std::unique_ptr<VulkanBuffer> createDeviceBuffer(Size const &size, const std::vector<T> &data) {
+            assert(size.numberOfElements() == data.size());
+            auto host_buffer = VulkanBuffer(*m_memory_allocator, m_logical_device, size, sizeof(T), true, true /* unused */);
+            for (int i = 0; i < data.size(); i++)
+                host_buffer.data<T>()[i] = data[i];
+            auto device_buffer = std::make_unique<VulkanBuffer>(*m_memory_allocator, m_logical_device, size, sizeof(T), false, true);
+            auto sq = createCommandBuffer();
+            sq->begin();
+            sq->enqueueCopyBuffer(host_buffer, *device_buffer);
+            sq->submit({}, {}, {});
+            sq->wait();
+            return device_buffer;
+        }
+
+        std::unique_ptr<VulkanBuffer> createDeviceBufferFloatsAsHalfFloats(Size const &size, const std::vector<float> &data) {
+            assert(size.numberOfElements() == data.size());
+            std::vector<ushort> half_floats(data.size());
+            for (int i = 0; i < data.size(); i++)
+                half_floats[i] = HalfFloatUtil::float_to_half(data[i]);
+            return createDeviceBuffer<ushort>(size, half_floats);
+        }
 
         std::unique_ptr<VulkanBuffer> createBuffer(
                 Size const &size,
@@ -59,7 +81,8 @@ namespace musevk {
                 int max_descriptor_sets = 1);
 
         std::shared_ptr<VulkanImage> createImage(uint32_t width, uint32_t height,
-                                                 std::optional<vk::ImageLayout> initial_layout = std::nullopt);
+                                                 vk::ImageUsageFlags image_usage_flags,
+                                                 std::optional<vk::ImageLayout> initial_layout);
 
         std::shared_ptr<CommandBuffer> createCommandBuffer(
                 TimestampQueryPool *timestamp_query_pool = nullptr);
@@ -71,19 +94,21 @@ namespace musevk {
         bool checkValidationLayerSupport();
         void createSurface();
         void pickPhysicalDevice();
-        bool isDeviceSuitable(vk::PhysicalDevice &device);
-        bool checkDeviceFeaturesSupport(vk::PhysicalDevice &device);
-        bool checkDeviceExtensionSupport(vk::PhysicalDevice &device);
 
         struct QueueFamilyIndices {
             std::optional<uint32_t> graphicsAndComputeFamily;
             std::optional<uint32_t> presentFamily;
 
-            bool isComplete() const {
+            [[nodiscard]] bool isComplete() const {
                 return graphicsAndComputeFamily.has_value() && presentFamily.has_value();
             }
         };
         QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice &device);
+
+        std::optional<QueueFamilyIndices> isDeviceSuitable(vk::PhysicalDevice &device);
+        bool checkDeviceFeaturesSupport(vk::PhysicalDevice &device);
+        bool checkDeviceExtensionSupport(vk::PhysicalDevice &device);
+
         void createLogicalDevice();
 
         struct SwapChainSupportDetails {
@@ -149,6 +174,7 @@ namespace musevk {
         vk::Instance m_instance;
         vk::DebugUtilsMessengerEXT m_debug_messenger;
         vk::PhysicalDevice m_physical_device;
+        QueueFamilyIndices m_queue_families;
         vk::Device m_logical_device;
         vk::SurfaceKHR m_surface;
         vk::Queue m_graphics_queue;

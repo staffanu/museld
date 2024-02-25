@@ -1,0 +1,43 @@
+#version 450
+
+#include "muse.h"
+
+// To be invoked with indices [0, 0] to (n_characters * font_width * scale, font_height * scale).
+
+layout(push_constant) uniform PushConstants {
+    uint16_t top_left_x;
+    uint16_t top_left_y;
+    uint16_t scale;
+    uint16_t font_width;
+    uint16_t font_height;
+    uint16_t font_total_width; // for all defined characters
+    uint16_t n_characters; // max 57 characters for a total of 128 bytes push constants (which is guaranteed)
+    uint16_t text[57]; // coded as indices in the font -- we can have more than 256 characters!
+};
+
+layout(set = 0, binding = 0) buffer readonly font_buffer {
+    uint8_t font[];
+};
+
+layout(set = 0, binding = 1, rgba32f) uniform writeonly image2D frame_out_image;
+
+void main() {
+    uint y = gl_GlobalInvocationID.y;
+    uint x = gl_GlobalInvocationID.x;
+
+    if (x >= n_characters * font_width * scale || y >= font_height * scale)
+        return;
+
+    uint char_index = x / font_width / scale;
+    uint glyph_index = text[char_index];
+
+    uint x_in_glyph = x - char_index * font_width * scale;
+
+    int pixel = font[y / scale * font_total_width + glyph_index * font_width + x_in_glyph / scale];
+    if (pixel != 0) {
+        float r = pixel != 0 ? 1.0f : 0.0f;
+        float g = pixel != 0 ? 1.0f : 0.0f;
+        float b = pixel != 0 ? 1.0f : 0.0f;
+        imageStore(frame_out_image, ivec2(x + top_left_x, y + top_left_y), vec4(r, g, b, 1.f));
+    }
+}

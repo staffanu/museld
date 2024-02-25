@@ -11,6 +11,7 @@
 #include "PhaseCorrect16MHzInputReader.h"
 #include "util/Logger.h"
 #include "musevk/TimestampQueryPool.h"
+#include "TextRenderer.h"
 
 #define INPUT_BUFFER_COUNT 6
 
@@ -81,6 +82,8 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     {
         auto command_buffer = manager.createCommandBuffer();
         Shaders shaders(log, executable_dir, manager);
+        TextRenderer text_renderer(executable_dir, manager, shaders.getResultImage());
+
         auto decoder = MuseDecoder(log,
                                    reader,
                                    shaders,
@@ -100,8 +103,11 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         MuseDecoder::FieldInterpolationMode field_interpolation_mode = MuseDecoder::eNormal;
         bool redo_last_field = false;
         bool enable_non_linear = true;
+        string osd_text;
+        string prev_osd_text;
+        int osd_text_remaining_frames = 0;
 
-        while (paused ||
+        while (paused && !redo_last_field ||
             decoder.next(efm_audio, audio_mode, audio_sample_count, audio_samples, field_interpolation_mode,
                          redo_last_field, enable_non_linear, enable_dropout_correction)) {
 
@@ -121,6 +127,19 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             // all commands to finish.
 
             command_buffer->begin();
+
+            if (osd_text != prev_osd_text) {
+                if (paused && osd_text_remaining_frames)
+                    redo_last_field = true;
+                osd_text_remaining_frames = 100;
+                prev_osd_text = osd_text;
+            }
+            if (osd_text_remaining_frames) {
+                text_renderer.drawText(90, 50, osd_text, 7, *command_buffer);
+                if (!--osd_text_remaining_frames)
+                    redo_last_field = true;
+            } // FIXME: check synchronization here
+
             image->enqueueTransitionLayout(*command_buffer, vk::ImageLayout::eTransferSrcOptimal,
                                            vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer,
                                            vk::AccessFlags(), vk::AccessFlagBits::eTransferRead);
@@ -158,6 +177,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
 
             if (paused_countdown != 0 && --paused_countdown == 0) {
                 paused = true;
+                osd_text = "PAUSE";
             }
             if (glfwWindowShouldClose(window))
                 break;
@@ -174,8 +194,10 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                     full_screen = true;
                 }
             }
-            if (check_glfw_key(window, GLFW_KEY_SPACE))
+            if (check_glfw_key(window, GLFW_KEY_SPACE)) {
                 paused = !paused;
+                osd_text = paused ? "PAUSE" : "PLAY";
+            }
             if (check_glfw_key(window, GLFW_KEY_N)) {
                 paused = false;
                 paused_countdown = 1;
@@ -196,42 +218,36 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             }
             if (check_glfw_key(window, GLFW_KEY_1)) {
                 field_interpolation_mode = MuseDecoder::eNormal;
-                if (paused) {
-                    paused = false;
+                if (paused)
                     redo_last_field = true;
-                    paused_countdown = 1;
-                }
                 log.info(eApplication | eVideo, "Field interpolation determined by motion detection");
+                osd_text = "MOTION NORMAL";
             }
             if (check_glfw_key(window, GLFW_KEY_2)) {
                 field_interpolation_mode = MuseDecoder::eForceIntraField;
-                if (paused) {
-                    paused = false;
+                if (paused)
                     redo_last_field = true;
-                    paused_countdown = 1;
-                }
                 log.info(eApplication | eVideo, "Field interpolation forced to intra field only");
+                osd_text = "MOTION ALL";
             }
             if (check_glfw_key(window, GLFW_KEY_3)) {
                 field_interpolation_mode = MuseDecoder::eForceInterFrame;
-                if (paused) {
-                    paused = false;
+                if (paused)
                     redo_last_field = true;
-                    paused_countdown = 1;
-                }
                 log.info(eApplication | eVideo, "Inter-frame interpolation forced");
+                osd_text = "MOTION NONE";
             }
             if (check_glfw_key(window, GLFW_KEY_A)) {
                 efm_audio = !efm_audio;
+                osd_text = efm_audio ? "EFM AUDIO" : "MUSE AUDIO";
             }
             if (check_glfw_key(window, GLFW_KEY_D)) {
                 enable_dropout_correction = !enable_dropout_correction;
-            }
-            if (check_glfw_key(window, GLFW_KEY_E)) {
-                enable_non_linear = true;
+                osd_text = enable_dropout_correction ? "DROPOUT ENABLED" : "DROPOUT DISABLED";
             }
             if (check_glfw_key(window, GLFW_KEY_L)) {
-                enable_non_linear = false;
+                enable_non_linear = !enable_non_linear;
+                osd_text = enable_non_linear ? "NON-LINEAR DE-EMPH ON" : "NON-LINEAR DE-EMPH OFF";
             }
         }
         auto t1 = chrono::high_resolution_clock::now();

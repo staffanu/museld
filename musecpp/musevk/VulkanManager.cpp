@@ -10,7 +10,6 @@
 #include <fmt/format.h>
 #include "VulkanManager.h"
 #include "VulkanBuffer.h"
-#include "HalfFloatUtil.h"
 
 using namespace std;
 
@@ -28,8 +27,7 @@ namespace musevk {
         m_memory_allocator = make_unique<MemoryAllocator>(m_physical_device, m_logical_device);
         createSwapChain();
 
-        auto indices = findQueueFamilies(m_physical_device);
-        uint32_t queue_index = indices.graphicsAndComputeFamily.value();
+        uint32_t queue_index = m_queue_families.graphicsAndComputeFamily.value();
 
         vk::CommandPoolCreateInfo command_pool_info(vk::CommandPoolCreateFlags(
                 vk::CommandPoolCreateFlagBits::eResetCommandBuffer), queue_index);
@@ -110,20 +108,6 @@ namespace musevk {
             throw runtime_error("presentKHR failed");
     }
 
-    unique_ptr<VulkanBuffer> VulkanManager::createDeviceBuffer(Size const &size, const vector<float> &data) {
-        assert(size.numberOfElements() == data.size());
-        auto host_buffer = VulkanBuffer(*m_memory_allocator, m_logical_device, size, 2, true, true /* unused */);
-        for (int i = 0; i < data.size(); i++)
-            host_buffer.data<ushort>()[i] = HalfFloatUtil::float_to_half(data[i]);
-        auto device_buffer = make_unique<VulkanBuffer>(*m_memory_allocator, m_logical_device, size, 2, false, true);
-        auto sq = createCommandBuffer();
-        sq->begin();
-        sq->enqueueCopyBuffer(host_buffer, *device_buffer);
-        sq->submit({}, {}, {});
-        sq->wait();
-        return device_buffer;
-    }
-
     unique_ptr<VulkanBuffer> VulkanManager::createBuffer(
             Size const &size,
             uint32_t elementMemorySize,
@@ -134,8 +118,10 @@ namespace musevk {
                                               is_host_visible, allow_transfers);
     }
 
-    shared_ptr<VulkanImage> VulkanManager::createImage(uint32_t width, uint32_t height, std::optional<vk::ImageLayout> initial_layout) {
-        auto image = make_unique<VulkanImage>(*m_memory_allocator, m_logical_device, width, height);
+    shared_ptr<VulkanImage> VulkanManager::createImage(uint32_t width, uint32_t height,
+                                                       vk::ImageUsageFlags image_usage_flags,
+                                                       std::optional<vk::ImageLayout> initial_layout) {
+        auto image = make_unique<VulkanImage>(*m_memory_allocator, m_logical_device, width, height, image_usage_flags);
         if (initial_layout.has_value()) {
             auto command_buffer = createCommandBuffer();
             command_buffer->begin();
@@ -268,63 +254,17 @@ namespace musevk {
         for (auto &device: devices) {
             auto properties = device.getProperties();
             m_log.debug(eVideo, fmt::format("Checking device {}", string(properties.deviceName)));
-            if (isDeviceSuitable(device)) {
+            auto queue_families = isDeviceSuitable(device);
+            if (queue_families.has_value()) {
                 found = true;
                 m_physical_device = device;
+                m_queue_families = queue_families.value();
                 m_log.info(eVideo, fmt::format("Picked device {}", string(properties.deviceName)));
                 break;
             }
         }
         if (!found)
             throw runtime_error("failed to find a suitable GPU!");
-    }
-
-    bool VulkanManager::isDeviceSuitable(vk::PhysicalDevice &device) {
-        if (!checkDeviceFeaturesSupport(device))
-            return false;
-        if (!checkDeviceExtensionSupport(device))
-            return false;
-
-        QueueFamilyIndices indices = findQueueFamilies(device);
-        if (!indices.isComplete())
-            return false;
-
-        SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
-        if (swapChainSupport.formats.empty() || swapChainSupport.presentModes.empty())
-            return false;
-
-        return true;
-    }
-
-    bool VulkanManager::checkDeviceFeaturesSupport(vk::PhysicalDevice &device) {
-        auto features2 = device.getFeatures2<
-                vk::PhysicalDeviceFeatures2,
-                vk::PhysicalDeviceVulkan11Features,
-                vk::PhysicalDeviceVulkan12Features>();
-
-        bool storageBuffer16BitAccess = features2.get<vk::PhysicalDeviceVulkan11Features>().storageBuffer16BitAccess;
-        bool uniformAndStorageBuffer8BitAccess = features2.get<vk::PhysicalDeviceVulkan12Features>().uniformAndStorageBuffer8BitAccess;
-        bool uniformAndStorageBuffer16BitAccess = features2.get<vk::PhysicalDeviceVulkan11Features>().uniformAndStorageBuffer16BitAccess;
-        bool shaderFloat16 = features2.get<vk::PhysicalDeviceVulkan12Features>().shaderFloat16;
-
-        m_log.debug(eVideo, fmt::format("device features: storageBuffer16BitAccess: {}, uniformAndStorageBuffer8BitAccess: {}, "
-                                        "uniformAndStorageBuffer16BitAccess: {}, shaderFloat16: {}",
-                                        storageBuffer16BitAccess, uniformAndStorageBuffer16BitAccess,
-                                        uniformAndStorageBuffer16BitAccess, shaderFloat16));
-
-        return storageBuffer16BitAccess && uniformAndStorageBuffer8BitAccess && uniformAndStorageBuffer16BitAccess && shaderFloat16;
-    }
-
-    bool VulkanManager::checkDeviceExtensionSupport(vk::PhysicalDevice &device) {
-        auto availableExtensions = device.enumerateDeviceExtensionProperties();
-
-        set<string> requiredExtensions(c_device_extensions.begin(), c_device_extensions.end());
-
-        for (const auto &extension: availableExtensions) {
-            requiredExtensions.erase(extension.extensionName);
-        }
-
-        return requiredExtensions.empty();
     }
 
     VulkanManager::QueueFamilyIndices VulkanManager::findQueueFamilies(vk::PhysicalDevice &device) {
@@ -350,12 +290,62 @@ namespace musevk {
         return indices;
     }
 
-    void VulkanManager::createLogicalDevice() {
-        QueueFamilyIndices indices = findQueueFamilies(m_physical_device);
+    optional<VulkanManager::QueueFamilyIndices> VulkanManager::isDeviceSuitable(vk::PhysicalDevice &device) {
+        if (!checkDeviceFeaturesSupport(device))
+            return nullopt;
+        if (!checkDeviceExtensionSupport(device))
+            return nullopt;
 
+        QueueFamilyIndices indices = findQueueFamilies(device);
+        if (!indices.isComplete())
+            return nullopt;
+
+        SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
+        if (swapChainSupport.formats.empty() || swapChainSupport.presentModes.empty())
+            return nullopt;
+
+        return make_optional(indices);
+    }
+
+    bool VulkanManager::checkDeviceFeaturesSupport(vk::PhysicalDevice &device) {
+        auto features2 = device.getFeatures2<
+                vk::PhysicalDeviceFeatures2,
+                vk::PhysicalDeviceVulkan11Features,
+                vk::PhysicalDeviceVulkan12Features>();
+
+        bool storageBuffer16BitAccess = features2.get<vk::PhysicalDeviceVulkan11Features>().storageBuffer16BitAccess;
+        bool uniformAndStorageBuffer8BitAccess = features2.get<vk::PhysicalDeviceVulkan12Features>().uniformAndStorageBuffer8BitAccess;
+        bool uniformAndStorageBuffer16BitAccess = features2.get<vk::PhysicalDeviceVulkan11Features>().uniformAndStorageBuffer16BitAccess;
+        bool shaderFloat16 = features2.get<vk::PhysicalDeviceVulkan12Features>().shaderFloat16;
+        bool shaderInt16 = features2.get<vk::PhysicalDeviceFeatures2>().features.shaderInt16;
+        bool storagePushConstant16 = features2.get<vk::PhysicalDeviceVulkan11Features>().storagePushConstant16;
+
+        m_log.debug(eVideo, fmt::format("device features: storageBuffer16BitAccess: {}, uniformAndStorageBuffer8BitAccess: {}, "
+                                        "uniformAndStorageBuffer16BitAccess: {}, shaderFloat16: {}, shaderInt16: {}"
+                                        "storagePushConstant16: {}",
+                                        storageBuffer16BitAccess, uniformAndStorageBuffer16BitAccess,
+                                        uniformAndStorageBuffer16BitAccess, shaderFloat16, shaderInt16,
+                                        storagePushConstant16));
+
+        return storageBuffer16BitAccess && uniformAndStorageBuffer8BitAccess && uniformAndStorageBuffer16BitAccess && shaderFloat16 && shaderInt16;
+    }
+
+    bool VulkanManager::checkDeviceExtensionSupport(vk::PhysicalDevice &device) {
+        auto availableExtensions = device.enumerateDeviceExtensionProperties();
+
+        set<string> requiredExtensions(c_device_extensions.begin(), c_device_extensions.end());
+
+        for (const auto &extension: availableExtensions) {
+            requiredExtensions.erase(extension.extensionName);
+        }
+
+        return requiredExtensions.empty();
+    }
+
+    void VulkanManager::createLogicalDevice() {
         vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
-        set<uint32_t> uniqueQueueFamilies = {indices.graphicsAndComputeFamily.value(),
-                                                  indices.presentFamily.value()};
+        set<uint32_t> uniqueQueueFamilies = {m_queue_families.graphicsAndComputeFamily.value(),
+                                             m_queue_families.presentFamily.value()};
 
         float queuePriority = 1.0f;
         for (uint32_t queueFamily: uniqueQueueFamilies) {
@@ -367,22 +357,25 @@ namespace musevk {
         }
 
         auto device_vulkan_12_features = vk::PhysicalDeviceVulkan12Features();
-        device_vulkan_12_features.uniformAndStorageBuffer8BitAccess = VK_TRUE;
-        device_vulkan_12_features.shaderFloat16 = VK_TRUE;
+        device_vulkan_12_features.uniformAndStorageBuffer8BitAccess = true;
+        device_vulkan_12_features.shaderFloat16 = true;
+        device_vulkan_12_features.pNext = nullptr;
 
         auto device_vulkan_11_features = vk::PhysicalDeviceVulkan11Features();
-        device_vulkan_11_features.storageBuffer16BitAccess = VK_TRUE;
-        device_vulkan_11_features.uniformAndStorageBuffer16BitAccess = VK_TRUE;
+        device_vulkan_11_features.storageBuffer16BitAccess = true;
+        device_vulkan_11_features.uniformAndStorageBuffer16BitAccess = true;
+        device_vulkan_11_features.storagePushConstant16 = true;
         device_vulkan_11_features.pNext = &device_vulkan_12_features;
 
-        auto device_features = vk::PhysicalDeviceFeatures2();
-        device_features.pNext = &device_vulkan_11_features;
+        auto device_features2 = vk::PhysicalDeviceFeatures2();
+        device_features2.pNext = &device_vulkan_11_features;
+        device_features2.features.shaderInt16 = true;
 
         vk::DeviceCreateInfo createInfo{};
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
 
-        createInfo.pNext = &device_features;
+        createInfo.pNext = &device_features2;
         createInfo.enabledExtensionCount = static_cast<uint32_t>(c_device_extensions.size());
         createInfo.ppEnabledExtensionNames = c_device_extensions.data();
 
@@ -393,9 +386,9 @@ namespace musevk {
             createInfo.enabledLayerCount = 0;
         }
         m_logical_device = m_physical_device.createDevice(createInfo);
-        m_graphics_queue = m_logical_device.getQueue(indices.graphicsAndComputeFamily.value(), 0);
-        m_present_queue = m_logical_device.getQueue(indices.presentFamily.value(), 0);
-        m_compute_queue = m_logical_device.getQueue(indices.graphicsAndComputeFamily.value(), 0);
+        m_graphics_queue = m_logical_device.getQueue(m_queue_families.graphicsAndComputeFamily.value(), 0);
+        m_present_queue = m_logical_device.getQueue(m_queue_families.presentFamily.value(), 0);
+        m_compute_queue = m_logical_device.getQueue(m_queue_families.graphicsAndComputeFamily.value(), 0);
     }
 
     VulkanManager::SwapChainSupportDetails VulkanManager::querySwapChainSupport(vk::PhysicalDevice &device) {
@@ -415,7 +408,7 @@ namespace musevk {
             }
         }
 
-        return availableFormats[1]; // FIXME: UNORM -- otherwise we can't use the VK_IMAGE_USAGE_STORAGE_BIT flag for the swapchain
+        throw runtime_error("Cannot find suitable swapchain surface format");
     }
 
     vk::PresentModeKHR
@@ -469,12 +462,11 @@ namespace musevk {
         createInfo.imageColorSpace = surfaceFormat.colorSpace;
         createInfo.imageExtent = extent;
         createInfo.imageArrayLayers = 1;
-        createInfo.imageUsage = vk::ImageUsageFlagBits::eTransferDst; // VK_IMAGE_USAGE_STORAGE_BIT; // ; // | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        createInfo.imageUsage = vk::ImageUsageFlagBits::eTransferDst;
 
-        QueueFamilyIndices indices = findQueueFamilies(m_physical_device);
-        uint32_t queueFamilyIndices[] = {indices.graphicsAndComputeFamily.value(), indices.presentFamily.value()};
+        uint32_t queueFamilyIndices[] = {m_queue_families.graphicsAndComputeFamily.value(), m_queue_families.presentFamily.value()};
 
-        if (indices.graphicsAndComputeFamily != indices.presentFamily) {
+        if (m_queue_families.graphicsAndComputeFamily != m_queue_families.presentFamily) {
             createInfo.imageSharingMode = vk::SharingMode::eConcurrent;
             createInfo.queueFamilyIndexCount = 2;
             createInfo.pQueueFamilyIndices = queueFamilyIndices;

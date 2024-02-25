@@ -22,8 +22,6 @@ class FieldBufferView;
 
 class Shaders {
 public:
-    static std::vector<uint32_t> loadSpirv(std::string const &executable_dir, std::string const &filename);
-
     Shaders(Logger &log, std::string const &executable_dir, musevk::VulkanManager &manager);
 
     Shaders(Shaders &other) = delete;

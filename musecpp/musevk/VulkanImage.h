@@ -16,7 +16,8 @@ namespace musevk {
         VulkanImage(MemoryAllocator &memory_allocator,
                     vk::Device &device,
                     uint32_t width,
-                    uint32_t height);
+                    uint32_t height,
+                    vk::ImageUsageFlags image_usage_flags);
 
         VulkanImage(const VulkanImage &other) = delete;
         VulkanImage &operator=(const VulkanImage &other) = delete;
@@ -31,6 +32,18 @@ namespace musevk {
 
         [[nodiscard]] MemoryObjectType getType() const final {
             return eImage;
+        }
+
+        [[nodiscard]] uint32_t getWidth() const {
+            return m_width;
+        }
+
+        [[nodiscard]] uint32_t getHeight() const {
+            return m_height;
+        }
+
+        [[nodiscard]] vk::ImageView getView() const {
+            return m_view;
         }
 
         void enqueueTransitionLayout(CommandBuffer &command_buffer, vk::ImageLayout new_layout,
