@@ -3,6 +3,7 @@
 //
 #include <catch2/catch.hpp>
 #include <algorithm>
+#include <iostream>
 #include "BchDecoder.h"
 #include "util/Logger.h"
 
@@ -16,7 +17,7 @@ void printData(std::vector<int> const &data) {
 TEST_CASE("BCH corrects errors") {
     for (int no_errors = 1; no_errors <= 2; no_errors++) {
 
-        BchDecoder decoder(82, 137, 0b100001101110111, true);
+        BchDecoder decoder(82, 137, true);
 
         std::vector<int> data(82);
         for (int i = 0; i < no_errors; i++)
