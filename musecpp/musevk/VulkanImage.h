@@ -17,7 +17,8 @@ namespace musevk {
                     vk::Device &device,
                     uint32_t width,
                     uint32_t height,
-                    vk::ImageUsageFlags image_usage_flags);
+                    vk::ImageUsageFlags image_usage_flags,
+                    std::optional<vk::ImageLayout> initial_layout);
 
         VulkanImage(const VulkanImage &other) = delete;
         VulkanImage &operator=(const VulkanImage &other) = delete;

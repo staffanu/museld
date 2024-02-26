@@ -114,50 +114,8 @@ namespace musevk {
             bool is_host_visible,
             bool allow_transfers) {
         return make_unique<VulkanBuffer>(*m_memory_allocator, m_logical_device,
-                                              size, elementMemorySize,
-                                              is_host_visible, allow_transfers);
-    }
-
-    shared_ptr<VulkanImage> VulkanManager::createImage(uint32_t width, uint32_t height,
-                                                       vk::ImageUsageFlags image_usage_flags,
-                                                       std::optional<vk::ImageLayout> initial_layout) {
-        auto image = make_unique<VulkanImage>(*m_memory_allocator, m_logical_device, width, height, image_usage_flags);
-        if (initial_layout.has_value()) {
-            auto command_buffer = createCommandBuffer();
-            command_buffer->begin();
-            image->enqueueTransitionLayout(*command_buffer, initial_layout.value(),
-                                           vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eBottomOfPipe,
-                                           vk::AccessFlags(), vk::AccessFlags()); // only command in buffer so synchronization doesn't matter
-            command_buffer->submit({}, {}, {});
-            command_buffer->wait();
-        }
-        return image;
-    }
-
-    shared_ptr<ComputeShader> VulkanManager::createComputeShader(
-            string name,
-            const vector<shared_ptr<VulkanMemoryObject>> &buffers,
-            int32_t push_constants_size,
-            const vector<uint32_t> &spirv,
-            const Size &workgroup,
-            int max_descriptor_sets) {
-        return make_shared<ComputeShader>(
-                name,
-                m_logical_device,
-                buffers, push_constants_size, spirv, workgroup, max_descriptor_sets);
-    }
-
-    shared_ptr<ComputeShader> VulkanManager::createComputeShader(
-            string name,
-            const vector<MemoryObjectType> &buffer_types,
-            int32_t push_constants_size,
-            const vector<uint32_t> &spirv,
-            const Size &workgroup,
-            int max_descriptor_sets) {
-        return make_unique<ComputeShader>(
-                name,
-                m_logical_device,
-                buffer_types, push_constants_size, spirv, workgroup, max_descriptor_sets);
+                                         size, elementMemorySize,
+                                         is_host_visible, allow_transfers);
     }
 
     shared_ptr<CommandBuffer> VulkanManager::createCommandBuffer(
@@ -412,7 +370,7 @@ namespace musevk {
     }
 
     vk::PresentModeKHR
-    VulkanManager::chooseSwapPresentMode(const vector<vk::PresentModeKHR> &availablePresentModes) {
+    VulkanManager::chooseSwapPresentMode(const vector<vk::PresentModeKHR> &availablePresentModes) const {
         for (const auto &availablePresentMode: availablePresentModes) {
             if (availablePresentMode == vk::PresentModeKHR::eMailbox) {
                 //return availablePresentMode;

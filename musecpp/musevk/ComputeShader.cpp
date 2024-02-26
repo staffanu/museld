@@ -11,15 +11,15 @@
 using namespace std;
 
 namespace musevk {
-    ComputeShader::ComputeShader(std::string &name,
-                                 vk::Device &device,
+    ComputeShader::ComputeShader(vk::Device &device,
+                                 std::string name,
                                  const std::vector<MemoryObjectType> &buffer_types,
                                  int32_t push_constants_size,
                                  const std::vector<uint32_t> &spirv,
                                  const Size &workgroup_size,
                                  int max_descriptor_sets)
-: m_name(name),
-  m_device(device),
+: m_device(device),
+  m_name(std::move(name)),
   m_descriptor_count(buffer_types.size()),
   m_push_constants_size(push_constants_size),
   m_spirv(spirv),
@@ -31,15 +31,15 @@ namespace musevk {
         updateDescriptorSet(0);
     }
 
-    ComputeShader::ComputeShader(std::string &name,
-                                 vk::Device &device,
+    ComputeShader::ComputeShader(vk::Device &device,
+                                 std::string name,
                                  const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
                                  int32_t push_constants_size,
                                  const std::vector<uint32_t> &spirv,
                                  const Size &workgroup_size,
                                  int max_descriptor_sets)
-: m_name(name),
-  m_device(device),
+: m_device(device),
+  m_name(std::move(name)),
   m_descriptor_count(buffers.size()),
   m_push_constants_size(push_constants_size),
   m_spirv(spirv),

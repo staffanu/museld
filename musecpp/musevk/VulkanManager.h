@@ -29,6 +29,7 @@ namespace musevk {
 
         vk::PhysicalDevice &getPhysicalDevice() { return m_physical_device; };
         vk::Device &getDevice() { return m_logical_device; };
+        MemoryAllocator &getMemoryAllocator() { return *m_memory_allocator; };
 
         vk::Image &acquireNextImage(vk::Semaphore image_available_semaphore);
         void present(vk::Image image);
@@ -64,26 +65,6 @@ namespace musevk {
                 bool is_host_visible = false,
                 bool allow_transfers = false);
 
-        std::shared_ptr<ComputeShader> createComputeShader(
-                std::string name,
-                const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
-                int32_t push_constants_size,
-                const std::vector<uint32_t> &spirv,
-                const Size &workgroup,
-                int max_descriptor_sets = 1);
-
-        std::shared_ptr<ComputeShader> createComputeShader(
-                std::string name,
-                const std::vector<MemoryObjectType> &buffer_types,
-                int32_t push_constants_size,
-                const std::vector<uint32_t> &spirv,
-                const Size &workgroup,
-                int max_descriptor_sets = 1);
-
-        std::shared_ptr<VulkanImage> createImage(uint32_t width, uint32_t height,
-                                                 vk::ImageUsageFlags image_usage_flags,
-                                                 std::optional<vk::ImageLayout> initial_layout);
-
         std::shared_ptr<CommandBuffer> createCommandBuffer(
                 TimestampQueryPool *timestamp_query_pool = nullptr);
 
@@ -117,8 +98,8 @@ namespace musevk {
             std::vector<vk::PresentModeKHR> presentModes;
         };
         SwapChainSupportDetails querySwapChainSupport(vk::PhysicalDevice &device);
-        vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR> &availableFormats);
-        vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes);
+        static vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR> &availableFormats);
+        vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes) const;
         vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities);
         void createSwapChain();
 

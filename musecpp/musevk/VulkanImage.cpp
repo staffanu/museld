@@ -7,10 +7,11 @@
 
 namespace musevk {
     VulkanImage::VulkanImage(MemoryAllocator &memory_allocator,
-                               vk::Device &device,
-                               uint32_t width,
-                               uint32_t height,
-                               vk::ImageUsageFlags image_usage_flags)
+                             vk::Device &device,
+                             uint32_t width,
+                             uint32_t height,
+                             vk::ImageUsageFlags image_usage_flags,
+                             std::optional<vk::ImageLayout> initial_layout)
             : VulkanMemoryObject(memory_allocator),
               m_device(device),
               m_width(width),
@@ -19,7 +20,7 @@ namespace musevk {
               m_allocated_memory(),
               m_view(),
               m_descriptor_image_info(),
-              m_layout(vk::ImageLayout::eUndefined) {
+              m_layout(initial_layout.has_value() ? initial_layout.value() : vk::ImageLayout::eUndefined) {
         auto format = vk::Format::eB8G8R8A8Unorm;
 
         vk::ImageCreateInfo image_info(vk::ImageCreateFlags(),

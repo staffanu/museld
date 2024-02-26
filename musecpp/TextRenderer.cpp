@@ -23,9 +23,9 @@ TextRenderer::TextRenderer(std::string const &executable_dir, VulkanManager &vul
 
     m_font_buffer = vulkan_manager.createDeviceBuffer(Size(bitmap_width, c_glyph_height), data);
 
-    m_render_text_shader = m_vulkan_manager.createComputeShader(
+    m_render_text_shader = std::shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "render_text", {m_font_buffer, image}, sizeof(uint16_t) * 64,
-            musevk::VulkanUtil::loadSpirv(executable_dir, "render_text.comp"), musevk::Size(0));
+            musevk::VulkanUtil::loadSpirv(executable_dir, "render_text.comp"), musevk::Size(0)));
 }
 
 void TextRenderer::drawText(int x, int y, std::string s, int scale, CommandBuffer &command_buffer) {

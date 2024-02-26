@@ -12,21 +12,21 @@
 namespace musevk {
     class ComputeShader {
     public:
-        ComputeShader(std::string &name,
-                      vk::Device &device,
+        ComputeShader(vk::Device &device,
+                      std::string name,
                       const std::vector<MemoryObjectType> &buffer_types,
                       int32_t push_constants_size,
                       const std::vector<uint32_t> &spirv,
                       const Size &workgroup_size,
-                      int max_descriptor_sets);
+                      int max_descriptor_sets = 1);
 
-        ComputeShader(std::string &name,
-                      vk::Device &device,
+        ComputeShader(vk::Device &device,
+                      std::string name,
                       const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
                       int32_t push_constants_size,
                       const std::vector<uint32_t> &spirv,
                       const Size &workgroup_size,
-                      int max_descriptor_sets);
+                      int max_descriptor_sets = 1);
 
         ~ComputeShader();
 

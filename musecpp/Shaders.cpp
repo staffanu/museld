@@ -3,6 +3,7 @@
 //
 
 #include <stdexcept>
+#include <memory>
 #include <fmt/format.h>
 #include "MuseTypes.h"
 #include "Shaders.h"
@@ -32,9 +33,11 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_movement_edge_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_movement_coring_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_movement_enlarged_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
-  m_image_out(m_vulkan_manager.createImage(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2,
-                                           vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc,
-                                           vk::ImageLayout::eGeneral)),
+  m_image_out(make_unique<VulkanImage>(m_vulkan_manager.getMemoryAllocator(),
+                                       m_vulkan_manager.getDevice(),
+                                       MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2,
+                                       vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc,
+                                       vk::ImageLayout::eGeneral)),
   m_diamond_filter_buffer(m_vulkan_manager.createDeviceBufferFloatsAsHalfFloats(
           Size(9, 7),
           {
@@ -102,70 +105,70 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
     m_detect_motion_spirv = VulkanUtil::loadSpirv(executable_dir, "detect_motion.comp");
     m_combine_still_and_moving_spirv = VulkanUtil::loadSpirv(executable_dir, "combine_still_and_moving.comp");
 
-    m_apply_eq_and_non_linear_algo = m_vulkan_manager.createComputeShader(
+    m_apply_eq_and_non_linear_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "apply_eq_and_non_linear",
             {eBuffer, eBuffer}, sizeof(float) * 3,
-            m_apply_eq_and_non_linear_spirv, Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT));
-    m_apply_dropout_compensation_algo = m_vulkan_manager.createComputeShader(
+            m_apply_eq_and_non_linear_spirv, Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)));
+    m_apply_dropout_compensation_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "apply_dropout_compensation",
             {eBuffer, eBuffer}, 0,
-            m_apply_dropout_compensation_spirv, Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT));
-    m_apply_deemphasis_and_gamma_algo = m_vulkan_manager.createComputeShader(
+            m_apply_dropout_compensation_spirv, Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)));
+    m_apply_deemphasis_and_gamma_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "apply_deemphasis_and_gamma",
             {eBuffer, eBuffer}, 0,
-            m_apply_deemphasis_and_gamma_spirv, Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT));
-    m_copy_y_for_interpolation_algo = m_vulkan_manager.createComputeShader(
+            m_apply_deemphasis_and_gamma_spirv, Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)));
+    m_copy_y_for_interpolation_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "copy_y_for_interpolation",
             {eBuffer, eBuffer}, sizeof(uint32_t) * 3,
-            m_copy_y_for_interpolation_spirv, Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT), 8);
-    m_diamond_algo = m_vulkan_manager.createComputeShader(
+            m_copy_y_for_interpolation_spirv, Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT), 8));
+    m_diamond_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "diamond",
             {eBuffer, eBuffer}, sizeof(uint32_t) * 5,
-            m_diamond_spirv, Size(0), 2);
-    m_filter_image_algo = m_vulkan_manager.createComputeShader(
+            m_diamond_spirv, Size(0), 2));
+    m_filter_image_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "filter_image",
             {eBuffer, eBuffer, eBuffer}, sizeof(float) * 5,
-            m_filter_image_spirv, Size(0), 4);
-    m_fill_empty_lines_algo = m_vulkan_manager.createComputeShader(
+            m_filter_image_spirv, Size(0), 4));
+    m_fill_empty_lines_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "fill_empty_lines",
             {m_field_Y_buffer}, sizeof(uint32_t) * 3,
-            m_fill_empty_lines_spirv, Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2));
-    m_convert_sample_rate_algo = m_vulkan_manager.createComputeShader(
+            m_fill_empty_lines_spirv, Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2)));
+    m_convert_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "convert_sample_rate",
             {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 13,
             m_convert_horiz_sample_rate_spirv,
-            Size(m_interpolated32_buffer->size().x_size / 4, m_interpolated32_buffer->size().y_size), 3);
-    m_convert_sample_rate_4_to_3_algo = m_vulkan_manager.createComputeShader(
+            Size(m_interpolated32_buffer->size().x_size / 4, m_interpolated32_buffer->size().y_size), 3));
+    m_convert_sample_rate_4_to_3_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "convert_sample_rate_4_to_3",
             {m_filter_4_to_3_buffer, m_interpolated32_buffer,
              m_inter_frame_Y_buffer}, sizeof(uint32_t) * 13,
             m_convert_horiz_sample_rate_spirv,
-            Size(m_inter_frame_Y_buffer->size().x_size, m_inter_frame_Y_buffer->size().y_size / 2));
-    m_convert_sample_rate_2_to_3_algo = m_vulkan_manager.createComputeShader(
+            Size(m_inter_frame_Y_buffer->size().x_size, m_inter_frame_Y_buffer->size().y_size / 2)));
+    m_convert_sample_rate_2_to_3_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "convert_sample_rate_2_to_3",
             {m_filter_2_to_3_buffer, m_interpolated32_buffer, m_field_Y_buffer},
             sizeof(uint32_t) * 13,
             m_convert_horiz_sample_rate_spirv,
-            Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2));
-    m_decode_c_algo = m_vulkan_manager.createComputeShader(
+            Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2)));
+    m_decode_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "decode_c",
             {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
-            m_decode_c_spirv, Size(m_intermediate_r_buffer->size().x_size, m_intermediate_r_buffer->size().y_size), 5);
-    m_detect_motion_algo = m_vulkan_manager.createComputeShader(
+            m_decode_c_spirv, Size(m_intermediate_r_buffer->size().x_size, m_intermediate_r_buffer->size().y_size), 5));
+    m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "detect_motion",
             {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 2,
-            m_detect_motion_spirv, Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT));
-    m_combine_still_and_moving_algo = m_vulkan_manager.createComputeShader(
+            m_detect_motion_spirv, Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT)));
+    m_combine_still_and_moving_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "combine_still_and_moving",
             {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eImage},
             sizeof(uint32_t) * 2,
             m_combine_still_and_moving_spirv,
-            Size(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2));
-    m_convert_audio_sample_rate_algo = m_vulkan_manager.createComputeShader(
+            Size(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)));
+    m_convert_audio_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "convert_audio_sample_rate",
             {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 13,
             m_convert_horiz_sample_rate_spirv,
-            Size(MUSE_TOTAL_WIDTH, 44), 2);
+            Size(MUSE_TOTAL_WIDTH, 44), 2));
 }
 
 std::shared_ptr<musevk::VulkanBuffer> Shaders::createMuseBuffer(unsigned int height, unsigned int width, bool host_visible) {
