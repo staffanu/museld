@@ -38,7 +38,7 @@ void glfw_error_callback(int error, const char* description) {
 
 void process_file(Logger &log, const string& executable_dir, InputReader &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
-                  bool start_paused, bool decode_video, bool enable_dropout_correction, bool decode_audio, bool efm_audio, bool benchmark_shaders) {
+                  bool start_paused, bool decode_video, Shaders::DropoutMode dropout_mode, bool decode_audio, bool efm_audio, bool benchmark_shaders) {
     glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -76,7 +76,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     AudioPlayback audio_playback(log);
 
     AudioMode audio_mode;
-    size_t audio_sample_count;
+    int audio_sample_count;
     AudioDecoder::AudioFrame audio_samples[AudioDecoder::c_max_output_samples];
 
     {
@@ -100,16 +100,21 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         int field_count = 0;
         bool paused = false;
         int paused_countdown = start_paused ? 5 : 0;
-        MuseDecoder::FieldInterpolationMode field_interpolation_mode = MuseDecoder::eNormal;
+        MuseDecoder::FieldInterpolationMode field_interpolation_mode = MuseDecoder::FieldInterpolationMode::eNormal;
         bool redo_last_field = false;
         bool enable_non_linear = true;
+        bool enable_cursor = false;
         string osd_text;
         string prev_osd_text;
         int osd_text_remaining_frames = 0;
+        double input_samples_per_muse_sample;
+        long last_buffer_file_offset;
+        int field_parity;
 
         while (paused && !redo_last_field ||
-            decoder.next(efm_audio, audio_mode, audio_sample_count, audio_samples, field_interpolation_mode,
-                         redo_last_field, enable_non_linear, enable_dropout_correction)) {
+            decoder.next(efm_audio, &audio_mode, &audio_sample_count, audio_samples,
+                         &field_parity, &last_buffer_file_offset, &input_samples_per_muse_sample,
+                         field_interpolation_mode, redo_last_field, enable_non_linear, dropout_mode)) {
 
             if (!paused)
                 field_count++;
@@ -138,7 +143,43 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                 text_renderer.drawText(90, 50, osd_text, 7, *command_buffer);
                 if (!--osd_text_remaining_frames)
                     redo_last_field = true;
-            } // FIXME: check synchronization here
+            }
+            string cursor_string;
+            if (enable_cursor) {
+                int xsize, ysize;
+                glfwGetWindowSize(window, &xsize, &ysize);
+                double xpos, ypos;
+                glfwGetCursorPos(window, &xpos, &ypos);
+                if (xpos >= 0 && ypos >= 0 && xpos < xsize && ypos < ysize) {
+                    int field_x = (int)(xpos / xsize * MUSE_Y_BUF_WIDTH);
+                    int field_y = (int)(ypos / ysize * MUSE_BUF_HEIGHT);
+                    cursor_string = fmt::format("({}, {}) ({}, {})",
+                                                (int)(xpos / xsize * MUSE_Y_BUF_WIDTH * 3),
+                                                (int)(ypos / ysize * MUSE_BUF_HEIGHT * 2),
+                                                field_x, field_y);
+                    text_renderer.drawText(10, 10, cursor_string, 2, *command_buffer);
+                    if (field_interpolation_mode == MuseDecoder::FieldInterpolationMode::eForceIntraField) {
+                        long field_offset = last_buffer_file_offset // start of sound data
+                                + (long)((field_parity ? 565 : 2) * MUSE_TOTAL_WIDTH * input_samples_per_muse_sample);
+                        string offset_string1 =
+                                fmt::format("{} {} {} ",
+                                            last_buffer_file_offset,
+                                            field_parity ? "ODD" : "EVEN",
+                                            field_offset);
+                        string offset_string2 =
+                                fmt::format("Y {} Cr {} Cb {}",
+                                            field_offset + (int)(input_samples_per_muse_sample * ((field_y + 44) * MUSE_TOTAL_WIDTH + (field_x + 106))),
+                                            field_offset + (int)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2) * MUSE_TOTAL_WIDTH + field_x / 4 + 11),
+                                            field_offset + (int)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2 + 1) * MUSE_TOTAL_WIDTH + field_x / 4 + 11));
+                        text_renderer.drawText(300, 10, offset_string1, 2, *command_buffer);
+                        text_renderer.drawText(300 + offset_string1.length() * TextRenderer::c_glyph_width * 2, 10, offset_string2, 2, *command_buffer);
+                        cursor_string += " " + offset_string1 + offset_string2;
+                    }
+                }
+                if (paused)
+                    redo_last_field = true;
+            }
+            // FIXME: check synchronization here
 
             image->enqueueTransitionLayout(*command_buffer, vk::ImageLayout::eTransferSrcOptimal,
                                            vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer,
@@ -200,6 +241,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             }
             if (check_glfw_key(window, GLFW_KEY_N)) {
                 paused = false;
+                redo_last_field = false;
                 paused_countdown = 1;
             }
             if (check_glfw_key(window, GLFW_KEY_LEFT)) {
@@ -217,21 +259,21 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                 }
             }
             if (check_glfw_key(window, GLFW_KEY_1)) {
-                field_interpolation_mode = MuseDecoder::eNormal;
+                field_interpolation_mode = MuseDecoder::FieldInterpolationMode::eNormal;
                 if (paused)
                     redo_last_field = true;
                 log.info(eApplication | eVideo, "Field interpolation determined by motion detection");
                 osd_text = "MOTION NORMAL";
             }
             if (check_glfw_key(window, GLFW_KEY_2)) {
-                field_interpolation_mode = MuseDecoder::eForceIntraField;
+                field_interpolation_mode = MuseDecoder::FieldInterpolationMode::eForceIntraField;
                 if (paused)
                     redo_last_field = true;
                 log.info(eApplication | eVideo, "Field interpolation forced to intra field only");
                 osd_text = "MOTION ALL";
             }
             if (check_glfw_key(window, GLFW_KEY_3)) {
-                field_interpolation_mode = MuseDecoder::eForceInterFrame;
+                field_interpolation_mode = MuseDecoder::FieldInterpolationMode::eForceInterFrame;
                 if (paused)
                     redo_last_field = true;
                 log.info(eApplication | eVideo, "Inter-frame interpolation forced");
@@ -242,12 +284,31 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                 osd_text = efm_audio ? "EFM AUDIO" : "MUSE AUDIO";
             }
             if (check_glfw_key(window, GLFW_KEY_D)) {
-                enable_dropout_correction = !enable_dropout_correction;
-                osd_text = enable_dropout_correction ? "DROPOUT ENABLED" : "DROPOUT DISABLED";
+                switch (dropout_mode) {
+                    case Shaders::DropoutMode::eNormal:
+                        dropout_mode = Shaders::DropoutMode::eDisabled;
+                        osd_text = "DROPOUT DISABLED";
+                        break;
+                    case Shaders::DropoutMode::eDisabled:
+                        dropout_mode = Shaders::DropoutMode::eHighlight;
+                        osd_text = "DROPOUT HIGHLIGHT";
+                        break;
+                    case Shaders::DropoutMode::eHighlight:
+                        dropout_mode = Shaders::DropoutMode::eNormal;
+                        osd_text = "DROPOUT ENABLED";
+                        break;
+                }
             }
             if (check_glfw_key(window, GLFW_KEY_L)) {
                 enable_non_linear = !enable_non_linear;
                 osd_text = enable_non_linear ? "NON-LINEAR DE-EMPH ON" : "NON-LINEAR DE-EMPH OFF";
+            }
+            if (check_glfw_key(window, GLFW_KEY_C)) {
+                enable_cursor = !enable_cursor;
+                glfwSetInputMode(window, GLFW_CURSOR, enable_cursor ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
+            }
+            if (check_glfw_key(window, GLFW_KEY_PRINT_SCREEN)) {
+                glfwSetClipboardString(window, cursor_string.c_str());
             }
         }
         auto t1 = chrono::high_resolution_clock::now();
@@ -305,7 +366,7 @@ int main(int argc, char *argv[]) {
     bool start_paused = false;
     optional<string> output_filename; // always written as little endian unsigned short values
     bool decode_video = true;
-    bool dropout_detect = true;
+    Shaders::DropoutMode dropout_mode = Shaders::DropoutMode::eNormal;
     bool decode_audio = true;
     bool efm_audio = false;
     bool benchmark_shaders = false;
@@ -342,7 +403,9 @@ int main(int argc, char *argv[]) {
             else if (*it == "--no-video")
                 decode_video = false;
             else if (*it == "--no-dropout")
-                dropout_detect = false;
+                dropout_mode = Shaders::DropoutMode::eDisabled;
+            else if (*it == "--highlight-dropout")
+                dropout_mode = Shaders::DropoutMode::eHighlight;
             else if (*it == "--no-audio")
                 decode_audio = false;
             else if (*it == "--efm")
@@ -388,7 +451,7 @@ int main(int argc, char *argv[]) {
                         throw runtime_error("No input format specified");
                 }
                 process_file(log, executable_dir, *reader, decode_all_fields,
-                             full_screen, no_sync, start_paused, decode_video, dropout_detect, decode_audio, efm_audio,
+                             full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio, efm_audio,
                              benchmark_shaders);
                 delete reader;
             }

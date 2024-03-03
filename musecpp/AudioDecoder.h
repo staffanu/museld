@@ -34,8 +34,8 @@ public:
     // output samples are written to the first two or all four channels depending on the detected mode
     void decodeFrame(int frame_no,
                      std::shared_ptr<musevk::VulkanBuffer> const &audio_converted_freq,
-                     AudioMode &audio_mode,
-                     size_t &sample_count,
+                     AudioMode *audio_mode,
+                     int *sample_count,
                      AudioFrame output_samples[c_max_output_samples]);
 
 private:

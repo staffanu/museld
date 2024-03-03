@@ -6,6 +6,10 @@
 
 #include "muse.h"
 
+layout(push_constant) uniform PushConstants {
+    uint dropout_mode; // 0: normal, 1: disabled, 2: highlight
+};
+
 layout(set = 0, binding = 0) buffer frame_buffer {
     float16_t frame[][MUSE_TOTAL_WIDTH];
 };
@@ -23,37 +27,46 @@ void main() {
     bool is_color_area = (row >= 42 && row < 558 || row >= 604 && row < 1120) && col >= 11 && col < 105;
 
     // The other shaders simply return early if row or col are outside the MUSE rectangle, but here
-    // we leave also if outside the picture / color areas.  This means the col +/- 3 indexing below is safe.
-    if (!is_picture_area && !is_color_area)
+    // we leave also if outside the picture / color areas.  This means the col +/- indexing below is safe.
+    if (!is_picture_area && !is_color_area || dropout_mode == 1)
         return;
 
+    // We extend the detected dropouts a few pixels
     bool is_dropout = false;
-    for (int i = -3; i <= 3; i++)
+    for (int i = -4; i <= 4; i++)
         if (dropout_data[row][col + i] != 0)
             is_dropout = true;
 
     if (is_picture_area && is_dropout) {
-        frame[row][col] = 0.5hf * (frame[row - 1][col] + frame[row + 1][col]);
-//        for (int i = -3; i <= 3; i++) {
-//            for (int j = -3; j <= 3; j++) {
-//                if ((row + i) % 2 == 0)
-//                    frame[row + i - 4][(col - 106) / 4 + 11 + j] = 255.hf;
-//                else
-//                    frame[row + i - 4][(col - 106) / 4 + 11 + j] = 0.hf;
-//            }
-//        }
+        if (dropout_mode == 2) {
+            // set dropout pixels to red
+            frame[row][col] = 120.0hf;
+            frame[(row - 4) / 2 * 2][(col - 106) / 4 + 11] = 255.hf;
+            frame[(row - 4) / 2 * 2 + 1][(col - 106) / 4 + 11] = 75.hf;
+        } else {
+            // Take the average of two preceeding and two following lines. This looks better for heavily
+            // horizonally striped areas -- they will not be correct but at least the contrast is lower.
+            float16_t sum = 0.hf;
+            for (int i = 1; i <= 2 ; i++)
+                sum += frame[row - i][col] + frame[row + i][col];
+            frame[row][col] = sum / 4.hf;
+        }
     }
 
     if (is_color_area && is_dropout) {
-        frame[row][col] = 0.5hf * (frame[row - 2][col] + frame[row + 2][col]);
-
-//        for (int i = -3; i <= 3; i++) {
-//            for (int j = -3; j <= 3; j++) {
-//                if ((row + i) % 2 == 0)
-//                    frame[row + i][col + j] = 255.hf;
-//                else
-//                    frame[row + i][col + j] = 0.hf;
-//            }
-//        }
+        if (dropout_mode == 2) {
+            // set dropout pixels to green
+            uint row1 = row % 2 * 2;
+            uint row2 = row % 2 * 2 + 1;
+            for (int i = 0; i < 4; i++) {
+                frame[row1 + 4][(col - 11) * 4 + 106 + i] = 176.0hf;
+                frame[row2 + 4][(col - 11) * 4 + 106 + i] = 176.0hf;
+            }
+            frame[row1][col] = 86.hf;
+            frame[row2][col] = 75.hf;
+        } else {
+            // Average between the preceeding and next line (notice colors are every other line red / blue)
+            frame[row][col] = 0.5hf * (frame[row - 2][col] + frame[row + 2][col]);
+        }
     }
 }

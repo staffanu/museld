@@ -16,10 +16,20 @@ FrameBuffer::FrameBuffer(Logger &log, int frame_no, std::shared_ptr<musevk::Vulk
   m_fields({FieldBufferView(log, frame_no, m_data, 0), FieldBufferView(log, frame_no, m_data, 1) }) {
 }
 
-void FrameBuffer::set_frame_no(int frame_no) {
+void FrameBuffer::set_frame_no(int frame_no, long input_offset, double input_samples_per_sample) {
     m_frame_no = frame_no;
+    m_input_offset = input_offset;
+    m_input_samples_per_sample = input_samples_per_sample;
     m_fields[0].set_frame_no(frame_no);
     m_fields[1].set_frame_no(frame_no);
+}
+
+long FrameBuffer::getInputOffset() const {
+    return m_input_offset;
+}
+
+double FrameBuffer::getInputSamplesPerMuseSample() const {
+    return m_input_samples_per_sample;
 }
 
 std::shared_ptr<musevk::VulkanBuffer> &FrameBuffer::data() {

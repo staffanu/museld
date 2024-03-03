@@ -31,7 +31,7 @@ TextRenderer::TextRenderer(std::string const &executable_dir, VulkanManager &vul
 void TextRenderer::drawText(int x, int y, std::string s, int scale, CommandBuffer &command_buffer) {
     int total_width = c_glyph_width * (int)c_monogram_font_definition.size();
     std::vector<uint16_t> push_constants = {
-            (uint16_t )x,    // top_left_x
+            (uint16_t)x,     // top_left_x
             (uint16_t)y,     // top_left_y
             (uint16_t)scale, // scale
             c_glyph_width,   // font_width

@@ -21,7 +21,7 @@ public:
     // output samples are written to the first two channels
     void decode(int frame_no,
                 const std::array<bool, InputReader::InputReaderBlock::c_max_efm_data_size> &data, int input_data_size,
-                size_t &sample_count, AudioDecoder::AudioFrame output_samples[c_max_output_samples]);
+                int *sample_count, AudioDecoder::AudioFrame output_samples[c_max_output_samples]);
 
 private:
     static const std::array<ByteWithErasureFlag, 1 << 14> c_efm_to_byte_table;
@@ -36,7 +36,7 @@ private:
     static const std::array<std::pair<int, int>, 6> c_left_output_map;
     static const std::array<std::pair<int, int>, 6> c_right_output_map;
 
-    void handleFrame(size_t &sample_count, AudioDecoder::AudioFrame output_samples[2048]);
+    void handleFrame(int &sample_count, AudioDecoder::AudioFrame output_samples[2048]);
 
     Logger &m_log;
     int m_total_bits;

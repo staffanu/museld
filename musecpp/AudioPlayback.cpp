@@ -45,7 +45,7 @@ void AudioPlayback::cleanup() {
         throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
 }
 
-void AudioPlayback::add_samples(AudioMode &audio_mode, size_t &sample_count,
+void AudioPlayback::add_samples(AudioMode const &audio_mode, int const &sample_count,
                                 AudioDecoder::AudioFrame *output_samples) {
     assert(audio_mode != MODE_UNKNOWN);
     if (audio_mode != m_current_mode) {

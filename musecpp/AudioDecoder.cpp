@@ -82,8 +82,8 @@ AudioDecoder::AudioDecoder(Logger &log)
 
 void AudioDecoder::decodeFrame(int frame_no,
                                shared_ptr<musevk::VulkanBuffer> const &audio_converted_freq,
-                               AudioMode &audio_mode,
-                               size_t &sample_count,
+                               AudioMode *audio_mode,
+                               int *sample_count_out,
                                AudioFrame output_samples[c_max_output_samples]) {
     auto t0 = chrono::high_resolution_clock::now();
 
@@ -100,8 +100,8 @@ void AudioDecoder::decodeFrame(int frame_no,
         m_range_bch_decoder.resetStatistics();
     }
 
-    audio_mode = m_active_audio_mode;
-    sample_count = 0;
+    *audio_mode = m_active_audio_mode;
+    int sample_count = 0;
     int no_not_updated_symbol_locations = 0;
 
     auto *ptr = audio_converted_freq->data<ushort>();
@@ -206,7 +206,7 @@ void AudioDecoder::decodeFrame(int frame_no,
                 auto mode = detectModeFromControlData(majority);
                 if (mode != m_active_audio_mode) {
                     m_active_audio_mode = mode;
-                    audio_mode = mode;
+                    *audio_mode = mode;
                     sample_count = 0;
                     m_log.info(eAudio, fmt::format("audio mode now: {}", (int)m_active_audio_mode));
                 }
@@ -281,6 +281,7 @@ void AudioDecoder::decodeFrame(int frame_no,
                 m_log.warn(eAudio, "Unknown audio mode");
         }
     }
+    *sample_count_out = sample_count;
 
     auto t1 = chrono::high_resolution_clock::now();
     m_total_time_us += chrono::duration_cast<chrono::microseconds>(t1 - t0).count();

@@ -29,12 +29,16 @@ public:
 
     std::shared_ptr<musevk::VulkanBuffer> createMuseBuffer(unsigned int height, unsigned int width, bool host_visible = false);
 
+    enum class DropoutMode {
+        eNormal, eDisabled, eHighlight
+    };
+
     void applyEqAndDeemphasisAndGamma(musevk::CommandBuffer &sq,
                                       std::shared_ptr <musevk::VulkanBuffer> const &video_input,
                                       std::shared_ptr <musevk::VulkanBuffer> const &dropout_input,
                                       std::shared_ptr <musevk::VulkanBuffer> const &buffer,
                                       const std::pair<float, float> &eq,
-                                      bool enable_non_linear,  bool enable_dropout_compensation);
+                                      bool enable_non_linear, DropoutMode dropout_mode);
 
     void decodeIntraField(musevk::CommandBuffer &sq, FieldBufferView &field);
 

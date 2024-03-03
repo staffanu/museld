@@ -13,10 +13,10 @@ class Logger;
 
 class AudioPlayback {
 public:
-    AudioPlayback(Logger &log);
+    explicit AudioPlayback(Logger &log);
     void add_samples(
-            AudioMode &audio_mode,
-            size_t &sample_count,
+            AudioMode const &audio_mode,
+            int const &sample_count,
             AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples]);
     void cleanup();
 

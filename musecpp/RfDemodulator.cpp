@@ -16,6 +16,7 @@ RfDemodulator::RfDemodulator(Logger &log, std::string filename)
   m_filename(std::move(filename)),
   m_input_fd(-1),
   m_input_is_fifo(filesystem::is_fifo(filename)),
+  m_total_samples_read(0),
   m_demodulator_thread(nullptr),
   m_vacant_blocks(),
   m_filled_blocks(),
@@ -79,6 +80,7 @@ void RfDemodulator::seek(double seconds) {
         m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples, {} bytes.",
                                        seconds, samples_to_seek, bytes_to_seek));
         lseek(m_input_fd, bytes_to_seek, SEEK_CUR);
+        m_total_samples_read = max(0L, m_total_samples_read + samples_to_seek); // FIXME: locking?
 
         // Discard any filled buffers
         std::unique_lock<std::mutex> lock2(m_demodulated_block_mutex);
@@ -121,16 +123,11 @@ void RfDemodulator::demodulate() {
 
     uint8_t dropout_buffer[c_dropout_buffer_size] = {};
 
-    float prev_angle;
-    long total_samples_read = 0;
+    complex<float> prev_sample = {};
     long total_samples_read_last_log = 0;
     long total_time_since_last_log_us = 0;
 
-    float positive_amplitude_estimate = 0;
-    float negative_amplitude_estimate = 0;
-
     while (!m_stop_request && readFloats(input_buffer + c_bandpass_filter_size - 1, c_sample_block_size)) {
-        auto t0 = chrono::high_resolution_clock::now();
 
         // First get a free output block to write to
         unique_ptr<DemodulatedBlock> block = nullptr;
@@ -151,6 +148,10 @@ void RfDemodulator::demodulate() {
             block = std::move(m_vacant_blocks.front());
             m_vacant_blocks.pop_front();
         }
+        auto t0 = chrono::high_resolution_clock::now();
+
+        // The first byte of the output lags the actual input due to three filters being applied
+        block->input_offset = m_total_samples_read - (c_bandpass_filter_size + c_lowpass_filter_size + c_rrc_filter_size) / 2;
 
         // Run the input signal through the bandpass filter that also converts the signal into an analytic signal
         firFilter(input_buffer, c_sample_block_size, c_bandpass_filter.first, 1, analytic_buffer_re);
@@ -158,9 +159,9 @@ void RfDemodulator::demodulate() {
 
         // Demodulate the analytic signal
         for (int index = 0; index < c_sample_block_size; index++) {
-            float angle = atan2(analytic_buffer_im[index], analytic_buffer_re[index]);
-            float phase_diff = angle - prev_angle + (float) (angle < prev_angle) * c_2pi;
-            prev_angle = angle;
+            auto sample = complex(analytic_buffer_re[index], analytic_buffer_im[index]);
+            float phase_diff = arg(sample * conj(prev_sample));
+            prev_sample = sample;
             // fm_out will be in the range [-1, 1] when the frequency varies between c_center_frequency - c_frequency_deviation and c_center_frequency + c_frequency_deviation
             // This expression is probably easier to understand but has one more multiplication:
             // (phase_diff * (c_sample_frequency / (c_2pi * c_center_frequency)) - 1.f) * (c_center_frequency / c_frequency_deviation);
@@ -186,25 +187,34 @@ void RfDemodulator::demodulate() {
                   c_efm_decimation_rate, efm_equalization_in_buffer + c_efm_equalization_filter_size - 1);
         firFilter(efm_equalization_in_buffer, c_efm_out_buffer_size, c_efm_equalization_filter, 1, block->efm_data);
 
-        // Dropout detection -- very simplistic for now
-        for (int index = 0; index < c_sample_block_size; index += 8) {
-            positive_amplitude_estimate = analytic_buffer_re[index] > positive_amplitude_estimate ?
-                                          analytic_buffer_re[index] : positive_amplitude_estimate * 0.9999f;
-            negative_amplitude_estimate = analytic_buffer_re[index] < negative_amplitude_estimate ?
-                                          analytic_buffer_re[index] : negative_amplitude_estimate * 0.9999f;
-            float min = 1e10;
-            float max = -1e10;
-            for (int j = 0; j < 8; j++) {
-                if (analytic_buffer_re[index + j] > max)
-                    max = analytic_buffer_re[index + j];
-                if (analytic_buffer_re[index + j] < min)
-                    min = analytic_buffer_re[index + j];
-            }
-            bool dropout = max < positive_amplitude_estimate / 2 || min > negative_amplitude_estimate / 2;
-            for (int j = 0; j < 8 / c_video_decimation_rate; j++)
-                dropout_buffer[c_dropout_delay + index / c_video_decimation_rate + j] = dropout;
+        // Dropout detection
+        // We interpret excessive signal values to indicate a dropout.  Due to pre-emphasis the signal is often
+        // outside the [-1, 1] range normally, so the thresholds for dropout detection are much wider.
+        for (int index = 0; index < c_sample_block_size; index += c_video_decimation_rate) {
+            bool dropout = false;
+            for (int i = 0 ; i < c_video_decimation_rate; i++)
+                if (lowpass_in_buffer[index + i + c_lowpass_filter_size - 1] < -2.1f ||
+                    lowpass_in_buffer[index + i + c_lowpass_filter_size - 1] > 5.5f)
+                    dropout = true;
 
+            dropout_buffer[c_dropout_delay + index / c_video_decimation_rate] = dropout;
+
+//            if (dropout && index > 32 && index < c_sample_block_size - 40) {
+//                cout << "Dropout index " << m_total_samples_read + index << ": " << endl;
+//                cout << "x=[";
+//                for (int i = -32; i < 8 + 32; i++) {
+//                    cout << analytic_buffer_re[index + i] << " ";
+//                }
+//                cout << "];" << endl;
+//                cout << "y=[";
+//                for (int i = -32; i < 8 + 32; i++) {
+//                    cout << lowpass_in_buffer[index + c_lowpass_filter_size - 1 + i] << " ";
+//                }
+//                cout << "];" << endl;
+//            }
         }
+
+
         memcpy(block->dropouts, dropout_buffer, sizeof(block->dropouts));
 
         // Copy the end of the filter inputs to the start of the corresponding buffers
@@ -226,12 +236,12 @@ void RfDemodulator::demodulate() {
         m_cv_filled.notify_one();
         m_filled_blocks.push_back(std::move(block));
 
-        total_samples_read += c_sample_block_size;
-        if (total_samples_read - total_samples_read_last_log > (long)c_sample_frequency) {
+        m_total_samples_read += c_sample_block_size;
+        if (m_total_samples_read - total_samples_read_last_log > (long)c_sample_frequency) {
             m_log.info(eInput | ePerformance,
                        fmt::format("Total demodulation time last second worth of video_data: {:.1f} ms", (double)total_time_since_last_log_us / 1000.0));
             total_time_since_last_log_us = 0;
-            total_samples_read_last_log = total_samples_read;
+            total_samples_read_last_log = m_total_samples_read;
         }
     }
     m_reader_thread_finished = true;

@@ -24,6 +24,7 @@ InputPll::InputPll(Logger &log)
   m_max_frame_pulse_sum_difference(0),
   m_consecutive_good_syncs(0),
   m_missed_line_pulses(0),
+  m_frame_start_offset(0),
   m_state(eSearching),
   m_error_sum(0) {
 }
@@ -42,7 +43,13 @@ void InputPll::initialize(double sample_rate) {
     m_log.debug(eInput, fmt::format("m_g1={:.5f} m_g2={:.7f}", m_g1, m_g2));
 }
 
-InputPll::PllResult InputPll::process(int sample_count, const float samples[], const uint8_t dropouts[], float *output, uint8_t *dropout_output) {
+InputPll::PllResult InputPll::process(int sample_count, long input_offset,
+                                      const float samples[], const uint8_t dropouts[],
+                                      float *output, uint8_t *dropout_output) {
+
+    if (m_state == eLocked && m_line == 1 && m_pixel == 1)
+        m_frame_start_offset = input_offset;
+
     for (int sample_ix = 0; sample_ix < sample_count; sample_ix++) {
         // if we are at the first pixel we should also not be in the middle of the loop
         assert (!(m_state == eLocked && m_line == 1 && m_pixel == 1) || sample_ix == 0);
@@ -86,6 +93,7 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], c
                         }
                         m_line = 2;
                         m_state = eLocked;
+                        m_frame_start_offset = input_offset + sample_ix - MUSE_TOTAL_WIDTH * 2 - 1;
                     }
                 }
                 if (m_state == eLocked && m_line == 2) {
@@ -158,10 +166,11 @@ InputPll::PllResult InputPll::process(int sample_count, const float samples[], c
             m_line = m_line == 1125 ? 1 : m_line + 1;
         }
     }
+    // we make sure that the loop never continues over a frame boundary by setting samples_to_read carefully below
     bool frame_done = m_state == eLocked && m_line == 1 && m_pixel == 1;
 
     int samples_to_read = m_line == 1125 ? 481 - m_pixel : m_pixel < 9 ? 9 - m_pixel : 480 - m_pixel + 9;
-    return {frame_done, samples_to_read, m_input_samples_per_sample, m_state == eLocked};
+    return {frame_done, samples_to_read, m_input_samples_per_sample, m_state == eLocked, m_frame_start_offset};
 }
 
 double InputPll::getInputSamplesPerSample() const {

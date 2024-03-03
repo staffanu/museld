@@ -71,11 +71,12 @@ bool MuseDecoder::initialize() {
     return true;
 }
 
-bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
-                       size_t &sample_count,
+bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
+                       int *sample_count,
                        AudioDecoder::AudioFrame output_samples[max(AudioDecoder::c_max_output_samples, EfmDecoder::c_max_output_samples)],
+                       int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
                        FieldInterpolationMode field_interpolation_mode,
-                       bool redo_last_field, bool enable_non_linear, bool enable_dropout_compensation) {
+                       bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode) {
     if (redo_last_field)
         m_field_index = (m_field_index + 1) % 2;
 
@@ -92,7 +93,6 @@ bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
     InputReader::PresentationHint presentation_hint;
     if (m_field_index == 0 && !redo_last_field) {
         auto frame_buffer = m_frame_buffers.back();
-        frame_buffer->set_frame_no(++m_frame_no);
         m_frame_buffers.pop_back();
         m_frame_buffers.push_front(frame_buffer);
 
@@ -100,6 +100,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
         if (input_block == nullptr) {
             return false;
         }
+        frame_buffer->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_muse_sample);
         shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
 
         auto eq_estimate = FrameBuffer::EstimateEq(input_vulkan_buffer->data<float>());
@@ -114,7 +115,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
         m_shaders.applyEqAndDeemphasisAndGamma(*m_first_stage_command_buffer,
                                                input_vulkan_buffer, input_block->dropout_data,
                                                frame_buffer->data(),
-                                               m_eq, enable_non_linear, enable_dropout_compensation);
+                                               m_eq, enable_non_linear, dropout_mode);
         m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame_buffer->data());
         m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
@@ -132,6 +133,10 @@ bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
     if (m_decode_video && (m_decode_all_fields || m_field_index == 0)) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
+        *last_frame_buffer_input_offset = m_frame_buffers[0]->getInputOffset();
+        *input_samples_per_muse_sample = m_frame_buffers[0]->getInputSamplesPerMuseSample();
+        *field_parity = decoded_field_index;
+
         m_shaders.decodeIntraField(*m_second_stage_command_buffer, m_frame_buffers[0]->get_field(decoded_field_index));
         auto fields = vector<reference_wrapper<FieldBufferView>>{
                 m_frame_buffers[0]->get_field(decoded_field_index),
@@ -143,8 +148,8 @@ bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
         if (m_shaders.decodeInterFrameAndDetectMotion(*m_second_stage_command_buffer, fields, true)) {
             m_log.debug(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation success", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
-                                                 field_interpolation_mode == eForceIntraField,
-                                                 field_interpolation_mode == eForceInterFrame);
+                                                 field_interpolation_mode == FieldInterpolationMode::eForceIntraField,
+                                                 field_interpolation_mode == FieldInterpolationMode::eForceInterFrame);
         } else {
             m_log.warn(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false);
@@ -162,11 +167,11 @@ bool MuseDecoder::next(bool efm_audio, AudioMode &audio_mode,
     if (m_decode_audio && m_field_index == 0) {
         if (efm_audio && input_block != nullptr) {
             m_efm_decoder.decode(m_frame_no, input_block->efm_data, input_block->efm_data_size, sample_count, output_samples);
-            audio_mode = MODE_EFM;
+            *audio_mode = MODE_EFM;
         } else // MUSE audio
             m_audio_decoder.decodeFrame(m_frame_no, m_shaders.getAudioData(), audio_mode, sample_count, output_samples);
     } else
-        sample_count = 0;
+        *sample_count = 0;
 
     if (input_block != nullptr)
         m_reader.returnBuffer(input_block); // EFM audio uses the buffer, so we cannot return it until now

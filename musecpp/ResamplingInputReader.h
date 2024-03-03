@@ -36,7 +36,8 @@ private:
 
     bool readSamples(int sample_count, float buffer[c_sample_buffer_size],
                      uint8_t dropout_buffer[c_sample_buffer_size], double dt,
-                     float efm_buffer[DemodulatedBlock::c_efm_block_size], bool &have_efm);
+                     float efm_buffer[DemodulatedBlock::c_efm_block_size],
+                     bool *have_efm, long *sample_buffer_input_offset, int *source_samples_per_sample);
 
     InputFormat m_input_format;
     InputPll m_input_pll;
@@ -49,6 +50,7 @@ private:
     uint8_t m_file_input_buffer[c_input_buffer_size];
     int m_file_input_buffer_bytes;
     int m_file_input_buffer_read_pos;
+    long m_file_input_buffer_input_offset;
     uint8_t m_dropout_input_buffer[c_input_buffer_size]{};
     double m_t; // the time of the previous read
     int m_bytes_per_sample;

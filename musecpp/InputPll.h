@@ -23,8 +23,11 @@ public:
         int samples_to_read;
         double input_samples_per_sample;
         bool locked;
+        long frame_input_offset;
     };
-    PllResult process(int sample_count, const float samples[], const uint8_t dropouts[], float *output, uint8_t *dropout_output);
+    PllResult process(int sample_count, long input_offset,
+                      const float samples[], const uint8_t dropouts[],
+                      float *output, uint8_t *dropout_output);
     [[nodiscard]] double getInputSamplesPerSample() const;
     void setUnlocked();
 
@@ -51,6 +54,7 @@ private:
     float m_max_frame_pulse_sum_difference;
     int m_consecutive_good_syncs;
     int m_missed_line_pulses;
+    long m_frame_start_offset;
 
     enum State {
         eSearching, eLocked, eLockedHoriz

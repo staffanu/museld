@@ -30,6 +30,7 @@ ResamplingInputReader::ResamplingInputReader(
           m_file_input_buffer{},
           m_file_input_buffer_bytes(c_input_buffer_lookback * 4), // 4 >= input bytes per sample
           m_file_input_buffer_read_pos(c_input_buffer_lookback * 4),
+          m_file_input_buffer_input_offset(0),
           m_dropout_input_buffer{},
           m_t(0) {
     if (demodulate) {
@@ -123,8 +124,11 @@ void ResamplingInputReader::threadFunc() {
     bool have_efm;
     double input_samples_per_sample = m_input_pll.getInputSamplesPerSample();
     int samples_to_read = 1;
+    long sample_buffer_input_offset;
+    int source_samples_per_sample; // for the RfDemodulator this is 2 due to decimation after demodulation
     unique_ptr<InputReaderBlock> buffer = nullptr;
-    while (readSamples(samples_to_read, sample_buffer, dropout_buffer, input_samples_per_sample, efm_sample_buffer, have_efm)) {
+    while (readSamples(samples_to_read, sample_buffer, dropout_buffer, input_samples_per_sample, efm_sample_buffer,
+                       &have_efm, &sample_buffer_input_offset, &source_samples_per_sample)) {
         if (buffer == nullptr) {
             unique_lock<std::mutex> lock(m_mutex);
             if (m_input_is_realtime && m_vacant_muse_input_buffers.empty()) {
@@ -146,7 +150,8 @@ void ResamplingInputReader::threadFunc() {
 
         auto video_data = buffer->video_data->data<float>();
         auto dropout_data = buffer->dropout_data->data<uint8_t>();
-        InputPll::PllResult pll_result = m_input_pll.process(samples_to_read, sample_buffer, dropout_buffer, video_data, dropout_data);
+        long input_offset = sample_buffer_input_offset;
+        InputPll::PllResult pll_result = m_input_pll.process(samples_to_read, input_offset, sample_buffer, dropout_buffer, video_data, dropout_data);
         samples_to_read = pll_result.samples_to_read;
         input_samples_per_sample = pll_result.input_samples_per_sample;
 
@@ -164,6 +169,8 @@ void ResamplingInputReader::threadFunc() {
             buffer->efm_data_size = 0;;
 
         if (pll_result.frame_done) {
+            buffer->input_offset = pll_result.frame_input_offset;
+            buffer->input_samples_per_muse_sample = pll_result.input_samples_per_sample * source_samples_per_sample;
             std::unique_lock<std::mutex> lock(m_mutex);
             m_cv_filled.notify_one();
             m_filled_muse_input_buffers.push_back(std::move(buffer));
@@ -179,8 +186,9 @@ void ResamplingInputReader::threadFunc() {
 // This is especially apparent in how EFM is handled.
 bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_buffer_size],
                                         uint8_t dropout_buffer[c_sample_buffer_size], double dt,
-                                        float efm_buffer[DemodulatedBlock::c_efm_block_size], bool &have_efm) {
-    have_efm = false;
+                                        float efm_buffer[DemodulatedBlock::c_efm_block_size],
+                                        bool *have_efm, long *buffer_input_offset, int *source_samples_per_sample) {
+    *have_efm = false;
     double t = m_t; // always in [0, 1)
     int read_pos = m_file_input_buffer_read_pos;
     for (int sample_ix = 0; sample_ix < sample_count; sample_ix++) {
@@ -235,12 +243,15 @@ bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_
                 memcpy(m_dropout_input_buffer + m_file_input_buffer_bytes / m_bytes_per_sample, block->dropouts, sizeof(block->dropouts));
                 m_file_input_buffer_bytes += sizeof(block->video_data);
                 memcpy(efm_buffer, block->efm_data, sizeof(block->efm_data));
-                have_efm = true;
+                *have_efm = true;
+                m_file_input_buffer_input_offset = block->input_offset - m_file_input_buffer_bytes / m_bytes_per_sample;
                 m_demodulator->returnBlock(block);
             }
             assert(read_pos + samples_to_read * m_bytes_per_sample < m_file_input_buffer_bytes);
             read_pos += samples_to_read * m_bytes_per_sample;
         }
+        if (sample_ix == 0)
+            *buffer_input_offset = m_file_input_buffer_input_offset + read_pos / m_bytes_per_sample;
 
         switch (m_input_format) {
             case eUnsignedByte:
@@ -279,5 +290,7 @@ bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_
     }
     m_t = t;
     m_file_input_buffer_read_pos = read_pos;
+    // Maybe take this from the input blocks instead
+    *source_samples_per_sample = m_demodulator ? RfDemodulatorConstants::c_video_decimation_rate : 1;
     return true;
 }

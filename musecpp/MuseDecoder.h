@@ -6,9 +6,10 @@
 #define MUSECPP_MUSEDECODER_H
 
 #include <deque>
-#include "AudioDecoder.h"
 #include "musevk/TimestampStatistics.h"
 #include "efm/EfmDecoder.h"
+#include "AudioDecoder.h"
+#include "Shaders.h"
 
 namespace musevk {
     class TimestampQueryPool;
@@ -38,15 +39,16 @@ public:
 
     [[nodiscard]] bool initialize();
 
-    enum FieldInterpolationMode {
+    enum class FieldInterpolationMode {
         eNormal, eForceIntraField, eForceInterFrame
     };
 
-    bool next(bool efm_audio, AudioMode &audio_mode,
-              size_t &sample_count,
+    bool next(bool efm_audio, AudioMode *audio_mode,
+              int *sample_count,
               AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples],
+              int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
               FieldInterpolationMode field_interpolation_mode,
-              bool redo_last_field, bool enable_non_linear, bool enable_dropout_compensation);
+              bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode);
 
     void output_benchmark_results();
 
