@@ -2,6 +2,7 @@
 // Created by staffanu on 12/10/23.
 //
 
+#include <algorithm>
 #include <cmath>
 #include <thread>
 #include <vector>
@@ -75,7 +76,7 @@ void RfDemodulator::seek(double seconds) {
     if (!m_input_is_fifo) {
         std::unique_lock<std::mutex> lock(m_input_file_mutex);
 
-        off_t samples_to_seek = (off_t) (seconds * c_sample_frequency);
+        long samples_to_seek = (long)(seconds * c_sample_frequency);
         off_t bytes_to_seek = 2 * samples_to_seek;
         m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples, {} bytes.",
                                        seconds, samples_to_seek, bytes_to_seek));
