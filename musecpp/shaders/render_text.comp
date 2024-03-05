@@ -8,15 +8,14 @@ layout(push_constant) uniform PushConstants {
     uint16_t top_left_x;
     uint16_t top_left_y;
     uint16_t scale;
-    uint16_t font_width;
-    uint16_t font_height;
-    uint16_t font_total_width; // for all defined characters
-    uint16_t n_characters; // max 57 characters for a total of 128 bytes push constants (which is guaranteed)
-    uint16_t text[57]; // coded as indices in the font -- we can have more than 256 characters!
+    uint16_t glyph_width; // spacing between characters -- if less than 16 we render the left (most significant) bits
+    uint16_t glyph_height;
+    uint16_t n_characters; // max 2*58 characters for a total of 128 bytes push constants (which is guaranteed)
+    uint16_t text[58]; // coded as byte indices in the font, so 0 means codepoint c_font_codepoint_begin, 2 per item
 };
 
 layout(set = 0, binding = 0) buffer readonly font_buffer {
-    uint8_t font[];
+    uint16_t font[];
 };
 
 layout(set = 0, binding = 1, rgba32f) uniform writeonly image2D frame_out_image;
@@ -25,15 +24,17 @@ void main() {
     uint y = gl_GlobalInvocationID.y;
     uint x = gl_GlobalInvocationID.x;
 
-    if (x >= n_characters * font_width * scale || y >= font_height * scale)
+    if (x >= n_characters * glyph_width * scale || y >= glyph_height * scale)
         return;
 
-    uint char_index = x / font_width / scale;
-    uint glyph_index = text[char_index];
+    uint char_index = x / glyph_width / scale;
+    uint text_chars = text[char_index / 2];
+    uint glyph_index = (char_index & 1u) == 0 ? text_chars >> 8 : text_chars & 0xffu;
 
-    uint x_in_glyph = x - char_index * font_width * scale;
+    uint x_in_glyph = x - char_index * glyph_width * scale;
 
-    int pixel = font[y / scale * font_total_width + glyph_index * font_width + x_in_glyph / scale];
+    uint16_t line = font[y / scale + glyph_index * glyph_height];
+    uint16_t pixel = line & (0x8000us >> (x_in_glyph / scale));
     if (pixel != 0) {
         float r = pixel != 0 ? 1.0f : 0.0f;
         float g = pixel != 0 ? 1.0f : 0.0f;
