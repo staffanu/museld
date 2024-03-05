@@ -140,12 +140,17 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                 prev_osd_text = osd_text;
             }
             if (osd_text_remaining_frames) {
-                text_renderer.drawText(90, 50, osd_text, 7, *command_buffer);
+                text_renderer.drawText(90, 50, osd_text, 4, *command_buffer);
                 if (!--osd_text_remaining_frames)
                     redo_last_field = true;
             }
             string cursor_string;
             if (enable_cursor) {
+                // Draw the pointer coordinates in the top left corner (both in single field and interpolated coordinates)
+                // If paused, and showing only a single field, also show the input stream offset for the start of the frame,
+                // the start of the current field, and the offsets for the pixel under the pointer, in the Y, Cr and Cb data.
+                // The offsets unfortunately aren't exact (I don't know why), but the offsets are very useful when
+                // investigating dropouts.
                 int xsize, ysize;
                 glfwGetWindowSize(window, &xsize, &ysize);
                 double xpos, ypos;
@@ -157,23 +162,20 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                                                 (int)(xpos / xsize * MUSE_Y_BUF_WIDTH * 3),
                                                 (int)(ypos / ysize * MUSE_BUF_HEIGHT * 2),
                                                 field_x, field_y);
-                    text_renderer.drawText(10, 10, cursor_string, 2, *command_buffer);
-                    if (field_interpolation_mode == MuseDecoder::FieldInterpolationMode::eForceIntraField) {
+                    text_renderer.drawText(10, 8, cursor_string, 1, *command_buffer);
+                    if (field_interpolation_mode == MuseDecoder::FieldInterpolationMode::eForceIntraField && paused) {
                         long field_offset = last_buffer_file_offset // start of sound data
                                 + (long)((field_parity ? 565 : 2) * MUSE_TOTAL_WIDTH * input_samples_per_muse_sample);
-                        string offset_string1 =
-                                fmt::format("{} {} {} ",
+                        string offset_string =
+                                fmt::format("{} {} {} Y {} Cr {} Cb {}",
                                             last_buffer_file_offset,
                                             field_parity ? "ODD" : "EVEN",
-                                            field_offset);
-                        string offset_string2 =
-                                fmt::format("Y {} Cr {} Cb {}",
+                                            field_offset,
                                             field_offset + (int)(input_samples_per_muse_sample * ((field_y + 44) * MUSE_TOTAL_WIDTH + (field_x + 106))),
                                             field_offset + (int)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2) * MUSE_TOTAL_WIDTH + field_x / 4 + 11),
                                             field_offset + (int)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2 + 1) * MUSE_TOTAL_WIDTH + field_x / 4 + 11));
-                        text_renderer.drawText(300, 10, offset_string1, 2, *command_buffer);
-                        text_renderer.drawText(300 + offset_string1.length() * TextRenderer::c_glyph_width * 2, 10, offset_string2, 2, *command_buffer);
-                        cursor_string += " " + offset_string1 + offset_string2;
+                        text_renderer.drawText(10, 34, offset_string, 1, *command_buffer);
+                        cursor_string += " " + offset_string;
                     }
                 }
                 if (paused)
