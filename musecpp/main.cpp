@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <fmt/format.h>
 #include <set>
+#include <functional>
 #include "Shaders.h"
 #include "MuseDecoder.h"
 #include "musevk/VulkanManager.h"
@@ -337,15 +338,6 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     glfwTerminate();
 }
 
-void usage() {
-    cerr << "usage: musecpp "
-            "<--resample-bytes|--resample-shorts|--big-endian> [--sample-freq] "
-            "[--fifo] [--full-frames-only] [-all-fields] "
-            "[--full-screen] [--no-video] [no-audio] [--verbose] [--no-sync] [--help] "
-            "<input_file> ...\n";
-    exit(EXIT_FAILURE);
-}
-
 int main(int argc, char *argv[]) {
     auto log_selection = Logger::c_log_warn;
     enum InputFormat {
@@ -373,63 +365,151 @@ int main(int argc, char *argv[]) {
     bool efm_audio = false;
     bool benchmark_shaders = false;
 
-    try {
-        const vector<string> args(argv + 1, argv + argc);
-        for (auto it = args.cbegin(), end = args.cend(); it != end; it++) {
-            if (*it == "--resample-bytes")
-                input_format = eOverSampledUnsignedBytes;
-            else if (*it == "--resample-shorts")
-                input_format = eOverSampledSignedShortsLittleEndian;
-            else if (*it == "--sample-freq")
-                input_sample_frequency = stod(*(++it));
-            else if (*it == "--little-endian")
-                input_format = eLittleEndianShorts;
-            else if (*it == "--big-endian")
-                input_format = eBigEndianShorts;
-            else if (*it == "--demodulate")
-                demodulate = true;
-            else if (*it == "--fifo")
-                input_is_fifo = true;
-            else if (*it == "--full-frames-only")
-                decode_all_fields = false;
-            else if (*it == "--all-fields")
-                decode_all_fields = true;
-            else if (*it == "--full-screen")
-                full_screen = true;
-            else if (*it == "--seek")
-                initial_seek_seconds = stod(*(++it));
-            else if (*it == "--pause")
-                start_paused = true;
-            else if (*it == "--write")
-                output_filename = *(++it);
-            else if (*it == "--no-video")
-                decode_video = false;
-            else if (*it == "--no-dropout")
-                dropout_mode = Shaders::DropoutMode::eDisabled;
-            else if (*it == "--highlight-dropout")
-                dropout_mode = Shaders::DropoutMode::eHighlight;
-            else if (*it == "--no-audio")
-                decode_audio = false;
-            else if (*it == "--efm")
-                efm_audio = true;
-            else if (*it == "--verbose")
-                log_selection = Logger::c_log_all;
-            else if (*it == "--benchmark-shaders")
-                benchmark_shaders = true;
-            else if (*it == "--no-sync")
-                no_sync = true;
-            else if (*it == "--help")
-                usage();
-            else if (it -> find("!", 0) == 0)
-                ; // used to ignore options (to easily enable/disable options in debug settings etc.)
-            else {
-                if (initial_seek_seconds != 0 && input_is_fifo)
-                    throw runtime_error("Initial seek is not compatible with reading from fifo");
-                if (!filesystem::exists(*it))
-                    throw runtime_error("File not found: " + string(*it));
-                Logger log(log_selection);
-//                Logger log({{eInput, eWarn}, {eAudio, eWarn}, {eVideo, eWarn}, {ePerformance, eWarn}});
+    const vector<string> args(argv + 1, argv + argc);
+    auto it = args.cbegin();
 
+    vector<pair<string, function<void ()>>> options;
+
+    auto usage = [&options] () -> void {
+        cerr << "usage: musecpp ";
+        for (auto o: options)
+            cerr << "[" << o.first << "] ";
+        cerr << "<input_file> ..." << endl;
+        exit(EXIT_FAILURE);
+    };
+
+    options.emplace_back("--resample-bytes", [&] () mutable -> void
+    {
+        input_format = eOverSampledUnsignedBytes;
+    });
+    options.emplace_back("--resample-shorts", [&] () mutable  -> void {
+        input_format = eOverSampledSignedShortsLittleEndian;
+    });
+    options.emplace_back("--sample-freq", [&] () mutable  -> void {
+        input_sample_frequency = stod(*(++it));
+    });
+    options.emplace_back("--little-endian", [&] () mutable  -> void {
+        input_format = eLittleEndianShorts;
+    });
+    options.emplace_back("--big-endian", [&] () mutable -> void {
+        input_format = eBigEndianShorts;
+    });
+    options.emplace_back("--demodulate", [&] () mutable -> void {
+        demodulate = true;
+    });
+    options.emplace_back("--fifo", [&] () mutable -> void {
+        input_is_fifo = true;
+    });
+    options.emplace_back("--full-frames-only", [&] () mutable -> void {
+        decode_all_fields = false;
+    });
+    options.emplace_back("--all-fields", [&] () mutable -> void {
+        decode_all_fields = true;
+    });
+    options.emplace_back("--full-screen", [&] () mutable -> void {
+        full_screen = true;
+    });
+    options.emplace_back("--seek", [&] () mutable -> void {
+        initial_seek_seconds = stod(*(it++));
+    });
+    options.emplace_back("--pause", [&] () mutable -> void {
+        start_paused = true;
+    });
+    options.emplace_back("--write", [&] () mutable -> void {
+        output_filename = *(it++);
+    });
+    options.emplace_back("--no-video", [&] () mutable -> void {
+        decode_video = false;
+    });
+    options.emplace_back("--no-dropout", [&] () mutable -> void {
+        dropout_mode = Shaders::DropoutMode::eDisabled;
+    });
+    options.emplace_back("--highlight-dropout", [&] () mutable -> void {
+        dropout_mode = Shaders::DropoutMode::eHighlight;
+    });
+    options.emplace_back("--no-audio", [&] () mutable -> void {
+        decode_audio = false;
+    });
+    options.emplace_back("--efm", [&] () mutable -> void {
+        efm_audio = true;
+    });
+    options.emplace_back("--log", [&] () mutable -> void {
+        // loggins is specified with a string with a letter corresponding to the category
+        // (MPAVDI for Main(Application), Performance, Audio, Video, Decoder, and Input, respectively,
+        // and a number corresponding to the amount of logging. 0-4 imples Off, Error, Warn, Info, Debug.
+        // Default is Warn for all categories.
+        if (it->length() %2)
+            throw runtime_error("Log specification should have even length");
+        auto parseLevel = [](char c) -> LogPriority {
+            switch (c) {
+                case '0': return eOff;
+                case '1': return eError;
+                case '2': return eWarn;
+                case '3': return eInfo;
+                case '4': return eDebug;
+                default: throw runtime_error("Invalid log level");
+            }
+        };
+        for (int i = 0; i < it->length(); i += 2) {
+            switch ((*it)[i]) {
+                case 'M':
+                    log_selection[eApplication] = parseLevel((*it)[i + 1]);
+                    break;
+                case 'P':
+                    log_selection[ePerformance] = parseLevel((*it)[i + 1]);
+                    break;
+                case 'A':
+                    log_selection[eAudio] = parseLevel((*it)[i + 1]);
+                    break;
+                case 'V':
+                    log_selection[eVideo] = parseLevel((*it)[i + 1]);
+                    break;
+                case 'D':
+                    log_selection[eDecoder] = parseLevel((*it)[i + 1]);
+                    break;
+                case 'I':
+                    log_selection[eInput] = parseLevel((*it)[i + 1]);
+                    break;
+                default:
+                    throw runtime_error("Unknown log category");
+            }
+        }
+        it++;
+    });
+    options.emplace_back("--benchmark-shaders", [&] () mutable -> void {
+        benchmark_shaders = true;
+    });
+    options.emplace_back("--no-sync", [&] () mutable -> void {
+        no_sync = true;
+    });
+    options.emplace_back("--help", [&] () mutable -> void {
+        usage();
+    });
+
+    try {
+        while (it != args.cend()) {
+            auto option = std::find_if(options.cbegin(), options.cend(),
+                                    [it](const pair<string, function<void()>> &pair) -> bool {
+                                        return *it == pair.first;
+                                    });
+            if (option != options.cend()) {
+                it++;
+                option->second();
+            } else if (it->find("!", 0) == 0) {
+                it++; // used to ignore options (to easily enable/disable options in debug settings etc.)
+            } else if (it->find("-", 0) == 0) {
+                usage();
+            } else {
+                if (initial_seek_seconds != 0 && input_is_fifo) {
+                    cerr << "Initial seek is not compatible with reading from fifo" << endl;
+                    exit(EXIT_FAILURE);
+                }
+                if (!filesystem::exists(*it)) {
+                    cerr << "File not found: " << *it << endl;
+                    exit(EXIT_FAILURE);
+                }
+
+                Logger log(log_selection);
 
                 if (demodulate)
                     input_format = eOverSampledSignedShortsLittleEndian;
@@ -439,7 +519,9 @@ int main(int argc, char *argv[]) {
                     case eOverSampledSignedShortsLittleEndian:
                         reader = new ResamplingInputReader(
                                 log, *it,
-                                input_format == eOverSampledSignedShortsLittleEndian ? ResamplingInputReader::eSignedShortLittleEndian : ResamplingInputReader::eUnsignedByte,
+                                input_format == eOverSampledSignedShortsLittleEndian
+                                ? ResamplingInputReader::eSignedShortLittleEndian
+                                : ResamplingInputReader::eUnsignedByte,
                                 input_sample_frequency, initial_seek_seconds, demodulate, output_filename);
                         break;
                     case eLittleEndianShorts:
@@ -450,12 +532,15 @@ int main(int argc, char *argv[]) {
                         break;
                     case eUnknown:
                     default:
-                        throw runtime_error("No input format specified");
+                        cerr << "No input format specified" << endl;
+                        exit(EXIT_FAILURE);
                 }
                 process_file(log, executable_dir, *reader, decode_all_fields,
                              full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio, efm_audio,
                              benchmark_shaders);
                 delete reader;
+
+                it++;
             }
         }
     } catch (const exception &x) {
@@ -464,5 +549,5 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    return 0;
+    return EXIT_SUCCESS;
 }
