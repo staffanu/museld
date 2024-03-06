@@ -386,7 +386,7 @@ int main(int argc, char *argv[]) {
         input_format = eOverSampledSignedShortsLittleEndian;
     });
     options.emplace_back("--sample-freq", [&] () mutable  -> void {
-        input_sample_frequency = stod(*(++it));
+        input_sample_frequency = stod(*(it++));
     });
     options.emplace_back("--little-endian", [&] () mutable  -> void {
         input_format = eLittleEndianShorts;
