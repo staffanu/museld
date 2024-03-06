@@ -194,7 +194,7 @@ void RfDemodulator::demodulate() {
         for (int index = 0; index < c_sample_block_size; index += c_video_decimation_rate) {
             bool dropout = false;
             for (int i = 0 ; i < c_video_decimation_rate; i++)
-                if (lowpass_in_buffer[index + i + c_lowpass_filter_size - 1] < -2.1f ||
+                if (lowpass_in_buffer[index + i + c_lowpass_filter_size - 1] < -2.2f ||
                     lowpass_in_buffer[index + i + c_lowpass_filter_size - 1] > 5.5f)
                     dropout = true;
 
