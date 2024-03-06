@@ -41,6 +41,26 @@ float16_t inverse_gamma_c(float16_t v) {
     return 128.0hf + x * sign * 112.0hf;
 }
 
+// One would think the pre-emphasis filter is applied to the entire picture area in
+// the final muse signal, but colors are distorted in the right side of the picture
+// if reading luminance values into the filter.  So the conclusion is that the filter
+// is applied separately to color and luminance before mixing.  Therefore handle the
+// edge cases.
+
+float16_t read_luminance_value(uint row, uint col) {
+    if (col < 106 || col >= 480)
+        return 128.hf;
+    else
+        return frame_in[row][col];
+}
+
+float16_t read_color_value(uint row, uint col) {
+    if (col < 11 || col >= 105)
+        return 128.hf;
+    else
+        return frame_in[row][col];
+}
+
 void main() {
     uint row = gl_GlobalInvocationID.y;
     uint col = gl_GlobalInvocationID.x;
@@ -54,11 +74,16 @@ void main() {
     bool is_color_area = (row >= 42 && row < 558 || row >= 604 && row < 1120) && col >= 11 && col < 105;
 
     float16_t deemphasized;
-    if (is_picture_area || is_color_area) {
-        deemphasized = 0.5hf * frame_in[row][col] +
-            5.hf/32.hf * frame_in[row][col - 1] + 5.hf/32.hf * frame_in[row][col + 1] +
-            1.hf/16.hf * frame_in[row][col - 2] + 1.hf/16.hf * frame_in[row][col + 2] +
-            1.hf/32.hf * frame_in[row][col - 3] + 1.hf/32.hf * frame_in[row][col + 3];
+    if (is_picture_area) {
+        deemphasized = 0.5hf * read_luminance_value(row, col) +
+        5.hf/32.hf * read_luminance_value(row, col - 1) + 5.hf/32.hf * read_luminance_value(row, col + 1) +
+        1.hf/16.hf * read_luminance_value(row, col - 2) + 1.hf/16.hf * read_luminance_value(row, col + 2) +
+        1.hf/32.hf * read_luminance_value(row, col - 3) + 1.hf/32.hf * read_luminance_value(row, col + 3);
+    } else if (is_color_area) {
+        deemphasized = 0.5hf * read_color_value(row, col) +
+        5.hf/32.hf * read_color_value(row, col - 1) + 5.hf/32.hf * read_color_value(row, col + 1) +
+        1.hf/16.hf * read_color_value(row, col - 2) + 1.hf/16.hf * read_color_value(row, col + 2) +
+        1.hf/32.hf * read_color_value(row, col - 3) + 1.hf/32.hf * read_color_value(row, col + 3);
     } else {
         deemphasized = frame_in[row][col];
     }
