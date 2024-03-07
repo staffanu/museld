@@ -20,7 +20,7 @@ namespace musevk {
 
     class VulkanManager {
     public:
-        VulkanManager(Logger &log);
+        explicit VulkanManager(Logger &log);
         VulkanManager(VulkanManager &other) = delete;
         void operator=(const musevk::VulkanManager &) = delete;
 
@@ -35,35 +35,6 @@ namespace musevk {
         void present(vk::Image image);
         vk::Extent2D getSwapChainExtent() { return m_swap_chain_extent; };
         void recreateSwapChain();
-
-        template<typename T>
-        std::unique_ptr<VulkanBuffer> createDeviceBuffer(Size const &size, const std::vector<T> &data) {
-            assert(size.numberOfElements() == data.size());
-            auto host_buffer = VulkanBuffer(*m_memory_allocator, m_logical_device, size, sizeof(T), true, true /* unused */);
-            for (int i = 0; i < data.size(); i++)
-                host_buffer.data<T>()[i] = data[i];
-            auto device_buffer = std::make_unique<VulkanBuffer>(*m_memory_allocator, m_logical_device, size, sizeof(T), false, true);
-            auto sq = createCommandBuffer();
-            sq->begin();
-            sq->enqueueCopyBuffer(host_buffer, *device_buffer);
-            sq->submit({}, {}, {});
-            sq->wait();
-            return device_buffer;
-        }
-
-        std::unique_ptr<VulkanBuffer> createDeviceBufferFloatsAsHalfFloats(Size const &size, const std::vector<float> &data) {
-            assert(size.numberOfElements() == data.size());
-            std::vector<ushort> half_floats(data.size());
-            for (int i = 0; i < data.size(); i++)
-                half_floats[i] = HalfFloatUtil::float_to_half(data[i]);
-            return createDeviceBuffer<ushort>(size, half_floats);
-        }
-
-        std::unique_ptr<VulkanBuffer> createBuffer(
-                Size const &size,
-                uint32_t elementMemorySize,
-                bool is_host_visible = false,
-                bool allow_transfers = false);
 
         std::shared_ptr<CommandBuffer> createCommandBuffer(
                 TimestampQueryPool *timestamp_query_pool = nullptr);
@@ -99,20 +70,20 @@ namespace musevk {
         };
         SwapChainSupportDetails querySwapChainSupport(vk::PhysicalDevice &device);
         static vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR> &availableFormats);
-        vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes) const;
-        vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities);
+        [[nodiscard]] vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes) const;
+        [[nodiscard]] vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities) const;
         void createSwapChain();
 
         static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
             vk::DebugUtilsMessageSeverityFlagBitsEXT message_severity,
             vk::DebugUtilsMessageTypeFlagBitsEXT message_type,
             const vk::DebugUtilsMessengerCallbackDataEXT* callback_data,
-            void* user_data);
+            void *user_data);
 
         VKAPI_ATTR VkBool32 VKAPI_CALL debugCallbackMember(
                 vk::DebugUtilsMessageSeverityFlagBitsEXT message_severity,
                 vk::DebugUtilsMessageTypeFlagBitsEXT message_type,
-                const vk::DebugUtilsMessengerCallbackDataEXT* callback_data);
+                const vk::DebugUtilsMessengerCallbackDataEXT *callback_data);
 
         const std::vector<const char *> c_validation_layers = {
                 "VK_LAYER_KHRONOS_validation"

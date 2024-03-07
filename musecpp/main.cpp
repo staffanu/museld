@@ -60,8 +60,8 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         for (int i = 0; i < INPUT_BUFFER_COUNT; i++)
             input_vulkan_buffers.push_back(
                     make_unique<InputReader::InputReaderBlock>(
-                            manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), true, true),
-                            manager.createBuffer(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint8_t), true, true)
+                            make_unique<musevk::VulkanBuffer>(manager, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), true, true),
+                            make_unique<musevk::VulkanBuffer>(manager, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint8_t), true, true)
                     ));
         if (!reader.initialize(input_vulkan_buffers))
             throw runtime_error("InputReader initialization failed");
@@ -83,7 +83,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     {
         auto command_buffer = manager.createCommandBuffer();
         Shaders shaders(log, executable_dir, manager);
-        TextRenderer text_renderer(executable_dir, manager, shaders.getResultImage());
+        TextRenderer text_renderer(executable_dir, manager);
 
         auto decoder = MuseDecoder(log,
                                    reader,
@@ -141,7 +141,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                 prev_osd_text = osd_text;
             }
             if (osd_text_remaining_frames) {
-                text_renderer.drawText(90, 50, osd_text, 4, *command_buffer);
+                text_renderer.drawText(shaders.getResultImage(), 90, 50, osd_text, 4, *command_buffer);
                 if (!--osd_text_remaining_frames)
                     redo_last_field = true;
             }
@@ -149,9 +149,9 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             if (enable_cursor) {
                 // Draw the pointer coordinates in the top left corner (both in single field and interpolated coordinates)
                 // If paused, and showing only a single field, also show the input stream offset for the start of the frame,
-                // the start of the current field, and the offsets for the pixel under the pointer, in the Y, Cr and Cb data.
-                // The offsets unfortunately aren't exact (I don't know why), but the offsets are very useful when
-                // investigating dropouts.
+                // the start of the current field (first line of audio data section), and the offsets for the pixel under the
+                // pointer, in the Y, Cr and Cb data. The offsets unfortunately aren't exact (I don't know why), but the
+                // offsets are very useful when investigating dropouts.
                 int xsize, ysize;
                 glfwGetWindowSize(window, &xsize, &ysize);
                 double xpos, ypos;
@@ -163,7 +163,7 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                                                 (int)(xpos / xsize * MUSE_Y_BUF_WIDTH * 3),
                                                 (int)(ypos / ysize * MUSE_BUF_HEIGHT * 2),
                                                 field_x, field_y);
-                    text_renderer.drawText(10, 8, cursor_string, 1, *command_buffer);
+                    text_renderer.drawText(shaders.getResultImage(), 10, 8, cursor_string, 1, *command_buffer);
                     if (field_interpolation_mode == MuseDecoder::FieldInterpolationMode::eForceIntraField && paused) {
                         long field_offset = last_buffer_file_offset // start of sound data
                                 + (long)((field_parity ? 565 : 2) * MUSE_TOTAL_WIDTH * input_samples_per_muse_sample);
@@ -175,17 +175,16 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
                                             field_offset + (int)(input_samples_per_muse_sample * ((field_y + 44) * MUSE_TOTAL_WIDTH + (field_x + 106))),
                                             field_offset + (int)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2) * MUSE_TOTAL_WIDTH + field_x / 4 + 11),
                                             field_offset + (int)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2 + 1) * MUSE_TOTAL_WIDTH + field_x / 4 + 11));
-                        text_renderer.drawText(10, 34, offset_string, 1, *command_buffer);
+                        text_renderer.drawText(shaders.getResultImage(), 10, 34, offset_string, 1, *command_buffer);
                         cursor_string += " " + offset_string;
                     }
                 }
                 if (paused)
                     redo_last_field = true;
             }
-            // FIXME: check synchronization here
 
             image->enqueueTransitionLayout(*command_buffer, vk::ImageLayout::eTransferSrcOptimal,
-                                           vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer,
+                                           vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer,
                                            vk::AccessFlags(), vk::AccessFlagBits::eTransferRead);
             command_buffer->enqueueTransitionMemoryLayout(swap_chain_image,
                                                           vk::ImageLayout::eUndefined,

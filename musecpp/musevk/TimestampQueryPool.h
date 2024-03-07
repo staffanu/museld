@@ -22,7 +22,7 @@ namespace musevk {
         ~TimestampQueryPool();
 
         void reset(CommandBuffer &command_buffer);
-        void timestamp(CommandBuffer &command_buffer, std::string label, vk::PipelineStageFlagBits stage);
+        void timestamp(CommandBuffer &command_buffer, std::string const &label, vk::PipelineStageFlagBits stage);
         std::vector<std::pair<std::string, int>> getTimestamps();
 
     private:

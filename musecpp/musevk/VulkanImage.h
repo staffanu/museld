@@ -9,16 +9,15 @@
 #include "VulkanMemoryObject.h"
 
 namespace musevk {
+    class VulkanManager;
     class CommandBuffer;
 
     class VulkanImage final : public VulkanMemoryObject {
     public:
-        VulkanImage(MemoryAllocator &memory_allocator,
-                    vk::Device &device,
+        VulkanImage(VulkanManager &vulkan_manager,
                     uint32_t width,
                     uint32_t height,
-                    vk::ImageUsageFlags image_usage_flags,
-                    std::optional<vk::ImageLayout> initial_layout);
+                    vk::ImageUsageFlags image_usage_flags);
 
         VulkanImage(const VulkanImage &other) = delete;
         VulkanImage &operator=(const VulkanImage &other) = delete;
@@ -66,7 +65,7 @@ namespace musevk {
     private:
         void allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags);
 
-        vk::Device &m_device;
+        VulkanManager &m_vulkan_manager;
         uint32_t m_width;
         uint32_t m_height;
 

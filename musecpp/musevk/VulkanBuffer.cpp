@@ -3,16 +3,16 @@
 //
 
 #include "VulkanBuffer.h"
+#include "VulkanManager.h"
 
 namespace musevk {
-    VulkanBuffer::VulkanBuffer(MemoryAllocator &memory_allocator,
-                               vk::Device &device,
+    VulkanBuffer::VulkanBuffer(VulkanManager &vulkan_manager,
                                Size size,
                                uint32_t element_size,
                                bool is_host,
                                bool allow_transfers) // only relevant for device local storage buffers
-            : VulkanMemoryObject(memory_allocator),
-              m_device(device),
+            : VulkanMemoryObject(vulkan_manager.getMemoryAllocator()),
+              m_vulkan_manager(vulkan_manager),
               m_size(size),
               m_memory_size(size.numberOfElements() * element_size),
               m_is_host(is_host),
@@ -34,7 +34,7 @@ namespace musevk {
                                          m_memory_size,
                                          buffer_usage_flags,
                                          vk::SharingMode::eExclusive);
-        m_buffer = m_device.createBuffer(buffer_info);
+        m_buffer = m_vulkan_manager.getDevice().createBuffer(buffer_info);
 
         m_descriptor_buffer_info = vk::DescriptorBufferInfo(m_buffer, 0, m_memory_size);
 
@@ -44,14 +44,14 @@ namespace musevk {
     }
 
     VulkanBuffer::~VulkanBuffer() {
-        m_device.destroy(m_buffer);
+        m_vulkan_manager.getDevice().destroy(m_buffer);
         m_memory_allocator.free(m_allocated_memory);
     }
 
     void VulkanBuffer::allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags) {
-        vk::MemoryRequirements memory_requirements = m_device.getBufferMemoryRequirements(m_buffer);
+        vk::MemoryRequirements memory_requirements = m_vulkan_manager.getDevice().getBufferMemoryRequirements(m_buffer);
 
         m_allocated_memory = m_memory_allocator.allocate(memory_requirements, memory_property_flags);
-        m_device.bindBufferMemory(m_buffer, m_allocated_memory.device_memory, m_allocated_memory.offset);
+        m_vulkan_manager.getDevice().bindBufferMemory(m_buffer, m_allocated_memory.device_memory, m_allocated_memory.offset);
     }
 }

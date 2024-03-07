@@ -6,17 +6,16 @@
 
 using namespace musevk;
 
-TextRenderer::TextRenderer(std::string const &executable_dir, VulkanManager &vulkan_manager, std::shared_ptr<VulkanImage> const &image)
+TextRenderer::TextRenderer(std::string const &executable_dir, VulkanManager &vulkan_manager)
 : m_vulkan_manager(vulkan_manager),
-  m_image(image),
-  m_font_buffer(vulkan_manager.createDeviceBuffer(Size(c_font_definition.size()), c_font_definition)),
+  m_font_buffer(VulkanUtil::createDeviceBuffer(vulkan_manager, Size(c_font_definition.size()), c_font_definition)),
   m_render_text_shader(std::shared_ptr<ComputeShader>(
           new ComputeShader(m_vulkan_manager.getDevice(),
-                            "render_text", {m_font_buffer, image}, sizeof(uint16_t) * 64,
+                            "render_text", {eBuffer, eImage}, sizeof(uint16_t) * 64,
                             musevk::VulkanUtil::loadSpirv(executable_dir, "render_text.comp"), musevk::Size(0)))) {
 }
 
-void TextRenderer::drawText(int x, int y, std::string s, int scale, CommandBuffer &command_buffer) {
+void TextRenderer::drawText(std::shared_ptr<VulkanImage> const &image, int x, int y, std::string s, int scale, CommandBuffer &command_buffer) {
     std::vector<uint16_t> push_constants = {
             (uint16_t)x,     // top_left_x
             (uint16_t)y,     // top_left_y
@@ -36,6 +35,11 @@ void TextRenderer::drawText(int x, int y, std::string s, int scale, CommandBuffe
     assert(push_constants.size() <= 64); // max push constant size that is guaranteed
     push_constants.resize(64);
 
+    image->enqueueTransitionLayout(command_buffer, vk::ImageLayout::eGeneral,
+                                   vk::PipelineStageFlagBits::eTopOfPipe,
+                                   vk::PipelineStageFlagBits::eComputeShader,
+                                   vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
+    m_render_text_shader->updateBufferDescriptorsInSet(0, {m_font_buffer, image});
     m_render_text_shader->updateWorkgroup(Size(c_glyph_width * s.length() * scale, c_glyph_height * scale));
     command_buffer.enqueueComputeShader(m_render_text_shader, push_constants);
 }

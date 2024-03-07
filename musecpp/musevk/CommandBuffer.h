@@ -22,8 +22,6 @@ namespace musevk {
                       vk::Queue &computeQueue,
                       TimestampQueryPool *timestamp_query_pool);
 
-        vk::CommandBuffer getCommandBuffer() { return m_command_buffer; }
-
         void begin();
 
         void enqueueTransitionMemoryLayout(vk::Image image,
@@ -69,6 +67,10 @@ namespace musevk {
             compute_shader->dispatch(m_command_buffer);
             maybeTimestamp(compute_shader->name(), vk::PipelineStageFlagBits::eComputeShader);
         }
+
+        void enqueueResetQueryPool(vk::QueryPool const &pool, unsigned int first_query, unsigned int query_count);
+
+        void enqueueWriteTimestamp(vk::PipelineStageFlagBits stage, vk::QueryPool const &pool, unsigned int query);
 
         void submit(std::vector<vk::Semaphore> const &wait_semaphores,
                     std::vector<vk::PipelineStageFlags> const &wait_dst_stage_masks,

@@ -83,18 +83,6 @@ private:
     Logger &m_log;
     musevk::VulkanManager &m_vulkan_manager;
 
-    std::vector<uint32_t> m_apply_eq_and_non_linear_spirv;
-    std::vector<uint32_t> m_apply_dropout_compensation_spirv;
-    std::vector<uint32_t> m_apply_deemphasis_and_gamma_spirv;
-    std::vector<uint32_t> m_copy_y_for_interpolation_spirv;
-    std::vector<uint32_t> m_diamond_spirv;
-    std::vector<uint32_t> m_filter_image_spirv;
-    std::vector<uint32_t> m_convert_horiz_sample_rate_spirv;
-    std::vector<uint32_t> m_fill_empty_lines_spirv;
-    std::vector<uint32_t> m_decode_c_spirv;
-    std::vector<uint32_t> m_detect_motion_spirv;
-    std::vector<uint32_t> m_combine_still_and_moving_spirv;
-
     std::shared_ptr<musevk::ComputeShader> m_apply_eq_and_non_linear_algo;
     std::shared_ptr<musevk::ComputeShader> m_apply_dropout_compensation_algo;
     std::shared_ptr<musevk::ComputeShader> m_apply_deemphasis_and_gamma_algo;

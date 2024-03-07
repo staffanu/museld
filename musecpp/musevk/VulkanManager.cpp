@@ -108,16 +108,6 @@ namespace musevk {
             throw runtime_error("presentKHR failed");
     }
 
-    unique_ptr<VulkanBuffer> VulkanManager::createBuffer(
-            Size const &size,
-            uint32_t elementMemorySize,
-            bool is_host_visible,
-            bool allow_transfers) {
-        return make_unique<VulkanBuffer>(*m_memory_allocator, m_logical_device,
-                                         size, elementMemorySize,
-                                         is_host_visible, allow_transfers);
-    }
-
     shared_ptr<CommandBuffer> VulkanManager::createCommandBuffer(
             TimestampQueryPool *timestamp_query_pool) {
         return make_unique<CommandBuffer>(
@@ -380,7 +370,7 @@ namespace musevk {
         return m_no_sync ? vk::PresentModeKHR::eImmediate : vk::PresentModeKHR::eFifo;
     }
 
-    vk::Extent2D VulkanManager::chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities) {
+    vk::Extent2D VulkanManager::chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities) const {
         if (capabilities.currentExtent.width != numeric_limits<uint32_t>::max()) {
             return capabilities.currentExtent;
         } else {

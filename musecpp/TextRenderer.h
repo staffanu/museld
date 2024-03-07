@@ -13,11 +13,11 @@ public:
     static constexpr int c_glyph_width = 12;
     static constexpr int c_glyph_height = 24;
 
-    TextRenderer(std::string const &executable_dir, musevk::VulkanManager &vulkan_manager, std::shared_ptr<musevk::VulkanImage> const &image);
+    TextRenderer(std::string const &executable_dir, musevk::VulkanManager &vulkan_manager);
     TextRenderer(const TextRenderer &) = delete;
     void operator=(const TextRenderer &) = delete;
 
-    void drawText(int x, int y, std::string s, int scale, musevk::CommandBuffer &command_buffer);
+    void drawText(std::shared_ptr<musevk::VulkanImage> const &image, int x, int y, std::string s, int scale, musevk::CommandBuffer &command_buffer);
 
 private:
     static const int c_font_codepoint_begin = 32;
@@ -25,7 +25,6 @@ private:
     static const std::vector<uint16_t> c_font_definition;
 
     musevk::VulkanManager &m_vulkan_manager;
-    std::shared_ptr<musevk::VulkanImage> m_image;
     std::shared_ptr<musevk::VulkanBuffer> m_font_buffer;
     std::shared_ptr<musevk::ComputeShader> m_render_text_shader;
 };

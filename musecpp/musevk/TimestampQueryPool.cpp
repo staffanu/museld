@@ -32,16 +32,13 @@ namespace musevk {
     }
 
     void TimestampQueryPool::reset(CommandBuffer &command_buffer) {
-        command_buffer.getCommandBuffer().resetQueryPool(m_timestamp_query_pool, 0, m_allocated_timestamp_queries);
+        command_buffer.enqueueResetQueryPool(m_timestamp_query_pool, 0, m_allocated_timestamp_queries);
         m_timestamped_operations.clear();
     }
 
-    void TimestampQueryPool::timestamp(CommandBuffer &command_buffer, std::string label, vk::PipelineStageFlagBits stage) {
+    void TimestampQueryPool::timestamp(CommandBuffer &command_buffer, std::string const &label, vk::PipelineStageFlagBits stage) {
         if (m_allocated_timestamp_queries > m_timestamped_operations.size()) {
-            command_buffer.getCommandBuffer().writeTimestamp(
-                    stage,
-                    m_timestamp_query_pool,
-                    m_timestamped_operations.size());
+            command_buffer.enqueueWriteTimestamp(stage, m_timestamp_query_pool, m_timestamped_operations.size());
             m_timestamped_operations.emplace_back(label);
         }
     }

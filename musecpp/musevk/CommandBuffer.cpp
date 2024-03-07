@@ -110,6 +110,14 @@ namespace musevk {
                                          nullptr);
     }
 
+    void CommandBuffer::enqueueResetQueryPool(vk::QueryPool const &pool, unsigned int first_query, unsigned int query_count) {
+        m_command_buffer.resetQueryPool(pool, first_query, query_count);
+    }
+
+    void CommandBuffer::enqueueWriteTimestamp(vk::PipelineStageFlagBits stage, vk::QueryPool const &pool, unsigned int query) {
+        m_command_buffer.writeTimestamp(stage, pool, query);
+    }
+
     void CommandBuffer::maybeTimestamp(std::string const &label, vk::PipelineStageFlagBits stage) {
         if (m_timestamp_query_pool != nullptr)
             m_timestamp_query_pool->timestamp(*this, label, stage);

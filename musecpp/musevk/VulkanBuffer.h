@@ -11,10 +11,11 @@
 #include "Size.h"
 
 namespace musevk {
+    class VulkanManager;
+
     class VulkanBuffer final : public VulkanMemoryObject {
     public:
-        VulkanBuffer(MemoryAllocator &memory_allocator,
-                     vk::Device &device,
+        VulkanBuffer(VulkanManager &vulkan_manager,
                      Size size,
                      uint32_t element_size,
                      bool is_host,
@@ -62,7 +63,7 @@ namespace musevk {
     private:
         void allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags);
 
-        vk::Device &m_device;
+        VulkanManager &m_vulkan_manager;
         Size m_size;
         uint32_t m_memory_size;
         bool m_is_host;
