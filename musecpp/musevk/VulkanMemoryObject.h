@@ -15,19 +15,53 @@ namespace musevk {
         eImage = 1
     };
 
+    enum HostAccess {
+        eHostNone = 0,
+        eHostRead = 1,
+        eHostWrite = 2,
+        eHostReadWrite = 3
+    };
+
     class VulkanMemoryObject {
     public:
         explicit VulkanMemoryObject(MemoryAllocator &memory_allocator)
-        : m_memory_allocator(memory_allocator){
+        : m_memory_allocator(memory_allocator),
+          m_raw_data(nullptr) {
         }
         virtual ~VulkanMemoryObject() = default;
 
         [[nodiscard]] virtual MemoryObjectType getType() const = 0;
+
+        template<typename T>
+        T *data() {
+            return (T*)m_raw_data;
+        }
+
         virtual vk::WriteDescriptorSet
         makeWriteDescriptorSet(vk::DescriptorSet &descriptor_set, uint32_t binding_index) const = 0;
 
     protected:
+        static vk::MemoryPropertyFlags makeMemoryPropertyFlags(HostAccess host_access) {
+            switch (host_access) {
+                case HostAccess::eHostNone:
+                    return vk::MemoryPropertyFlagBits::eDeviceLocal;
+                case HostAccess::eHostRead:
+                    return vk::MemoryPropertyFlagBits::eHostVisible |
+                           vk::MemoryPropertyFlagBits::eHostCached;
+                case HostAccess::eHostWrite:
+                    return vk::MemoryPropertyFlagBits::eHostVisible |
+                           vk::MemoryPropertyFlagBits::eHostCoherent;
+                case HostAccess::eHostReadWrite:
+                    return vk::MemoryPropertyFlagBits::eHostVisible |
+                           vk::MemoryPropertyFlagBits::eHostCoherent |
+                           vk::MemoryPropertyFlagBits::eHostCached;
+                default:
+                    throw std::runtime_error("Undefined host_access type");
+            }
+        }
+
         MemoryAllocator &m_memory_allocator;
+        void *m_raw_data;
     };
 }
 

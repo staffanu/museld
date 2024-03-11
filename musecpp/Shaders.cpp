@@ -34,8 +34,8 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_movement_coring_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_movement_enlarged_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_image_out(make_unique<VulkanImage>(m_vulkan_manager,
-                                       MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2,
-                                       vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc)),
+                                       MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, // eHostRead needed only if writing video output to file
+                                       vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc, eHostRead)),
   m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager,
           Size(9, 7),
           {
@@ -89,7 +89,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   0.026254025154003564, 0.033415918595708603, 0.021480566035093858, 0.000000000000000010,
                   -0.018175863568156325, -0.023868513282649006, -0.015752415092402161
           })),
-  m_audio_data(createMuseBuffer(88, MUSE_TOTAL_WIDTH * 3 / 4, true))
+  m_audio_data(createMuseBuffer(88, MUSE_TOTAL_WIDTH * 3 / 4, eHostRead))
 {
     m_apply_eq_and_non_linear_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "apply_eq_and_non_linear",
@@ -159,8 +159,8 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             Size(MUSE_TOTAL_WIDTH, 44), 2));
 }
 
-std::shared_ptr<musevk::VulkanBuffer> Shaders::createMuseBuffer(unsigned int height, unsigned int width, bool host_visible) {
-    return make_unique<VulkanBuffer>(m_vulkan_manager, Size(width, height), 2 /* sizeof(float16) */, host_visible, false);
+std::shared_ptr<musevk::VulkanBuffer> Shaders::createMuseBuffer(unsigned int height, unsigned int width, HostAccess host_access) {
+    return make_unique<VulkanBuffer>(m_vulkan_manager, Size(width, height), 2 /* sizeof(float16) */, vk::BufferUsageFlagBits::eStorageBuffer, host_access);
 }
 
 void Shaders::applyEqAndDeemphasisAndGamma(

@@ -18,8 +18,8 @@ namespace musevk {
         VulkanBuffer(VulkanManager &vulkan_manager,
                      Size size,
                      uint32_t element_size,
-                     bool is_host,
-                     bool allow_transfers);  // only relevant for device local storage buffers
+                     vk::BufferUsageFlags buffer_usage_flags,
+                     HostAccess host_access);
         VulkanBuffer(const VulkanBuffer &other) = delete;
         VulkanBuffer &operator=(const VulkanBuffer &other) = delete;
         VulkanBuffer(VulkanBuffer &&other) = delete;
@@ -55,19 +55,12 @@ namespace musevk {
             return m_memory_size;
         }
 
-        template<typename T>
-        T *data() {
-            return (T*)m_raw_data;
-        }
-
     private:
         void allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags);
 
         VulkanManager &m_vulkan_manager;
         Size m_size;
         uint32_t m_memory_size;
-        bool m_is_host;
-        void *m_raw_data;
 
         vk::Buffer m_buffer;
         AllocatedMemory m_allocated_memory;

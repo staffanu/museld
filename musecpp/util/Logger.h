@@ -25,6 +25,7 @@ enum LogCategoryFlags {
     eVideo = 8,
     eDecoder = 16,
     eInput = 32,
+    eOutput = 64,
 };
 
 inline LogCategoryFlags operator|(LogCategoryFlags a, LogCategoryFlags b)

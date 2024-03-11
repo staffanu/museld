@@ -17,10 +17,11 @@ namespace musevk {
         template<typename T>
         static std::unique_ptr<VulkanBuffer> createDeviceBuffer(VulkanManager &vulkan_manager, Size const &size, const std::vector<T> &data) {
             assert(size.numberOfElements() == data.size());
-            auto host_buffer = VulkanBuffer(vulkan_manager, size, sizeof(T), true, true /* unused */);
+            auto host_buffer = VulkanBuffer(vulkan_manager, size, sizeof(T), vk::BufferUsageFlagBits::eTransferSrc, eHostWrite);
             for (int i = 0; i < data.size(); i++)
                 host_buffer.data<T>()[i] = data[i];
-            auto device_buffer = std::make_unique<VulkanBuffer>(vulkan_manager, size, sizeof(T), false, true);
+            auto device_buffer = std::make_unique<VulkanBuffer>(
+                    vulkan_manager, size, sizeof(T), vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, eHostNone);
             auto sq = vulkan_manager.createCommandBuffer();
             sq->begin();
             sq->enqueueCopyBuffer(host_buffer, *device_buffer);

@@ -27,7 +27,7 @@ public:
     Shaders(Shaders &other) = delete;
     void operator=(const Shaders &) = delete;
 
-    std::shared_ptr<musevk::VulkanBuffer> createMuseBuffer(unsigned int height, unsigned int width, bool host_visible = false);
+    std::shared_ptr<musevk::VulkanBuffer> createMuseBuffer(unsigned int height, unsigned int width, musevk::HostAccess host_access = musevk::eHostNone);
 
     enum class DropoutMode {
         eNormal, eDisabled, eHighlight

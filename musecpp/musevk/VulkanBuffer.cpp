@@ -9,26 +9,13 @@ namespace musevk {
     VulkanBuffer::VulkanBuffer(VulkanManager &vulkan_manager,
                                Size size,
                                uint32_t element_size,
-                               bool is_host,
-                               bool allow_transfers) // only relevant for device local storage buffers
+                               vk::BufferUsageFlags buffer_usage_flags,
+                               HostAccess host_access)
             : VulkanMemoryObject(vulkan_manager.getMemoryAllocator()),
               m_vulkan_manager(vulkan_manager),
               m_size(size),
               m_memory_size(size.numberOfElements() * element_size),
-              m_is_host(is_host),
-              m_allocated_memory(),
-              m_raw_data(nullptr) {
-
-        auto buffer_usage_flags = m_is_host || allow_transfers ?
-                                  vk::BufferUsageFlagBits::eStorageBuffer |
-                                  vk::BufferUsageFlagBits::eTransferSrc |
-                                  vk::BufferUsageFlagBits::eTransferDst :
-                                  vk::BufferUsageFlagBits::eStorageBuffer;
-
-        auto memory_property_flags = m_is_host ?
-                                     vk::MemoryPropertyFlagBits::eHostVisible |
-                                     vk::MemoryPropertyFlagBits::eHostCoherent :
-                                     vk::MemoryPropertyFlagBits::eDeviceLocal;
+              m_allocated_memory() {
 
         vk::BufferCreateInfo buffer_info(vk::BufferCreateFlags(),
                                          m_memory_size,
@@ -38,9 +25,9 @@ namespace musevk {
 
         m_descriptor_buffer_info = vk::DescriptorBufferInfo(m_buffer, 0, m_memory_size);
 
-        allocateAndBindMemory(memory_property_flags);
+        allocateAndBindMemory(makeMemoryPropertyFlags(host_access));
 
-        m_raw_data = is_host ? m_allocated_memory.host_memory : nullptr;
+        m_raw_data = host_access != eHostNone ? m_allocated_memory.host_memory : nullptr;
     }
 
     VulkanBuffer::~VulkanBuffer() {

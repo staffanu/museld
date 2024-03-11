@@ -17,7 +17,8 @@ namespace musevk {
         VulkanImage(VulkanManager &vulkan_manager,
                     uint32_t width,
                     uint32_t height,
-                    vk::ImageUsageFlags image_usage_flags);
+                    vk::ImageUsageFlags image_usage_flags,
+                    HostAccess host_access);
 
         VulkanImage(const VulkanImage &other) = delete;
         VulkanImage &operator=(const VulkanImage &other) = delete;

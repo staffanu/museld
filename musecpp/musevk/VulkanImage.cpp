@@ -10,7 +10,8 @@ namespace musevk {
     VulkanImage::VulkanImage(VulkanManager &vulkan_manager,
                              uint32_t width,
                              uint32_t height,
-                             vk::ImageUsageFlags image_usage_flags)
+                             vk::ImageUsageFlags image_usage_flags,
+                             HostAccess host_access)
             : VulkanMemoryObject(vulkan_manager.getMemoryAllocator()),
               m_vulkan_manager(vulkan_manager),
               m_width(width),
@@ -29,15 +30,16 @@ namespace musevk {
                                        1, // mipLevels
                                        1, // arrayLayers
                                        vk::SampleCountFlagBits::e1,
-                                       vk::ImageTiling::eOptimal,
+                                       vk::ImageTiling::eLinear, // FIXME: inefficent -- use only when writing video file
                                        image_usage_flags,
                                        vk::SharingMode::eExclusive,
                                        nullptr,
                                        m_layout);
         m_image = m_vulkan_manager.getDevice().createImage(image_info);
 
-        auto memory_property_flags = vk::MemoryPropertyFlagBits::eDeviceLocal;
-        allocateAndBindMemory(memory_property_flags);
+        allocateAndBindMemory(makeMemoryPropertyFlags(host_access));
+
+        m_raw_data = host_access != eHostNone ? m_allocated_memory.host_memory : nullptr;
 
         vk::ImageViewCreateInfo view_info(vk::ImageViewCreateFlags(),
                                           m_image,

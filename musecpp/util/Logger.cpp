@@ -18,6 +18,7 @@ const map<LogCategoryFlags, LogPriority> Logger::c_log_all = {
         { eVideo, eDebug },
         { eDecoder, eDebug },
         { eInput, eDebug },
+        { eOutput, eDebug },
 };
 
 const map<LogCategoryFlags, LogPriority> Logger::c_log_info = {
@@ -27,6 +28,7 @@ const map<LogCategoryFlags, LogPriority> Logger::c_log_info = {
         { eVideo, eInfo },
         { eDecoder, eInfo },
         { eInput, eInfo },
+        { eOutput, eInfo },
 };
 
 const map<LogCategoryFlags, LogPriority> Logger::c_log_warn = {
@@ -36,6 +38,7 @@ const map<LogCategoryFlags, LogPriority> Logger::c_log_warn = {
         { eVideo, eWarn },
         { eDecoder, eWarn },
         { eInput, eWarn },
+        { eOutput, eWarn },
 };
 
 const map<int, string> Logger::c_priority_names = {
@@ -52,7 +55,8 @@ const map<int, string> Logger::c_category_names = {
         { eAudio, "audio" },
         { eVideo, "video" },
         { eDecoder, "decoder" },
-        { eInput, "input" }
+        { eInput, "input" },
+        { eOutput, "output" },
 };
 
 void Logger::log(LogPriority priority, LogCategoryFlags categorization, const std::string &message) {

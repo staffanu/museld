@@ -12,6 +12,9 @@ SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake-modules" ${CMAKE_MODULE_PATH})
 find_package(PORTAUDIO REQUIRED)
 include_directories("${PORTAUDIO_INCLUDE_DIRS}")
 
+find_package(LIBAV REQUIRED)
+include_directories("${LIBAV_INCLUDE_DIR}")
+
 #add_compile_options(-O0 -pg -g)
 #SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Og -pg -g")
 #SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -pg -g")
@@ -41,6 +44,7 @@ add_executable(musecpp
         AudioMode.h
         util/PercentileFilter.cpp util/PercentileFilter.h
         util/Logger.cpp util/Logger.h
+        VideoFileWriter.cpp VideoFileWriter.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandBuffer.cpp musevk/CommandBuffer.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h
@@ -64,6 +68,7 @@ target_link_libraries(musecpp
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
         PRIVATE fmt::fmt
+        PRIVATE ${LIBAV_LIBRARIES}
 )
 
 set(GLSLC "glslc")

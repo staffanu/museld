@@ -13,6 +13,7 @@
 #include "util/Logger.h"
 #include "musevk/TimestampQueryPool.h"
 #include "TextRenderer.h"
+#include "VideoFileWriter.h"
 
 #define INPUT_BUFFER_COUNT 6
 
@@ -37,9 +38,11 @@ void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "Error %d: %s\n", error, description); // FIXME: use logging framework
 }
 
-void process_file(Logger &log, const string& executable_dir, InputReader &reader,
+void process_file(Logger &log, const string &executable_dir, InputReader &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
-                  bool start_paused, bool decode_video, Shaders::DropoutMode dropout_mode, bool decode_audio, bool efm_audio, bool benchmark_shaders) {
+                  bool start_paused, bool decode_video, Shaders::DropoutMode dropout_mode,
+                  bool decode_audio, bool efm_audio, bool benchmark_shaders,
+                  optional<string> const &output_filename) {
     glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -60,11 +63,18 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
         for (int i = 0; i < INPUT_BUFFER_COUNT; i++)
             input_vulkan_buffers.push_back(
                     make_unique<InputReader::InputReaderBlock>(
-                            make_unique<musevk::VulkanBuffer>(manager, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), true, true),
-                            make_unique<musevk::VulkanBuffer>(manager, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint8_t), true, true)
+                            make_unique<musevk::VulkanBuffer>(manager, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite),
+                            make_unique<musevk::VulkanBuffer>(manager, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint8_t), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite)
                     ));
         if (!reader.initialize(input_vulkan_buffers))
             throw runtime_error("InputReader initialization failed");
+    }
+
+    unique_ptr<VideoFileWriter> vfw = nullptr;
+    if (output_filename.has_value()) {
+        vfw = make_unique<VideoFileWriter>(output_filename.value(), log, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, decode_all_fields ? 60 : 30);
+        if (!vfw->init())
+            throw runtime_error("Cannot initialize output encoder");
     }
 
     vk::SemaphoreCreateInfo semaphoreInfo{};
@@ -120,6 +130,9 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
             if (!paused)
                 field_count++;
             redo_last_field = false;
+
+            if (vfw != nullptr)
+                vfw->addVideoFrameWithAudio(image, audio_mode, audio_sample_count, audio_samples);
 
             if (audio_sample_count != 0 && audio_mode != MODE_UNKNOWN && !paused)
                 audio_playback.add_samples(audio_mode, audio_sample_count, audio_samples);
@@ -329,6 +342,10 @@ void process_file(Logger &log, const string& executable_dir, InputReader &reader
     device.destroy(render_finished_semaphore);
     device.destroy(in_flight_fence);
 
+    if (vfw != nullptr) {
+        vfw->cleanup();
+        vfw = nullptr;
+    }
     audio_playback.cleanup();
     reader.cleanup();
     manager.cleanup();
@@ -357,7 +374,8 @@ int main(int argc, char *argv[]) {
     bool input_is_fifo = false;
     double initial_seek_seconds = 0;
     bool start_paused = false;
-    optional<string> output_filename; // always written as little endian unsigned short values
+    optional<string> muse_output_filename; // always written as little endian unsigned short values
+    optional<string> output_filename; // format selected automatically from filename
     bool decode_video = true;
     Shaders::DropoutMode dropout_mode = Shaders::DropoutMode::eNormal;
     bool decode_audio = true;
@@ -414,6 +432,9 @@ int main(int argc, char *argv[]) {
     options.emplace_back("--pause", [&] () mutable -> void {
         start_paused = true;
     });
+    options.emplace_back("--write-muse", [&] () mutable -> void {
+        muse_output_filename = *(it++);
+    });
     options.emplace_back("--write", [&] () mutable -> void {
         output_filename = *(it++);
     });
@@ -433,8 +454,8 @@ int main(int argc, char *argv[]) {
         efm_audio = true;
     });
     options.emplace_back("--log", [&] () mutable -> void {
-        // loggins is specified with a string with a letter corresponding to the category
-        // (MPAVDI for Main(Application), Performance, Audio, Video, Decoder, and Input, respectively,
+        // Logging is specified with a string with a letter corresponding to the category
+        // (MPAVDIO for Main(Application), Performance, Audio, Video, Decoder, Input, and Output, respectively,
         // and a number corresponding to the amount of logging. 0-4 imples Off, Error, Warn, Info, Debug.
         // Default is Warn for all categories.
         if (it->length() %2)
@@ -468,6 +489,9 @@ int main(int argc, char *argv[]) {
                     break;
                 case 'I':
                     log_selection[eInput] = parseLevel((*it)[i + 1]);
+                    break;
+                case 'O':
+                    log_selection[eOutput] = parseLevel((*it)[i + 1]);
                     break;
                 default:
                     throw runtime_error("Unknown log category");
@@ -521,13 +545,13 @@ int main(int argc, char *argv[]) {
                                 input_format == eOverSampledSignedShortsLittleEndian
                                 ? ResamplingInputReader::eSignedShortLittleEndian
                                 : ResamplingInputReader::eUnsignedByte,
-                                input_sample_frequency, initial_seek_seconds, demodulate, output_filename);
+                                input_sample_frequency, initial_seek_seconds, demodulate, muse_output_filename);
                         break;
                     case eLittleEndianShorts:
                     case eBigEndianShorts:
                         reader = new PhaseCorrect16MHzInputReader(log, *it,
                                                                   input_format == eBigEndianShorts,
-                                                                  initial_seek_seconds, output_filename);
+                                                                  initial_seek_seconds, muse_output_filename);
                         break;
                     case eUnknown:
                     default:
@@ -536,7 +560,7 @@ int main(int argc, char *argv[]) {
                 }
                 process_file(log, executable_dir, *reader, decode_all_fields,
                              full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio, efm_audio,
-                             benchmark_shaders);
+                             benchmark_shaders, output_filename);
                 delete reader;
 
                 it++;
