@@ -27,7 +27,7 @@ void TextRenderer::drawText(std::shared_ptr<VulkanImage> const &image, int x, in
 
     for (int i = 0; i < s.length(); i += 2) {
         char c1 = s[i];
-        char c2 = i + 1 < s.length() ? s[i + 1] : 32;
+        char c2 = i + 1 < s.length() ? s[i + 1] : ' ';
         int glyph_index1 = c1 >= c_font_codepoint_begin && c1 < c_font_codepoint_end ? c1 - c_font_codepoint_begin : 0;
         int glyph_index2 = c2 >= c_font_codepoint_begin && c2 < c_font_codepoint_end ? c2 - c_font_codepoint_begin : 0;
         push_constants.push_back((glyph_index1 << 8) | glyph_index2);
@@ -45,10 +45,10 @@ void TextRenderer::drawText(std::shared_ptr<VulkanImage> const &image, int x, in
 }
 
 /*
- * This font is Spleen 12x24 2.0.2, opyright (c) 2018-2024, Frederic Cambus, https://www.cambus.net/
+ * This font is Spleen 12x24 2.0.2, copyright (c) 2018-2024, Frederic Cambus, https://www.cambus.net/
  * Spleen is released under the BSD 2-Clause license.
  *
- * To generate the code below form a bdf file, this command line was used:
+ * To generate the code below from a bdf file, this command line was used:
  * awk < spleen12x24.bdf '/^ENCODING/ { printf("// %d (%c)\n        ", c, c); c=$2 } /^[0-9A-F]{4}/ { printf("0x%s, ", $1) }'
  */
 const std::vector<uint16_t> TextRenderer::c_font_definition = {
