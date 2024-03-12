@@ -4,7 +4,6 @@
 
 #include <stdexcept>
 #include <memory>
-#include <fmt/format.h>
 #include "MuseTypes.h"
 #include "Shaders.h"
 #include "FieldBufferView.h"
@@ -184,7 +183,6 @@ void Shaders::applyEqAndDeemphasisAndGamma(
 }
 
 void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
-    //m_log.info(eVideo, fmt::format("Decoding frame {} field {}", field.m_frame_no, field.m_field_parity));
     if (field.control_data().has_value())
         field.control_data().value().log_control_data();
 
