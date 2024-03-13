@@ -69,36 +69,42 @@ void VideoFileWriter::addVideoFrameWithAudio(
             for (int j = 0; j < m_audio_stream.codec_context->ch_layout.nb_channels; j++)
                 *q++ = audio_samples[i].samples[j];
 
-        uint8_t *out[8];
         int bytes_per_sample = av_get_bytes_per_sample((AVSampleFormat)m_audio_stream.frame->format);
-        if (av_sample_fmt_is_planar((AVSampleFormat)m_audio_stream.frame->format)) {
-            for (int i = 0; i < m_audio_stream.codec_context->ch_layout.nb_channels; i++)
-                out[i] = {m_audio_stream.frame->data[i] + m_samples_in_frame * bytes_per_sample};
-        } else {
-            assert(false);
-        }
-        const uint8_t *in[8] = {m_audio_tmp_buffer};
 
-        ret = swr_convert(m_swr_ctx, out,
-                          m_audio_stream.frame->nb_samples - m_samples_in_frame,
-                          in, number_of_samples);
-        if (ret < 0)
-            throw std::runtime_error("Error while converting audio");
+        bool filled_frame;
+        do {
+            uint8_t *out[8];
+            if (av_sample_fmt_is_planar((AVSampleFormat)m_audio_stream.frame->format)) {
+                for (int i = 0; i < m_audio_stream.codec_context->ch_layout.nb_channels; i++)
+                    out[i] = {m_audio_stream.frame->data[i] + m_samples_in_frame * bytes_per_sample};
+            } else {
+                assert(false); // easy to add support if needed
+            }
+            const uint8_t *in[8] = {m_audio_tmp_buffer};
 
-        m_samples_in_frame += ret;
+            ret = swr_convert(m_swr_ctx, out,
+                              m_audio_stream.frame->nb_samples - m_samples_in_frame,
+                              in, number_of_samples);
+            number_of_samples = 0;
+            if (ret < 0)
+                throw std::runtime_error("Error while converting audio");
 
-        assert (m_samples_in_frame <= m_audio_stream.frame->nb_samples);
-        if (m_samples_in_frame == m_audio_stream.frame->nb_samples) {
+            m_samples_in_frame += ret;
 
-            m_encode_audio = !writeFrame(m_audio_stream.codec_context, m_audio_stream.stream, m_audio_stream.frame,
-                                         m_audio_stream.tmp_pkt);
+            assert (m_samples_in_frame <= m_audio_stream.frame->nb_samples);
+            filled_frame =  m_samples_in_frame == m_audio_stream.frame->nb_samples;
+            if (filled_frame) {
 
-            assert(av_frame_is_writable(m_audio_stream.frame));
+                m_encode_audio = !writeFrame(m_audio_stream.codec_context, m_audio_stream.stream, m_audio_stream.frame,
+                                             m_audio_stream.tmp_pkt);
 
-            m_audio_stream.frame->pts = m_audio_stream.next_pts;
-            m_audio_stream.next_pts += m_audio_stream.frame->nb_samples;
-            m_samples_in_frame = 0;
-        }
+                assert(av_frame_is_writable(m_audio_stream.frame)); // it seems like audio frames are always writable after making writable the first time?
+
+                m_audio_stream.frame->pts = m_audio_stream.next_pts;
+                m_audio_stream.next_pts += m_audio_stream.frame->nb_samples;
+                m_samples_in_frame = 0;
+            }
+        } while (filled_frame);
     }
 }
 
@@ -309,6 +315,7 @@ AVFrame *VideoFileWriter::makeVideoFrame(OutputStream *ost, std::shared_ptr<muse
 
 void VideoFileWriter::copyImageToFrame(AVFrame *pict, std::shared_ptr<musevk::VulkanImage> const &image) {
     for (int y = 0; y < image->getHeight(); y++)
+        // FIXME: I haven't figured out how to feed linear RGB values to swscale, so apply a 2.2 inverse gamma
         for (int x = 0; x < image->getWidth() * 4; x++)
             pict->data[0][y * pict->linesize[0] + x] = pow(image->data<uint8_t>()[y * image->getWidth() * 4 + x] / 256.0, 1/2.2) * 256;
         //memcpy(pict->data[0] + y * pict->linesize[0], image->data<uint32_t>() + y * image->getWidth(), image->getWidth() * 4);

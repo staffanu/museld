@@ -13,10 +13,8 @@
 #include "AudioDecoder.h"
 
 extern "C" {
-#include <libavutil/avassert.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/opt.h>
-#include <libavutil/mathematics.h>
 #include <libavutil/timestamp.h>
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -66,7 +64,7 @@ private:
         AVPacket *tmp_pkt;
     };
 
-    static constexpr int64_t c_video_output_bit_rate = 2000000;
+    static constexpr int64_t c_video_output_bit_rate = 5000000;
 
     void initStream(OutputStream *ost, enum AVCodecID codec_id);
     void initVideo(AVDictionary *opt_arg);
