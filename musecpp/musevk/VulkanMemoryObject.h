@@ -47,6 +47,7 @@ namespace musevk {
                     return vk::MemoryPropertyFlagBits::eDeviceLocal;
                 case HostAccess::eHostRead:
                     return vk::MemoryPropertyFlagBits::eHostVisible |
+                           vk::MemoryPropertyFlagBits::eHostCoherent |
                            vk::MemoryPropertyFlagBits::eHostCached;
                 case HostAccess::eHostWrite:
                     return vk::MemoryPropertyFlagBits::eHostVisible |

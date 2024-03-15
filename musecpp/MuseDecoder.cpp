@@ -55,8 +55,11 @@ bool MuseDecoder::initialize() {
     // Always keep the three latest frames (required for motion detection) -- pretend we have three already
     // The newest frame is always at index 0
     for (int i = 0; i < 3; i++)
-        m_frame_buffers.push_back(new FrameBuffer(m_log, -i,
-                                                  m_shaders.createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)));
+        m_frame_buffers.push_back(
+                new FrameBuffer(m_log, -i,
+                                make_unique<musevk::VulkanBuffer>(
+                                        m_manager, musevk::Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT), 2 /* sizeof(float16) */,
+                                        vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostRead)));
 
     for (int i = 0; i < 3; i++)
         for (int parity = 0; parity <= 1; parity++) {
