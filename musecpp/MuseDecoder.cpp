@@ -95,7 +95,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
     }
 
     std::unique_ptr<InputReader::InputReaderBlock> input_block = nullptr;
-    InputReader::InputStatus input_status;
+    InputReader::InputStatus input_status = InputReader::InputStatus::eNormal;
     if (m_field_index == 0 && !redo_last_field) {
         auto frame_buffer = m_frame_buffers.back();
         m_frame_buffers.pop_back();
@@ -106,6 +106,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
             case InputReader::InputStatus::eEof:
                 return false;
             case InputReader::InputStatus::eTimeout:
+                m_log.info(eDecoder, "Input timeout");
                 return true;
             default:
                 assert(input_block != nullptr);
@@ -157,12 +158,12 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                 m_frame_buffers[2]->get_field(decoded_field_index)};
 
         if (m_shaders.decodeInterFrameAndDetectMotion(*m_second_stage_command_buffer, fields, true)) {
-            m_log.debug(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation success", decoded_field_index));
+            m_log.debug(eVideo, fmt::format("Field {} inter-frame interpolation success", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
                                                  field_interpolation_mode == FieldInterpolationMode::eForceIntraField,
                                                  field_interpolation_mode == FieldInterpolationMode::eForceInterFrame);
         } else {
-            m_log.warn(eDecoder | eVideo, fmt::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
+            m_log.warn(eVideo, fmt::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false);
         }
     }

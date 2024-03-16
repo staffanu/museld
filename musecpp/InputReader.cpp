@@ -92,7 +92,7 @@ InputReader::getNextInputBuffer() {
 
         m_cv_filled.wait_for(
                 lock,
-                chrono::microseconds(100),
+                chrono::milliseconds(100),
                 [this] { return m_reader_thread_finished || !m_filled_muse_input_buffers.empty(); });
 
         if (m_filled_muse_input_buffers.empty())

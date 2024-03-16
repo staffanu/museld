@@ -2,6 +2,7 @@
 // Created by staffanu on 9/24/23.
 //
 
+#include <fmt/format.h>
 #include "MemoryAllocator.h"
 
 #define ALLOCATION_BLOCK_SIZE (8 * 1024 * 1024)
@@ -12,14 +13,19 @@ namespace musevk {
 
         int32_t memory_type_index = -1;
         vk::PhysicalDeviceMemoryProperties memory_properties = m_physical_device.getMemoryProperties();
-        for (uint32_t i = 0; i < memory_properties.memoryTypeCount; i++) {
+        for (int32_t i = 0; i < memory_properties.memoryTypeCount; i++) {
             if (memory_requirements.memoryTypeBits & (1 << i) &&
                 (memory_properties.memoryTypes[i].propertyFlags & properties) == properties) {
                 memory_type_index = i;
+                break;
             }
         }
         if (memory_type_index == -1)
-            throw std::runtime_error("Memory type index for memory allocation not found");
+            throw std::runtime_error(fmt::format("Memory type index for memory allocation not found; "
+                                                 "memory_requirements(size={}, alignment={}, bits={}), "
+                                                 "properties={}",
+                                                 memory_requirements.size, memory_requirements.alignment, memory_requirements.memoryTypeBits,
+                                                 (uint32_t)properties));
 
         bool is_host_visible = properties & vk::MemoryPropertyFlagBits::eHostVisible ? true : false;
         auto key = std::make_pair(memory_type_index, is_host_visible);

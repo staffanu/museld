@@ -41,25 +41,7 @@ namespace musevk {
         makeWriteDescriptorSet(vk::DescriptorSet &descriptor_set, uint32_t binding_index) const = 0;
 
     protected:
-        static vk::MemoryPropertyFlags makeMemoryPropertyFlags(HostAccess host_access) {
-            switch (host_access) {
-                case HostAccess::eHostNone:
-                    return vk::MemoryPropertyFlagBits::eDeviceLocal;
-                case HostAccess::eHostRead:
-                    return vk::MemoryPropertyFlagBits::eHostVisible |
-                           vk::MemoryPropertyFlagBits::eHostCoherent |
-                           vk::MemoryPropertyFlagBits::eHostCached;
-                case HostAccess::eHostWrite:
-                    return vk::MemoryPropertyFlagBits::eHostVisible |
-                           vk::MemoryPropertyFlagBits::eHostCoherent;
-                case HostAccess::eHostReadWrite:
-                    return vk::MemoryPropertyFlagBits::eHostVisible |
-                           vk::MemoryPropertyFlagBits::eHostCoherent |
-                           vk::MemoryPropertyFlagBits::eHostCached;
-                default:
-                    throw std::runtime_error("Undefined host_access type");
-            }
-        }
+        static vk::MemoryPropertyFlags makeMemoryPropertyFlags(HostAccess host_access);
 
         MemoryAllocator &m_memory_allocator;
         void *m_raw_data;

@@ -62,6 +62,7 @@ add_executable(musecpp
         efm/EfmDecoder.cpp efm/EfmDecoder.h
         efm/ByteWithErasureFlag.h
         musevk/Size.h
+        musevk/VulkanMemoryObject.cpp
 )
 target_link_libraries(musecpp
         PRIVATE glfw
