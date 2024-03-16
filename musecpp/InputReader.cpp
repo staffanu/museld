@@ -82,20 +82,21 @@ void InputReader::cleanup() {
     }
 }
 
-pair<unique_ptr<InputReader::InputReaderBlock>, InputReader::PresentationHint>
+pair<unique_ptr<InputReader::InputReaderBlock>, InputReader::InputStatus>
 InputReader::getNextInputBuffer() {
     m_get_input_buffers_count++;
     unique_ptr<InputReaderBlock> buffer = nullptr;
-    PresentationHint hint = eNormal;
+    InputStatus hint = InputStatus::eNormal;
     {
         unique_lock<std::mutex> lock(m_mutex);
 
-        m_cv_filled.wait(
+        m_cv_filled.wait_for(
                 lock,
+                chrono::microseconds(100),
                 [this] { return m_reader_thread_finished || !m_filled_muse_input_buffers.empty(); });
 
         if (m_filled_muse_input_buffers.empty())
-            return {nullptr, eNormal};
+            return {nullptr, m_reader_thread_finished ? InputStatus::eEof : InputStatus::eTimeout};
 
         buffer = std::move(m_filled_muse_input_buffers.front());
         m_filled_muse_input_buffers.pop_front();
@@ -103,10 +104,10 @@ InputReader::getNextInputBuffer() {
         auto filled_buffers = m_filled_muse_input_buffers.size();
         if (filled_buffers == 0 && !m_reader_thread_finished) {
             m_log.warn(eInput, fmt::format("getNextInputBuffer: no filled buffers after this one"));
-            hint = eSlowdown;
+            hint = InputStatus::eBuffersEmpty;
         } else if (m_vacant_muse_input_buffers.empty() && m_input_is_realtime) {
             m_log.warn(eInput, fmt::format("getNextInputBuffer: no vacant buffers available"));
-            hint = eSpeedup;
+            hint = InputStatus::eBuffersFilled;
         } else if (m_get_input_buffers_count % 30 == 0)
             m_log.debug(eInput, fmt::format("getNextInputBuffer: {} buffers filled", filled_buffers));
     }

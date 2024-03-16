@@ -80,7 +80,9 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                        int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
                        FieldInterpolationMode field_interpolation_mode,
                        bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode) {
-    if (redo_last_field)
+    *sample_count = 0;
+
+    if (redo_last_field) // undo the field advance from the previous call
         m_field_index = (m_field_index + 1) % 2;
 
     auto t0 = chrono::high_resolution_clock::now();
@@ -93,15 +95,21 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
     }
 
     std::unique_ptr<InputReader::InputReaderBlock> input_block = nullptr;
-    InputReader::PresentationHint presentation_hint;
+    InputReader::InputStatus input_status;
     if (m_field_index == 0 && !redo_last_field) {
         auto frame_buffer = m_frame_buffers.back();
         m_frame_buffers.pop_back();
         m_frame_buffers.push_front(frame_buffer);
 
-        tie(input_block, presentation_hint) = m_reader.getNextInputBuffer();
-        if (input_block == nullptr) {
-            return false;
+        tie(input_block, input_status) = m_reader.getNextInputBuffer();
+        switch (input_status) {
+            case InputReader::InputStatus::eEof:
+                return false;
+            case InputReader::InputStatus::eTimeout:
+                return true;
+            default:
+                assert(input_block != nullptr);
+                break;
         }
         frame_buffer->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_muse_sample);
         shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
@@ -173,8 +181,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
             *audio_mode = MODE_EFM;
         } else // MUSE audio
             m_audio_decoder.decodeFrame(m_frame_no, m_shaders.getAudioData(), audio_mode, sample_count, output_samples);
-    } else
-        *sample_count = 0;
+    }
 
     if (input_block != nullptr)
         m_reader.returnBuffer(input_block); // EFM audio uses the buffer, so we cannot return it until now
@@ -192,7 +199,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                                          m_field_index, time_us / 1000,
                                          m_total_elapsed_time_us / 1000 / m_frame_no));
 
-    if (presentation_hint == InputReader::eSpeedup)
+    if (input_status == InputReader::InputStatus::eBuffersFilled)
         m_field_index = 0; // skip second field -- next field will be from the next frame
     else
         m_field_index = (m_field_index + 1) % 2;

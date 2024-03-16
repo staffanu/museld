@@ -43,6 +43,7 @@ public:
         eNormal, eForceIntraField, eForceInterFrame
     };
 
+    // true if not eof.  In case of a read timeout also returns true so that we can check for key presses.
     bool next(bool efm_audio, AudioMode *audio_mode,
               int *sample_count,
               AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples],

@@ -44,13 +44,15 @@ public:
     [[nodiscard]] virtual bool initialize(std::vector<std::unique_ptr<InputReaderBlock>> &buffers);
     virtual void cleanup();
 
-    enum PresentationHint {
+    enum class InputStatus {
         eNormal = 0,
-        eSlowdown = 1,
-        eSpeedup = 2
+        eBuffersEmpty = 1,
+        eBuffersFilled = 2, // buffers all filled, real-time input
+        eTimeout = 3, // returned value is null
+        eEof = 4, // returned value is null
     };
 
-    std::pair<std::unique_ptr<InputReaderBlock>, PresentationHint> getNextInputBuffer();
+    std::pair<std::unique_ptr<InputReaderBlock>, InputStatus> getNextInputBuffer();
     void returnBuffer(std::unique_ptr<InputReaderBlock> &buffer);
     virtual void seek(double seconds) = 0;
 
