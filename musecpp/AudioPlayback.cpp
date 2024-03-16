@@ -126,8 +126,8 @@ void AudioPlayback::openStream() {
     PaDeviceIndex count = Pa_GetDeviceCount();
     for (PaDeviceIndex i = 0; i < count; i++) {
         auto *info = Pa_GetDeviceInfo(i);
-        m_log.debug(eAudio, fmt::format("Device {}: maximum {} output channels",
-                                        info->name, info->maxOutputChannels));
+        m_log.debug(eAudio, fmt::format("Device {}: {}, maximum {} output channels",
+                                        i, info->name, info->maxOutputChannels));
     }
 
     PaDeviceIndex device_index = Pa_GetDefaultOutputDevice();
