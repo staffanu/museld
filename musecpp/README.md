@@ -11,6 +11,24 @@ have not been merged to the main branch.
 
 The code is mostly written in C++, with video filtering done by the GPU, using Vulkan and GLSL.
 
+The project uses cmake, and the following commands should build the project on Ubuntu.  This also installs most
+of the dependencies, but you also require a C++ compiler, and I didn't want to pick one for you.  g++ or clang should
+both work.  You also need a graphics driver that supports Vulkan.
+
+```console
+sudo apt install cmake glslc portaudio19-dev libavformat-dev libavcodec-dev libswscale-dev catch2 vulkan-tools vulkan-validationlayers-dev
+git clone https://bitbucket.org/staffanulfberg/ldaudio.git
+cd ldaudio/musecpp
+cmake -DCMAKE_BUILD_TYPE=Release -B build-release .
+cmake --build build-release
+```
+
+To run the program, see command line options below, but for a quick start download an example RF capture and play it:
+```console
+wget --directory-prefix ../data/muse https://madeye.org/muse-demo/makeup-muse-rf-62.5MHz-nofilter.raw
+./build-release/musecpp --demodulate ../data/muse https://madeye.org/muse-demo/makeup-muse-rf-62.5MHz-nofilter.raw
+```
+
 ![](test-picture.png)
 
 ### Command line options
@@ -64,11 +82,16 @@ surrounding picture area.  This can also be changed during playback by pressing 
 If demodulating an RF signal, this uses the EFM data for audio, instead of decoding MUSE audio.  This can also be changed during
 playback by pressing the A key.
 
-> --write <filename>
+> --write-muse <filename>
 
 Writes the input stream in the --little-endian format.  This is useful for creating small video segments from larger
 files, and also to re-code captures from one of the oversampled or RF formats.  Notice that in the case of RF, the
 EFM data is lost.
+
+> --write <filename>
+
+Writes the decoded video into a media file.  This uses the Ffmpeg libraries and is currently very experimental:
+for one, video and audio is not properly synchronized.
 
 > --fifo
 
@@ -198,6 +221,12 @@ is if this feature was never actually used for MUSE laserdiscs, or if the specif
 encoded elsewhere.  I've looked quite extensively at the control signal and concluded that the other bits do not contain
 this information either, since it is mostly constant.
 
+> Audio channel mapping
+
+I'm using the Portaudio library to output audio.  For four-channel (mode A) MUSE audio the channels aren't mapped correctly,
+and I don't understand if it is possible to query the library which channel is which.  The short term plan is to make it right on
+my laptop, but I suspect the channel indices might differ depending on audio hardware.
+
 > Adjustable RF input sample rate
 
 When demodulating RF, the sample rate is currently fixed at 62.5 MHz.  The filters are hard coded in the application and
@@ -225,13 +254,25 @@ more time on these filters.
 
 The motion detection algorithm is quite simplistic and could probably be improved.
 
+> Adaptive equalization
+
+The MUSE signal is very sensitive to the channel characteristics, and especially phase shifts are bad.  Initially, for RF
+captures, I tried to use a lowpass filter before sampling the signal to remove any noise over the Nyquist frequency, 
+but results are much better without any analog input filter at all, at least compared to the filter that I used, that
+distorted the phase of the signal too much.  Adaptive equalization could be used to mitigate such effects, and
+the book by Yuichi Ninomiya (see the list below) described how to do this in Chapter 4.12.  I've not spent any serious
+time trying to understand this in detail, however.
+
 ### Information on MUSE
 
 The information on MUSE that is available is quite sparse, and some of it is out of date.  Of course, it is all out of date
 in some sense of the word, but apparently some details were changed after some of these articles and books were published.
 
-* A method of moving area-detection technique in a muse decoder, Yoshinori Izumi, Seiichi Gohshi, Yuichi Ninomiya, 1993.
-* An HDTV Broadcasting System Utilizing a Bandwidth Compression Technique-MUSE, Seiichi Gohshi, 1988.
+* MUSE－ハイビジョン伝送方式 (MUSE-High-Vision Transmission System), Yuichi Ninomiya, 1990. 
+  In Japanese; I managed to get a used copy from amazon.co.jp.
+* [High Definition Television Hi Vision Technology](https://archive.org/details/high-definition-television-hi-vision-technology),
+  NHK Science and Technical Research Laboratories, 1993.
+* An HDTV Broadcasting System Utilizing a Bandwidth Compression Technique-MUSE, Seiichi Gohshi, 1988. 
+  In this article the mapping table from audio ternary symbols to bits is incorrect -- I assume they changed it after publication.
 * MUSE system for HDTV broadcasting-satellite services, ITU-R BO.786, 1992.
-* [High Definition Television Hi Vision Technology](https://archive.org/details/high-definition-television-hi-vision-technology), NHK Science and Technical Research Laboratories, 1993.
-* MUSE－ハイビジョン伝送方式 (MUSE-High-Vision Transmission System), Yuichi Ninomiya, 1990. In Japanese.
+* A method of moving area-detection technique in a muse decoder, Yoshinori Izumi, Seiichi Gohshi, Yuichi Ninomiya, 1993.
