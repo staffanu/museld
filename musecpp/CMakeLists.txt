@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.22)
 project(musecpp)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -12,14 +12,15 @@ SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake-modules" ${CMAKE_MODULE_PATH})
 find_package(PORTAUDIO REQUIRED)
 include_directories("${PORTAUDIO_INCLUDE_DIRS}")
 
-find_package(LIBAV REQUIRED)
-include_directories("${LIBAV_INCLUDE_DIR}")
+find_package(LIBAV)
+if (HAVE_LIBAV)
+    add_compile_definitions(HAVE_LIBAV)
+    include_directories("${LIBAV_INCLUDE_DIR}")
+else()
+    message("FFMpeg not found or wrong version; not building support for writing video files.")
+endif()
 
-#add_compile_options(-O0 -pg -g)
-#SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Og -pg -g")
-#SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -pg -g")
-
-# -mavx is hopefully implied by -march=native
+# -march=native is used to add, e.g., -mavx for architectures where it is available
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math -march=native")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ffast-math -march=native") # -fsanitize=address")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -ffast-math -march=native")
@@ -44,7 +45,6 @@ add_executable(musecpp
         AudioMode.h
         util/PercentileFilter.cpp util/PercentileFilter.h
         util/Logger.cpp util/Logger.h
-        VideoFileWriter.cpp VideoFileWriter.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandBuffer.cpp musevk/CommandBuffer.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h
@@ -64,6 +64,12 @@ add_executable(musecpp
         musevk/Size.h
         musevk/VulkanMemoryObject.cpp
 )
+if (HAVE_LIBAV)
+    target_sources(musecpp PRIVATE
+        VideoFileWriter.cpp VideoFileWriter.h
+    )
+endif()
+
 target_link_libraries(musecpp
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan

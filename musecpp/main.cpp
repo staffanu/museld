@@ -13,7 +13,10 @@
 #include "util/Logger.h"
 #include "musevk/TimestampQueryPool.h"
 #include "TextRenderer.h"
-#include "VideoFileWriter.h"
+
+#ifdef HAVE_LIBAV
+# include "VideoFileWriter.h"
+#endif
 
 #define INPUT_BUFFER_COUNT 6
 
@@ -70,12 +73,14 @@ void process_file(Logger &log, const string &executable_dir, InputReader &reader
             throw runtime_error("InputReader initialization failed");
     }
 
+#ifdef HAVE_LIBAV
     unique_ptr<VideoFileWriter> vfw = nullptr;
     if (output_filename.has_value()) {
         vfw = make_unique<VideoFileWriter>(output_filename.value(), log, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, decode_all_fields ? 60 : 30);
         if (!vfw->init())
             throw runtime_error("Cannot initialize output encoder");
     }
+#endif
 
     vk::SemaphoreCreateInfo semaphoreInfo{};
     vk::FenceCreateInfo fenceInfo{};
@@ -131,8 +136,10 @@ void process_file(Logger &log, const string &executable_dir, InputReader &reader
                 field_count++;
             redo_last_field = false;
 
+#ifdef HAVE_LIBAV
             if (vfw != nullptr)
                 vfw->addVideoFrameWithAudio(image, audio_mode, audio_sample_count, audio_samples);
+#endif
 
             if (audio_sample_count != 0 && audio_mode != MODE_UNKNOWN && !paused)
                 audio_playback.add_samples(audio_mode, audio_sample_count, audio_samples);
@@ -329,7 +336,7 @@ void process_file(Logger &log, const string &executable_dir, InputReader &reader
         auto t1 = chrono::high_resolution_clock::now();
         auto time_us = (double) chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
         log.info(eApplication | ePerformance,
-            fmt::format("Total {} frames.  Avg {:.3f} ms/m_frame ({:.3f} frames/s)",
+            fmt::format("Total {} frames.  Avg {:.3f} ms/frame ({:.3f} frames/s)",
                         field_count / 2,
                         time_us / 1000.0 / field_count * 2,
                         1000000.0 / time_us * field_count / 2));
@@ -342,10 +349,12 @@ void process_file(Logger &log, const string &executable_dir, InputReader &reader
     device.destroy(render_finished_semaphore);
     device.destroy(in_flight_fence);
 
+#ifdef HAVE_LIBAV
     if (vfw != nullptr) {
         vfw->cleanup();
         vfw = nullptr;
     }
+#endif
     audio_playback.cleanup();
     reader.cleanup();
     manager.cleanup();
@@ -436,7 +445,11 @@ int main(int argc, char *argv[]) {
         muse_output_filename = *(it++);
     });
     options.emplace_back("--write", [&] () mutable -> void {
+#ifdef HAVE_LIBAV
         output_filename = *(it++);
+#else
+        throw std::runtime_error("FFMPEG is not available");
+#endif
     });
     options.emplace_back("--no-video", [&] () mutable -> void {
         decode_video = false;

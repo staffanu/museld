@@ -13,15 +13,19 @@ The code is mostly written in C++, with video filtering done by the GPU, using V
 
 The project uses cmake, and the following commands should build the project on Ubuntu.  This also installs most
 of the dependencies, but you also require a C++ compiler, and I didn't want to pick one for you.  g++ or clang should
-both work.  You also need a graphics driver that supports Vulkan.
+both work.  You also need a graphics driver that supports Vulkan.  I'm using Ubuntu 23.10.
 
 ```console
-sudo apt install cmake glslc portaudio19-dev libavformat-dev libavcodec-dev libswscale-dev catch2 vulkan-tools vulkan-validationlayers-dev
+sudo apt install cmake glslc libglfw3-dev portaudio19-dev libavformat-dev libavcodec-dev libswscale-dev catch2 vulkan-tools vulkan-validationlayers-dev
 git clone https://bitbucket.org/staffanulfberg/ldaudio.git
 cd ldaudio/musecpp
 cmake -DCMAKE_BUILD_TYPE=Release -B build-release .
 cmake --build build-release
 ```
+
+For earlier Ubuntu distributions the glslc package isn't available. Another way to install the tool
+is to follow the instuctions at https://vulkan.lunarg.com/sdk/home and install their vulcan-sdk which includes
+shaderc (that includes the glslc command).
 
 To run the program, see command line options below, but for a quick start download an example RF capture and play it:
 ```console
