@@ -159,12 +159,6 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, float const *data, std::
 
     still_picture = vector_index_to_bit_opt(result, 23);
 
-    if (horizontal_motion_vector.has_value() && horizontal_motion_vector.value() != 0 ||
-        vertical_motion_vector.has_value() && vertical_motion_vector.value() != 0 ||
-        motion_sensitivity_ctrl.has_value() && motion_sensitivity_ctrl.value() != 0 ||
-        edge_detection_prohibited.has_value() && motion_sensitivity_ctrl.value() != 0)
-        // Of course this is not an error -- but if we see examples we don't want to miss them!
-        throw runtime_error("Actually found non-zero motion vector!");
 }
 
 void ControlSignalDecoder::log_control_data() const {
