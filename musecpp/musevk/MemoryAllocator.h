@@ -10,6 +10,7 @@
 #include <vulkan/vulkan.hpp>
 #include <memory>
 #include <mutex>
+#include "../util/Logger.h"
 
 namespace musevk {
     struct AllocatedMemory {
@@ -38,9 +39,11 @@ namespace musevk {
      */
     class MemoryAllocator {
     public:
-        MemoryAllocator(vk::PhysicalDevice &physical_device,
+        MemoryAllocator(Logger &log,
+                        vk::PhysicalDevice &physical_device,
                         vk::Device &device)
-                : m_physical_device(physical_device),
+                : m_log(log),
+                  m_physical_device(physical_device),
                   m_device(device),
                   m_memory_pools(),
                   m_mutex() {
@@ -56,6 +59,10 @@ namespace musevk {
         ~MemoryAllocator();
 
     private:
+        static void printMemoryProperties(Logger &log, const VkPhysicalDeviceMemoryProperties& memProperties);
+        static std::string memoryPropertyFlagsToString(VkMemoryPropertyFlags flags);
+        static std::string memoryHeapFlagsToString(VkMemoryHeapFlags flags);
+
         struct MemoryBlock {
             vk::Device device;
             std::pair<int32_t, bool> allocation_key;
@@ -79,6 +86,7 @@ namespace musevk {
             void free(AllocatedMemory &allocation);
         };
 
+        Logger &m_log;
         vk::PhysicalDevice &m_physical_device;
         vk::Device &m_device;
         std::map<std::pair<int32_t, bool>, AllocationPool> m_memory_pools;

@@ -2,8 +2,11 @@
 // Created by staffanu on 9/24/23.
 //
 
+#include <iostream>
+#include <vector>
 #include <fmt/format.h>
 #include "MemoryAllocator.h"
+#include "../util/Logger.h"
 
 #define ALLOCATION_BLOCK_SIZE (16 * 1024 * 1024)
 
@@ -21,12 +24,15 @@ namespace musevk {
                 break;
             }
         }
-        if (memory_type_index == -1)
+        if (memory_type_index == -1) {
+            printMemoryProperties(m_log, memory_properties);
             throw std::runtime_error(fmt::format("Memory type index for memory allocation not found; "
                                                  "memory_requirements(size={}, alignment={}, bits={}), "
                                                  "properties={}",
-                                                 memory_requirements.size, memory_requirements.alignment, memory_requirements.memoryTypeBits,
-                                                 (uint32_t)properties));
+                                                 memory_requirements.size, memory_requirements.alignment,
+                                                 memory_requirements.memoryTypeBits,
+                                                 (uint32_t) properties));
+        }
 
         // FIXME: why do we need to key on eHostVisible?  This should be part of the memory_type_index anyway
         bool is_host_visible = properties & vk::MemoryPropertyFlagBits::eHostVisible ? true : false;
@@ -101,5 +107,58 @@ namespace musevk {
             }
         } else
             throw std::runtime_error("free() for unknown allocation");
+    }
+
+    void MemoryAllocator::printMemoryProperties(Logger &log, const VkPhysicalDeviceMemoryProperties &memProperties) {
+        log.info(eVideo, "Available memory types");
+        for (uint32_t i = 0; i < memProperties.memoryTypeCount; ++i) {
+            const VkMemoryType &memType = memProperties.memoryTypes[i];
+            log.info(eVideo, fmt::format("Memory Type {}: heap index {}, property flags({}): {}",
+                                         i, memType.heapIndex, memType.propertyFlags, memoryPropertyFlagsToString(memType.propertyFlags)));
+        }
+
+        log.info(eVideo, "Available memory heaps:");
+        for (uint32_t i = 0; i < memProperties.memoryHeapCount; ++i) {
+            const VkMemoryHeap &memHeap = memProperties.memoryHeaps[i];
+            log.info(eVideo, fmt::format("Memory Heap {}: size {}, flags({}): {}",
+                                         i, memHeap.size, memHeap.flags, memoryHeapFlagsToString(memHeap.flags)));
+        }
+    }
+
+    std::string MemoryAllocator::memoryPropertyFlagsToString(VkMemoryPropertyFlags flags) {
+        std::vector<std::string> result;
+        if (flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+            result.emplace_back("VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT");
+        if (flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+            result.emplace_back("VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT");
+        if (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+            result.emplace_back("VK_MEMORY_PROPERTY_HOST_COHERENT_BIT");
+        if (flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)
+            result.emplace_back("VK_MEMORY_PROPERTY_HOST_CACHED_BIT");
+        if (flags & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT)
+            result.emplace_back("VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT");
+        if (flags & VK_MEMORY_PROPERTY_PROTECTED_BIT)
+            result.emplace_back("VK_MEMORY_PROPERTY_PROTECTED_BIT");
+        if (flags & VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD)
+            result.emplace_back("VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD");
+        if (flags & VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD)
+            result.emplace_back("VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD");
+        if (flags & VK_MEMORY_PROPERTY_RDMA_CAPABLE_BIT_NV)
+            result.emplace_back("VK_MEMORY_PROPERTY_RDMA_CAPABLE_BIT_NV");
+
+        std::ostringstream ss;
+        std::string delim;
+        for (auto &s : result) {
+            ss << delim << s;
+            delim = " | ";
+        }
+        return ss.str();
+    }
+
+    std::string MemoryAllocator::memoryHeapFlagsToString(VkMemoryHeapFlags flags) {
+        std::string result;
+        if (flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+            result += "VK_MEMORY_HEAP_DEVICE_LOCAL_BIT";
+        return result;
     }
 }
