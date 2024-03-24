@@ -43,9 +43,9 @@ float16_t inverse_gamma_c(float16_t v) {
 
 // One would think the pre-emphasis filter is applied to the entire picture area in
 // the final muse signal, but colors are distorted in the right side of the picture
-// if reading luminance values into the filter.  So the conclusion is that the filter
-// is applied separately to color and luminance before mixing.  Therefore handle the
-// edge cases.
+// if reading luminance values into the filter.  On the left side color is distored
+// if we handle the edge case. So the conclusion is that the filter is applied somewhat
+// separately to color and luminance before mixing.  We handle the edge cases here.
 
 float16_t read_luminance_value(uint row, uint col) {
     if (col < 106 || col >= 480)
@@ -55,7 +55,7 @@ float16_t read_luminance_value(uint row, uint col) {
 }
 
 float16_t read_color_value(uint row, uint col) {
-    if (col < 11 || col >= 105)
+    if (col >= 105)
         return 128.hf;
     else
         return frame_in[row][col];
