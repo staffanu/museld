@@ -109,7 +109,7 @@ and if the input buffer fills up a field is dropped.  This also increases the OS
 > --no-video --no-audio
 
 Turns off video and audio output respectively. Useful for troubleshooting (if, for example, the program
-doesn't recognize the audio playback device), and also when using the --write option to recode the input
+doesn't recognize the audio playback device), and also when using the --write-muse option to recode the input
 stream; since no decoding has to be done this is faster.
 
 > --no-sync
@@ -191,11 +191,12 @@ Switches the audio processing mode between MUSE and EFM.  Only useful if demodul
 
 Turns on the mouse cursor and displays its coordinates in the top left of the window.  Two sets of coordinates are shown:
 the coordinates in a single field (low resolution: 374x516), and the coordinates in the decoded MUSE output picture (1122x1032).
-If intra-frame interpolation is forced (by pressing the 2 key), a calculated input file offset of the pixel under the cursor is also
+If intra-frame interpolation is forced (by pressing the 2 key), and video playback is paused, a calculated input file 
+offset of the pixel under the cursor is also
 shown.  This is useful when working with improving dropout detection, in order to find the dropout in the input RF file.
 This offset seems to be off by about 1000 samples or so for reasons I've not been able to figure out, and also it is very difficult
 to know exactly what pixel is under the cursor.  Anyway, the offset shown is usually close enough that it is easy to find
-the dropout in the input file.  There are actually five offsets shown:  In offset of the current frame, the offset of the
+the dropout in the input file.  There are actually five offsets shown:  The offset of the current frame, the offset of the
 current field (start of the sound data, i.e., the third line of the field), and the pixel offset in the Y, Cr, anf Cb data.
 
 The text displayed can be copied to the clipboard by pressing print screen.
@@ -223,7 +224,7 @@ phases are correctly decoded (this is obvious since decoding them incorrectly yi
 part of the control data containing the motion vector (3 + 4 bits) is always zero for the discs that I have.  So the question
 is if this feature was never actually used for MUSE laserdiscs, or if the specification somehow changed so that this data is 
 encoded elsewhere.  I've looked quite extensively at the control signal and concluded that the other bits do not contain
-this information either, since it is mostly constant.
+this information either, since they are mostly constant.
 
 > Audio channel mapping
 
@@ -251,7 +252,7 @@ been applied to the signal when reading from the output of a MUSE player.
 > Picture filter improvements
 
 Most of the filters used were computed early in the project, and I was more interested in getting something reasonable
-working that spending too much time optimizing the filters used.  Picture quality could probably be improved by spending
+working than spending too much time optimizing the filters used.  Picture quality could probably be improved by spending
 more time on these filters.
 
 > Motion detection
@@ -264,7 +265,7 @@ The MUSE signal is very sensitive to the channel characteristics, and especially
 captures, I tried to use a lowpass filter before sampling the signal to remove any noise over the Nyquist frequency, 
 but results are much better without any analog input filter at all, at least compared to the filter that I used, that
 distorted the phase of the signal too much.  Adaptive equalization could be used to mitigate such effects, and
-the book by Yuichi Ninomiya (see the list below) described how to do this in Chapter 4.12.  I've not spent any serious
+the book by Yuichi Ninomiya (see the list below) describes how to do this in Chapter 4.12.  I've not spent any serious
 time trying to understand this in detail, however.
 
 ### Information on MUSE
