@@ -53,6 +53,10 @@ namespace musevk {
 
     private:
         friend class CommandBuffer;
+        static const Size c_default_workgroup_size;
+        static const Size c_default_linear_workgroup_size;
+
+        void initialize(const std::vector<MemoryObjectType> &buffer_types, int max_descriptor_sets);
 
         void createShaderModule();
         void createDescriptorLayout(int number_of_descriptor_sets, const std::vector<MemoryObjectType> &buffer_types);
@@ -72,7 +76,7 @@ namespace musevk {
             }
         }
 
-        void dispatch(const vk::CommandBuffer &commandBuffer);
+        void dispatch(const vk::CommandBuffer &commandBuffer, const vk::PhysicalDeviceLimits &limits);
 
         std::string m_name;
         vk::Device &m_device;
@@ -81,7 +85,7 @@ namespace musevk {
         std::vector<std::vector<std::shared_ptr<VulkanMemoryObject>>> m_buffers;
 
         vk::DescriptorSetLayout m_descriptor_set_layout;
-        vk::DescriptorPool m_descriptor_pool;
+        vk::DescriptorPool m_descriptor_pool; // TODO: think about whether it is good to have one per shader
         std::vector<vk::DescriptorSet> m_descriptor_sets;
         vk::ShaderModule m_shader_module;
         vk::PipelineLayout m_pipeline_layout;
@@ -90,6 +94,7 @@ namespace musevk {
 
         std::vector<uint32_t> m_spirv;
         Size m_workgroup_size;
+        Size m_local_workgroup_size;
     };
 }
 

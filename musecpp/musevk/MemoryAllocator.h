@@ -9,6 +9,7 @@
 #include <optional>
 #include <vulkan/vulkan.hpp>
 #include <memory>
+#include <mutex>
 
 namespace musevk {
     struct AllocatedMemory {
@@ -32,6 +33,8 @@ namespace musevk {
      *
      * This should work well for applications that more or less allocate all memory on startup.  For more
      * dynamic use cases more care should be given to re-using freed memory regions.
+     *
+     * The allocate and free methods are synchronized on an internal lock so should be thread safe.
      */
     class MemoryAllocator {
     public:
@@ -39,10 +42,12 @@ namespace musevk {
                         vk::Device &device)
                 : m_physical_device(physical_device),
                   m_device(device),
-                  m_memory_pools() {
+                  m_memory_pools(),
+                  m_mutex() {
         }
 
         MemoryAllocator(MemoryAllocator &other) = delete;
+        MemoryAllocator &operator=(MemoryAllocator &other) = delete;
 
         AllocatedMemory allocate(vk::MemoryRequirements memory_requirements, vk::MemoryPropertyFlags properties);
 
@@ -77,6 +82,7 @@ namespace musevk {
         vk::PhysicalDevice &m_physical_device;
         vk::Device &m_device;
         std::map<std::pair<int32_t, bool>, AllocationPool> m_memory_pools;
+        std::mutex m_mutex;
     };
 }
 

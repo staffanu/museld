@@ -20,10 +20,9 @@ else()
     message("FFMpeg not found or wrong version; not building support for writing video files.")
 endif()
 
-# -march=native is used to add, e.g., -mavx for architectures where it is available
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math -march=native")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ffast-math -march=native") # -fsanitize=address")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -ffast-math -march=native")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ffast-math -fsanitize=address")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -ffast-math -UNDEBUG")
 
 add_executable(musecpp
         main.cpp
@@ -63,6 +62,8 @@ add_executable(musecpp
         efm/ByteWithErasureFlag.h
         musevk/Size.h
         musevk/VulkanMemoryObject.cpp
+        musevk/CommandPool.h
+        musevk/Queue.h
 )
 if (HAVE_LIBAV)
     target_sources(musecpp PRIVATE

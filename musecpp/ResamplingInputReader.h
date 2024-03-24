@@ -16,9 +16,11 @@ public:
         eSignedShortLittleEndian,
         eFloat,
     };
-    explicit ResamplingInputReader(Logger &log, const std::string &filename, InputFormat input_format,
+    explicit ResamplingInputReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
+                                   const std::string &filename, InputFormat input_format,
                                    double sample_rate, double initial_seek_seconds,
-                                   bool demodulate, const std::optional<std::string> &output_filename);
+                                   bool demodulate, bool benchmark_shaders,
+                                   const std::optional<std::string> &output_filename);
     ResamplingInputReader(const ResamplingInputReader&) = delete;
     void operator=(const ResamplingInputReader&) = delete;
 
@@ -31,7 +33,7 @@ protected:
 
 private:
     static constexpr size_t c_sample_buffer_size = 480;
-    static constexpr size_t c_input_buffer_size = 1024 * 256;
+    static constexpr size_t c_input_buffer_size = DemodulatedBlock::c_video_block_size * sizeof(float) + 100;
     static constexpr int c_input_buffer_lookback = 3; // we look back 3 samples
 
     bool readSamples(int sample_count, float buffer[c_sample_buffer_size],

@@ -69,3 +69,11 @@ namespace musevk {
         return labeled_timestamps;
     }
 }
+
+void musevk::TimestampQueryPool::resetAndSubmit(CommandBuffer &command_buffer) {
+    command_buffer.begin();
+    reset(command_buffer);
+    timestamp(command_buffer, "begin", vk::PipelineStageFlagBits::eTopOfPipe);
+    command_buffer.submit({}, {}, {});
+    command_buffer.wait();
+}

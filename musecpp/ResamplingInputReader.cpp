@@ -14,9 +14,9 @@
 using namespace std;
 
 ResamplingInputReader::ResamplingInputReader(
-        Logger &log,
+        Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
         const std::string &filename, InputFormat input_format, double sample_rate,
-        double initial_seek_seconds, bool demodulate,
+        double initial_seek_seconds, bool demodulate, bool benchmark_shaders,
         const std::optional<std::string> &output_filename)
         : InputReader(log, filename,
                       filesystem::is_fifo(filename),
@@ -35,7 +35,7 @@ ResamplingInputReader::ResamplingInputReader(
           m_t(0) {
     if (demodulate) {
         m_input_format = eFloat;
-        m_demodulator = new RfDemodulator(log, m_filename);
+        m_demodulator = new RfDemodulator(log, executable_dir, m_filename, vulkan_manager, benchmark_shaders);
         m_sample_rate = 31.25e6;
     }
 
@@ -239,10 +239,10 @@ bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_
                     m_log.info(eInput, "ResamplingInputReader: no more demodulated blocks");
                     return false;
                 }
-                memcpy(m_file_input_buffer + m_file_input_buffer_bytes, block->video_data, sizeof(block->video_data));
-                memcpy(m_dropout_input_buffer + m_file_input_buffer_bytes / m_bytes_per_sample, block->dropouts, sizeof(block->dropouts));
-                m_file_input_buffer_bytes += sizeof(block->video_data);
-                memcpy(efm_buffer, block->efm_data, sizeof(block->efm_data));
+                memcpy(m_file_input_buffer + m_file_input_buffer_bytes, block->video_data->data<float>(), block->c_video_block_size * sizeof(float));
+                memcpy(m_dropout_input_buffer + m_file_input_buffer_bytes / m_bytes_per_sample, block->dropouts->data<uint8_t>(), block->c_video_block_size * sizeof(uint8_t));
+                m_file_input_buffer_bytes += block->c_video_block_size * sizeof(float);
+                memcpy(efm_buffer, block->efm_data->data<float>(), block->c_efm_block_size * sizeof(float));
                 *have_efm = true;
                 m_file_input_buffer_input_offset = block->input_offset - m_file_input_buffer_bytes / m_bytes_per_sample;
                 m_demodulator->returnBlock(block);

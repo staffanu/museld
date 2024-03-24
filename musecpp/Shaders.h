@@ -9,6 +9,7 @@
 #include <vector>
 #include <csignal>
 #include "musevk/VulkanBuffer.h"
+#include "musevk/CommandPool.h"
 
 class Logger;
 
@@ -22,7 +23,7 @@ class FieldBufferView;
 
 class Shaders {
 public:
-    Shaders(Logger &log, std::string const &executable_dir, musevk::VulkanManager &manager);
+    Shaders(Logger &log, std::string const &executable_dir, musevk::VulkanManager &manager, musevk::CommandPool &command_pool);
 
     Shaders(Shaders &other) = delete;
     void operator=(const Shaders &) = delete;
@@ -82,6 +83,7 @@ private:
 
     Logger &m_log;
     musevk::VulkanManager &m_vulkan_manager;
+    musevk::CommandPool &m_command_pool;
 
     std::shared_ptr<musevk::ComputeShader> m_apply_eq_and_non_linear_algo;
     std::shared_ptr<musevk::ComputeShader> m_apply_dropout_compensation_algo;

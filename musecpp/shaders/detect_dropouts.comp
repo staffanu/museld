@@ -1,0 +1,43 @@
+#version 450
+
+// This shader implements dropout detection by comparing the demodulated values with what is reasonable.
+// It should be invoked with global invocation ids from 0 to dest_size - 1.
+//
+// The source data will be indexed from source_offset up to source_offset + video_decimation_rate * dest_size - 1.
+// The destination data will be indexed from dest_offset up to dest_offset + dest_size - 1.
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint dest_size;
+    uint source_offset;
+    uint dest_offset;
+    uint video_decimation_rate;
+};
+
+layout(set = 0, binding = 0) buffer readonly source_buffer {
+    float source[];
+};
+
+layout(set = 0, binding = 1) buffer writeonly dest_buffer {
+    uint8_t dest[];
+};
+
+void main() {
+    uint ix = gl_GlobalInvocationID.x;
+
+    if (ix >= dest_size)
+        return;
+
+    // We interpret excessive signal values to indicate a dropout.  Due to pre-emphasis the signal is often
+    // outside the [-1, 1] range normally, so the thresholds for dropout detection are much wider.  Since the
+    // fm demodulation step scales the signal to MUSE range, we have to take that into account as well.
+    int dropout = 0;
+    for (uint i = 0; i < video_decimation_rate; i++) {
+        float v = source[source_offset + ix * video_decimation_rate + i];
+        if (v < -2.2f * 112.f + 128.f || v > 5.5f * 112.f + 128.f)
+            dropout = 1;
+    }
+
+    dest[dest_offset + ix] = uint8_t(dropout);
+}

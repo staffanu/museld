@@ -19,12 +19,13 @@
 #include <condition_variable>
 #include "util/Logger.h"
 #include "MuseTypes.h"
+#include "musevk/VulkanManager.h"
 
 namespace RfDemodulatorConstants {
     // The filters assume an input sampling rate of 62.5 MHz.  In order to allow that to be set in runtime
     // we could link against the gnuradio libraries.
     static constexpr float c_sample_frequency = 62.5e6f;
-    static constexpr int c_sample_block_size = 4096;
+    static constexpr int c_sample_block_size = 512 * 1024;
     static constexpr int c_video_decimation_rate = 2;
     static constexpr int c_efm_decimation_rate = 4;
 
@@ -132,17 +133,30 @@ namespace RfDemodulatorConstants {
 using namespace RfDemodulatorConstants;
 
 struct DemodulatedBlock {
+    explicit DemodulatedBlock(musevk::VulkanManager &vulkan_manager) {
+        video_data = std::make_unique<musevk::VulkanBuffer>(
+                vulkan_manager, musevk::Size(c_video_block_size), sizeof(float),
+                vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);;
+        efm_data = std::make_unique<musevk::VulkanBuffer>(
+                vulkan_manager, musevk::Size(c_efm_block_size), sizeof(float),
+                vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);;
+        dropouts = std::make_unique<musevk::VulkanBuffer>(
+                vulkan_manager, musevk::Size(c_video_block_size), sizeof(uint8_t),
+                vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, musevk::HostAccess::eHostRead);;
+    }
+
     static constexpr int c_video_block_size = c_sample_block_size / c_video_decimation_rate;
     static constexpr int c_efm_block_size = c_sample_block_size / c_efm_decimation_rate;
     long input_offset; // the number of samples in the input before this block
-    float video_data[c_video_block_size];
-    uint8_t dropouts[c_video_block_size]; // 1-to-1 with the video_data array. 0 or 1 for now, but could indicate how certain we are in the future
-    float efm_data[c_efm_block_size];
+    std::shared_ptr<musevk::VulkanBuffer> video_data;
+    std::shared_ptr<musevk::VulkanBuffer> dropouts; // 1-to-1 with the video_data array. 0 or 1 for now, but could indicate how certain we are in the future
+    std::shared_ptr<musevk::VulkanBuffer> efm_data;
 };
 
 class RfDemodulator {
 public:
-    RfDemodulator(Logger &log, std::string filename);
+    RfDemodulator(Logger &log, std::string filename, std::string executable_dir,
+                  musevk::VulkanManager &vulkan_manager, bool benchmark_shaders);
     RfDemodulator(const RfDemodulator&) = delete;
     void operator=(const RfDemodulator&) = delete;
 
@@ -154,14 +168,11 @@ public:
     void cleanup();
 
 private:
-    // enough buffers for one frame
-    static constexpr int c_number_of_block_buffers = (int)(MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH
+    // enough buffers for two frames
+    static constexpr int c_number_of_block_buffers = (int)(2 * MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH
             * c_sample_frequency / c_video_decimation_rate / 16.2e6 / DemodulatedBlock::c_video_block_size);
     static constexpr float c_center_frequency = 12.5e6f;
     static constexpr float c_frequency_deviation = 1.9e6f;
-    static constexpr float c_2pi = 2 * (float)M_PI;
-    static constexpr int c_AVX_floats_per_chunk = 8;
-    static constexpr int c_NEON_floats_per_chunk = 4;
 
     static constexpr std::pair<std::array<float, 32>, std::array<float, 32>> c_bandpass_filter = initializeBandpassFilter();
     static constexpr int c_bandpass_filter_size = c_bandpass_filter.first.size();
@@ -179,30 +190,26 @@ private:
     static constexpr int c_efm_equalization_filter_size = c_efm_equalization_filter.size();
 
     static constexpr int c_input_buffer_size = c_sample_block_size + c_bandpass_filter_size - 1;
+    static constexpr int c_analytic_buffer_size = c_sample_block_size + 1;
     static constexpr int c_lowpass_in_buffer_size = c_sample_block_size + c_lowpass_filter_size - 1;
     static constexpr int c_rrc_in_buffer_size = c_sample_block_size / c_video_decimation_rate + c_rrc_filter_size - 1;
-    static constexpr int c_output_buffer_size = c_sample_block_size / c_video_decimation_rate;
 
     // We need to delay the output of the detected dropouts as much as the rest of the filter chain delays the video signal
     static constexpr int c_dropout_delay = c_lowpass_filter_size / c_video_decimation_rate / 2 + c_rrc_filter_size / 2 - 1;
-    static constexpr int c_dropout_buffer_size = c_output_buffer_size + c_dropout_delay;
+    static constexpr int c_dropout_buffer_size = DemodulatedBlock::c_video_block_size + c_dropout_delay;
 
     static constexpr int c_efm_equalization_in_buffer_size = c_sample_block_size / c_efm_decimation_rate + c_efm_equalization_filter_size - 1;
     static constexpr int c_efm_out_buffer_size = c_sample_block_size / c_efm_decimation_rate;
 
     void demodulate();
 
-    bool readFloats(float *out, size_t n);
-
-    template<size_t filter_size> void firFilter(
-                const float *input,   // input signal of length at least output_size + filter_length - 1
-                size_t output_size,   // number of output values to compute
-                const std::array<float, filter_size> &filter,  // reversed filter coefficients, needs to be aligned at 32 byte multiple (c_AVX_floats_per_chunk * sizeof(float))
-                int decimation_rate,
-                float *output);
+    bool readFloats(int16_t *out, size_t n);
 
     Logger &m_log;
+    const std::string m_executable_dir;
     const std::string m_filename;
+    musevk::VulkanManager &m_vulkan_manager;
+    bool m_benchmark_shaders;
     int m_input_fd;
     bool m_input_is_fifo;
     long m_total_samples_read;

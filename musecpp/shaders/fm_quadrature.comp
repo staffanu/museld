@@ -1,0 +1,59 @@
+#version 450
+
+// This shader implements fm quadrature demodulation.
+//
+// The source analytic data will be indexed from 0 to size.
+// The dest data will be indexed from output_offset up to output_offset + size - 1.
+//
+// For scale = 1, add = 0, the output will be between -1 and 1 if the
+// frequency deviation is +/- frequency_deviation.
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    float size;
+    float output_offset;
+    float sample_frequency;
+    float frequency_deviation;
+    float center_frequency;
+    float output_scale;
+    float output_add;
+};
+
+layout(set = 0, binding = 0) buffer readonly filter_buffer {
+    float analytic_re[];
+};
+
+layout(set = 0, binding = 1) buffer readonly source_buffer {
+    float analytic_im[];
+};
+
+layout(set = 0, binding = 2) buffer writeonly dest_buffer {
+    float dest[];
+};
+
+void main() {
+    uint ix = gl_GlobalInvocationID.x;
+
+    if (ix >= uint(size))
+        return;
+
+    float prev_sample_re = analytic_re[ix];
+    float prev_sample_im = analytic_im[ix];
+    float sample_re = analytic_re[ix + 1];
+    float sample_im = analytic_im[ix + 1];
+
+    // compute prod = sample * conj(prev_sample);
+    float prod_re = sample_re * prev_sample_re + sample_im * prev_sample_im;
+    float prod_im = sample_re * -prev_sample_im + sample_im * prev_sample_re;
+
+    // arg(prod)
+    float phase_diff = atan(prod_im, prod_re);
+
+    // fm_out will be in the range [-1, 1] when the frequency varies between c_center_frequency - c_frequency_deviation and c_center_frequency + c_frequency_deviation
+    // This expression is probably easier to understand but has one more multiplication:
+    // (phase_diff * (c_sample_frequency / (c_2pi * c_center_frequency)) - 1.f) * (c_center_frequency / c_frequency_deviation);
+    float fm_out = phase_diff * (sample_frequency / (2 * 3.14159265f * frequency_deviation)) - center_frequency / frequency_deviation;
+
+    dest[ix + uint(output_offset)] = fm_out * output_scale + output_add;
+}

@@ -3,6 +3,7 @@
 //
 
 #include <cassert>
+#include <algorithm>
 #include <fmt/format.h>
 #include "InputPll.h"
 #include "MuseTypes.h"
@@ -126,8 +127,8 @@ InputPll::PllResult InputPll::process(int sample_count, long input_offset,
 
             if (m_sync_is_good) {
                 double avgLevel = (sample0 + sample4) / 2;
-                double new_error = sync_should_be_positive ? sample2 - avgLevel : avgLevel - sample2; // negative means we sampled too early
-                m_error_sum += new_error;
+                double new_error = std::clamp(sync_should_be_positive ? sample2 - avgLevel : avgLevel - sample2, -10000.0, 10000.0); // negative means we sampled too early
+                m_error_sum = std::clamp(m_error_sum + new_error, -15000.0, 15000.0);
                 m_input_samples_per_sample =
                         m_input_samples_per_sample_ref - new_error * m_g1 - m_error_sum * m_g2;
             }

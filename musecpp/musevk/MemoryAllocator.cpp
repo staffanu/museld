@@ -5,11 +5,12 @@
 #include <fmt/format.h>
 #include "MemoryAllocator.h"
 
-#define ALLOCATION_BLOCK_SIZE (8 * 1024 * 1024)
+#define ALLOCATION_BLOCK_SIZE (16 * 1024 * 1024)
 
 namespace musevk {
     AllocatedMemory MemoryAllocator::allocate(
             vk::MemoryRequirements memory_requirements, vk::MemoryPropertyFlags properties) {
+        std::scoped_lock lock(m_mutex);
 
         int32_t memory_type_index = -1;
         vk::PhysicalDeviceMemoryProperties memory_properties = m_physical_device.getMemoryProperties();
@@ -27,6 +28,7 @@ namespace musevk {
                                                  memory_requirements.size, memory_requirements.alignment, memory_requirements.memoryTypeBits,
                                                  (uint32_t)properties));
 
+        // FIXME: why do we need to key on eHostVisible?  This should be part of the memory_type_index anyway
         bool is_host_visible = properties & vk::MemoryPropertyFlagBits::eHostVisible ? true : false;
         auto key = std::make_pair(memory_type_index, is_host_visible);
 
@@ -37,6 +39,7 @@ namespace musevk {
     }
 
     void MemoryAllocator::free(AllocatedMemory memory) {
+        std::scoped_lock lock(m_mutex);
         m_memory_pools[memory.allocation_key].free(memory);
     }
 

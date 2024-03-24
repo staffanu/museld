@@ -7,13 +7,14 @@
 
 #include "musevk/VulkanBuffer.h"
 #include "musevk/VulkanManager.h"
+#include "musevk/CommandPool.h"
 
 class TextRenderer {
 public:
     static constexpr int c_glyph_width = 12;
     static constexpr int c_glyph_height = 24;
 
-    TextRenderer(std::string const &executable_dir, musevk::VulkanManager &vulkan_manager);
+    TextRenderer(std::string const &executable_dir, musevk::VulkanManager &vulkan_manager, musevk::CommandPool &command_pool);
     TextRenderer(const TextRenderer &) = delete;
     void operator=(const TextRenderer &) = delete;
 

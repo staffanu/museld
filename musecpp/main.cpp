@@ -16,6 +16,8 @@
 
 #ifdef HAVE_LIBAV
 # include "VideoFileWriter.h"
+#include "musevk/CommandPool.h"
+
 #endif
 
 #define INPUT_BUFFER_COUNT 6
@@ -41,7 +43,7 @@ void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "Error %d: %s\n", error, description); // FIXME: use logging framework
 }
 
-void process_file(Logger &log, const string &executable_dir, InputReader &reader,
+void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, InputReader &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
                   bool start_paused, bool decode_video, Shaders::DropoutMode dropout_mode,
                   bool decode_audio, bool efm_audio, bool benchmark_shaders,
@@ -55,7 +57,6 @@ void process_file(Logger &log, const string &executable_dir, InputReader &reader
     glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
 
-    musevk::VulkanManager manager(log);
     manager.initVulkan(window, no_sync);
     musevk::TimestampQueryPool *timestamp_query_pool =
             benchmark_shaders ? new musevk::TimestampQueryPool(manager.getPhysicalDevice(), manager.getDevice(), 40) : nullptr;
@@ -89,16 +90,19 @@ void process_file(Logger &log, const string &executable_dir, InputReader &reader
     auto render_finished_semaphore = device.createSemaphore(semaphoreInfo);
     auto in_flight_fence = device.createFence(fenceInfo);
 
-    AudioPlayback audio_playback(log);
+    unique_ptr<AudioPlayback> audio_playback = nullptr;
+    if (decode_audio)
+         audio_playback = make_unique<AudioPlayback>(log);
 
     AudioMode audio_mode;
     int audio_sample_count;
     AudioDecoder::AudioFrame audio_samples[AudioDecoder::c_max_output_samples];
 
     {
-        auto command_buffer = manager.createCommandBuffer();
-        Shaders shaders(log, executable_dir, manager);
-        TextRenderer text_renderer(executable_dir, manager);
+        musevk::CommandPool command_pool(manager);
+        auto command_buffer = command_pool.createCommandBuffer();
+        Shaders shaders(log, executable_dir, manager, command_pool);
+        TextRenderer text_renderer(executable_dir, manager, command_pool);
 
         auto decoder = MuseDecoder(log,
                                    reader,
@@ -142,7 +146,7 @@ void process_file(Logger &log, const string &executable_dir, InputReader &reader
 #endif
 
             if (audio_sample_count != 0 && audio_mode != MODE_UNKNOWN && !paused)
-                audio_playback.add_samples(audio_mode, audio_sample_count, audio_samples);
+                audio_playback->add_samples(audio_mode, audio_sample_count, audio_samples);
 
             //vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
             //vkResetFences(device, 1, &in_flight_fence);
@@ -355,7 +359,8 @@ void process_file(Logger &log, const string &executable_dir, InputReader &reader
         vfw = nullptr;
     }
 #endif
-    audio_playback.cleanup();
+    if (audio_playback != nullptr)
+        audio_playback->cleanup();
     reader.cleanup();
     manager.cleanup();
 
@@ -547,6 +552,8 @@ int main(int argc, char *argv[]) {
 
                 Logger log(log_selection);
 
+                musevk::VulkanManager manager(log);
+
                 if (demodulate)
                     input_format = eOverSampledSignedShortsLittleEndian;
                 InputReader *reader;
@@ -554,11 +561,12 @@ int main(int argc, char *argv[]) {
                     case eOverSampledUnsignedBytes:
                     case eOverSampledSignedShortsLittleEndian:
                         reader = new ResamplingInputReader(
-                                log, *it,
+                                log, executable_dir, manager, *it,
                                 input_format == eOverSampledSignedShortsLittleEndian
                                 ? ResamplingInputReader::eSignedShortLittleEndian
                                 : ResamplingInputReader::eUnsignedByte,
-                                input_sample_frequency, initial_seek_seconds, demodulate, muse_output_filename);
+                                input_sample_frequency, initial_seek_seconds, demodulate, benchmark_shaders,
+                                muse_output_filename);
                         break;
                     case eLittleEndianShorts:
                     case eBigEndianShorts:
@@ -571,7 +579,7 @@ int main(int argc, char *argv[]) {
                         cerr << "No input format specified" << endl;
                         exit(EXIT_FAILURE);
                 }
-                process_file(log, executable_dir, *reader, decode_all_fields,
+                process_file(log, executable_dir, manager, *reader, decode_all_fields,
                              full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio, efm_audio,
                              benchmark_shaders, output_filename);
                 delete reader;

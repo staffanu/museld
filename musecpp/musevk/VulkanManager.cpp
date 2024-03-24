@@ -15,7 +15,8 @@ using namespace std;
 
 namespace musevk {
     VulkanManager::VulkanManager(Logger &log)
-    : m_log(log) {}
+    : m_log(log),
+      m_graphics_and_compute_queue(nullptr) {}
 
     void VulkanManager::initVulkan(GLFWwindow *window, bool no_sync) {
         m_window = window;
@@ -26,18 +27,14 @@ namespace musevk {
         createLogicalDevice();
         m_memory_allocator = make_unique<MemoryAllocator>(m_physical_device, m_logical_device);
         createSwapChain();
-
-        uint32_t queue_index = m_queue_families.graphicsAndComputeFamily.value();
-
-        vk::CommandPoolCreateInfo command_pool_info(vk::CommandPoolCreateFlags(
-                vk::CommandPoolCreateFlagBits::eResetCommandBuffer), queue_index);
-        m_command_pool = m_logical_device.createCommandPool(command_pool_info);
     }
 
     void VulkanManager::cleanup() {
-        m_logical_device.destroy(m_command_pool);
         m_logical_device.waitIdle();
         cleanupSwapChain();
+        delete m_graphics_and_compute_queue;
+        if (m_present_queue != m_graphics_and_compute_queue)
+            delete m_present_queue;
         m_logical_device.destroy();
         m_instance.destroy(m_surface);
         if (enableValidationLayers) {
@@ -101,20 +98,12 @@ namespace musevk {
         presentInfo.pSwapchains = swapChains;
         presentInfo.pImageIndices = &image_index;
         presentInfo.pResults = nullptr; // Optional
-        auto result = m_present_queue.presentKHR(presentInfo);
+
+        auto result = m_present_queue->presentKHR(presentInfo);
         if (result == vk::Result::eSuboptimalKHR)
             m_log.warn(eVideo, "presentKHR: eSuboptimalKHR");
         else if (result != vk::Result::eSuccess)
             throw runtime_error("presentKHR failed");
-    }
-
-    shared_ptr<CommandBuffer> VulkanManager::createCommandBuffer(
-            TimestampQueryPool *timestamp_query_pool) {
-        return make_unique<CommandBuffer>(
-                m_command_pool,
-                m_logical_device,
-                m_compute_queue,
-                timestamp_query_pool);
     }
 
     void VulkanManager::createInstance() {
@@ -207,6 +196,7 @@ namespace musevk {
                 found = true;
                 m_physical_device = device;
                 m_queue_families = queue_families.value();
+                m_physical_device_properties = properties;
                 m_log.info(eVideo, fmt::format("Picked device {}", string(properties.deviceName)));
                 break;
             }
@@ -275,7 +265,8 @@ namespace musevk {
                                         uniformAndStorageBuffer16BitAccess, shaderFloat16, shaderInt16,
                                         storagePushConstant16));
 
-        return storageBuffer16BitAccess && uniformAndStorageBuffer8BitAccess && uniformAndStorageBuffer16BitAccess && shaderFloat16 && shaderInt16;
+        return storageBuffer16BitAccess && uniformAndStorageBuffer8BitAccess && uniformAndStorageBuffer16BitAccess
+            && shaderFloat16 && shaderInt16 && storagePushConstant16;
     }
 
     bool VulkanManager::checkDeviceExtensionSupport(vk::PhysicalDevice &device) {
@@ -295,12 +286,12 @@ namespace musevk {
         set<uint32_t> uniqueQueueFamilies = {m_queue_families.graphicsAndComputeFamily.value(),
                                              m_queue_families.presentFamily.value()};
 
-        float queuePriority = 1.0f;
+        vector<float> queuePriorities = { 1.0f };
         for (uint32_t queueFamily: uniqueQueueFamilies) {
             vk::DeviceQueueCreateInfo queueCreateInfo{};
             queueCreateInfo.queueFamilyIndex = queueFamily;
             queueCreateInfo.queueCount = 1;
-            queueCreateInfo.pQueuePriorities = &queuePriority;
+            queueCreateInfo.setQueuePriorities(queuePriorities);
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
@@ -320,8 +311,7 @@ namespace musevk {
         device_features2.features.shaderInt16 = true;
 
         vk::DeviceCreateInfo createInfo{};
-        createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
-        createInfo.pQueueCreateInfos = queueCreateInfos.data();
+        createInfo.setQueueCreateInfos(queueCreateInfos);
 
         createInfo.pNext = &device_features2;
         createInfo.enabledExtensionCount = static_cast<uint32_t>(c_device_extensions.size());
@@ -334,9 +324,11 @@ namespace musevk {
             createInfo.enabledLayerCount = 0;
         }
         m_logical_device = m_physical_device.createDevice(createInfo);
-        m_graphics_queue = m_logical_device.getQueue(m_queue_families.graphicsAndComputeFamily.value(), 0);
-        m_present_queue = m_logical_device.getQueue(m_queue_families.presentFamily.value(), 0);
-        m_compute_queue = m_logical_device.getQueue(m_queue_families.graphicsAndComputeFamily.value(), 0);
+        m_graphics_and_compute_queue = new Queue(m_logical_device.getQueue(m_queue_families.graphicsAndComputeFamily.value(), 0));
+        if (m_queue_families.graphicsAndComputeFamily != m_queue_families.presentFamily)
+            m_present_queue = new Queue(m_logical_device.getQueue(m_queue_families.presentFamily.value(), 0));
+        else
+            m_present_queue = m_graphics_and_compute_queue;
     }
 
     VulkanManager::SwapChainSupportDetails VulkanManager::querySwapChainSupport(vk::PhysicalDevice &device) {

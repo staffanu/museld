@@ -13,9 +13,10 @@
 using namespace std;
 using namespace musevk;
 
-Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &manager)
+Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &manager, CommandPool &command_pool)
 : m_log(log),
   m_vulkan_manager(manager),
+  m_command_pool(command_pool),
   m_non_linear_processed_buffer(createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)),
   m_interpolated32_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
   m_intermediate_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
@@ -35,7 +36,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_image_out(make_unique<VulkanImage>(m_vulkan_manager,
                                        MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, // eHostRead needed only if writing video output to file
                                        vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc, eHostRead)),
-  m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager,
+  m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
           Size(9, 7),
           {
                   -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
@@ -46,7 +47,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   0.000205, 0.000474, -0.005036, -0.012591, 0.010491, -0.012591, -0.005036, 0.000474, 0.000205,
                   -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
           })),
-  m_color_filter_single_field_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager,
+  m_color_filter_single_field_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
           Size(9, 5),
           {
                   0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
@@ -55,7 +56,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
                   0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
           })),
-  m_color_filter_inter_frame_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager,
+  m_color_filter_inter_frame_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
           Size(5, 5),
           {
                   0.000158, 0.007330, 0.020738, 0.007330, 0.000158,
@@ -64,7 +65,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   0.001069, 0.049475, 0.139983, 0.049475, 0.001069,
                   0.000158, 0.007330, 0.020738, 0.007330, 0.000158,
           })),
-  m_filter_2_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager,
+  m_filter_2_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
           Size(19),
           {
                   // cutoff 0.25, transition 0.05, sampling freq 1, Rectangular: 19 coeffs (25 non-zero).  Looks +/- 9 samples in each direction
@@ -75,7 +76,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   0.061716249977351118, 0.000000000000000019, -0.044083035698107946, -0.000000000000000019,
                   0.034286805542972851
           })),
-  m_filter_4_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager,
+  m_filter_4_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
           Size(31),
           {
                   // cutoff 0.125, transition 0.03, sampling freq 1, Rectangular: 31 coeffs (25 non-zero).  Looks +/- 15 samples in each direction
@@ -169,7 +170,7 @@ void Shaders::applyEqAndDeemphasisAndGamma(
         shared_ptr<musevk::VulkanBuffer> const &buffer,
         pair<float, float> const &eq, bool enable_non_linear,  DropoutMode dropout_mode) {
     m_apply_eq_and_non_linear_algo->updateBufferDescriptorsInSet(0, {video_input, m_non_linear_processed_buffer});
-    sq.enqueueComputeShader(m_apply_eq_and_non_linear_algo,
+    sq.enqueueComputeShader<float>(m_apply_eq_and_non_linear_algo,
                             {eq.first, eq.second, enable_non_linear ? 1.0f : 0.0f});
 
     if (dropout_mode != DropoutMode::eDisabled) {
@@ -179,7 +180,7 @@ void Shaders::applyEqAndDeemphasisAndGamma(
     }
 
     m_apply_deemphasis_and_gamma_algo->updateBufferDescriptorsInSet(0, {m_non_linear_processed_buffer, buffer});
-    sq.enqueueComputeShader(m_apply_deemphasis_and_gamma_algo, {});
+    sq.enqueueComputeShader<float>(m_apply_deemphasis_and_gamma_algo, {});
 }
 
 void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {

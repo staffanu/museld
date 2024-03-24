@@ -1,0 +1,65 @@
+#version 450
+
+// This shader implements a one dimensional fir filter.
+// and should be invoked with global invocation ids
+// from 0 to output_size - 1.
+//
+// The input data will be indexed from 0 up to output_size + filter_size - 1.
+// The output data will be indexed from output_offset up to output_offset + output_size - 1.
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint filter_size;
+    uint output_size;
+    uint output_offset;
+    uint decimation_rate;
+};
+
+layout(set = 0, binding = 0) buffer readonly filter_buffer {
+    float fir_filter[];
+};
+
+layout(set = 0, binding = 1) buffer readonly input_buffer {
+    float input_data[];
+};
+
+layout(set = 0, binding = 2) buffer writeonly output_buffer {
+    float output_data[];
+};
+
+// we assume that the workgroup size is at least MAX_FILTER_SIZE
+#define MAX_WORKGROUP_SIZE 1024
+#define MAX_FILTER_SIZE 64
+#define MAX_DECIMATION 4
+
+shared float shared_filter[MAX_FILTER_SIZE];
+shared float shared_input[MAX_WORKGROUP_SIZE * MAX_DECIMATION + MAX_FILTER_SIZE - 1];
+
+void main() {
+    uint global_ix = gl_GlobalInvocationID.x;
+    uint local_ix = gl_LocalInvocationID.x;
+    uint local_size = 1024; // FIXME: read this from somewhere
+
+    if (local_ix < filter_size)
+            shared_filter[local_ix] = fir_filter[local_ix];
+
+    uint base_ix = (global_ix - local_ix) * decimation_rate;
+
+    for (int i = 0; i < decimation_rate; i++)
+        shared_input[local_ix + i * local_size] = input_data[base_ix + local_ix + i * local_size];
+    if (local_ix < MAX_FILTER_SIZE)
+        shared_input[local_ix + decimation_rate * local_size] = input_data[base_ix + local_ix + decimation_rate * local_size];
+
+    barrier();
+
+    if (global_ix >= output_size)
+        return;
+
+    float s = 0.f;
+    for (uint i = 0; i < filter_size; i++) {
+        s += shared_filter[i] * shared_input[local_ix * decimation_rate + i];
+    }
+
+    output_data[output_offset + global_ix] = s;
+}

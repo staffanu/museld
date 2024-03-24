@@ -29,15 +29,15 @@ namespace musevk {
 
         vk::PhysicalDevice &getPhysicalDevice() { return m_physical_device; };
         vk::Device &getDevice() { return m_logical_device; };
+        uint32_t getGraphicsAndComputeFamily() { return m_queue_families.graphicsAndComputeFamily.value(); };
+        Queue &getGraphicsAndComputeQueue() { return *m_graphics_and_compute_queue; };
         MemoryAllocator &getMemoryAllocator() { return *m_memory_allocator; };
+        vk::PhysicalDeviceProperties &getPhysicalDeviceProperties() { return m_physical_device_properties; };
 
         vk::Image &acquireNextImage(vk::Semaphore image_available_semaphore);
         void present(vk::Image image);
         vk::Extent2D getSwapChainExtent() { return m_swap_chain_extent; };
         void recreateSwapChain();
-
-        std::shared_ptr<CommandBuffer> createCommandBuffer(
-                TimestampQueryPool *timestamp_query_pool = nullptr);
 
     private:
         void cleanupSwapChain();
@@ -126,17 +126,16 @@ namespace musevk {
         vk::Instance m_instance;
         vk::DebugUtilsMessengerEXT m_debug_messenger;
         vk::PhysicalDevice m_physical_device;
+        vk::PhysicalDeviceProperties m_physical_device_properties;
         QueueFamilyIndices m_queue_families;
         vk::Device m_logical_device;
         vk::SurfaceKHR m_surface;
-        vk::Queue m_graphics_queue;
-        vk::Queue m_present_queue;
-        vk::Queue m_compute_queue;
+        Queue *m_graphics_and_compute_queue;
+        Queue *m_present_queue;
         vk::SwapchainKHR m_swap_chain;
         std::vector<vk::Image> m_swap_chain_images;
         vk::Format m_swap_chain_image_format;
         vk::Extent2D m_swap_chain_extent;
-        vk::CommandPool m_command_pool;
     };
 }
 

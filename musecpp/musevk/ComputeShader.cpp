@@ -2,15 +2,15 @@
 // Created by staffanu on 5/31/23.
 //
 
+#include <fmt/format.h>
 #include "ComputeShader.h"
-
-#define LOCAL_WORKGROUP_SIZE_X 32
-#define LOCAL_WORKGROUP_SIZE_Y 2
-#define LOCAL_WORKGROUP_SIZE_Z 1
 
 using namespace std;
 
 namespace musevk {
+    const Size ComputeShader::c_default_workgroup_size = Size(32, 2, 1);
+    const Size ComputeShader::c_default_linear_workgroup_size = Size(1024, 1, 1);
+
     ComputeShader::ComputeShader(vk::Device &device,
                                  std::string name,
                                  const std::vector<MemoryObjectType> &buffer_types,
@@ -18,17 +18,15 @@ namespace musevk {
                                  const std::vector<uint32_t> &spirv,
                                  const Size &workgroup_size,
                                  int max_descriptor_sets)
-: m_device(device),
-  m_name(std::move(name)),
-  m_descriptor_count(buffer_types.size()),
-  m_push_constants_size(push_constants_size),
-  m_spirv(spirv),
-  m_workgroup_size(workgroup_size) {
-        m_buffers.resize(max_descriptor_sets);
-        createShaderModule();
-        createDescriptorLayout(max_descriptor_sets, buffer_types);
-        createPipeline();
-        updateDescriptorSet(0);
+    : m_device(device),
+      m_name(std::move(name)),
+      m_descriptor_count(buffer_types.size()),
+      m_push_constants_size(push_constants_size),
+      m_spirv(spirv),
+      m_workgroup_size(workgroup_size),
+      m_local_workgroup_size(Size(0)) {
+
+        initialize(buffer_types, max_descriptor_sets);
     }
 
     ComputeShader::ComputeShader(vk::Device &device,
@@ -38,25 +36,34 @@ namespace musevk {
                                  const std::vector<uint32_t> &spirv,
                                  const Size &workgroup_size,
                                  int max_descriptor_sets)
-: m_device(device),
-  m_name(std::move(name)),
-  m_descriptor_count(buffers.size()),
-  m_push_constants_size(push_constants_size),
-  m_spirv(spirv),
-  m_workgroup_size(workgroup_size)
-    {
+    : m_device(device),
+      m_name(std::move(name)),
+      m_descriptor_count(buffers.size()),
+      m_push_constants_size(push_constants_size),
+      m_spirv(spirv),
+      m_workgroup_size(workgroup_size),
+      m_local_workgroup_size(Size(0)) {
+
         std::vector<MemoryObjectType> buffer_types;
         buffer_types.reserve(buffers.size());
         for (auto &buffer : buffers)
             buffer_types.push_back(buffer->getType());
+
+        initialize(buffer_types, max_descriptor_sets);
+
+        updateBufferDescriptorsInSet(0, buffers);
+    }
+
+    void ComputeShader::initialize(const std::vector<MemoryObjectType> &buffer_types, int max_descriptor_sets) {
+
+        m_local_workgroup_size = m_workgroup_size.y_size == 1 && m_workgroup_size.z_size == 1 ?
+                c_default_linear_workgroup_size : c_default_workgroup_size;
 
         m_buffers.resize(max_descriptor_sets);
         createShaderModule();
         createDescriptorLayout(max_descriptor_sets, buffer_types);
         createPipeline();
         updateDescriptorSet(0);
-
-        updateBufferDescriptorsInSet(0, buffers);
     }
 
     ComputeShader::~ComputeShader() {
@@ -135,10 +142,10 @@ namespace musevk {
 
     void ComputeShader::createPipeline() {
         struct Constants {
-            uint32_t size_x = LOCAL_WORKGROUP_SIZE_X;
-            uint32_t size_y = LOCAL_WORKGROUP_SIZE_Y;
-            uint32_t size_z = LOCAL_WORKGROUP_SIZE_Z;
-        } constants;
+            uint32_t size_x;
+            uint32_t size_y;
+            uint32_t size_z;
+        } constants { m_local_workgroup_size.x_size, m_local_workgroup_size.y_size, m_local_workgroup_size.z_size };
         vector<vk::SpecializationMapEntry> specialization_map_entries {
                 vk::SpecializationMapEntry(1, offsetof(Constants, size_x), sizeof(constants.size_x)),
                 vk::SpecializationMapEntry(2, offsetof(Constants, size_y), sizeof(constants.size_y)),
@@ -187,10 +194,23 @@ namespace musevk {
         );
     }
 
-    void ComputeShader::dispatch(const vk::CommandBuffer &commandBuffer) {
-        uint32_t group_count_x = (m_workgroup_size.x_size + LOCAL_WORKGROUP_SIZE_X - 1) / LOCAL_WORKGROUP_SIZE_X;
-        uint32_t group_count_y = (m_workgroup_size.y_size + LOCAL_WORKGROUP_SIZE_Y - 1) / LOCAL_WORKGROUP_SIZE_Y;
-        uint32_t group_count_z = (m_workgroup_size.z_size + LOCAL_WORKGROUP_SIZE_Z - 1) / LOCAL_WORKGROUP_SIZE_Z;
+    void ComputeShader::dispatch(const vk::CommandBuffer &commandBuffer, const vk::PhysicalDeviceLimits &limits) {
+        uint32_t group_count_x = (m_workgroup_size.x_size + m_local_workgroup_size.x_size - 1) / m_local_workgroup_size.x_size;
+        uint32_t group_count_y = (m_workgroup_size.y_size + m_local_workgroup_size.y_size - 1) / m_local_workgroup_size.y_size;
+        uint32_t group_count_z = (m_workgroup_size.z_size + m_local_workgroup_size.z_size - 1) / m_local_workgroup_size.z_size;
+
+        if (group_count_x > limits.maxComputeWorkGroupCount[0]
+            || group_count_y > limits.maxComputeWorkGroupCount[1]
+            || group_count_z > limits.maxComputeWorkGroupCount[2])
+            throw std::runtime_error(fmt::format("Dispatch workgroup count too high: x: count={}, limit={}; y: count={}, limit={}; z: count={}, limit={}",
+                                                 group_count_x, limits.maxComputeWorkGroupCount[0],
+                                                 group_count_y, limits.maxComputeWorkGroupCount[1],
+                                                 group_count_z, limits.maxComputeWorkGroupCount[2]));
+
+//        if (group_count_x * group_count_y * group_count_z > limits.maxComputeWorkGroupInvocations)
+//            throw std::runtime_error(fmt::format("Dispatch total count too high: count={}, limit={}",
+//                                                 group_count_x * group_count_y * group_count_z, limits.maxComputeWorkGroupInvocations));
+
         commandBuffer.dispatch(group_count_x, group_count_y, group_count_z);
     }
 }

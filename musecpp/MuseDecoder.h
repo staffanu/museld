@@ -10,6 +10,7 @@
 #include "efm/EfmDecoder.h"
 #include "AudioDecoder.h"
 #include "Shaders.h"
+#include "musevk/CommandPool.h"
 
 namespace musevk {
     class TimestampQueryPool;
@@ -58,6 +59,7 @@ private:
     InputReader &m_reader;
     Shaders &m_shaders;
     musevk::VulkanManager &m_manager;
+    musevk::CommandPool m_command_pool;
     const bool m_decode_video;
     const bool m_decode_all_fields;
     const bool m_decode_audio;

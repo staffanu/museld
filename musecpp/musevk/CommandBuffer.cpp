@@ -2,6 +2,7 @@
 // Created by staffanu on 5/25/23.
 //
 
+#include <fmt/format.h>
 #include "CommandBuffer.h"
 #include "VulkanBuffer.h"
 #include "TimestampQueryPool.h"
@@ -9,12 +10,14 @@
 namespace musevk {
     CommandBuffer::CommandBuffer(vk::CommandPool &command_pool,
                                  vk::Device &device,
-                                 vk::Queue &computeQueue,
-                                 TimestampQueryPool *timestamp_query_pool)
+                                 Queue &queue,
+                                 TimestampQueryPool *timestamp_query_pool,
+                                 const vk::PhysicalDeviceLimits &limits)
             : m_command_pool(command_pool),
               m_device(device),
-              m_compute_queue(computeQueue),
-              m_timestamp_query_pool(timestamp_query_pool) {
+              m_queue(queue),
+              m_timestamp_query_pool(timestamp_query_pool),
+              m_limits(limits){
 
         vk::CommandBufferAllocateInfo commandBufferAllocateInfo(m_command_pool, vk::CommandBufferLevel::ePrimary, 1);
         m_command_buffer = m_device.allocateCommandBuffers(commandBufferAllocateInfo)[0];
@@ -30,6 +33,7 @@ namespace musevk {
                                                       vk::ImageLayout old_layout, vk::ImageLayout new_layout,
                                                       vk::PipelineStageFlagBits src_stage, vk::PipelineStageFlagBits dst_stage,
                                                       vk::AccessFlags src_access_mask, vk::AccessFlags dst_access_mask) {
+        assert(m_recording);
         vk::ImageMemoryBarrier barrier;
         barrier.oldLayout = old_layout;
         barrier.newLayout = new_layout;
@@ -54,8 +58,13 @@ namespace musevk {
 
     void CommandBuffer::enqueueCopyBuffer(VulkanBuffer &source, VulkanBuffer &destination) {
         vk::DeviceSize buffer_size(source.getMemorySize());
-        vk::BufferCopy copy_region(0, 0, buffer_size);
-        m_command_buffer.copyBuffer(source.buffer(), destination.buffer(), copy_region);
+        enqueueCopyBuffer(source, destination, 0, 0, buffer_size);
+    }
+
+    void CommandBuffer::enqueueCopyBuffer(VulkanBuffer &source, VulkanBuffer &dest, uint32_t srcOffset, uint32_t dstOffset, uint32_t size) {
+        assert(m_recording);
+        vk::BufferCopy region(srcOffset, dstOffset, size);
+        m_command_buffer.copyBuffer(source.buffer(), dest.buffer(), {region});
         maybeTimestamp("copy", vk::PipelineStageFlagBits::eTransfer);
     }
 
@@ -63,6 +72,7 @@ namespace musevk {
                                                  vk::Image imageTo,
                                                  vk::ImageLayout layout,
                                                  vk::BufferImageCopy region) {
+        assert(m_recording);
         m_command_buffer.copyBufferToImage(bufferFrom, imageTo, layout, region);
         maybeTimestamp("copyToImage", vk::PipelineStageFlagBits::eTransfer);
     }
@@ -70,7 +80,15 @@ namespace musevk {
     void CommandBuffer::enqueueBlitImage(vk::Image &source, vk::ImageLayout source_layout,
                                          vk::Image &dest, vk::ImageLayout dest_layout,
                                          vk::ImageBlit region) {
+        assert(m_recording);
         m_command_buffer.blitImage(source, source_layout, dest, dest_layout, region, vk::Filter::eLinear);
+        maybeTimestamp("blit", vk::PipelineStageFlagBits::eTransfer);
+    }
+
+    void CommandBuffer::enqueueFillBuffer(VulkanBuffer &buffer, uint32_t data) {
+        assert(m_recording);
+        m_command_buffer.fillBuffer(buffer.buffer(), 0, VK_WHOLE_SIZE, data);
+        maybeTimestamp("fill", vk::PipelineStageFlagBits::eTransfer);
     }
 
     void CommandBuffer::enqueueBufferBarrier(VulkanBuffer &buffer,
@@ -78,6 +96,7 @@ namespace musevk {
                                              vk::AccessFlagBits dstAccessMask,
                                              vk::PipelineStageFlagBits srcStageMask,
                                              vk::PipelineStageFlagBits dstStageMask) {
+        assert(m_recording);
         vk::BufferMemoryBarrier bufferMemoryBarrier;
         bufferMemoryBarrier.buffer = buffer.buffer();
         bufferMemoryBarrier.size = buffer.getMemorySize();
@@ -98,6 +117,7 @@ namespace musevk {
                                        vk::AccessFlagBits dstAccessMask,
                                        vk::PipelineStageFlagBits srcStageMask,
                                        vk::PipelineStageFlagBits dstStageMask) {
+        assert(m_recording);
         vk::MemoryBarrier memoryBarrier;
         memoryBarrier.srcAccessMask = srcAccessMask;
         memoryBarrier.dstAccessMask = dstAccessMask;
@@ -111,10 +131,12 @@ namespace musevk {
     }
 
     void CommandBuffer::enqueueResetQueryPool(vk::QueryPool const &pool, unsigned int first_query, unsigned int query_count) {
+        assert(m_recording);
         m_command_buffer.resetQueryPool(pool, first_query, query_count);
     }
 
     void CommandBuffer::enqueueWriteTimestamp(vk::PipelineStageFlagBits stage, vk::QueryPool const &pool, unsigned int query) {
+        assert(m_recording);
         m_command_buffer.writeTimestamp(stage, pool, query);
     }
 
@@ -140,7 +162,7 @@ namespace musevk {
         m_is_running = true;
 
         vk::SubmitInfo submitInfo(wait_semaphores, wait_dst_stage_masks, m_command_buffer, signal_semaphores);
-        m_compute_queue.submit(submitInfo, m_fence);
+        m_queue.submit(submitInfo, m_fence);
     }
 
     bool CommandBuffer::isSubmitted() const {
@@ -150,7 +172,8 @@ namespace musevk {
     void CommandBuffer::wait() {
         assert(m_is_running);
         auto result = m_device.waitForFences(m_fence, VK_TRUE, UINT64_MAX);
-        assert(result == vk::Result::eSuccess);
+        if (result != vk::Result::eSuccess)
+            throw std::runtime_error(fmt::format("waitForFences returned with result {}", (uint32_t)result));
         m_device.resetFences(m_fence);
         m_is_running = false;
     }

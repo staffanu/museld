@@ -25,15 +25,16 @@ MuseDecoder::MuseDecoder(
   m_reader(reader),
   m_shaders(shaders),
   m_manager(manager),
+  m_command_pool(manager),
   m_decode_video(decode_video),
   m_decode_all_fields(decode_all_fields),
   m_decode_audio(decode_audio),
   m_timestamp_query_pool(timestamp_query_pool),
   m_eq{-1, -1},
   m_first_stage_complete_semaphore(manager.getDevice().createSemaphore(vk::SemaphoreCreateInfo())),
-  m_reset_timestamp_query_pool_command_buffer(m_manager.createCommandBuffer(timestamp_query_pool)),
-  m_first_stage_command_buffer(m_manager.createCommandBuffer(timestamp_query_pool)),
-  m_second_stage_command_buffer(m_manager.createCommandBuffer(timestamp_query_pool)),
+  m_reset_timestamp_query_pool_command_buffer(m_command_pool.createCommandBuffer(timestamp_query_pool)),
+  m_first_stage_command_buffer(m_command_pool.createCommandBuffer(timestamp_query_pool)),
+  m_second_stage_command_buffer(m_command_pool.createCommandBuffer(timestamp_query_pool)),
   m_timestamp_statistics(),
   m_frame_no(-1),
   m_field_index(0),
@@ -86,13 +87,8 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
         m_field_index = (m_field_index + 1) % 2;
 
     auto t0 = chrono::high_resolution_clock::now();
-    if (m_timestamp_query_pool != nullptr) {
-        m_reset_timestamp_query_pool_command_buffer->begin();
-        m_timestamp_query_pool->reset(*m_reset_timestamp_query_pool_command_buffer);
-        m_timestamp_query_pool->timestamp(*m_reset_timestamp_query_pool_command_buffer, "begin", vk::PipelineStageFlagBits::eTopOfPipe);
-        m_reset_timestamp_query_pool_command_buffer->submit({}, {}, {});
-        m_reset_timestamp_query_pool_command_buffer->wait();
-    }
+    if (m_timestamp_query_pool != nullptr)
+        m_timestamp_query_pool->resetAndSubmit(*m_reset_timestamp_query_pool_command_buffer);
 
     std::unique_ptr<InputReader::InputReaderBlock> input_block = nullptr;
     InputReader::InputStatus input_status = InputReader::InputStatus::eNormal;

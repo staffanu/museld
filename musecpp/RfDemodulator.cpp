@@ -2,19 +2,25 @@
 // Created by staffanu on 12/10/23.
 //
 
-#include <algorithm>
-#include <cmath>
 #include <thread>
 #include <vector>
 #include <iostream>
 #include <filesystem>
 #include "RfDemodulator.h"
+#include "musevk/VulkanUtil.h"
+#include "musevk/TimestampQueryPool.h"
+#include "musevk/TimestampStatistics.h"
 
 using namespace std;
+using namespace musevk;
 
-RfDemodulator::RfDemodulator(Logger &log, std::string filename)
+RfDemodulator::RfDemodulator(Logger &log, std::string executable_dir, std::string filename,
+                             musevk::VulkanManager &vulkan_manager, bool benchmark_shaders)
 : m_log(log),
+  m_executable_dir(std::move(executable_dir)),
   m_filename(std::move(filename)),
+  m_vulkan_manager(vulkan_manager),
+  m_benchmark_shaders(benchmark_shaders),
   m_input_fd(-1),
   m_input_is_fifo(filesystem::is_fifo(filename)),
   m_total_samples_read(0),
@@ -43,7 +49,7 @@ bool RfDemodulator::initialize() {
 #endif
 
     for (int i = 0; i < c_number_of_block_buffers; i++)
-        m_vacant_blocks.push_back(make_unique<DemodulatedBlock>());
+        m_vacant_blocks.push_back(make_unique<DemodulatedBlock>(m_vulkan_manager));
 
     m_demodulator_thread = new thread(&RfDemodulator::demodulate, this);
 #ifdef linux
@@ -109,33 +115,105 @@ void RfDemodulator::cleanup() {
 
 void RfDemodulator::demodulate() {
     assert(c_sample_block_size % c_video_decimation_rate == 0);
-    assert(c_bandpass_filter_size % c_AVX_floats_per_chunk == 0);
-    assert(c_lowpass_filter_size % c_AVX_floats_per_chunk == 0);
-    assert(c_rrc_filter_size % c_AVX_floats_per_chunk == 0);
-    assert(c_output_buffer_size == DemodulatedBlock::c_video_block_size);
     assert(c_efm_out_buffer_size == DemodulatedBlock::c_efm_block_size);
 
-    float input_buffer[c_input_buffer_size] = {};
-    float analytic_buffer_re[c_sample_block_size] = {};
-    float analytic_buffer_im[c_sample_block_size] = {};
-    float lowpass_in_buffer[c_lowpass_in_buffer_size] = {};
-    float rrc_in_buffer[c_rrc_in_buffer_size] = {};
-    float efm_equalization_in_buffer[c_efm_equalization_in_buffer_size] = {};
+    CommandPool command_pool(m_vulkan_manager);
+    musevk::TimestampQueryPool *timestamp_query_pool =
+            m_benchmark_shaders ? new musevk::TimestampQueryPool(m_vulkan_manager.getPhysicalDevice(), m_vulkan_manager.getDevice(), 40) : nullptr;
+    musevk::TimestampStatistics timestamp_statistics;
+    auto command_buffer = command_pool.createCommandBuffer(timestamp_query_pool);
+    if (timestamp_query_pool != nullptr)
+        timestamp_query_pool->resetAndSubmit(*command_buffer);
 
-    uint8_t dropout_buffer[c_dropout_buffer_size] = {};
+    vk::BufferUsageFlags buffer_usage_flags =
+            vk::BufferUsageFlagBits::eStorageBuffer
+            | vk::BufferUsageFlagBits::eTransferDst
+            | vk::BufferUsageFlagBits::eTransferSrc;
 
-    complex<float> prev_sample = {};
-    long total_samples_read_last_log = 0;
-    long total_time_since_last_log_us = 0;
+    // Create buffers for all the filters
+    shared_ptr<VulkanBuffer> bandpass_filter_re =
+            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(c_bandpass_filter_size), c_bandpass_filter.first);
+    shared_ptr<VulkanBuffer> bandpass_filter_im =
+            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(c_bandpass_filter_size), c_bandpass_filter.second);
+    shared_ptr<VulkanBuffer> lowpass_filter =
+            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(c_lowpass_filter_size), c_lowpass_filter);
+    shared_ptr<VulkanBuffer> rrc_filter =
+            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(c_rrc_filter_size), c_rrc_filter);
+    shared_ptr<VulkanBuffer> efm_lowpass_filter =
+            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(c_efm_lowpass_filter_size), c_efm_lowpass_filter);
+    shared_ptr<VulkanBuffer> efm_equalization_filter =
+            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(c_efm_equalization_filter_size), c_efm_equalization_filter);
 
-    while (!m_stop_request && readFloats(input_buffer + c_bandpass_filter_size - 1, c_sample_block_size)) {
+    shared_ptr<VulkanBuffer> input_buffer = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(c_input_buffer_size), sizeof(int16_t), buffer_usage_flags, HostAccess::eHostWrite);
+
+    shared_ptr<VulkanBuffer> analytic_buffer_re = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(c_analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+
+    shared_ptr<VulkanBuffer> analytic_buffer_im = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(c_analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+
+    shared_ptr<VulkanBuffer> lowpass_in_buffer = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(c_lowpass_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+
+    shared_ptr<VulkanBuffer> rrc_in_buffer = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(c_rrc_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+
+    shared_ptr<VulkanBuffer> efm_equalization_in_buffer = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(c_efm_equalization_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+
+    shared_ptr<VulkanBuffer> dropout_buffer = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(c_dropout_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+
+    // Create shaders
+    shared_ptr<ComputeShader> input_fir_filter_shader = unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager.getDevice(), "input_fir_filter",
+                              {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "input_fir_filter.comp"), Size(0), 3));
+
+    input_fir_filter_shader->updateBufferDescriptorsInSet(0, {bandpass_filter_re, input_buffer, analytic_buffer_re});
+    input_fir_filter_shader->updateBufferDescriptorsInSet(1, {bandpass_filter_im, input_buffer, analytic_buffer_im});
+    input_fir_filter_shader->updateBufferDescriptorsInSet(2, {efm_lowpass_filter, input_buffer, efm_equalization_in_buffer});
+
+    shared_ptr<ComputeShader> fir_filter_shader = unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager.getDevice(), "fir_filter",
+                              {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 3));
+
+    fir_filter_shader->updateBufferDescriptorsInSet(0, {lowpass_filter, lowpass_in_buffer, rrc_in_buffer});
+
+    shared_ptr<ComputeShader> fm_quadrature_shader = unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager.getDevice(), "fm_quadrature",
+                              {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer}, 7 * sizeof(float),
+                              VulkanUtil::loadSpirv(m_executable_dir, "fm_quadrature.comp"), Size(c_sample_block_size)));
+
+    shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager.getDevice(),
+                              "detect_dropouts",
+                              {lowpass_in_buffer, dropout_buffer}, 4 * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts.comp"), Size(DemodulatedBlock::c_video_block_size)));
+
+    // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
+    // will have undefined output otherwise.
+    command_buffer->begin();
+    float zero = 0.f;
+    float one = 1.f;
+    command_buffer->enqueueFillBuffer(*input_buffer, 0); // int32_t interpreted as 2 x int16_t
+    command_buffer->enqueueFillBuffer(*analytic_buffer_re, reinterpret_cast<uint32_t &>(one));
+    command_buffer->enqueueFillBuffer(*analytic_buffer_im, reinterpret_cast<uint32_t &>(one));
+    command_buffer->enqueueFillBuffer(*lowpass_in_buffer, reinterpret_cast<uint32_t &>(zero));
+    command_buffer->enqueueFillBuffer(*rrc_in_buffer, reinterpret_cast<uint32_t &>(zero));
+    command_buffer->submit({}, {}, {});
+    command_buffer->wait();
+
+    while (!m_stop_request && readFloats(input_buffer->data<int16_t>() + c_bandpass_filter_size - 1, c_sample_block_size)) {
 
         // First get a free output block to write to
         unique_ptr<DemodulatedBlock> block = nullptr;
         {
             std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
             if (m_input_is_fifo && m_vacant_blocks.empty()) {
-                // discard a filled buffer -- this is better than having the writer to the fifo wait
+                // discard a filled buffer -- this is better than waiting since it means the reader cannot cope anyway
                 m_log.warn(eInput, "Discarding demodulated block due to overrun");
                 assert(!m_filled_blocks.empty());
                 m_vacant_blocks.push_back(std::move(m_filled_blocks.back()));
@@ -149,117 +227,105 @@ void RfDemodulator::demodulate() {
             block = std::move(m_vacant_blocks.front());
             m_vacant_blocks.pop_front();
         }
-        auto t0 = chrono::high_resolution_clock::now();
-
         // The first byte of the output lags the actual input due to three filters being applied
         block->input_offset = m_total_samples_read - (c_bandpass_filter_size + c_lowpass_filter_size + c_rrc_filter_size) / 2;
 
-        // Run the input signal through the bandpass filter that also converts the signal into an analytic signal
-        firFilter(input_buffer, c_sample_block_size, c_bandpass_filter.first, 1, analytic_buffer_re);
-        firFilter(input_buffer, c_sample_block_size, c_bandpass_filter.second, 1, analytic_buffer_im);
+        // Begin Vulkan command buffer and reset the timestamp query pool if we use one
+        if (timestamp_query_pool != nullptr)
+            timestamp_query_pool->resetAndSubmit(*command_buffer);
+        command_buffer->begin();
 
-        // Demodulate the analytic signal
-        for (int index = 0; index < c_sample_block_size; index++) {
-            auto sample = complex(analytic_buffer_re[index], analytic_buffer_im[index]);
-            float phase_diff = arg(sample * conj(prev_sample));
-            prev_sample = sample;
-            // fm_out will be in the range [-1, 1] when the frequency varies between c_center_frequency - c_frequency_deviation and c_center_frequency + c_frequency_deviation
-            // This expression is probably easier to understand but has one more multiplication:
-            // (phase_diff * (c_sample_frequency / (c_2pi * c_center_frequency)) - 1.f) * (c_center_frequency / c_frequency_deviation);
-            float fm_out = phase_diff * (c_sample_frequency / (c_2pi * c_frequency_deviation)) -
-                           c_center_frequency / c_frequency_deviation;
-            lowpass_in_buffer[index + c_lowpass_filter_size - 1] = fm_out;
-        }
+        // Run the input signal through the bandpass filter that also converts the signal to an analytic signal
+        input_fir_filter_shader->updateWorkgroup(Size(c_sample_block_size));
+        command_buffer->enqueueComputeShader<uint32_t>(
+                input_fir_filter_shader,
+                {c_bandpass_filter_size, c_sample_block_size, /* out offset */ 1, /* decimation */ 1}, 0);
+        command_buffer->enqueueComputeShader<uint32_t>(
+                input_fir_filter_shader,
+                {c_bandpass_filter_size, c_sample_block_size, /* out offset */ 1, /* decimation */ 1}, 1);
 
-        // Lowpass filter the demodulated signal, and down-sample before rrc filtering
-        firFilter(lowpass_in_buffer, c_sample_block_size / 2, c_lowpass_filter, 2,
-                  rrc_in_buffer + c_rrc_filter_size - 1);
+        // Demodulate the analytic signal, and scale to the standard MUSE range
+        // +/- 1 corresponds to the white/black level, which is 128+/-112 (16, 240) in MUSE
+        // With the current parameters (62.5MHz/12.5MHz/1.9MHz) the possible output swing is between -23.03 and +9.87.
+        command_buffer->enqueueComputeShader<float>(fm_quadrature_shader,
+                                                    {c_sample_block_size, c_lowpass_filter_size - 1,
+                                                     c_sample_frequency, c_frequency_deviation, c_center_frequency, /* scale */ 112.f, /* add */ 128.f});
+
+        // Lowpass filter the demodulated signal, and down-sample (decimate by factor 2) before rrc filtering
+        fir_filter_shader->updateWorkgroup(Size(c_sample_block_size / c_video_decimation_rate));
+        command_buffer->enqueueComputeShader<uint32_t>(
+                fir_filter_shader,
+                {c_lowpass_filter_size, c_sample_block_size / c_video_decimation_rate, /* out offset */ c_rrc_filter_size - 1, c_video_decimation_rate}, 0);
 
         // Run the down-sampled signal through the root raised cosine pulse-shaping filter and store in the output block
-        firFilter(rrc_in_buffer, c_sample_block_size / 2, c_rrc_filter, 1, block->video_data);
-
-        // Scale the values to the standard MUSE range
-        // +/- 1 corresponds to the white/black level, which is 128+/-112 (16, 240) in MUSE
-        for (int i = 0; i < block->c_video_block_size; i++)
-            block->video_data[i] = block->video_data[i] * 112.f + 128.f;
+        fir_filter_shader->updateBufferDescriptorsInSet(1, {rrc_filter, rrc_in_buffer, block->video_data});
+        command_buffer->enqueueComputeShader<uint32_t>(
+                fir_filter_shader,
+                {c_rrc_filter_size, c_sample_block_size / c_video_decimation_rate, /* out offset */ 0, /* decimation */ 1}, 1);
 
         // EFM
-        firFilter(input_buffer, c_sample_block_size / c_efm_decimation_rate, c_efm_lowpass_filter,
-                  c_efm_decimation_rate, efm_equalization_in_buffer + c_efm_equalization_filter_size - 1);
-        firFilter(efm_equalization_in_buffer, c_efm_out_buffer_size, c_efm_equalization_filter, 1, block->efm_data);
+        input_fir_filter_shader->updateWorkgroup(Size(c_efm_out_buffer_size));
+        command_buffer->enqueueComputeShader<uint32_t>(
+                input_fir_filter_shader,
+                {c_rrc_filter_size, c_efm_out_buffer_size, /* out offset */ c_efm_equalization_filter_size - 1, c_efm_decimation_rate}, 2);
 
-        // Dropout detection
-        // We interpret excessive signal values to indicate a dropout.  Due to pre-emphasis the signal is often
-        // outside the [-1, 1] range normally, so the thresholds for dropout detection are much wider.
-        for (int index = 0; index < c_sample_block_size; index += c_video_decimation_rate) {
-            bool dropout = false;
-            for (int i = 0 ; i < c_video_decimation_rate; i++)
-                if (lowpass_in_buffer[index + i + c_lowpass_filter_size - 1] < -2.2f ||
-                    lowpass_in_buffer[index + i + c_lowpass_filter_size - 1] > 5.5f)
-                    dropout = true;
+        fir_filter_shader->updateBufferDescriptorsInSet(2, {efm_equalization_filter, efm_equalization_in_buffer, block->efm_data});
+        command_buffer->enqueueComputeShader<uint32_t>(
+                fir_filter_shader,
+                {c_efm_equalization_filter_size, c_efm_out_buffer_size, /* out offset */ 0, /* decimation */ 1}, 2);
 
-            dropout_buffer[c_dropout_delay + index / c_video_decimation_rate] = dropout;
+        // Detect dropouts
+        command_buffer->enqueueComputeShader<uint32_t>(
+                detect_dropouts_shader, {DemodulatedBlock::c_video_block_size, c_lowpass_filter_size - 1, c_dropout_delay, c_video_decimation_rate});
 
-//            if (dropout && index > 32 && index < c_sample_block_size - 40) {
-//                cout << "Dropout index " << m_total_samples_read + index << ": " << endl;
-//                cout << "x=[";
-//                for (int i = -32; i < 8 + 32; i++) {
-//                    cout << analytic_buffer_re[index + i] << " ";
-//                }
-//                cout << "];" << endl;
-//                cout << "y=[";
-//                for (int i = -32; i < 8 + 32; i++) {
-//                    cout << lowpass_in_buffer[index + c_lowpass_filter_size - 1 + i] << " ";
-//                }
-//                cout << "];" << endl;
-//            }
-        }
+        // Copy data from dropout detection to the output buffer before writing over the first part of the buffer below
+        command_buffer->enqueueCopyBuffer(*dropout_buffer, *block->dropouts, 0, 0, block->c_video_block_size * sizeof(uint8_t));
 
+        // After filtering, we need to copy the last data from the input buffers to their start,
+        // since the filter output is shorter than the input.  The same is true for the demodulation input,
+        // but here only one byte needs to be copied.
+        auto enqueue_int16_copy = [command_buffer](VulkanBuffer &buffer, uint32_t buffer_size, uint32_t copy_count) -> void {
+            command_buffer->enqueueCopyBuffer(buffer, buffer, (buffer_size - copy_count) * sizeof(int16_t), 0, copy_count * sizeof(int16_t));
+        };
+        auto enqueue_float_copy = [command_buffer](VulkanBuffer &buffer, uint32_t buffer_size, uint32_t floats_to_copy) -> void {
+            command_buffer->enqueueCopyBuffer(buffer, buffer, (buffer_size - floats_to_copy) * sizeof(float), 0, floats_to_copy * sizeof(float));
+        };
+        enqueue_int16_copy(*input_buffer, c_input_buffer_size, c_bandpass_filter_size - 1);
+        enqueue_float_copy(*analytic_buffer_re, c_analytic_buffer_size, 1);
+        enqueue_float_copy(*analytic_buffer_im, c_analytic_buffer_size, 1);
+        enqueue_float_copy(*lowpass_in_buffer, c_lowpass_in_buffer_size, c_lowpass_filter_size - 1);
+        enqueue_float_copy(*rrc_in_buffer, c_rrc_in_buffer_size, c_rrc_filter_size - 1);
+        enqueue_float_copy(*efm_equalization_in_buffer, c_efm_equalization_in_buffer_size, c_efm_equalization_filter_size - 1);
+        command_buffer->enqueueCopyBuffer(*dropout_buffer, *dropout_buffer, (c_dropout_buffer_size - c_dropout_delay) * sizeof(uint8_t), 0, c_dropout_delay * sizeof(uint8_t));
 
-        memcpy(block->dropouts, dropout_buffer, sizeof(block->dropouts));
+        command_buffer->submit({}, {}, {});
+        command_buffer->wait();
 
-        // Copy the end of the filter inputs to the start of the corresponding buffers
-        memcpy(input_buffer, input_buffer + c_input_buffer_size - c_bandpass_filter_size + 1,
-               (c_bandpass_filter_size - 1) * sizeof(float));
-        memcpy(lowpass_in_buffer, lowpass_in_buffer + c_lowpass_in_buffer_size - c_lowpass_filter_size + 1,
-               (c_lowpass_filter_size - 1) * sizeof(float));
-        memcpy(rrc_in_buffer, rrc_in_buffer + c_rrc_in_buffer_size - c_rrc_filter_size + 1,
-               (c_rrc_filter_size - 1) * sizeof(float));
-        memcpy(efm_equalization_in_buffer, efm_equalization_in_buffer + c_efm_equalization_in_buffer_size - c_efm_equalization_filter_size + 1,
-               (c_efm_equalization_filter_size - 1) * sizeof(float));
-        memcpy(dropout_buffer, dropout_buffer + c_dropout_buffer_size - c_dropout_delay, c_dropout_delay);
-
-        auto t1 = chrono::high_resolution_clock::now();
-        total_time_since_last_log_us += chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
+        if (timestamp_query_pool != nullptr)
+            timestamp_statistics.add_timestamps(timestamp_query_pool->getTimestamps());
 
         // Send away result
         std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
         m_cv_filled.notify_one();
         m_filled_blocks.push_back(std::move(block));
-
-        m_total_samples_read += c_sample_block_size;
-        if (m_total_samples_read - total_samples_read_last_log > (long)c_sample_frequency) {
-            m_log.info(eInput | ePerformance,
-                       fmt::format("Total demodulation time last second worth of video_data: {:.1f} ms", (double)total_time_since_last_log_us / 1000.0));
-            total_time_since_last_log_us = 0;
-            total_samples_read_last_log = m_total_samples_read;
-        }
     }
     m_reader_thread_finished = true;
     m_cv_filled.notify_one();
+
+    delete timestamp_query_pool;
+    timestamp_statistics.print_stats(0);
 }
 
-bool RfDemodulator::readFloats(float *out, size_t n) {
-    int16_t m_tmp_input_buffer[n];
+bool RfDemodulator::readFloats(int16_t *out, size_t n) {
     int filled_bytes = 0;
     do {
         if (m_stop_request) {
             m_log.info(eInput, "RfDemodulator: stop requested");
             return false;
         }
-        std::unique_lock<std::mutex> lock(m_input_file_mutex);
+        std::scoped_lock<std::mutex> lock(m_input_file_mutex);
         ssize_t read_count = read(m_input_fd,
-                                  (void *)((char *)m_tmp_input_buffer + filled_bytes),
+                                  (void *)((char *)out + filled_bytes),
                                   n * sizeof(int16_t) - filled_bytes);
         if (read_count == -1 && errno == EAGAIN)
             this_thread::sleep_for(chrono::milliseconds(1));
@@ -274,92 +340,5 @@ bool RfDemodulator::readFloats(float *out, size_t n) {
             filled_bytes += (int)read_count;
     } while (filled_bytes < n * sizeof(int16_t));
 
-    for (int i = 0; i < n; i++)
-        out[i] = (float)m_tmp_input_buffer[i];
-
     return true;
 }
-
-#ifdef __AVX__
-#include <immintrin.h>
-#include <numeric>
-
-template<size_t filter_size> void RfDemodulator::firFilter(
-        const float *input,   // input signal of length at least output_size + filter_length - 1
-        size_t output_size,   // number of output values to compute -- must be even!
-        const array<float, filter_size> &filter,  // reversed filter coefficients, needs to be aligned at 32 byte multiple (c_AVX_floats_per_chunk * sizeof(float))
-        int decimation_rate,
-        float *output) {
-    assert(output_size % 2 == 0);
-    alignas(__m256) array<float, c_AVX_floats_per_chunk> tmp_store0{};
-    alignas(__m256) array<float, c_AVX_floats_per_chunk> tmp_store1{};
-
-    for (int oi = 0, ii = 0; oi < output_size; oi += 2, ii += 2 * decimation_rate) {
-        __m256 out_chunk0 = _mm256_setzero_ps();
-        __m256 out_chunk1 = _mm256_setzero_ps();
-
-        for (int j = 0; j < filter_size; j += c_AVX_floats_per_chunk) {
-            __m256 filter_chunk = _mm256_loadu_ps(filter.data() + j);
-
-            __m256 input_chunk0 = _mm256_loadu_ps(input + ii + j);
-            out_chunk0 = _mm256_add_ps(out_chunk0, _mm256_mul_ps(input_chunk0, filter_chunk));
-
-            __m256 input_chunk1 = _mm256_loadu_ps(input + ii + decimation_rate + j);
-            out_chunk1 = _mm256_add_ps(out_chunk1, _mm256_mul_ps(input_chunk1, filter_chunk));
-        }
-        _mm256_store_ps(tmp_store0.data(), out_chunk0); // aligned store
-        output[oi] = std::accumulate(tmp_store0.begin(), tmp_store0.end(), 0.f);
-
-        _mm256_store_ps(tmp_store1.data(), out_chunk1); // aligned store
-        output[oi + 1] = std::accumulate(tmp_store1.begin(), tmp_store1.end(), 0.f);
-    }
-}
-
-#elif __ARM_NEON == 1
-#include <arm_neon.h>
-
-template<size_t filter_size> void RfDemodulator::firFilter(
-        const float *input,   // input signal of length at least output_size + filter_length - 1
-        size_t output_size,   // number of output values to compute -- must be even!
-        const array<float, filter_size> &filter,  // reversed filter coefficients
-        int decimation_rate,
-        float *output) {
-    assert(output_size % 2 == 0);
-    alignas(float32x4_t) array<float, c_NEON_floats_per_chunk> tmp_store0{};
-    alignas(float32x4_t) array<float, c_NEON_floats_per_chunk> tmp_store1{};
-
-    for (int oi = 0, ii = 0; oi < output_size; oi += 2, ii += 2 * decimation_rate) {
-        float32x4_t out_chunk0 = vdupq_n_f32(0);
-        float32x4_t out_chunk1 = vdupq_n_f32(0);
-
-        for (int j = 0; j < filter_size; j += c_NEON_floats_per_chunk) {
-            float32x4_t filter_chunk = vld1q_f32(filter.data() + j);
-
-            float32x4_t input_chunk0 = vld1q_f32(input + ii + j);
-            out_chunk0 = vmlaq_f32(out_chunk0, input_chunk0, filter_chunk);
-
-            float32x4_t input_chunk1 = vld1q_f32(input + ii + decimation_rate + j);
-            out_chunk1 = vmlaq_f32(out_chunk1, input_chunk1, filter_chunk);
-        }
-
-        output[oi] = vaddvq_f32(out_chunk0);
-        output[oi + 1] = vaddvq_f32(out_chunk1);
-    }
-}
-
-#else
-#warning "SIMD architecture not detected"
-template<size_t filter_size> void RfDemodulator::firFilter(
-        const float *input,   // input signal of length output_length + filter_length - 1
-        size_t output_size, // usable input (not including the filter_length-1 extra values)
-        const array<float, filter_size> &filter,  // reversed filter coefficients
-        int decimation_rate,
-        float *output) {
-    for (auto i = 0; i < output_size; i++) {
-        output[i] = 0;
-        for (auto j = 0; j < filter_size; j++) {
-            output[i] += input[i * decimation_rate + j] * filter[j];
-        }
-    }
-}
-#endif

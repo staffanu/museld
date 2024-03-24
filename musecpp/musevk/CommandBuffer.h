@@ -7,6 +7,7 @@
 
 #include <vulkan/vulkan.hpp>
 #include "ComputeShader.h"
+#include "Queue.h"
 
 namespace musevk {
     class TimestampQueryPool;
@@ -19,8 +20,9 @@ namespace musevk {
 
         CommandBuffer(vk::CommandPool &command_pool,
                       vk::Device &device,
-                      vk::Queue &computeQueue,
-                      TimestampQueryPool *timestamp_query_pool);
+                      Queue &queue,
+                      TimestampQueryPool *timestamp_query_pool,
+                      const vk::PhysicalDeviceLimits &limits);
 
         void begin();
 
@@ -30,6 +32,8 @@ namespace musevk {
                                            vk::AccessFlags src_access_mask, vk::AccessFlags dst_access_mask);
 
         void enqueueCopyBuffer(VulkanBuffer &source, VulkanBuffer &destination);
+
+        void enqueueCopyBuffer(VulkanBuffer &source, VulkanBuffer &dest, uint32_t srcOffset, uint32_t dstOffset, uint32_t size);
 
         void enqueueCopyBufferToImage(vk::Buffer &bufferFrom,
                                       vk::Image imageTo,
@@ -42,6 +46,8 @@ namespace musevk {
                               vk::ImageLayout dest_layout,
                               vk::ImageBlit region);
 
+        void enqueueFillBuffer(VulkanBuffer &buffer, uint32_t data);
+
         void enqueueBufferBarrier(VulkanBuffer &buffer,
                 vk::AccessFlagBits srcAccessMask,
                 vk::AccessFlagBits dstAccessMask,
@@ -53,7 +59,7 @@ namespace musevk {
                             vk::PipelineStageFlagBits srcStageMask,
                             vk::PipelineStageFlagBits dstStageMask);
 
-        template<typename T = float>
+        template<typename T>
         void enqueueComputeShader(const std::shared_ptr<ComputeShader> &compute_shader,
                                   const std::vector<T> &pushConstants,
                                   int descriptor_set_index = 0) {
@@ -64,7 +70,7 @@ namespace musevk {
 
             compute_shader->bindPipelineAndDescriptorSets(m_command_buffer, descriptor_set_index);
             compute_shader->bindPushConstants(m_command_buffer, pushConstants);
-            compute_shader->dispatch(m_command_buffer);
+            compute_shader->dispatch(m_command_buffer, m_limits);
             maybeTimestamp(compute_shader->name(), vk::PipelineStageFlagBits::eComputeShader);
         }
 
@@ -86,8 +92,9 @@ namespace musevk {
 
         vk::CommandPool &m_command_pool;
         vk::Device &m_device;
-        vk::Queue &m_compute_queue;
+        Queue &m_queue;
         TimestampQueryPool *m_timestamp_query_pool;
+        const vk::PhysicalDeviceLimits m_limits;
         vk::CommandBuffer m_command_buffer;
 
         vk::Fence m_fence;
