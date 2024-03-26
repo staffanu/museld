@@ -25,7 +25,7 @@ namespace musevk {
         VulkanImage(VulkanImage &&other) = delete;
         VulkanImage &operator=(VulkanImage &&other) = delete;
 
-        ~VulkanImage() override;
+        ~VulkanImage();
 
         vk::Image &image() {
             return m_image;
@@ -34,6 +34,9 @@ namespace musevk {
         [[nodiscard]] MemoryObjectType getType() const final {
             return eImage;
         }
+
+        void synchronizeForHostRead(CommandBuffer &command_buffer) final {};
+        void synchronizeHostWrites(CommandBuffer &command_buffer) final {};
 
         [[nodiscard]] uint32_t getWidth() const {
             return m_width;
@@ -64,14 +67,11 @@ namespace musevk {
         }
 
     private:
-        void allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags);
-
         VulkanManager &m_vulkan_manager;
         uint32_t m_width;
         uint32_t m_height;
 
         vk::Image m_image;
-        AllocatedMemory m_allocated_memory;
         vk::ImageView m_view;
         vk::DescriptorImageInfo m_descriptor_image_info;
         vk::ImageLayout m_layout;

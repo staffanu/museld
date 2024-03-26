@@ -27,16 +27,17 @@ namespace musevk {
         void initVulkan(GLFWwindow *window, bool no_sync);
         void cleanup();
 
-        vk::PhysicalDevice &getPhysicalDevice() { return m_physical_device; };
-        vk::Device &getDevice() { return m_logical_device; };
-        uint32_t getGraphicsAndComputeFamily() { return m_queue_families.graphicsAndComputeFamily.value(); };
-        Queue &getGraphicsAndComputeQueue() { return *m_graphics_and_compute_queue; };
-        MemoryAllocator &getMemoryAllocator() { return *m_memory_allocator; };
-        vk::PhysicalDeviceProperties &getPhysicalDeviceProperties() { return m_physical_device_properties; };
+        Logger &getLogger() { return m_log; }
+        vk::PhysicalDevice &getPhysicalDevice() { return m_physical_device; }
+        vk::Device &getDevice() { return m_logical_device; }
+        uint32_t getGraphicsAndComputeFamily() { return m_queue_families.graphicsAndComputeFamily.value(); }
+        Queue &getGraphicsAndComputeQueue() { return *m_graphics_and_compute_queue; }
+        MemoryAllocator &getMemoryAllocator() { return *m_memory_allocator; }
+        vk::PhysicalDeviceProperties &getPhysicalDeviceProperties() { return m_physical_device_properties; }
 
         vk::Image &acquireNextImage(vk::Semaphore image_available_semaphore);
         void present(vk::Image image);
-        vk::Extent2D getSwapChainExtent() { return m_swap_chain_extent; };
+        vk::Extent2D getSwapChainExtent() { return m_swap_chain_extent; }
         void recreateSwapChain();
 
     private:

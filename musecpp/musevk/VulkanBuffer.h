@@ -9,6 +9,7 @@
 #include <memory>
 #include "VulkanMemoryObject.h"
 #include "Size.h"
+#include "CommandBuffer.h"
 
 namespace musevk {
     class VulkanManager;
@@ -25,15 +26,21 @@ namespace musevk {
         VulkanBuffer(VulkanBuffer &&other) = delete;
         VulkanBuffer &operator=(VulkanBuffer &&other) = delete;
 
-        ~VulkanBuffer() override;
+        ~VulkanBuffer();
 
         vk::Buffer &buffer() {
-            return m_buffer;
+            return m_device_buffer;
         }
 
         [[nodiscard]] MemoryObjectType getType() const final {
             return eBuffer;
         }
+
+        void synchronizeForHostRead(CommandBuffer &command_buffer) final {
+            if (m_host_visible_buffer.has_value())
+                command_buffer.enqueueCopyRawBuffer(m_device_buffer, m_host_visible_buffer.value(), 0, 0, m_memory_size);
+        };
+        void synchronizeHostWrites(CommandBuffer &command_buffer) final {};
 
         vk::WriteDescriptorSet
         makeWriteDescriptorSet(vk::DescriptorSet &descriptor_set, uint32_t binding_index) const final {
@@ -51,19 +58,11 @@ namespace musevk {
             return m_size;
         }
 
-        [[nodiscard]] uint32_t getMemorySize() const {
-            return m_memory_size;
-        }
-
     private:
-        void allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags);
-
         VulkanManager &m_vulkan_manager;
         Size m_size;
-        uint32_t m_memory_size;
 
-        vk::Buffer m_buffer;
-        AllocatedMemory m_allocated_memory;
+        vk::Buffer m_device_buffer;
         vk::DescriptorBufferInfo m_descriptor_buffer_info;
     };
 }

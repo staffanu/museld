@@ -25,7 +25,7 @@ namespace musevk {
         createSurface();
         pickPhysicalDevice();
         createLogicalDevice();
-        m_memory_allocator = make_unique<MemoryAllocator>(m_log, m_physical_device, m_logical_device);
+        m_memory_allocator = make_unique<MemoryAllocator>(m_physical_device, m_logical_device);
         createSwapChain();
     }
 

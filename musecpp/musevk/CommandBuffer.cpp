@@ -68,6 +68,13 @@ namespace musevk {
         maybeTimestamp("copy", vk::PipelineStageFlagBits::eTransfer);
     }
 
+    void CommandBuffer::enqueueCopyRawBuffer(vk::Buffer &source, vk::Buffer &dest, uint32_t srcOffset, uint32_t dstOffset, uint32_t size) {
+        assert(m_recording);
+        vk::BufferCopy region(srcOffset, dstOffset, size);
+        m_command_buffer.copyBuffer(source, dest, {region});
+        maybeTimestamp("raw copy", vk::PipelineStageFlagBits::eTransfer);
+    }
+
     void CommandBuffer::enqueueCopyBufferToImage(vk::Buffer &bufferFrom,
                                                  vk::Image imageTo,
                                                  vk::ImageLayout layout,

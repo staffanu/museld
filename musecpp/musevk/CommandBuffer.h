@@ -35,6 +35,8 @@ namespace musevk {
 
         void enqueueCopyBuffer(VulkanBuffer &source, VulkanBuffer &dest, uint32_t srcOffset, uint32_t dstOffset, uint32_t size);
 
+        void enqueueCopyRawBuffer(vk::Buffer &source, vk::Buffer &dest, uint32_t srcOffset, uint32_t dstOffset, uint32_t size);
+
         void enqueueCopyBufferToImage(vk::Buffer &bufferFrom,
                                       vk::Image imageTo,
                                       vk::ImageLayout layout,

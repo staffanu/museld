@@ -39,11 +39,9 @@ namespace musevk {
      */
     class MemoryAllocator {
     public:
-        MemoryAllocator(Logger &log,
-                        vk::PhysicalDevice &physical_device,
+        MemoryAllocator(vk::PhysicalDevice &physical_device,
                         vk::Device &device)
-                : m_log(log),
-                  m_physical_device(physical_device),
+                : m_physical_device(physical_device),
                   m_device(device),
                   m_memory_pools(),
                   m_mutex() {
@@ -52,17 +50,17 @@ namespace musevk {
         MemoryAllocator(MemoryAllocator &other) = delete;
         MemoryAllocator &operator=(MemoryAllocator &other) = delete;
 
-        AllocatedMemory allocate(vk::MemoryRequirements memory_requirements, vk::MemoryPropertyFlags properties);
+        // The reason that we need to specify host_visible here is that we use different chunks of memory for host visible and
+        // non-host visible memory even if they have the same memory type index.  It could very well be that some different
+        // HostAccess enumeration members map tp the same memory index, but that some do not require host visible memory, and
+        // then we do not need to map memory for the ones that do not need it.
+        AllocatedMemory allocate(vk::MemoryRequirements memory_requirements, int32_t memory_type_index, bool host_visible);
 
         void free(AllocatedMemory memory);
 
         ~MemoryAllocator();
 
     private:
-        static void printMemoryProperties(Logger &log, const VkPhysicalDeviceMemoryProperties& memProperties);
-        static std::string memoryPropertyFlagsToString(VkMemoryPropertyFlags flags);
-        static std::string memoryHeapFlagsToString(VkMemoryHeapFlags flags);
-
         struct MemoryBlock {
             vk::Device device;
             std::pair<int32_t, bool> allocation_key;
@@ -86,7 +84,6 @@ namespace musevk {
             void free(AllocatedMemory &allocation);
         };
 
-        Logger &m_log;
         vk::PhysicalDevice &m_physical_device;
         vk::Device &m_device;
         std::map<std::pair<int32_t, bool>, AllocationPool> m_memory_pools;

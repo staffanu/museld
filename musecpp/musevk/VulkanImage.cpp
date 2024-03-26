@@ -12,16 +12,16 @@ namespace musevk {
                              uint32_t height,
                              vk::ImageUsageFlags image_usage_flags,
                              HostAccess host_access)
-            : VulkanMemoryObject(vulkan_manager.getMemoryAllocator()),
+            : VulkanMemoryObject(vulkan_manager, 4 * width * height),
               m_vulkan_manager(vulkan_manager),
               m_width(width),
               m_height(height),
               m_image(),
-              m_allocated_memory(),
               m_view(),
               m_descriptor_image_info(),
               m_layout(vk::ImageLayout::eUndefined) {
         auto format = vk::Format::eB8G8R8A8Unorm;
+        //auto format = vk::Format::eR16G16B16A16Unorm;
 
         vk::ImageCreateInfo image_info(vk::ImageCreateFlags(),
                                        vk::ImageType::e2D,
@@ -37,9 +37,11 @@ namespace musevk {
                                        m_layout);
         m_image = m_vulkan_manager.getDevice().createImage(image_info);
 
-        allocateAndBindMemory(makeMemoryPropertyFlags(host_access));
+        vk::MemoryRequirements memory_requirements = m_vulkan_manager.getDevice().getImageMemoryRequirements(m_image);
 
-        m_raw_data = host_access != eHostNone ? m_allocated_memory.host_memory : nullptr;
+        allocateMemory(memory_requirements, host_access);
+
+        m_vulkan_manager.getDevice().bindImageMemory(m_image, m_allocated_device_memory.device_memory, m_allocated_device_memory.offset);
 
         vk::ImageViewCreateInfo view_info(vk::ImageViewCreateFlags(),
                                           m_image,
@@ -56,7 +58,6 @@ namespace musevk {
     }
 
     VulkanImage::~VulkanImage() {
-        m_memory_allocator.free(m_allocated_memory);
         m_vulkan_manager.getDevice().destroy(m_view);
         m_vulkan_manager.getDevice().destroy(m_image);
     }
@@ -76,12 +77,5 @@ namespace musevk {
                     m_view,
                     m_layout);
         }
-    }
-
-    void VulkanImage::allocateAndBindMemory(vk::MemoryPropertyFlags memory_property_flags) {
-        vk::MemoryRequirements memoryRequirements = m_vulkan_manager.getDevice().getImageMemoryRequirements(m_image);
-
-        m_allocated_memory = m_memory_allocator.allocate(memoryRequirements, memory_property_flags);
-        m_vulkan_manager.getDevice().bindImageMemory(m_image, m_allocated_memory.device_memory, m_allocated_memory.offset);
     }
 }

@@ -281,6 +281,11 @@ void RfDemodulator::demodulate() {
         // Copy data from dropout detection to the output buffer before writing over the first part of the buffer below
         command_buffer->enqueueCopyBuffer(*dropout_buffer, *block->dropouts, 0, 0, block->c_video_block_size * sizeof(uint8_t));
 
+        // Ensure data can be read from the host later
+        block->video_data->synchronizeForHostRead(*command_buffer);
+        block->efm_data->synchronizeForHostRead(*command_buffer);
+        block->dropouts->synchronizeForHostRead(*command_buffer);
+
         // After filtering, we need to copy the last data from the input buffers to their start,
         // since the filter output is shorter than the input.  The same is true for the demodulation input,
         // but here only one byte needs to be copied.

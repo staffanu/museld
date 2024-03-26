@@ -383,6 +383,7 @@ void Shaders::convertAudioSampleRate(musevk::CommandBuffer &sq, shared_ptr<Vulka
                        44u * i, 1u, 0u, 1u, 0u, 1u},
                 i);
     }
+    m_audio_data->synchronizeForHostRead(sq);
 }
 
 shared_ptr<VulkanBuffer> Shaders::getAudioData() const {
