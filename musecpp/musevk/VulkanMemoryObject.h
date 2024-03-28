@@ -23,8 +23,9 @@ namespace musevk {
     enum HostAccess {
         eHostNone = 0,
         eHostRead = 1,
-        eHostWrite = 2,
-        eHostReadWrite = 3
+        eHostWrite = 2, // try to allocate a host visible buffer if possible
+        eHostWriteRarely = 3, // do ont care about whether the buffer is host writable -- insist more on a separate device local buffer
+        eHostReadWrite = 4
     };
 
     // VulkanMemoryObject represents an Image or a Vulkan Buffer.  It is assumed that all memory objects need to be
@@ -39,9 +40,10 @@ namespace musevk {
     // For the same reason, it is required to call synchronizeHostWrites to ensure that host writes are visible from the GPU.
     class VulkanMemoryObject {
     public:
-        explicit VulkanMemoryObject(VulkanManager &vulkan_manager, uint32_t memory_size) :
+        explicit VulkanMemoryObject(VulkanManager &vulkan_manager, uint32_t memory_size, HostAccess host_access) :
           m_vulkan_manager(vulkan_manager),
           m_memory_size(memory_size),
+          m_host_access(host_access),
           m_allocated_device_memory(),
           m_allocated_host_visible_memory(),
           m_raw_data(nullptr) {
@@ -75,10 +77,14 @@ namespace musevk {
         static std::vector<std::pair<vk::MemoryPropertyFlags, std::optional<vk::MemoryPropertyFlags>>>
                 makeMemoryPropertyFlags(HostAccess host_access);
 
+        // This will allocate device memory, and if required, also allocate a host visible buffer that
+        // will be used for host read/writes in case there is no available memory type that is suitable
+        // for using a device buffer only.
         void allocateMemory(vk::MemoryRequirements memory_requirements, HostAccess host_access);
 
         VulkanManager &m_vulkan_manager;
         uint32_t m_memory_size;
+        HostAccess m_host_access;
         AllocatedMemory m_allocated_device_memory;
         std::optional<AllocatedMemory> m_allocated_host_visible_memory;
         std::optional<vk::Buffer> m_host_visible_buffer;

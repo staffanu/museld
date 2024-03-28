@@ -47,9 +47,16 @@ public:
                                          const std::vector<std::reference_wrapper<FieldBufferView>> &fields,
                                          bool use_prev_motion_info);
 
-    void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only);
+    void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only, bool output_yuv);
 
-    std::shared_ptr<musevk::VulkanImage> getResultImage();
+    struct ResultImages {
+        std::shared_ptr<musevk::VulkanImage> out_image;
+        std::shared_ptr<musevk::VulkanBuffer> out_Y;
+        std::shared_ptr<musevk::VulkanBuffer> out_U;
+        std::shared_ptr<musevk::VulkanBuffer> out_V;
+    };
+
+    ResultImages getResultImages();
 
     void convertAudioSampleRate(musevk::CommandBuffer &sq, std::shared_ptr<musevk::VulkanBuffer> const &frame);
 
@@ -126,6 +133,9 @@ private:
 
     // used for final result
     std::shared_ptr<musevk::VulkanImage> m_image_out;
+    std::shared_ptr<musevk::VulkanBuffer> m_image_Y_out; // only used if writing to file using ffmpeg
+    std::shared_ptr<musevk::VulkanBuffer> m_image_U_out; // ..
+    std::shared_ptr<musevk::VulkanBuffer> m_image_V_out; // ..
 
     // sample rate converted audio data
     std::shared_ptr<musevk::VulkanBuffer> m_audio_data;

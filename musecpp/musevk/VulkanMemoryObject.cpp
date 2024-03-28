@@ -20,29 +20,37 @@ musevk::VulkanMemoryObject::makeMemoryPropertyFlags(HostAccess host_access) {
     switch (host_access) {
         case HostAccess::eHostNone:
             return {
-                std::make_pair(vk::MemoryPropertyFlagBits::eDeviceLocal, std::nullopt)
+                    std::make_pair(vk::MemoryPropertyFlagBits::eDeviceLocal, std::nullopt)
             };
         case HostAccess::eHostRead:
             return {
-                std::make_pair(
-                        vk::MemoryPropertyFlagBits::eDeviceLocal |
-                        vk::MemoryPropertyFlagBits::eHostVisible |
-                        vk::MemoryPropertyFlagBits::eHostCached,
-                        std::nullopt),
+                    std::make_pair(
+                            vk::MemoryPropertyFlagBits::eDeviceLocal |
+                            vk::MemoryPropertyFlagBits::eHostVisible |
+                            vk::MemoryPropertyFlagBits::eHostCached,
+                            std::nullopt),
 
-                std::make_pair(
-                        vk::MemoryPropertyFlagBits::eDeviceLocal,
-                        std::make_optional(
-                                vk::MemoryPropertyFlagBits::eHostVisible |
-                                vk::MemoryPropertyFlagBits::eHostCached))
+                    std::make_pair(
+                            vk::MemoryPropertyFlagBits::eDeviceLocal,
+                            std::make_optional(
+                                    vk::MemoryPropertyFlagBits::eHostVisible |
+                                    vk::MemoryPropertyFlagBits::eHostCached))
             };
         case HostAccess::eHostWrite:
             return {
-                std::make_pair(
-                        vk::MemoryPropertyFlagBits::eDeviceLocal |
-                        vk::MemoryPropertyFlagBits::eHostVisible |
-                        vk::MemoryPropertyFlagBits::eHostCoherent,
-                        std::nullopt)
+                    std::make_pair(
+                            vk::MemoryPropertyFlagBits::eDeviceLocal |
+                            vk::MemoryPropertyFlagBits::eHostVisible |
+                            vk::MemoryPropertyFlagBits::eHostCoherent,
+                            std::nullopt)
+            };
+        case HostAccess::eHostWriteRarely:
+            return {
+                    std::make_pair(
+                            vk::MemoryPropertyFlagBits::eDeviceLocal,
+                            std::make_optional(
+                                    vk::MemoryPropertyFlagBits::eHostVisible |
+                                    vk::MemoryPropertyFlagBits::eHostCoherent))
             };
         case HostAccess::eHostReadWrite:
             return {

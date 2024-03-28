@@ -114,7 +114,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                                    timestamp_query_pool);
         if (!decoder.initialize())
             throw runtime_error("MuseDecoder initialization failed");
-        auto image = shaders.getResultImage();
+        auto images = shaders.getResultImages();
 
         auto t0 = chrono::high_resolution_clock::now();
         int field_count = 0;
@@ -134,7 +134,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         while (paused && !redo_last_field ||
             decoder.next(efm_audio, &audio_mode, &audio_sample_count, audio_samples,
                          &field_parity, &last_buffer_file_offset, &input_samples_per_muse_sample,
-                         field_interpolation_mode, redo_last_field, enable_non_linear, dropout_mode)) {
+                         field_interpolation_mode, redo_last_field, enable_non_linear, dropout_mode, output_filename.has_value())) {
 
             if (!paused)
                 field_count++;
@@ -142,7 +142,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
 
 #ifdef HAVE_LIBAV
             if (vfw != nullptr)
-                vfw->addVideoFrameWithAudio(image, audio_mode, audio_sample_count, audio_samples);
+                vfw->addVideoFrameWithAudio(images.out_Y, images.out_U, images.out_V, audio_mode, audio_sample_count, audio_samples);
 #endif
 
             if (audio_sample_count != 0 && audio_mode != MODE_UNKNOWN && !paused)
@@ -165,7 +165,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 prev_osd_text = osd_text;
             }
             if (osd_text_remaining_frames) {
-                text_renderer.drawText(shaders.getResultImage(), 90, 50, osd_text, 4, *command_buffer);
+                text_renderer.drawText(images.out_image, 90, 50, osd_text, 4, *command_buffer);
                 if (!--osd_text_remaining_frames)
                     redo_last_field = true;
             }
@@ -187,7 +187,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                                                 (int)(xpos / xsize * MUSE_Y_BUF_WIDTH * 3),
                                                 (int)(ypos / ysize * MUSE_BUF_HEIGHT * 2),
                                                 field_x, field_y);
-                    text_renderer.drawText(shaders.getResultImage(), 10, 8, cursor_string, 1, *command_buffer);
+                    text_renderer.drawText(images.out_image, 10, 8, cursor_string, 1, *command_buffer);
                     if (field_interpolation_mode == MuseDecoder::FieldInterpolationMode::eForceIntraField && paused) {
                         long field_offset = last_buffer_file_offset // start of sound data
                                 + (long)((field_parity ? 565 : 2) * MUSE_TOTAL_WIDTH * input_samples_per_muse_sample);
@@ -199,7 +199,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                                             field_offset + (int)(input_samples_per_muse_sample * ((field_y + 44) * MUSE_TOTAL_WIDTH + (field_x + 106))),
                                             field_offset + (int)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2) * MUSE_TOTAL_WIDTH + field_x / 4 + 11),
                                             field_offset + (int)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2 + 1) * MUSE_TOTAL_WIDTH + field_x / 4 + 11));
-                        text_renderer.drawText(shaders.getResultImage(), 10, 34, offset_string, 1, *command_buffer);
+                        text_renderer.drawText(images.out_image, 10, 34, offset_string, 1, *command_buffer);
                         cursor_string += " " + offset_string;
                     }
                 }
@@ -207,7 +207,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                     redo_last_field = true;
             }
 
-            image->enqueueTransitionLayout(*command_buffer, vk::ImageLayout::eTransferSrcOptimal,
+            images.out_image->enqueueTransitionLayout(*command_buffer, vk::ImageLayout::eTransferSrcOptimal,
                                            vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer,
                                            vk::AccessFlags(), vk::AccessFlagBits::eTransferRead);
             command_buffer->enqueueTransitionMemoryLayout(swap_chain_image,
@@ -226,7 +226,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             region.dstOffsets[0] = vk::Offset3D(0, 0, 0);
             region.dstOffsets[1] = vk::Offset3D((int)extent.width, (int)extent.height, 1);
             region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
-            command_buffer->enqueueBlitImage(image->image(), vk::ImageLayout::eTransferSrcOptimal,
+            command_buffer->enqueueBlitImage(images.out_image->image(), vk::ImageLayout::eTransferSrcOptimal,
                                              swap_chain_image, vk::ImageLayout::eTransferDstOptimal,
                                              region);
 

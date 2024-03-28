@@ -80,7 +80,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                        AudioDecoder::AudioFrame output_samples[max(AudioDecoder::c_max_output_samples, EfmDecoder::c_max_output_samples)],
                        int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
                        FieldInterpolationMode field_interpolation_mode,
-                       bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode) {
+                       bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode, bool output_yuv) {
     *sample_count = 0;
 
     if (redo_last_field) // undo the field advance from the previous call
@@ -158,10 +158,11 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
             m_log.debug(eVideo, fmt::format("Field {} inter-frame interpolation success", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
                                                  field_interpolation_mode == FieldInterpolationMode::eForceIntraField,
-                                                 field_interpolation_mode == FieldInterpolationMode::eForceInterFrame);
+                                                 field_interpolation_mode == FieldInterpolationMode::eForceInterFrame,
+                                                 output_yuv);
         } else {
             m_log.warn(eVideo, fmt::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
-            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false);
+            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false, output_yuv);
         }
     }
     if (m_first_stage_command_buffer->isSubmitted())

@@ -37,7 +37,6 @@ public:
             m_have_audio(false),
             m_encode_video(false),
             m_encode_audio(false),
-            m_sws_ctx(nullptr),
             m_swr_ctx(nullptr),
             m_samples_in_frame(0) {
     }
@@ -47,7 +46,9 @@ public:
     VideoFileWriter &operator=(VideoFileWriter &&) = delete;
 
     bool init();
-    void addVideoFrameWithAudio(std::shared_ptr<musevk::VulkanImage> const &image, AudioMode audio_mode, int number_of_samples, AudioDecoder::AudioFrame *audio_samples);
+    void addVideoFrameWithAudio(std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
+                                std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V,
+                                AudioMode audio_mode, int number_of_samples, AudioDecoder::AudioFrame *audio_samples);
     void cleanup();
 
 private:
@@ -60,7 +61,6 @@ private:
         int64_t next_pts; // pts of the next frame that will be generated
 
         AVFrame *frame;
-        AVFrame *tmp_frame;
         AVPacket *tmp_pkt;
     };
 
@@ -68,11 +68,9 @@ private:
 
     void initStream(OutputStream *ost, enum AVCodecID codec_id);
     void initVideo(AVDictionary *opt_arg);
-    static AVFrame *allocFrame(enum AVPixelFormat pix_fmt, int width, int height);
     void initAudio(AVDictionary *opt_arg);
-    static AVFrame *allocAudioFrame(enum AVSampleFormat sample_fmt, const AVChannelLayout *channel_layout, int sample_rate, int nb_samples);
-    AVFrame *makeVideoFrame(OutputStream *ost, std::shared_ptr<musevk::VulkanImage> const &image);
-    static void copyImageToFrame(AVFrame *pict, std::shared_ptr<musevk::VulkanImage> const &image);
+    AVFrame *makeVideoFrame(OutputStream *ost, std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
+                            std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V);
     bool writeFrame(AVCodecContext *c, AVStream *st, AVFrame *frame, AVPacket *pkt);
     static void close_stream(AVFormatContext *oc, OutputStream *ost);
 
@@ -104,7 +102,6 @@ private:
     bool m_encode_video; // if we want to encode video
     bool m_encode_audio; // if we want to encode audio
 
-    struct SwsContext *m_sws_ctx; // scaling
     struct SwrContext *m_swr_ctx; // resampling
 
     uint8_t m_audio_tmp_buffer[20000];

@@ -42,6 +42,11 @@ namespace musevk {
                                       vk::ImageLayout layout,
                                       vk::BufferImageCopy region);
 
+        void enqueueCopyImageToBuffer(vk::Image imageFrom,
+                                      vk::ImageLayout layout,
+                                      vk::Buffer &bufferTo,
+                                      vk::BufferImageCopy region);
+
         void enqueueBlitImage(vk::Image &source,
                               vk::ImageLayout source_layout,
                               vk::Image &dest,

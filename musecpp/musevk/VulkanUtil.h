@@ -15,36 +15,35 @@ namespace musevk {
     public:
         static std::vector<uint32_t> loadSpirv(std::string const &executable_dir, std::string const &filename);
 
+        // Used to allocate a device local storage buffer initialized with the given data
         template<typename T>
         static std::unique_ptr<VulkanBuffer> createDeviceBuffer(VulkanManager &vulkan_manager, CommandPool &command_pool, Size const &size, const std::vector<T> &data) {
             assert(size.numberOfElements() == data.size());
-            auto host_buffer = VulkanBuffer(vulkan_manager, size, sizeof(T), vk::BufferUsageFlagBits::eTransferSrc, eHostWrite);
+            auto buffer = std::make_unique<VulkanBuffer>(vulkan_manager, size, sizeof(T), vk::BufferUsageFlagBits::eStorageBuffer, eHostWriteRarely);
             for (int i = 0; i < data.size(); i++)
-                host_buffer.data<T>()[i] = data[i];
-            auto device_buffer = std::make_unique<VulkanBuffer>(
-                    vulkan_manager, size, sizeof(T), vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, eHostNone);
-            auto sq = command_pool.createCommandBuffer();
-            sq->begin();
-            sq->enqueueCopyBuffer(host_buffer, *device_buffer);
-            sq->submit({}, {}, {});
-            sq->wait();
-            return device_buffer;
+                buffer->data<T>()[i] = data[i];
+
+            auto command_buffer = command_pool.createCommandBuffer();
+            command_buffer->begin();
+            buffer->synchronizeHostWrites(*command_buffer);
+            command_buffer->submit({}, {}, {});
+            command_buffer->wait();
+            return buffer;
         }
 
         template<typename T, size_t n>
         static std::unique_ptr<VulkanBuffer> createDeviceBuffer(VulkanManager &vulkan_manager, CommandPool &command_pool, Size const &size, const std::array<T, n> &data) {
             assert(size.numberOfElements() == n);
-            auto host_buffer = VulkanBuffer(vulkan_manager, size, sizeof(T), vk::BufferUsageFlagBits::eTransferSrc, eHostWrite);
+            auto buffer = std::make_unique<VulkanBuffer>(vulkan_manager, size, sizeof(T), vk::BufferUsageFlagBits::eStorageBuffer, eHostWriteRarely);
             for (int i = 0; i < data.size(); i++)
-                host_buffer.data<T>()[i] = data[i];
-            auto device_buffer = std::make_unique<VulkanBuffer>(
-                    vulkan_manager, size, sizeof(T), vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, eHostNone);
-            auto sq = command_pool.createCommandBuffer();
-            sq->begin();
-            sq->enqueueCopyBuffer(host_buffer, *device_buffer);
-            sq->submit({}, {}, {});
-            sq->wait();
-            return device_buffer;
+                buffer->data<T>()[i] = data[i];
+
+            auto command_buffer = command_pool.createCommandBuffer();
+            command_buffer->begin();
+            buffer->synchronizeHostWrites(*command_buffer);
+            command_buffer->submit({}, {}, {});
+            command_buffer->wait();
+            return buffer;
         }
 
         static std::unique_ptr<VulkanBuffer> createDeviceBufferFloatsAsHalfFloats(VulkanManager &vulkan_manager, CommandPool &command_pool,

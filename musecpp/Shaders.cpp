@@ -34,8 +34,14 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_movement_coring_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_movement_enlarged_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_image_out(make_unique<VulkanImage>(m_vulkan_manager,
-                                       MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, // eHostRead needed only if writing video output to file
-                                       vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc, eHostRead)),
+                                       MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2,
+                                       vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc, eHostNone)),
+  m_image_Y_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2), 2,
+                                          vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
+  m_image_U_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(MUSE_Y_BUF_WIDTH * 3 / 2, MUSE_BUF_HEIGHT * 2 / 2), 2,
+                                          vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
+  m_image_V_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(MUSE_Y_BUF_WIDTH * 3 / 2, MUSE_BUF_HEIGHT * 2 / 2), 2,
+                                          vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
           Size(9, 7),
           {
@@ -148,8 +154,8 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             VulkanUtil::loadSpirv(executable_dir, "detect_motion.comp"), Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT)));
     m_combine_still_and_moving_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "combine_still_and_moving",
-            {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eImage},
-            sizeof(uint32_t) * 2,
+            {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eImage, eBuffer, eBuffer, eBuffer},
+            sizeof(uint32_t) * 3,
             VulkanUtil::loadSpirv(executable_dir, "combine_still_and_moving.comp"),
             Size(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)));
     m_convert_audio_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
@@ -352,7 +358,7 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
                         m_interpolated32_buffer->size().x_size, uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases, 1u});
 }
 
-void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only) {
+void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only, bool output_yuv) {
     m_image_out->enqueueTransitionLayout(sq, vk::ImageLayout::eGeneral,
                                          vk::PipelineStageFlagBits::eTopOfPipe,
                                          vk::PipelineStageFlagBits::eComputeShader,
@@ -362,13 +368,20 @@ void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_onl
             {m_field_Y_buffer, m_field_r_buffer,
              m_field_b_buffer, m_inter_frame_Y_buffer,
              m_inter_frame_r_buffer, m_inter_frame_b_buffer,
-             m_movement_buffers[m_current_movement_buffer_index], m_image_out});
+             m_movement_buffers[m_current_movement_buffer_index], m_image_out,
+             m_image_Y_out, m_image_U_out, m_image_V_out});
     sq.enqueueComputeShader(m_combine_still_and_moving_algo,
-                            vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u});
+                            vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u, output_yuv ? 1u : 0u});
+
+    if (output_yuv) {
+        m_image_Y_out->synchronizeForHostRead(sq);
+        m_image_U_out->synchronizeForHostRead(sq);
+        m_image_V_out->synchronizeForHostRead(sq);
+    }
 }
 
-shared_ptr<VulkanImage> Shaders::getResultImage() {
-    return m_image_out;
+Shaders::ResultImages Shaders::getResultImages() {
+    return ResultImages { m_image_out, m_image_Y_out, m_image_V_out, m_image_U_out};
 }
 
 void Shaders::convertAudioSampleRate(musevk::CommandBuffer &sq, shared_ptr<VulkanBuffer> const &frame) {

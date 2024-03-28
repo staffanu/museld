@@ -45,16 +45,17 @@ bool VideoFileWriter::init() {
 }
 
 void VideoFileWriter::addVideoFrameWithAudio(
-        std::shared_ptr<musevk::VulkanImage> const &image,
+        std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
+        std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V,
         AudioMode audio_mode, int number_of_samples, AudioDecoder::AudioFrame *audio_samples) {
 
     //av_compare_ts(m_video_stream.next_pts, m_video_stream.codec_context->time_base,
     //              m_audio_stream.next_pts, m_audio_stream.codec_context->time_base)
 
     if (m_encode_video) {
-        assert(image->getWidth() == m_video_stream.codec_context->width);
-        assert(image->getHeight() == m_video_stream.codec_context->height);
-        auto frame = makeVideoFrame(&m_video_stream, image);
+        assert(image_Y->size().x_size == m_video_stream.codec_context->width);
+        assert(image_Y->size().y_size == m_video_stream.codec_context->height);
+        auto frame = makeVideoFrame(&m_video_stream, image_Y, image_U, image_V);
         m_encode_video = !writeFrame(m_video_stream.codec_context, m_video_stream.stream, frame, m_video_stream.tmp_pkt);
     }
 
@@ -116,7 +117,6 @@ void VideoFileWriter::cleanup() {
     if (m_have_audio)
         close_stream(m_format_context, &m_audio_stream);
 
-    sws_freeContext(m_sws_ctx);
     swr_free(&m_swr_ctx);
 
     if (!(m_format_context->oformat->flags & AVFMT_NOFILE))
@@ -170,44 +170,20 @@ void VideoFileWriter::initVideo(AVDictionary *opt_arg) {
     if (ret < 0)
         throw std::runtime_error(fmt::format("Could not open video codec: {}", av_err2string(ret)));
 
-    m_video_stream.frame = allocFrame(c->pix_fmt, c->width, c->height);
-
-    // If the output format is not AV_PIX_FMT_BGRA, then a temporary AV_PIX_FMT_BGRA
-    //picture is needed too.  It is then converted to the required output format.
-    m_video_stream.tmp_frame = nullptr;
-    if (c->pix_fmt != AV_PIX_FMT_BGRA) {
-        m_video_stream.tmp_frame = allocFrame(AV_PIX_FMT_BGRA, c->width, c->height);
-
-        m_sws_ctx = sws_getContext(c->width, c->height,
-                                   AV_PIX_FMT_BGRA,
-                                   c->width, c->height,
-                                   c->pix_fmt,
-                                   SWS_BICUBIC, nullptr, nullptr, nullptr);
-        if (!m_sws_ctx)
-            throw std::runtime_error("Could not initialize the conversion context");
-    }
+    m_video_stream.frame = av_frame_alloc();
+    if (!m_video_stream.frame)
+        throw std::runtime_error("Could not allocate video frame");
+    m_video_stream.frame->format = c->pix_fmt;
+    m_video_stream.frame->width = c->width;
+    m_video_stream.frame->height = c->height;
+    ret = av_frame_get_buffer(m_video_stream.frame, 0);
+    if (ret < 0)
+        throw std::runtime_error("Could not allocate video frame buffer");
 
     /* copy the stream parameters to the muxer */
     ret = avcodec_parameters_from_context(m_video_stream.stream->codecpar, c);
     if (ret < 0)
         throw std::runtime_error("Could not copy the stream parameters");
-}
-
-AVFrame *VideoFileWriter::allocFrame(enum AVPixelFormat pix_fmt, int width, int height) {
-    AVFrame *frame = av_frame_alloc();
-    if (!frame)
-        throw std::runtime_error("Could not allocate video frame");
-
-    frame->format = pix_fmt;
-    frame->width = width;
-    frame->height = height;
-
-    /* allocate the buffers for the frame data */
-    int ret = av_frame_get_buffer(frame, 0);
-    if (ret < 0)
-        throw std::runtime_error("Could not allocate video frame buffer");
-
-    return frame;
 }
 
 void VideoFileWriter::initAudio(AVDictionary *opt_arg) {
@@ -237,8 +213,18 @@ void VideoFileWriter::initAudio(AVDictionary *opt_arg) {
 
     int nb_samples = c->codec->capabilities & AV_CODEC_CAP_VARIABLE_FRAME_SIZE ? 1024 : c->frame_size;
 
-    m_audio_stream.frame = allocAudioFrame(c->sample_fmt, &c->ch_layout, c->sample_rate, nb_samples);
-    m_audio_stream.tmp_frame = allocAudioFrame(AV_SAMPLE_FMT_S16, &c->ch_layout, c->sample_rate, nb_samples);
+    m_audio_stream.frame = av_frame_alloc();
+    if (!m_audio_stream.frame)
+        throw std::runtime_error("Error allocating an audio frame");
+    m_audio_stream.frame->format = c->sample_fmt;
+    av_channel_layout_copy(&m_audio_stream.frame->ch_layout, &c->ch_layout);
+    m_audio_stream.frame->sample_rate = c->sample_rate;
+    m_audio_stream.frame->nb_samples = nb_samples;
+    m_audio_stream.frame->pts = 0;
+    if (nb_samples) {
+        if (av_frame_get_buffer(m_audio_stream.frame, 0) < 0)
+            throw std::runtime_error("Error allocating an audio buffer");
+    }
 
     // copy the stream parameters to the muxer
     ret = avcodec_parameters_from_context(m_audio_stream.stream->codecpar, c);
@@ -262,63 +248,40 @@ void VideoFileWriter::initAudio(AVDictionary *opt_arg) {
         throw std::runtime_error("Failed to initialize the resampling context");
 }
 
-AVFrame *VideoFileWriter::allocAudioFrame(enum AVSampleFormat sample_fmt,
-                                          const AVChannelLayout *channel_layout,
-                                          int sample_rate, int nb_samples) {
-    AVFrame *frame = av_frame_alloc();
-    if (!frame)
-        throw std::runtime_error("Error allocating an audio frame");
-
-    frame->format = sample_fmt;
-    av_channel_layout_copy(&frame->ch_layout, channel_layout);
-    frame->sample_rate = sample_rate;
-    frame->nb_samples = nb_samples;
-    frame->pts = 0;
-
-    if (nb_samples) {
-        if (av_frame_get_buffer(frame, 0) < 0)
-            throw std::runtime_error("Error allocating an audio buffer");
-    }
-
-    return frame;
-}
-
 void VideoFileWriter::close_stream(AVFormatContext *oc, OutputStream *ost) {
     avcodec_free_context(&ost->codec_context);
     av_frame_free(&ost->frame);
-    av_frame_free(&ost->tmp_frame);
     av_packet_free(&ost->tmp_pkt);
 }
 
-AVFrame *VideoFileWriter::makeVideoFrame(OutputStream *ost, std::shared_ptr<musevk::VulkanImage> const &image) {
-    AVCodecContext *c = ost->codec_context;
-
+AVFrame *VideoFileWriter::makeVideoFrame(OutputStream *ost, std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
+                                         std::shared_ptr<musevk::VulkanBuffer> const &image_U,
+                                         std::shared_ptr<musevk::VulkanBuffer> const &image_V) {
     /* when we pass a frame to the encoder, it may keep a reference to it
      * internally; make sure we do not overwrite it here */
     if (av_frame_make_writable(ost->frame) < 0)
         throw std::runtime_error("Failed to make video frame writable");
 
-    if (c->pix_fmt != AV_PIX_FMT_BGRA) {
-        copyImageToFrame(ost->tmp_frame, image);
+    auto sizeY = image_Y->size();
+    auto sizeU = image_U->size();
+    assert(image_V->size() == sizeU);
+    assert(sizeY.x_size == sizeU.x_size * 2);
+    assert(sizeY.y_size == sizeU.y_size * 2);
 
-        sws_scale(m_sws_ctx, (const uint8_t *const *) ost->tmp_frame->data,
-                  ost->tmp_frame->linesize, 0, c->height, ost->frame->data,
-                  ost->frame->linesize);
-    } else {
-        copyImageToFrame(ost->frame, image);
-    }
+    // TODO: figure out what formats are supported by the codecs that use more than 8 bits -- our output is 16 bpp
+    for (int y = 0; y < sizeY.y_size; y++)
+        for (int x = 0; x < sizeY.x_size; x++)
+            ost->frame->data[0][y * ost->frame->linesize[0] + x] = image_Y->data<uint16_t>()[y * sizeY.x_size + x] >> 8;
+
+    for (int y = 0; y < sizeU.y_size; y++)
+        for (int x = 0; x < sizeU.x_size; x++) {
+            ost->frame->data[2][y * ost->frame->linesize[2] + x] = image_U->data<uint16_t>()[y * sizeU.x_size + x] >> 8;
+            ost->frame->data[1][y * ost->frame->linesize[1] + x] = image_V->data<uint16_t>()[y * sizeU.x_size + x] >> 8;
+        }
 
     ost->frame->pts = ost->next_pts++;
 
     return ost->frame;
-}
-
-void VideoFileWriter::copyImageToFrame(AVFrame *pict, std::shared_ptr<musevk::VulkanImage> const &image) {
-    for (int y = 0; y < image->getHeight(); y++)
-        // FIXME: I haven't figured out how to feed linear RGB values to swscale, so apply a 2.2 inverse gamma
-        for (int x = 0; x < image->getWidth() * 4; x++)
-            pict->data[0][y * pict->linesize[0] + x] = pow(image->data<uint8_t>()[y * image->getWidth() * 4 + x] / 256.0, 1/2.2) * 256;
-        //memcpy(pict->data[0] + y * pict->linesize[0], image->data<uint32_t>() + y * image->getWidth(), image->getWidth() * 4);
 }
 
 bool VideoFileWriter::writeFrame(AVCodecContext *c, AVStream *st, AVFrame *frame, AVPacket *pkt) {
@@ -327,7 +290,7 @@ bool VideoFileWriter::writeFrame(AVCodecContext *c, AVStream *st, AVFrame *frame
     if (ret < 0)
         throw std::runtime_error(fmt::format("Error sending a frame to the encoder: {}", av_err2string(ret)));
 
-    while (ret >= 0) {
+    while (true) {
         ret = avcodec_receive_packet(c, pkt);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
             break;

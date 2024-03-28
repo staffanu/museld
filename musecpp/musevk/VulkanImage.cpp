@@ -12,7 +12,7 @@ namespace musevk {
                              uint32_t height,
                              vk::ImageUsageFlags image_usage_flags,
                              HostAccess host_access)
-            : VulkanMemoryObject(vulkan_manager, 4 * width * height),
+            : VulkanMemoryObject(vulkan_manager, 4 * width * height, host_access),
               m_vulkan_manager(vulkan_manager),
               m_width(width),
               m_height(height),
@@ -30,7 +30,7 @@ namespace musevk {
                                        1, // mipLevels
                                        1, // arrayLayers
                                        vk::SampleCountFlagBits::e1,
-                                       vk::ImageTiling::eLinear, // FIXME: inefficent -- use only when writing video file
+                                       vk::ImageTiling::eOptimal, // TODO: automatically change to eLinear if host readable and not using a secondary buffer, or maybe add HostAccess enum value
                                        image_usage_flags,
                                        vk::SharingMode::eExclusive,
                                        nullptr,

@@ -9,6 +9,7 @@ layout(push_constant) uniform PushConstants {
     // both set to 1 makes no sense
     uint force_field_only;
     uint force_inter_frame_only;
+    uint output_yuv;
 };
 
 layout(set = 0, binding = 0) buffer readonly field_Y_buffer {
@@ -40,6 +41,19 @@ layout(set = 0, binding = 6) buffer readonly movement_buffer {
 };
 
 layout(set = 0, binding = 7, rgba32f) uniform writeonly image2D frame_out_image;
+
+layout(set = 0, binding = 8) buffer writeonly frame_out_y_buffer {
+    uint16_t frame_out_y[][MUSE_Y_BUF_WIDTH * 3];
+};
+
+layout(set = 0, binding = 9) buffer writeonly frame_out_u_buffer {
+    uint16_t frame_out_u[][MUSE_Y_BUF_WIDTH * 3 / 2];
+};
+
+layout(set = 0, binding = 10) buffer writeonly frame_out_v_buffer {
+    uint16_t frame_out_v[][MUSE_Y_BUF_WIDTH * 3 / 2];
+};
+
 
 void main() {
     uint row = gl_GlobalInvocationID.y;
@@ -78,4 +92,12 @@ void main() {
     b = pow(b, 2.2hf);
 
     imageStore(frame_out_image, ivec2(col, row), vec4(float(r), float(g), float(b), 1.f));
+
+    if (output_yuv != 0) {
+        frame_out_y[row][col] = uint16_t(clamp(YM * 256.hf, 0.hf, 65535.hf));
+        if ((row & 1) == 0 && (col & 1) == 0) {
+            frame_out_u[row / 2][col / 2] = uint16_t(clamp((BmYM + 128.hf) * 256.hf, 0.hf, 65535.hf));
+            frame_out_v[row / 2][col / 2] = uint16_t(clamp((RmYM + 128.hf) * 256.hf, 0.hf, 65535.hf));
+        }
+    }
 }

@@ -50,7 +50,7 @@ public:
               AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples],
               int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
               FieldInterpolationMode field_interpolation_mode,
-              bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode);
+              bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode, bool output_yuv);
 
     void output_benchmark_results();
 
