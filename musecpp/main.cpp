@@ -124,6 +124,9 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         bool redo_last_field = false;
         bool enable_non_linear = true;
         bool enable_cursor = false;
+        int zoom_factor = 1;
+        const double zoom_step = 0.2;
+        pair<double, double> zoom_center = make_pair(0.5, 0.5);
         string osd_text;
         string prev_osd_text;
         int osd_text_remaining_frames = 0;
@@ -220,11 +223,13 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
 
             auto extent = manager.getSwapChainExtent();
             vk::ImageBlit region;
-            region.srcOffsets[0] = vk::Offset3D(0, 0, 0);
-            region.srcOffsets[1] = vk::Offset3D(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 1);
+            region.srcOffsets[0] = vk::Offset3D((int32_t)((zoom_center.first - 0.5 / zoom_factor) * MUSE_Y_BUF_WIDTH * 3),
+                                                (int32_t)((zoom_center.second - 0.5 / zoom_factor) * MUSE_BUF_HEIGHT * 2), 0);
+            region.srcOffsets[1] = vk::Offset3D((int32_t)((zoom_center.first + 0.5 / zoom_factor) * MUSE_Y_BUF_WIDTH * 3),
+                                                (int32_t)((zoom_center.second + 0.5 / zoom_factor) * MUSE_BUF_HEIGHT * 2), 1);
             region.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
             region.dstOffsets[0] = vk::Offset3D(0, 0, 0);
-            region.dstOffsets[1] = vk::Offset3D((int)extent.width, (int)extent.height, 1);
+            region.dstOffsets[1] = vk::Offset3D((int) extent.width, (int) extent.height, 1);
             region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
             command_buffer->enqueueBlitImage(images.out_image->image(), vk::ImageLayout::eTransferSrcOptimal,
                                              swap_chain_image, vk::ImageLayout::eTransferDstOptimal,
@@ -271,18 +276,32 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 paused_countdown = 1;
             }
             if (check_glfw_key(window, GLFW_KEY_LEFT)) {
-                reader.seek(-10);
-                if (paused) {
-                    paused = false;
-                    paused_countdown = 5;
+                if (zoom_factor != 1)
+                    zoom_center.first = max(0.5 / zoom_factor, zoom_center.first - zoom_step / zoom_factor);
+                else {
+                    reader.seek(-10);
+                    if (paused) {
+                        paused = false;
+                        paused_countdown = 5;
+                    }
                 }
             }
             if (check_glfw_key(window, GLFW_KEY_RIGHT)) {
-                reader.seek(10);
-                if (paused) {
-                    paused = false;
-                    paused_countdown = 5;
+                if (zoom_factor != 1)
+                    zoom_center.first = min(1.0 - 0.5 / zoom_factor, zoom_center.first + zoom_step / zoom_factor);
+                else {
+                    reader.seek(10);
+                    if (paused) {
+                        paused = false;
+                        paused_countdown = 5;
+                    }
                 }
+            }
+            if (check_glfw_key(window, GLFW_KEY_UP)) {
+                zoom_center.second = max(0.5 / zoom_factor, zoom_center.second - zoom_step / zoom_factor);
+            }
+            if (check_glfw_key(window, GLFW_KEY_DOWN)) {
+                zoom_center.second = min(1.0 - 0.5 / zoom_factor, zoom_center.second + zoom_step / zoom_factor);
             }
             if (check_glfw_key(window, GLFW_KEY_1)) {
                 field_interpolation_mode = MuseDecoder::FieldInterpolationMode::eNormal;
@@ -335,6 +354,12 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             }
             if (check_glfw_key(window, GLFW_KEY_PRINT_SCREEN)) {
                 glfwSetClipboardString(window, cursor_string.c_str());
+            }
+            if (check_glfw_key(window, GLFW_KEY_Z)) {
+                zoom_factor = (zoom_factor * 2) % 7;
+                zoom_center.first = max(0.5 / zoom_factor, min(1.0 - 0.5 / zoom_factor, zoom_center.first));
+                zoom_center.second = max(0.5 / zoom_factor, min(1.0 - 0.5 / zoom_factor, zoom_center.second));
+                osd_text = fmt::format("ZOOM {}", zoom_factor);
             }
         }
         auto t1 = chrono::high_resolution_clock::now();

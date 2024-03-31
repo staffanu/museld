@@ -30,7 +30,7 @@ shaderc (that includes the glslc command).
 To run the program, see command line options below, but for a quick start download an example RF capture and play it:
 ```console
 wget --directory-prefix ../data/muse https://madeye.org/muse-demo/makeup-muse-rf-62.5MHz-nofilter.raw
-./build-release/musecpp --demodulate ../data/muse https://madeye.org/muse-demo/makeup-muse-rf-62.5MHz-nofilter.raw
+./build-release/musecpp --demodulate ../data/muse/makeup-muse-rf-62.5MHz-nofilter.raw
 ```
 
 ![](test-picture.png)
@@ -207,6 +207,12 @@ Toggles the non-linear processing that is part of de-emphasis on/off.  The reaso
 know if the non-linear processing has already been applied or not in the case we read the input from the output of a MUSE player.
 When demodulating RF, enabling the non-linear processing clearly improves picture quality, and we also know that it is not
 done elsewhere.  In the other case, however, it is not clear that picture quality is improved, so this is still an unknown.
+
+> GLFW_KEY_Z
+
+Zoom the displayed output image: toggles between zoom factor 1, 2, and 4.  When zoomed, the visible area can be changed 
+using the arrow keys.
+
 
 ### Things to do
 
