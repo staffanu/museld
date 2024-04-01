@@ -39,7 +39,7 @@ shared float shared_input[MAX_WORKGROUP_SIZE * MAX_DECIMATION + MAX_FILTER_SIZE 
 void main() {
     uint global_ix = gl_GlobalInvocationID.x;
     uint local_ix = gl_LocalInvocationID.x;
-    uint local_size = 1024; // FIXME: read this from somewhere
+    uint local_size = gl_WorkGroupSize.x;
 
     if (local_ix < filter_size)
             shared_filter[local_ix] = fir_filter[local_ix];

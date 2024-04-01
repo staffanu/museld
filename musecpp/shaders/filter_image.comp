@@ -25,6 +25,9 @@ layout(set = 0, binding = 2) buffer writeonly dest_buffer {
     float16_t dest[];
 };
 
+#define MAX_FILTER_SIZE 64 // same as workgroup size
+shared float16_t shared_filter[MAX_FILTER_SIZE];
+
 void main() {
     int row = int(gl_GlobalInvocationID.y);
     int col = int(gl_GlobalInvocationID.x);
@@ -33,6 +36,13 @@ void main() {
     int filter_height = int(filter_height_f);
     int filter_width = int(filter_width_f);
     float16_t multiplier = float16_t(multiplier_f);
+
+    // This converts the local index to a one-dimensional index!
+    uint local_ix = gl_LocalInvocationID.x + gl_WorkGroupSize.x * gl_LocalInvocationID.y;
+    if (local_ix < filter_width * filter_height)
+        shared_filter[local_ix] = image_filter[local_ix];
+
+    barrier();
 
     if (row >= image_height || col >= image_width)
         return;
@@ -52,7 +62,7 @@ void main() {
             int rr = read_row < 0 ? -read_row : read_row >= image_height ? image_height - 4 + (read_row - image_height) % 4 : read_row;
 
             float16_t v = source[rr * image_width + rc];
-            s += v * image_filter[(i + H) * filter_width + j + W];
+            s += v * shared_filter[(i + H) * filter_width + j + W];
         }
     }
     dest[row * image_width + col] = clamp(s * multiplier, 0.hf, 255.hf);

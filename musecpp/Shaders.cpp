@@ -43,7 +43,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_image_V_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(MUSE_Y_BUF_WIDTH * 3 / 2, MUSE_BUF_HEIGHT * 2 / 2), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
-          Size(9, 7),
+          Size(9, 7), // Notice the total size should not be larger than the workgroup size!
           {
                   -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
                   0.000205, 0.000474, -0.005036, -0.012591, 0.010491, -0.012591, -0.005036, 0.000474, 0.000205,
@@ -54,7 +54,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
           })),
   m_color_filter_single_field_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
-          Size(9, 5),
+          Size(9, 5), // Notice the total size should not be larger than the workgroup size!
           {
                   0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
                   0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
@@ -63,14 +63,16 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
           })),
   m_color_filter_inter_frame_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
-          Size(5, 5),
+          Size(5, 7), // Notice the total size should not be larger than the workgroup size!
           {
-                  0.000158, 0.007330, 0.020738, 0.007330, 0.000158,
-                  0.001069, 0.049475, 0.139983, 0.049475, 0.001069,
-                  0.001980, 0.091620, 0.259228, 0.091620, 0.001980,
-                  0.001069, 0.049475, 0.139983, 0.049475, 0.001069,
-                  0.000158, 0.007330, 0.020738, 0.007330, 0.000158,
-          })),
+                 -0.000343, -0.002317, -0.004290, -0.002317, -0.000343,
+                 0.000920, 0.006212, 0.011504, 0.006212, 0.000920,
+                 0.009256, 0.062476, 0.115696, 0.062476, 0.009256,
+                 0.016049, 0.108329, 0.200609, 0.108329, 0.016049,
+                 0.009256, 0.062476, 0.115696, 0.062476, 0.009256,
+                 0.000920, 0.006212, 0.011504, 0.006212, 0.000920,
+                 -0.000343, -0.002317, -0.004290, -0.002317, -0.000343,
+         })),
   m_filter_2_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
           Size(19),
           {
