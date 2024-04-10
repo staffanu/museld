@@ -23,6 +23,7 @@ AudioPlayback::AudioPlayback(Logger &log)
   m_audio_speed_adjust(0),
   m_audio_speed_adjust_sum(0),
   m_current_mode(MODE_UNKNOWN),
+  m_channels_used(0),
   m_audio_stream(nullptr) {
     auto audio_status = Pa_Initialize();
     if (audio_status != paNoError)

@@ -23,16 +23,25 @@ ResamplingInputReader::ResamplingInputReader(
                       initial_seek_seconds, output_filename),
           m_input_format(input_format),
           m_sample_rate(sample_rate),
-          m_input_pll(log),
           m_efm_pll(log),
           m_file_fd(-1),
           m_demodulator(nullptr),
-          m_file_input_buffer{},
-          m_file_input_buffer_bytes(c_input_buffer_lookback * 4), // 4 >= input bytes per sample
-          m_file_input_buffer_read_pos(c_input_buffer_lookback * 4),
-          m_file_input_buffer_input_offset(0),
-          m_dropout_input_buffer{},
-          m_t(0) {
+          m_input_buffer(nullptr),
+          m_input_dropout_buffer(nullptr),
+          m_last_input_sub_buffer_ix_read(0),
+          m_t(0.0),
+          m_state(eSearching),
+          m_line(1),
+          m_pixel(1),
+          m_line1_frame_pulse_sum(0),
+          m_line2_frame_pulse_sum(0),
+          m_upper_percentile_filter(0.995f, 239.f),
+          m_lower_percentile_filter(0.005f, 16.f),
+          m_max_frame_pulse_sum_difference(0),
+          m_consecutive_good_syncs(0),
+          m_missed_line_pulses(0),
+          m_frame_start_offset(0),
+          m_error_sum(0) {
     if (demodulate) {
         m_input_format = eFloat;
         m_demodulator = new RfDemodulator(log, executable_dir, m_filename, vulkan_manager, benchmark_shaders);
@@ -65,7 +74,6 @@ bool ResamplingInputReader::initialize(std::vector<std::unique_ptr<InputReader::
         m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
         if (m_file_fd == -1)
             throw runtime_error(fmt::format("ResamplingInputReader: Unable to open input file {}", m_filename));
-        memset(m_dropout_input_buffer, 0, sizeof(m_dropout_input_buffer));
 #ifdef linux
         if (filesystem::is_fifo(m_filename)) {
             m_log.debug(eInput, fmt::format("Pipe size: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
@@ -77,13 +85,32 @@ bool ResamplingInputReader::initialize(std::vector<std::unique_ptr<InputReader::
         m_demodulator->initialize();
     }
 
-    m_input_pll.initialize(m_sample_rate);
+    m_input_samples_per_sample_ref = m_sample_rate / 16.2e6;
+    m_input_samples_per_sample = m_input_samples_per_sample_ref;
+    m_omega = 2 * M_PI * 3000 / m_sample_rate;
+    m_zeta = 0.75;
+    m_Ts = m_input_samples_per_sample_ref * 480;
+    m_G1 = 1 - exp(-2 * m_zeta * m_omega * m_Ts);
+    m_G2 = 1 + exp(-2 * m_omega * m_zeta * m_Ts) -
+           2 * exp(-m_omega * m_zeta * m_Ts) * cos(m_omega * m_Ts * sqrt(1 - m_zeta * m_zeta));
+    m_GpdGvco = 64 * (1 / m_input_samples_per_sample_ref) * 480;
+    m_g1 = m_G1 / m_GpdGvco;
+    m_g2 = m_G2 / m_GpdGvco;
+
+    m_log.debug(eInput, fmt::format("m_g1={:.5f} m_g2={:.7f}", m_g1, m_g2));
+
+    m_input_buffer = (uint8_t *)calloc(m_bytes_per_sample, c_input_buffer_size);
+    m_input_dropout_buffer = (uint8_t *)calloc(1, c_input_buffer_size);
+    assert(m_input_buffer != nullptr && m_input_dropout_buffer != nullptr);
 
     return InputReader::initialize(buffers);
 }
 
 void ResamplingInputReader::cleanup() {
     InputReader::cleanup();
+
+    free(m_input_buffer);
+    free(m_input_dropout_buffer);
 
     if (m_demodulator != nullptr) {
         m_demodulator->cleanup();
@@ -101,7 +128,7 @@ void ResamplingInputReader::seek(double seconds) {
         } else {
             std::unique_lock<std::mutex> lock(m_mutex);
 
-            off_t samples_to_seek = (off_t) (seconds * 16.2e6 * m_input_pll.getInputSamplesPerSample());
+            off_t samples_to_seek = (off_t) (seconds * 16.2e6 * m_input_samples_per_sample);
             off_t bytes_to_seek = m_bytes_per_sample * samples_to_seek;
             m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples, {} bytes.",
                                            seconds, samples_to_seek, bytes_to_seek));
@@ -113,27 +140,30 @@ void ResamplingInputReader::seek(double seconds) {
             m_filled_muse_input_buffers.clear();
             m_cv_vacant.notify_one();
         }
-        m_input_pll.setUnlocked(); // do not wait to discover that we lost sync
+        setUnlocked(); // do not wait to discover that we lost sync
     }
 }
 
 void ResamplingInputReader::threadFunc() {
-    float sample_buffer[c_sample_buffer_size];
-    uint8_t dropout_buffer[c_sample_buffer_size];
     float efm_sample_buffer[DemodulatedBlock::c_efm_block_size];
     bool have_efm;
-    double input_samples_per_sample = m_input_pll.getInputSamplesPerSample();
     int samples_to_read = 1;
-    long sample_buffer_input_offset;
+    // long sample_buffer_input_offset; TODO
     int source_samples_per_sample; // for the RfDemodulator this is 2 due to decimation after demodulation
-    unique_ptr<InputReaderBlock> buffer = nullptr;
-    while (readSamples(samples_to_read, sample_buffer, dropout_buffer, input_samples_per_sample, efm_sample_buffer,
-                       &have_efm, &sample_buffer_input_offset, &source_samples_per_sample)) {
-        if (buffer == nullptr) {
+
+    unique_ptr<InputReaderBlock> output_block = nullptr;
+
+    for (int i = 0; i < c_number_of_input_sub_buffers; i++) {
+        readInput(m_input_buffer + m_bytes_per_sample * c_input_sub_buffer_size * i, m_input_dropout_buffer + c_input_sub_buffer_size * i, nullptr);
+    }
+    m_last_input_sub_buffer_ix_read = c_number_of_input_sub_buffers - 1;
+
+    for (;;) {
+        if (output_block == nullptr) {
             unique_lock<std::mutex> lock(m_mutex);
             if (m_input_is_realtime && m_vacant_muse_input_buffers.empty()) {
-                // discard a filled buffer -- this is better than having the writer to the fifo wait
-                m_log.warn(eInput, "Discarding filled input buffer due to overrun");
+                // discard a filled output_block -- this is better than having the writer to the fifo wait
+                m_log.warn(eInput, "Discarding filled block due to overrun");
                 assert(!m_filled_muse_input_buffers.empty());
                 m_vacant_muse_input_buffers.push_back(std::move(m_filled_muse_input_buffers.back()));
                 m_filled_muse_input_buffers.pop_back();
@@ -143,154 +173,267 @@ void ResamplingInputReader::threadFunc() {
                 m_log.info(eInput, "ResamplingInputReader: stop requested");
                 break;
             }
-            buffer = std::move(m_vacant_muse_input_buffers.front());
+            output_block = std::move(m_vacant_muse_input_buffers.front());
             m_vacant_muse_input_buffers.pop_front();
-            buffer->efm_data_size = 0;;
+            output_block->efm_data_size = 0;;
         }
 
-        auto video_data = buffer->video_data->data<float>();
-        auto dropout_data = buffer->dropout_data->data<uint8_t>();
-        long input_offset = sample_buffer_input_offset;
-        InputPll::PllResult pll_result = m_input_pll.process(samples_to_read, input_offset, sample_buffer, dropout_buffer, video_data, dropout_data);
-        samples_to_read = pll_result.samples_to_read;
-        input_samples_per_sample = pll_result.input_samples_per_sample;
-
-        if (pll_result.locked) {
-            if (have_efm) {
-                bool efm_bit_buffer[DemodulatedBlock::c_efm_block_size]; // much bigger than needed
-                int actual_output_size = m_efm_pll.reclock(efm_sample_buffer, DemodulatedBlock::c_efm_block_size,
-                                                           efm_bit_buffer, DemodulatedBlock::c_efm_block_size);
-
-                for (int i = 0; i < actual_output_size; i++)
-                    buffer->efm_data[buffer->efm_data_size++] = efm_bit_buffer[i];
-                assert(buffer->efm_data_size <= buffer->c_max_efm_data_size);
-            }
-        } else
-            buffer->efm_data_size = 0;;
-
-        if (pll_result.frame_done) {
-            buffer->input_offset = pll_result.frame_input_offset;
-            buffer->input_samples_per_muse_sample = pll_result.input_samples_per_sample * source_samples_per_sample;
-            std::unique_lock<std::mutex> lock(m_mutex);
-            m_cv_filled.notify_one();
-            m_filled_muse_input_buffers.push_back(std::move(buffer));
-            buffer = nullptr;
+        if (!process(output_block)) {
+            m_log.info(eInput, "ResamplingInputReader: end of file");
+            break;
         }
+
+        output_block->input_offset = 0; // TODO pll_result.frame_input_offset;
+        output_block->input_samples_per_muse_sample = m_input_samples_per_sample * source_samples_per_sample;
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_cv_filled.notify_one();
+        m_filled_muse_input_buffers.push_back(std::move(output_block));
+        output_block = nullptr;
     }
+
     std::unique_lock<std::mutex> lock(m_mutex);
     m_cv_filled.notify_one();
     m_reader_thread_finished = true;
 }
 
-// TODO: This interface isn't very good when reading constant size blocks from the demodulator -- rewrite somehow!
-// This is especially apparent in how EFM is handled.
-bool ResamplingInputReader::readSamples(int sample_count, float buffer[c_sample_buffer_size],
-                                        uint8_t dropout_buffer[c_sample_buffer_size], double dt,
-                                        float efm_buffer[DemodulatedBlock::c_efm_block_size],
-                                        bool *have_efm, long *buffer_input_offset, int *source_samples_per_sample) {
-    *have_efm = false;
-    double t = m_t; // always in [0, 1)
-    int read_pos = m_file_input_buffer_read_pos;
-    for (int sample_ix = 0; sample_ix < sample_count; sample_ix++) {
-        t += dt;
-        int samples_to_read = (int)t;
-        t -= samples_to_read;
-
-        double b0, b1, b2, b3;
-        if (m_demodulator == nullptr) {
-            if (read_pos + samples_to_read * m_bytes_per_sample >= m_file_input_buffer_bytes) {
-                // move remaining input to start of buffer
-                int start_copy_pos = read_pos - c_input_buffer_lookback * m_bytes_per_sample;
-                int n = m_file_input_buffer_bytes - start_copy_pos;
-                memcpy(m_file_input_buffer, m_file_input_buffer + start_copy_pos, n);
-                m_file_input_buffer_bytes -= start_copy_pos;
-                read_pos = c_input_buffer_lookback * m_bytes_per_sample;
-
-                do {
-                    ssize_t read_count = read(m_file_fd,
-                                              (void *) (m_file_input_buffer + m_file_input_buffer_bytes),
-                                              c_input_buffer_size - m_file_input_buffer_bytes);
-                    if (read_count == -1 && errno == EAGAIN)
-                        this_thread::sleep_for(chrono::milliseconds(1));
-                    else if (read_count == 0) {
-                        if (!m_input_is_realtime) {
-                            m_log.info(eInput, "ResamplingInputReader: end of file");
-                            return false;
-                        }
-                    } else if (read_count == -1)
-                        throw runtime_error(fmt::format("Error reading from file: {}", strerror(errno)));
-                    else
-                        m_file_input_buffer_bytes += (int) read_count;
-                } while (read_pos + samples_to_read * m_bytes_per_sample >= m_file_input_buffer_bytes);
-            }
-            read_pos += samples_to_read * m_bytes_per_sample;
-        } else {
-            if (read_pos + samples_to_read * m_bytes_per_sample >= m_file_input_buffer_bytes) {
-                // move remaining input to start of buffer
-                int start_copy_pos = read_pos - c_input_buffer_lookback * m_bytes_per_sample;
-                int n = m_file_input_buffer_bytes - start_copy_pos;
-                memmove(m_file_input_buffer, m_file_input_buffer + start_copy_pos, n);
-                memmove(m_dropout_input_buffer, m_dropout_input_buffer + start_copy_pos / m_bytes_per_sample, n / m_bytes_per_sample);
-                m_file_input_buffer_bytes -= start_copy_pos;
-                read_pos = c_input_buffer_lookback * m_bytes_per_sample;
-
-                auto block = m_demodulator->getNextDemodulatedBlock();
-                if (block == nullptr) {
-                    m_log.info(eInput, "ResamplingInputReader: no more demodulated blocks");
+bool ResamplingInputReader::readInput(uint8_t *input_buffer, uint8_t *input_dropout_buffer,
+                                      std::unique_ptr<InputReaderBlock> const &output_block) {
+    if (m_demodulator == nullptr) {
+        int bytes_read = 0;
+        while (bytes_read < c_input_sub_buffer_size * m_bytes_per_sample) {
+            ssize_t read_count = read(m_file_fd, (void *)(input_buffer + bytes_read), c_input_sub_buffer_size * m_bytes_per_sample - bytes_read);
+            if (read_count == -1 && errno == EAGAIN)
+                this_thread::sleep_for(chrono::milliseconds(1));
+            else if (read_count == 0) {
+                if (!m_input_is_realtime) {
+                    m_log.info(eInput, "ResamplingInputReader: end of file");
                     return false;
                 }
-                memcpy(m_file_input_buffer + m_file_input_buffer_bytes, block->video_data->data<float>(), block->c_video_block_size * sizeof(float));
-                memcpy(m_dropout_input_buffer + m_file_input_buffer_bytes / m_bytes_per_sample, block->dropouts->data<uint8_t>(), block->c_video_block_size * sizeof(uint8_t));
-                m_file_input_buffer_bytes += block->c_video_block_size * sizeof(float);
-                memcpy(efm_buffer, block->efm_data->data<float>(), block->c_efm_block_size * sizeof(float));
-                *have_efm = true;
-                m_file_input_buffer_input_offset = block->input_offset - m_file_input_buffer_bytes / m_bytes_per_sample;
-                m_demodulator->returnBlock(block);
-            }
-            assert(read_pos + samples_to_read * m_bytes_per_sample < m_file_input_buffer_bytes);
-            read_pos += samples_to_read * m_bytes_per_sample;
+            } else if (read_count == -1)
+                throw runtime_error(fmt::format("Error reading from file: {}", strerror(errno)));
+            else
+                bytes_read += (int) read_count;
         }
-        if (sample_ix == 0)
-            *buffer_input_offset = m_file_input_buffer_input_offset + read_pos / m_bytes_per_sample;
+        assert (bytes_read == c_input_sub_buffer_size * m_bytes_per_sample);
+        return true;
+    } else {
+        auto block = m_demodulator->getNextDemodulatedBlock();
+        if (block == nullptr) {
+            m_log.info(eInput, "ResamplingInputReader: no more demodulated blocks");
+            return false;
+        }
+        memcpy(input_buffer, block->video_data->data<float>(), block->c_video_block_size * sizeof(float));
+        memcpy(input_dropout_buffer, block->dropouts->data<uint8_t>(), block->c_video_block_size * sizeof(uint8_t));
 
-        switch (m_input_format) {
-            case eUnsignedByte:
-                b0 = m_file_input_buffer[read_pos - 3]; // max lookback
-                b1 = m_file_input_buffer[read_pos - 2];
-                b2 = m_file_input_buffer[read_pos - 1];
-                b3 = m_file_input_buffer[read_pos - 0];
-                break;
-            case eSignedShortLittleEndian:
-                b0 = ((int16_t *)(m_file_input_buffer + read_pos))[-3];
-                b1 = ((int16_t *)(m_file_input_buffer + read_pos))[-2];
-                b2 = ((int16_t *)(m_file_input_buffer + read_pos))[-1];
-                b3 = ((int16_t *)(m_file_input_buffer + read_pos))[0];
-                break;
-            case eFloat:
-                b0 = ((float *)(m_file_input_buffer + read_pos))[-3];
-                b1 = ((float *)(m_file_input_buffer + read_pos))[-2];
-                b2 = ((float *)(m_file_input_buffer + read_pos))[-1];
-                b3 = ((float *)(m_file_input_buffer + read_pos))[0];
-                break;
-            default:
-                throw runtime_error("Unrecognized input format");
+        if (output_block != nullptr) {
+            if (m_state == eLocked) {
+                int actual_output_size = m_efm_pll.reclock(block->efm_data->data<float>(),
+                                                           DemodulatedBlock::c_efm_block_size,
+                                                           output_block->efm_data.data() + output_block->efm_data_size,
+                                                           InputReaderBlock::c_max_efm_data_size - output_block->efm_data_size);
+                output_block->efm_data_size += actual_output_size;
+                assert(output_block->efm_data_size <= output_block->c_max_efm_data_size);
+            } else
+                output_block->efm_data_size = 0;
         }
 
-        double x = 1 + t;
-        // cubic spline though 4 points, f(x) = a0 + a1 x + a2 x(x-1) + a3 x(x-1)(x-2)
-        double a0 = b0;
-        double a1 = b1 - a0;
-        double a2 = (b2 - a0 - 2 * a1) / 2;
-        double a3 = (b3 - a0 - 3 * a1 - 6 * a2) / 6;
-        // now evaluate at point 1 + p
-        double y = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
-
-        buffer[sample_ix] = (float)(y * m_output_multiplier + m_output_add);
-        dropout_buffer[sample_ix] = m_dropout_input_buffer[read_pos / 4];
+        m_demodulator->returnBlock(block);
+        return true;
     }
-    m_t = t;
-    m_file_input_buffer_read_pos = read_pos;
+}
+
+bool ResamplingInputReader::resample(float *sample_out, uint8_t *dropout_out,
+                                     double input_samples_per_sample,
+                                     std::unique_ptr<InputReaderBlock> const &output_block) {
+
+    m_t += input_samples_per_sample;
+
+    const size_t read_pos = (size_t)m_t & c_input_buffer_size_mask;
+    const auto i3 = (read_pos - 3) & c_input_buffer_size_mask;
+    const auto i2 = (read_pos - 2) & c_input_buffer_size_mask;
+    const auto i1 = (read_pos - 1) & c_input_buffer_size_mask;
+    const auto i0 = read_pos;
+
+    double b0, b1, b2, b3;
+    switch (m_input_format) {
+        case eUnsignedByte:
+            b0 = m_input_buffer[i3];
+            b1 = m_input_buffer[i2];
+            b2 = m_input_buffer[i1];
+            b3 = m_input_buffer[i0];
+            break;
+        case eSignedShortLittleEndian:
+            b0 = ((int16_t *)m_input_buffer)[i3];
+            b1 = ((int16_t *)m_input_buffer)[i2];
+            b2 = ((int16_t *)m_input_buffer)[i1];
+            b3 = ((int16_t *)m_input_buffer)[i0];
+            break;
+        case eFloat:
+            b0 = ((float *)m_input_buffer)[i3];
+            b1 = ((float *)m_input_buffer)[i2];
+            b2 = ((float *)m_input_buffer)[i1];
+            b3 = ((float *)m_input_buffer)[i0];
+            break;
+        default:
+            throw runtime_error("Unrecognized input format");
+    }
+
+    double x = 1 + (m_t - (unsigned long)m_t);
+    // cubic spline though 4 points, f(x) = a0 + a1 x + a2 x(x-1) + a3 x(x-1)(x-2)
+    double a0 = b0;
+    double a1 = b1 - a0;
+    double a2 = (b2 - a0 - 2 * a1) / 2;
+    double a3 = (b3 - a0 - 3 * a1 - 6 * a2) / 6;
+    // now evaluate at point 1 + p
+    double y = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
+
+    *sample_out = (float)(y * m_output_multiplier + m_output_add);
+    *dropout_out = m_input_dropout_buffer[read_pos];
+
     // Maybe take this from the input blocks instead
-    *source_samples_per_sample = m_demodulator ? RfDemodulatorConstants::c_video_decimation_rate : 1;
+//    *source_samples_per_sample = m_demodulator ? RfDemodulatorConstants::c_video_decimation_rate : 1;
+
+    auto current_sub_buffer_index = read_pos >> c_input_sub_buffer_size_bits;
+    if ((m_last_input_sub_buffer_ix_read + 1) % c_number_of_input_sub_buffers != current_sub_buffer_index) {
+        m_last_input_sub_buffer_ix_read = (m_last_input_sub_buffer_ix_read + 1) % c_number_of_input_sub_buffers;
+
+        if (!readInput(m_input_buffer + m_bytes_per_sample * c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read,
+                       m_input_dropout_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read,
+                       output_block))
+            return false;
+    }
     return true;
+}
+
+
+bool ResamplingInputReader::process(std::unique_ptr<InputReaderBlock> const &output_block) {
+    auto *output = output_block->video_data->data<float>();
+    auto *dropout_output = output_block->dropout_data->data<uint8_t>();
+
+    float sample;
+    uint8_t dropout;
+    while (resample(&sample, &dropout, m_input_samples_per_sample, output_block)) {
+        m_upper_percentile_filter.update(sample);
+        m_lower_percentile_filter.update(sample);
+
+        int output_index = MUSE_TOTAL_WIDTH * (m_line - 1) + m_pixel - 1;
+        output[output_index] = sample;
+        dropout_output[output_index] = dropout;
+
+        if (m_state == eLockedHoriz || m_state == eLocked && m_line <= 2) {
+            if (m_pixel == 312) {
+                m_line1_frame_pulse_sum = m_line2_frame_pulse_sum;
+                m_line2_frame_pulse_sum = 0;
+            } else if (m_pixel >= 313 && m_pixel <= 478) { // skip the two last pixels: especially line 2 often has bad values
+                int pulsePixel = m_pixel - 313;
+                float pulseValue = (pulsePixel < 144 ? pulsePixel / 4 % 2 == 0 : pulsePixel < 160) ? 1.f : -1.f;
+                m_line2_frame_pulse_sum += pulseValue * sample;
+            }
+            // We calculate the sums over 164 pixels, so if the signal levels of the high and low parts of the signal
+            // differ by d, a perfect fit with the frame sync signals should have a difference between line 1 and line 2
+            // of 166 * d.  If the input is scaled according to the MUSE specification, d = 239 - 16 = 223,
+            // so the difference should be 37018.  In practice, for a correctly scaled input signal we get around 27000,
+            // or 73 % of the theoretical value.  The percentile filters estimate the upper/lower signal values, but there
+            // is some variation due to the content of the rest of the signal, so we set the thresholds lower.
+            if (m_pixel == 480) {
+                if (m_state == eLockedHoriz) {
+                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
+                    m_max_frame_pulse_sum_difference = max(m_max_frame_pulse_sum_difference, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum);
+                    if (m_line1_frame_pulse_sum - m_line2_frame_pulse_sum > threshold) {
+
+                        m_log.info(eInput, fmt::format("New state eLocked at line {}, diff={}, threshold={}",
+                                                       m_line, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold));
+                        // copy the two last lines to lines 1 and 2 so that the first frame is complete -- ignore dropouts
+                        for (int i = 0; i < MUSE_TOTAL_WIDTH; i++) {
+                            output[i] = output[(m_line - 2) * MUSE_TOTAL_WIDTH + i];
+                            output[i + MUSE_TOTAL_WIDTH] = output[(m_line - 1) * MUSE_TOTAL_WIDTH + i];
+                        }
+                        m_line = 2;
+                        m_state = eLocked;
+                        //m_frame_start_offset = input_offset + sample_ix - MUSE_TOTAL_WIDTH * 2 - 1;
+                    }
+                }
+                if (m_state == eLocked && m_line == 2) {
+                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
+                    if (m_line1_frame_pulse_sum - m_line2_frame_pulse_sum > threshold)
+                        m_missed_line_pulses = 0;
+                    else {
+                        if (m_missed_line_pulses < 3)
+                            m_missed_line_pulses += 1;
+                        else {
+                            m_log.warn(eInput, fmt::format("Missed line pulses (diff={}, threshold={}): New state eSearching at line {}",
+                                                           m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold, m_line));
+                            m_state = eSearching;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (m_pixel == 8) {
+            // When locked: line 1: positive, line 2: negative, line 3: negative, m_line 4: positive, then alternating up to 1125
+            bool sync_should_be_positive = m_line == 1 || (m_line > 3 && m_line % 2 == 0);
+
+            float sample0 = output[output_index - 4];
+            float sample2 = output[output_index - 2];
+            float sample4 = output[output_index];
+
+            bool m_sync_is_good = (sync_should_be_positive && sample0 < sample2 && sample2 < sample4) ||
+                                  (!sync_should_be_positive && sample0 > sample2 && sample2 > sample4);
+
+            if (m_sync_is_good) {
+                double avgLevel = (sample0 + sample4) / 2;
+                double new_error = std::clamp(sync_should_be_positive ? sample2 - avgLevel : avgLevel - sample2, -10000.0, 10000.0); // negative means we sampled too early
+                m_error_sum = std::clamp(m_error_sum + new_error, -15000.0, 15000.0);
+                m_input_samples_per_sample =
+                        m_input_samples_per_sample_ref - new_error * m_g1 - m_error_sum * m_g2;
+            }
+            if (m_state == eSearching) {
+                m_consecutive_good_syncs = m_sync_is_good ? m_consecutive_good_syncs + 1 :
+                                           m_consecutive_good_syncs >= 2 ? m_consecutive_good_syncs - 2 : 0;
+                if (m_consecutive_good_syncs >= 50) {
+                    m_log.info(eInput, fmt::format("New state eLockedHoriz at line {}", m_line));
+                    m_state = eLockedHoriz;
+                    m_line2_frame_pulse_sum = 0;
+                    m_max_frame_pulse_sum_difference = 0;
+                }
+            }
+            if ((m_state == eSearching && ((m_consecutive_good_syncs < 5 && m_line == 50) || m_line == 100)) ||
+                (m_state == eLockedHoriz && m_line == 1125)) {
+                m_consecutive_good_syncs = 0;
+                m_error_sum = 0;
+                m_input_samples_per_sample = m_input_samples_per_sample_ref;
+
+                if (m_state == eLockedHoriz) {
+                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
+                    m_log.info(eInput, fmt::format(
+                            "Locked horizontally, but frame pulses not found (max sum={}, threshold={}): New state eSearching at line {}",
+                            m_max_frame_pulse_sum_difference, threshold, m_line));
+                }
+                m_state = eSearching; // TODO: add to VHDL
+                m_line = 3;
+                m_pixel = 263; // "random", start search from new position
+            }
+        }
+
+        if (m_pixel < 480)
+            m_pixel++;
+        else {
+            m_pixel = 1;
+            if (m_line != 1125)
+                m_line++;
+            else {
+                m_line = 1;
+                if (m_state == eLocked)
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
+void ResamplingInputReader::setUnlocked() {
+    m_state = eSearching;
+    m_line = 333; // make sure we do not recognize old data and immediately re-lock
+    m_log.info(eInput, "state externally set to eSearching");
 }

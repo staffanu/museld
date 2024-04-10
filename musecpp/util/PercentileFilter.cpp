@@ -3,26 +3,12 @@
 //
 
 #include "PercentileFilter.h"
-#include "../MuseTypes.h"
 
 PercentileFilter::PercentileFilter(float percentile, float initial_estimate)
         : m_percentile(percentile),
           m_current_estimate(initial_estimate),
           m_counter(0),
           m_under_count(0) {
-}
-
-void PercentileFilter::update(float v) {
-    if (v < m_current_estimate)
-        m_under_count++;
-    if (m_counter++ == MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT) {
-        if ((float)m_under_count / (float)(MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT) > m_percentile)
-            m_current_estimate *= 0.99;
-        else
-            m_current_estimate *= 1.01;
-        m_counter = 0;
-        m_under_count = 0;
-    }
 }
 
 float PercentileFilter::getEstimate() const {

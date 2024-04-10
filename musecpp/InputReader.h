@@ -9,8 +9,8 @@
 #include <condition_variable>
 #include <optional>
 #include <vector>
+#include <deque>
 #include <atomic>
-#include "InputPll.h"
 
 namespace musevk {
     class VulkanBuffer;
@@ -19,6 +19,7 @@ class Logger;
 
 class InputReader {
 public:
+    // A block contains a full frame of data, sampled at 16.2 MHz
     struct InputReaderBlock {
         static constexpr int c_max_efm_data_size = 150000; // a bit above 7350 / 30 * 588;
         InputReaderBlock(std::shared_ptr<musevk::VulkanBuffer> v, std::shared_ptr<musevk::VulkanBuffer> d)

@@ -32,6 +32,7 @@ private:
     static const double c_g1;
     static const double c_g2;
 
+    Logger &m_log;
     double m_clk_counter;
     double m_prev_in;
     double m_error_sum;

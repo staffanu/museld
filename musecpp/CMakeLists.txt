@@ -37,17 +37,17 @@ add_executable(musecpp
         AudioPlayback.cpp AudioPlayback.h
         InputReader.cpp InputReader.h
         ResamplingInputReader.cpp ResamplingInputReader.h
-        InputPll.cpp InputPll.h
         PhaseCorrect16MHzInputReader.cpp PhaseCorrect16MHzInputReader.h
         RfDemodulator.cpp RfDemodulator.h
         TextRenderer.cpp TextRenderer.h
         AudioMode.h
         util/PercentileFilter.cpp util/PercentileFilter.h
         util/Logger.cpp util/Logger.h
+        util/ConstExprHelpers.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandBuffer.cpp musevk/CommandBuffer.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h
-        musevk/VulkanMemoryObject.h
+        musevk/VulkanMemoryObject.cpp musevk/VulkanMemoryObject.h
         musevk/VulkanImage.cpp musevk/VulkanImage.h
         musevk/VulkanBuffer.cpp musevk/VulkanBuffer.h
         musevk/TimestampStatistics.cpp musevk/TimestampStatistics.h
@@ -55,15 +55,14 @@ add_executable(musecpp
         musevk/MemoryAllocator.cpp musevk/MemoryAllocator.h
         musevk/TimestampQueryPool.cpp musevk/TimestampQueryPool.h
         musevk/VulkanUtil.cpp musevk/VulkanUtil.h
+        musevk/Size.h
+        musevk/CommandPool.h
+        musevk/Queue.h
         efm/ReedSolomon.h
         efm/GFValue.h
         efm/EfmPll.cpp efm/EfmPll.h
         efm/EfmDecoder.cpp efm/EfmDecoder.h
         efm/ByteWithErasureFlag.h
-        musevk/Size.h
-        musevk/VulkanMemoryObject.cpp
-        musevk/CommandPool.h
-        musevk/Queue.h
 )
 if (HAVE_LIBAV)
     target_sources(musecpp PRIVATE

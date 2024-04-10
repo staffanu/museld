@@ -5,6 +5,7 @@
 #ifndef MUSECPP_PERCENTILEFILTER_H
 #define MUSECPP_PERCENTILEFILTER_H
 
+#include "../MuseTypes.h"
 
 class PercentileFilter {
 public:
@@ -12,7 +13,19 @@ public:
     PercentileFilter(const PercentileFilter &other) = delete;
     PercentileFilter& operator=(const PercentileFilter &other) = delete;
 
-    void update(float v);
+    inline void update(float v) {
+        if (v < m_current_estimate)
+            m_under_count++;
+        if (m_counter++ == MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT) {
+            if ((float)m_under_count / (float)(MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT) > m_percentile)
+                m_current_estimate *= 0.99;
+            else
+                m_current_estimate *= 1.01;
+            m_counter = 0;
+            m_under_count = 0;
+        }
+    }
+
     [[nodiscard]] float getEstimate() const;
 
 private:

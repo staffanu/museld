@@ -8,6 +8,8 @@
 #include "InputReader.h"
 #include "RfDemodulator.h"
 #include "efm/EfmPll.h"
+#include "util/PercentileFilter.h"
+#include "util/ConstExprHelpers.h"
 
 class ResamplingInputReader : public InputReader {
 public:
@@ -32,32 +34,76 @@ protected:
     void threadFunc() override;
 
 private:
-    static constexpr size_t c_sample_buffer_size = 480;
-    static constexpr size_t c_input_buffer_size = DemodulatedBlock::c_video_block_size * sizeof(float) + 100;
-    static constexpr int c_input_buffer_lookback = 3; // we look back 3 samples
+    // takes output_block as parameter in order to fill in efm data when getting a new demodulated block
+    bool resample(float *sample_out, uint8_t *dropout_out,
+                  double input_samples_per_sample,
+                  std::unique_ptr<InputReaderBlock> const &output_block);
 
-    bool readSamples(int sample_count, float buffer[c_sample_buffer_size],
-                     uint8_t dropout_buffer[c_sample_buffer_size], double dt,
-                     float efm_buffer[DemodulatedBlock::c_efm_block_size],
-                     bool *have_efm, long *sample_buffer_input_offset, int *source_samples_per_sample);
+    // takes output_block as parameter in order to fill in efm data when getting a new demodulated block
+    bool readInput(uint8_t *input_buffer, uint8_t *input_dropout_buffer, std::unique_ptr<InputReaderBlock> const &output_block);
+
+    [[nodiscard]] bool process(std::unique_ptr<InputReaderBlock> const &output_block);
+    void setUnlocked();
 
     InputFormat m_input_format;
-    InputPll m_input_pll;
     EfmPll m_efm_pll;
     int m_file_fd;
     double m_sample_rate;
 
     RfDemodulator *m_demodulator;
 
-    uint8_t m_file_input_buffer[c_input_buffer_size];
-    int m_file_input_buffer_bytes;
-    int m_file_input_buffer_read_pos;
-    long m_file_input_buffer_input_offset;
-    uint8_t m_dropout_input_buffer[c_input_buffer_size]{};
-    double m_t; // the time of the previous read
+    // The input buffer (and also the input dropout buffer) is a multiple of the demodulated block size.
+    // (The same is used if reading from file for simplicity.)
+    // The total buffer size needs to be a power of two.
+    static constexpr int c_number_of_input_sub_buffers = 2;
+    static constexpr size_t c_input_sub_buffer_size = DemodulatedBlock::c_video_block_size;
+    static constexpr size_t c_input_buffer_size = c_input_sub_buffer_size * c_number_of_input_sub_buffers;
+    static_assert((c_input_sub_buffer_size & (c_input_sub_buffer_size - 1)) == 0); // ensure power of two
+    static_assert((c_number_of_input_sub_buffers & (c_number_of_input_sub_buffers - 1)) == 0);
+    static constexpr size_t c_input_buffer_size_mask = c_input_buffer_size - 1;
+    static constexpr unsigned c_input_sub_buffer_size_bits = ConstHelpers::log2(c_input_sub_buffer_size);
+
+    uint8_t *m_input_buffer;
+    uint8_t *m_input_dropout_buffer;
+
+    int m_last_input_sub_buffer_ix_read;
+    double m_t;
+
     int m_bytes_per_sample;
     double m_output_multiplier;
     double m_output_add;
+
+    double m_input_samples_per_sample_ref;
+    double m_input_samples_per_sample;
+    // These variable names and the computations performed are heavily influenced by
+    // the TI publication "Introduction to phase-locked loop system modeling"
+    // (Analog Applications Journal SLYT015 - May 2000 Analog and Mixed-Signal Products)
+    double m_omega; // undamped frequency
+    double m_zeta; // damping factor
+    double m_Ts; // We think of one line as one sample here since we detect the phase once per line
+    double m_G1;
+    double m_G2;
+    double m_GpdGvco;
+    double m_g1;
+    double m_g2;
+
+    enum PllState {
+        eSearching, eLocked, eLockedHoriz
+    };
+
+    int m_pixel;
+    int m_line;
+    PllState m_state;
+    float m_line1_frame_pulse_sum;
+    float m_line2_frame_pulse_sum;
+    PercentileFilter m_upper_percentile_filter;
+    PercentileFilter m_lower_percentile_filter;
+    float m_max_frame_pulse_sum_difference;
+    int m_consecutive_good_syncs;
+    int m_missed_line_pulses;
+    long m_frame_start_offset;
+
+    double m_error_sum;
 };
 
 #endif //MUSECPP_RESAMPLINGINPUTREADER_H

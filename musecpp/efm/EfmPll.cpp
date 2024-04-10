@@ -16,7 +16,8 @@ const double EfmPll::c_g1 = c_G1 / c_GpdGvcoG1;
 const double EfmPll::c_g2 = c_G2 / c_GpdGvcoG2;
 
 EfmPll::EfmPll(Logger &log)
-        : m_clk_counter(0),
+        : m_log(log),
+          m_clk_counter(0),
           m_prev_in(false),
           m_error_sum(0),
           m_filter_out(0),
@@ -44,7 +45,10 @@ int EfmPll::reclock(const float *input, int input_size, bool *output, int max_ou
             new_counter -= c_counter_max;
         m_filter_out = 0;
         if (new_counter < m_clk_counter) {
-            assert(output_size < max_output_size);
+            if (output_size >= max_output_size) {
+                m_log.warn(eAudio, "EFM reclocked data buffer overflow");
+                return output_size;
+            }
             output[output_size++] = m_toggle_count % 2 == 1;
 
             m_filter_out = 0;
