@@ -25,9 +25,11 @@ ResamplingInputReader::ResamplingInputReader(
           m_sample_rate(sample_rate),
           m_efm_pll(log),
           m_file_fd(-1),
+          m_input_samples_decimation_rate(1),
           m_demodulator(nullptr),
           m_input_buffer(nullptr),
           m_input_dropout_buffer(nullptr),
+          m_input_sub_buffer_input_offsets{},
           m_last_input_sub_buffer_ix_read(0),
           m_t(0.0),
           m_state(eSearching),
@@ -40,7 +42,7 @@ ResamplingInputReader::ResamplingInputReader(
           m_max_frame_pulse_sum_difference(0),
           m_consecutive_good_syncs(0),
           m_missed_line_pulses(0),
-          m_frame_start_offset(0),
+          m_frame_start_offset(0L),
           m_error_sum(0) {
     if (demodulate) {
         m_input_format = eFloat;
@@ -145,16 +147,10 @@ void ResamplingInputReader::seek(double seconds) {
 }
 
 void ResamplingInputReader::threadFunc() {
-    float efm_sample_buffer[DemodulatedBlock::c_efm_block_size];
-    bool have_efm;
-    int samples_to_read = 1;
-    // long sample_buffer_input_offset; TODO
-    int source_samples_per_sample; // for the RfDemodulator this is 2 due to decimation after demodulation
-
     unique_ptr<InputReaderBlock> output_block = nullptr;
 
-    for (int i = 0; i < c_number_of_input_sub_buffers; i++) {
-        readInput(m_input_buffer + m_bytes_per_sample * c_input_sub_buffer_size * i, m_input_dropout_buffer + c_input_sub_buffer_size * i, nullptr);
+    for (m_last_input_sub_buffer_ix_read = 0; m_last_input_sub_buffer_ix_read < c_number_of_input_sub_buffers; m_last_input_sub_buffer_ix_read++) {
+        readInput(nullptr);
     }
     m_last_input_sub_buffer_ix_read = c_number_of_input_sub_buffers - 1;
 
@@ -183,8 +179,8 @@ void ResamplingInputReader::threadFunc() {
             break;
         }
 
-        output_block->input_offset = 0; // TODO pll_result.frame_input_offset;
-        output_block->input_samples_per_muse_sample = m_input_samples_per_sample * source_samples_per_sample;
+        output_block->input_offset = m_frame_start_offset;
+        output_block->input_samples_per_muse_sample = m_input_samples_per_sample * m_input_samples_decimation_rate;
         std::unique_lock<std::mutex> lock(m_mutex);
         m_cv_filled.notify_one();
         m_filled_muse_input_buffers.push_back(std::move(output_block));
@@ -196,12 +192,15 @@ void ResamplingInputReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
-bool ResamplingInputReader::readInput(uint8_t *input_buffer, uint8_t *input_dropout_buffer,
-                                      std::unique_ptr<InputReaderBlock> const &output_block) {
+bool ResamplingInputReader::readInput(std::unique_ptr<InputReaderBlock> const &output_block) {
+    uint8_t *read_ptr = m_input_buffer + m_bytes_per_sample * c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
+    uint8_t *dropout_read_ptr = m_input_dropout_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
+
     if (m_demodulator == nullptr) {
+        m_input_samples_decimation_rate = 1;
         int bytes_read = 0;
         while (bytes_read < c_input_sub_buffer_size * m_bytes_per_sample) {
-            ssize_t read_count = read(m_file_fd, (void *)(input_buffer + bytes_read), c_input_sub_buffer_size * m_bytes_per_sample - bytes_read);
+            ssize_t read_count = read(m_file_fd, (void *)(read_ptr + bytes_read), c_input_sub_buffer_size * m_bytes_per_sample - bytes_read);
             if (read_count == -1 && errno == EAGAIN)
                 this_thread::sleep_for(chrono::milliseconds(1));
             else if (read_count == 0) {
@@ -217,13 +216,15 @@ bool ResamplingInputReader::readInput(uint8_t *input_buffer, uint8_t *input_drop
         assert (bytes_read == c_input_sub_buffer_size * m_bytes_per_sample);
         return true;
     } else {
+        m_input_samples_decimation_rate = RfDemodulatorConstants::c_video_decimation_rate;
         auto block = m_demodulator->getNextDemodulatedBlock();
         if (block == nullptr) {
             m_log.info(eInput, "ResamplingInputReader: no more demodulated blocks");
             return false;
         }
-        memcpy(input_buffer, block->video_data->data<float>(), block->c_video_block_size * sizeof(float));
-        memcpy(input_dropout_buffer, block->dropouts->data<uint8_t>(), block->c_video_block_size * sizeof(uint8_t));
+        memcpy(read_ptr, block->video_data->data<float>(), block->c_video_block_size * sizeof(float));
+        memcpy(dropout_read_ptr, block->dropouts->data<uint8_t>(), block->c_video_block_size * sizeof(uint8_t));
+        m_input_sub_buffer_input_offsets[m_last_input_sub_buffer_ix_read] = block->input_offset;
 
         if (output_block != nullptr) {
             if (m_state == eLocked) {
@@ -290,16 +291,11 @@ bool ResamplingInputReader::resample(float *sample_out, uint8_t *dropout_out,
     *sample_out = (float)(y * m_output_multiplier + m_output_add);
     *dropout_out = m_input_dropout_buffer[read_pos];
 
-    // Maybe take this from the input blocks instead
-//    *source_samples_per_sample = m_demodulator ? RfDemodulatorConstants::c_video_decimation_rate : 1;
-
     auto current_sub_buffer_index = read_pos >> c_input_sub_buffer_size_bits;
     if ((m_last_input_sub_buffer_ix_read + 1) % c_number_of_input_sub_buffers != current_sub_buffer_index) {
         m_last_input_sub_buffer_ix_read = (m_last_input_sub_buffer_ix_read + 1) % c_number_of_input_sub_buffers;
 
-        if (!readInput(m_input_buffer + m_bytes_per_sample * c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read,
-                       m_input_dropout_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read,
-                       output_block))
+        if (!readInput(output_block))
             return false;
     }
     return true;
@@ -309,6 +305,8 @@ bool ResamplingInputReader::resample(float *sample_out, uint8_t *dropout_out,
 bool ResamplingInputReader::process(std::unique_ptr<InputReaderBlock> const &output_block) {
     auto *output = output_block->video_data->data<float>();
     auto *dropout_output = output_block->dropout_data->data<uint8_t>();
+
+    m_frame_start_offset = m_input_sub_buffer_input_offsets[((size_t)m_t & c_input_buffer_size_mask) >> c_input_sub_buffer_size_bits];
 
     float sample;
     uint8_t dropout;
@@ -350,7 +348,9 @@ bool ResamplingInputReader::process(std::unique_ptr<InputReaderBlock> const &out
                         }
                         m_line = 2;
                         m_state = eLocked;
-                        //m_frame_start_offset = input_offset + sample_ix - MUSE_TOTAL_WIDTH * 2 - 1;
+
+                        m_frame_start_offset = m_input_sub_buffer_input_offsets[((size_t)m_t & c_input_buffer_size_mask) >> c_input_sub_buffer_size_bits]
+                                - MUSE_TOTAL_WIDTH * 2 - 1;
                     }
                 }
                 if (m_state == eLocked && m_line == 2) {

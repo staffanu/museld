@@ -40,7 +40,7 @@ private:
                   std::unique_ptr<InputReaderBlock> const &output_block);
 
     // takes output_block as parameter in order to fill in efm data when getting a new demodulated block
-    bool readInput(uint8_t *input_buffer, uint8_t *input_dropout_buffer, std::unique_ptr<InputReaderBlock> const &output_block);
+    bool readInput(std::unique_ptr<InputReaderBlock> const &output_block);
 
     [[nodiscard]] bool process(std::unique_ptr<InputReaderBlock> const &output_block);
     void setUnlocked();
@@ -49,6 +49,7 @@ private:
     EfmPll m_efm_pll;
     int m_file_fd;
     double m_sample_rate;
+    int m_input_samples_decimation_rate;
 
     RfDemodulator *m_demodulator;
 
@@ -65,6 +66,7 @@ private:
 
     uint8_t *m_input_buffer;
     uint8_t *m_input_dropout_buffer;
+    long m_input_sub_buffer_input_offsets[c_number_of_input_sub_buffers];
 
     int m_last_input_sub_buffer_ix_read;
     double m_t;

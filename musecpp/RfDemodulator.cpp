@@ -229,6 +229,7 @@ void RfDemodulator::demodulate() {
         }
         // The first byte of the output lags the actual input due to three filters being applied
         block->input_offset = m_total_samples_read - (c_bandpass_filter_size + c_lowpass_filter_size + c_rrc_filter_size) / 2;
+        m_total_samples_read += c_sample_block_size;
 
         // Begin Vulkan command buffer and reset the timestamp query pool if we use one
         if (timestamp_query_pool != nullptr)

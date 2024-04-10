@@ -83,6 +83,7 @@ void PhaseCorrect16MHzInputReader::threadFunc() {
             m_vacant_muse_input_buffers.pop_front();
         }
 
+        buffer->input_samples_per_muse_sample = 1;
         auto data = buffer->video_data->data<float>();
         if (!readFloats(m_input, data, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH))
             break;
