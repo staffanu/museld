@@ -43,6 +43,11 @@ namespace musevk {
             updateDescriptorSet(set_index);
         }
 
+        // Can be used to check if the descriptors need to be updated when calling the same shader several times
+        std::vector<std::shared_ptr<VulkanMemoryObject>> getBuffersForDescriptorSet(int index) {
+            return m_buffers[index];
+        }
+
         void updateWorkgroup(Size const &workgroup) {
             m_workgroup_size = workgroup;
         }

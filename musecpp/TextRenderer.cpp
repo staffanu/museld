@@ -39,7 +39,14 @@ void TextRenderer::drawText(std::shared_ptr<VulkanImage> const &image, int x, in
                                    vk::PipelineStageFlagBits::eTopOfPipe,
                                    vk::PipelineStageFlagBits::eComputeShader,
                                    vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
-    m_render_text_shader->updateBufferDescriptorsInSet(0, {m_font_buffer, image});
+
+    // Do not call updateDescriptorSet if calling several times for the same image.
+    // This is not allowed in the same command buffer, and it is common to want to write
+    // more than one text on the same image.
+    auto currentBuffers = m_render_text_shader->getBuffersForDescriptorSet(0);
+    if (currentBuffers.size() != 2 || currentBuffers[1] != image)
+        m_render_text_shader->updateBufferDescriptorsInSet(0, {m_font_buffer, image});
+
     m_render_text_shader->updateWorkgroup(Size(c_glyph_width * s.length() * scale, c_glyph_height * scale));
     command_buffer.enqueueComputeShader(m_render_text_shader, push_constants);
 }
