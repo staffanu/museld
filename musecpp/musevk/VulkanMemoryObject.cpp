@@ -133,7 +133,7 @@ void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_re
     }
 
     printMemoryProperties();
-    throw std::runtime_error(fmt::format("No available memory for host access type {}", host_access));
+    throw std::runtime_error(fmt::format("No available memory for host access type {}", (int)host_access));
 }
 
 void musevk::VulkanMemoryObject::printMemoryProperties() {
