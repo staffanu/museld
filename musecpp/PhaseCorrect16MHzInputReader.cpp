@@ -99,10 +99,10 @@ void PhaseCorrect16MHzInputReader::threadFunc() {
 }
 
 bool PhaseCorrect16MHzInputReader::readFloats(ifstream &input, float *out, size_t n) {
-    auto *input_buffer = (uint16_t *)malloc(n * sizeof(uint16_t));
-    input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(uint16_t));
+    auto *input_buffer = (int16_t *)malloc(n * sizeof(int16_t));
+    input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(int16_t));
     for (int i = 0; i < n; i++) {
-        out[i] = (float)(m_big_endian ? ntohs(input_buffer[i]) : input_buffer[i]) / 4.0f;
+        out[i] = (float)(short)(m_big_endian ? ntohs(input_buffer[i]) : input_buffer[i]) / 4.0f;
     }
     free(input_buffer);
     return input.good();

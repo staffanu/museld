@@ -236,6 +236,9 @@ void RfDemodulator::demodulate() {
             timestamp_query_pool->resetAndSubmit(*command_buffer);
         command_buffer->begin();
 
+        // Make the data available on the GPU; this is necessary in case we didn't find a memory type good for both host writes and shader reads
+        input_buffer->synchronizeHostWrites(*command_buffer);
+
         // Run the input signal through the bandpass filter that also converts the signal to an analytic signal
         input_fir_filter_shader->updateWorkgroup(Size(c_sample_block_size));
         command_buffer->enqueueComputeShader<uint32_t>(

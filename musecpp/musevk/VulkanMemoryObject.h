@@ -92,7 +92,6 @@ namespace musevk {
 
     private:
         std::optional<int32_t> getMemoryTypeIndex(vk::MemoryRequirements memory_requirements, vk::MemoryPropertyFlags properties);
-        void printMemoryProperties();
         static std::string memoryPropertyFlagsToString(VkMemoryPropertyFlags flags);
         static std::string memoryHeapFlagsToString(VkMemoryHeapFlags flags);
     };

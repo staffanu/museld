@@ -120,11 +120,16 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
             m_log.info(eDecoder, fmt::format("eq: {}, {}", m_eq.first, m_eq.second));
 
         m_first_stage_command_buffer->begin();
+
+        // The input block data was written by the host, so make sure it is visible on the GPU
+        input_block->video_data->synchronizeHostWrites(*m_first_stage_command_buffer);
+        input_block->dropout_data->synchronizeHostWrites(*m_first_stage_command_buffer);
+
         m_shaders.applyEqAndDeemphasisAndGamma(*m_first_stage_command_buffer,
                                                input_vulkan_buffer, input_block->dropout_data,
                                                frame_buffer->data(),
                                                m_eq, enable_non_linear, dropout_mode);
-        frame_buffer->data()->synchronizeForHostRead(*m_first_stage_command_buffer);
+        frame_buffer->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for control data processing
         m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame_buffer->data());
         m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 

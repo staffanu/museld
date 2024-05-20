@@ -47,7 +47,7 @@ The command line options aren't very well organized and have accumulated over ti
 Determines the input format; these can not be combined and the names should probably change, possibly
 when making them more generic and/or refactoring into several independent options.
 
-* --big-endian / -little-endian: inputs are unsigned shorts sampled at the correct phase at 16.2MHz, with only the 10 least significant bits used.
+* --big-endian / -little-endian: inputs are shorts sampled at the correct phase at 16.2MHz, with only the 10 least significant bits used.
 * --resample-bytes: inputs are samples at a higher frequency (specified by its own parameter) as unsigned bytes.
 * --resample-shorts: inputs are samples at a higher frequency (specified by its own parameter) as full 16-bit signed little endian shorts.
 
