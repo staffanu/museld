@@ -187,6 +187,10 @@ of the line depends on whether the dropout occurred during the luminance or colo
 
 Switches the audio processing mode between MUSE and EFM.  Only useful if demodulating an RF signal.
 
+> GLFW_KEY_V
+
+Turns on/off display of Disc Code information (disc info / chapter / frame).  Reading of TOC is not implemented.
+
 > GLFW_KEY_C
 
 Turns on the mouse cursor and displays its coordinates in the top left of the window.  Two sets of coordinates are shown:

@@ -10,13 +10,13 @@
 #include "efm/EfmDecoder.h"
 #include "AudioDecoder.h"
 #include "Shaders.h"
+#include "FrameBuffer.h"
 #include "musevk/CommandPool.h"
 
 namespace musevk {
     class TimestampQueryPool;
 }
 class AudioDecoder;
-class FrameBuffer;
 class InputReader;
 class Logger;
 class Shaders;
@@ -49,6 +49,7 @@ public:
               int *sample_count,
               AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples],
               int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
+              std::optional<FrameBuffer::DiscCode> *disc_code,
               FieldInterpolationMode field_interpolation_mode,
               bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode, bool output_yuv);
 

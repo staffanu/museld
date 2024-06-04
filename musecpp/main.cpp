@@ -124,6 +124,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         bool redo_last_field = false;
         bool enable_non_linear = true;
         bool enable_cursor = false;
+        bool show_disc_code = false;
         int zoom_factor = 1;
         const double zoom_step = 0.2;
         pair<double, double> zoom_center = make_pair(0.5, 0.5);
@@ -132,11 +133,12 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         int osd_text_remaining_frames = 0;
         double input_samples_per_muse_sample;
         long last_buffer_file_offset;
+        std::optional<FrameBuffer::DiscCode> disc_code;
         int field_parity;
 
         while (paused && !redo_last_field ||
             decoder.next(efm_audio, &audio_mode, &audio_sample_count, audio_samples,
-                         &field_parity, &last_buffer_file_offset, &input_samples_per_muse_sample,
+                         &field_parity, &last_buffer_file_offset, &input_samples_per_muse_sample, &disc_code,
                          field_interpolation_mode, redo_last_field, enable_non_linear, dropout_mode, output_filename.has_value())) {
 
             if (!paused)
@@ -206,6 +208,18 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                         cursor_string += " " + offset_string;
                     }
                 }
+                if (paused)
+                    redo_last_field = true;
+            }
+            if (show_disc_code) {
+                string disc_code_string1 = disc_code.has_value() ?
+                                          fmt::format("{}{} {}",
+                                                      disc_code->pf() ? "TOC " : "", disc_code->sz() ? "20 cm" : "30 cm", disc_code->df() ? "CLV" : "CAV")
+                                                      : "No disc code";
+                string disc_code_string2 = disc_code.has_value() ?
+                                           fmt::format("Chapter {} Frame {}", disc_code->chapter(), disc_code->frame()) : "";
+                text_renderer.drawText(images.out_image, 90, 900, disc_code_string1, 2, *command_buffer);
+                text_renderer.drawText(images.out_image, 90, 955, disc_code_string2, 2, *command_buffer);
                 if (paused)
                     redo_last_field = true;
             }
@@ -351,6 +365,9 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             if (check_glfw_key(window, GLFW_KEY_C)) {
                 enable_cursor = !enable_cursor;
                 glfwSetInputMode(window, GLFW_CURSOR, enable_cursor ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
+            }
+            if (check_glfw_key(window, GLFW_KEY_V)) {
+                show_disc_code = !show_disc_code;
             }
             if (check_glfw_key(window, GLFW_KEY_PRINT_SCREEN)) {
                 glfwSetClipboardString(window, cursor_string.c_str());

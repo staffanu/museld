@@ -79,6 +79,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                        int *sample_count,
                        AudioDecoder::AudioFrame output_samples[max(AudioDecoder::c_max_output_samples, EfmDecoder::c_max_output_samples)],
                        int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
+                       optional<FrameBuffer::DiscCode> *disc_code,
                        FieldInterpolationMode field_interpolation_mode,
                        bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode, bool output_yuv) {
     *sample_count = 0;
@@ -176,8 +177,11 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
         m_second_stage_command_buffer->submit({}, {}, {});
 
     assert(input_block != nullptr == m_first_stage_command_buffer->isSubmitted());
-    if (m_first_stage_command_buffer->isSubmitted())
+    if (m_first_stage_command_buffer->isSubmitted()) {
         m_first_stage_command_buffer->wait();
+
+        m_frame_buffers[0]->processDiscCode();
+    }
 
     if (m_decode_audio && m_field_index == 0) {
         if (efm_audio && input_block != nullptr) {
@@ -207,6 +211,8 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
         m_field_index = 0; // skip second field -- next field will be from the next frame
     else
         m_field_index = (m_field_index + 1) % 2;
+
+    *disc_code = m_frame_buffers[0]->getDiscCode();
 
     return true;
 }

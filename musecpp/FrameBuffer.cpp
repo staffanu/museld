@@ -7,13 +7,17 @@
 #include "musevk/VulkanBuffer.h"
 #include "FrameBuffer.h"
 #include "FieldBufferView.h"
+#include "musevk/HalfFloatUtil.h"
 
 using namespace std;
 
 FrameBuffer::FrameBuffer(Logger &log, int frame_no, std::shared_ptr<musevk::VulkanBuffer> data)
 : m_frame_no(frame_no),
+  m_input_offset(-1),
+  m_input_samples_per_sample(0),
   m_data(std::move(data)),
-  m_fields({FieldBufferView(log, frame_no, m_data, 0), FieldBufferView(log, frame_no, m_data, 1) }) {
+  m_fields({FieldBufferView(log, frame_no, m_data, 0), FieldBufferView(log, frame_no, m_data, 1) }),
+  m_disc_code(nullopt) {
 }
 
 void FrameBuffer::set_frame_no(int frame_no, long input_offset, double input_samples_per_sample) {
@@ -74,7 +78,57 @@ FieldBufferView &FrameBuffer::get_field(int parity) {
     return m_fields[parity];
 }
 
+std::optional<FrameBuffer::DiscCode> FrameBuffer::getDiscCode() const {
+    return m_disc_code;
+}
+
+// Notice we use a pointer to the buffer from which the frame data is created before the frame data itself is ready
 void FrameBuffer::ProcessControlData(float const *frame_data, std::pair<float, float> const &eq) {
     m_fields[0].ProcessControlData(frame_data + 558 * MUSE_TOTAL_WIDTH + 12, eq);
     m_fields[1].ProcessControlData(frame_data + 1120 * MUSE_TOTAL_WIDTH + 12, eq);
+}
+
+void FrameBuffer::processDiscCode() {
+    // Information on the Disc Code can be found in European Patent Application
+    // EP0532277A2 "Method of recording information on video disk."
+
+    // read all 76 bits
+    int bits[76];
+    for (int bit_ix = 0; bit_ix < 76; bit_ix++) {
+        float d1 = HalfFloatUtil::half_to_float(m_data->data<uint16_t>()[563 * MUSE_TOTAL_WIDTH + 18 + 6 * bit_ix + 1]);
+        float d2 = HalfFloatUtil::half_to_float(m_data->data<uint16_t>()[563 * MUSE_TOTAL_WIDTH + 18 + 6 * bit_ix + 4]);
+        bits[bit_ix] = d2 > d1;
+    }
+
+    // makes an integer of the given bits (msb first)
+    auto extractBits = [bits](int start, int length) -> int {
+        int s = 0;
+        for (int i = 0; i < length; i++)
+            s += bits[start + i] ? (1 << (length - i - 1)) : 0;
+        return s;
+    };
+
+    // checks if the crc8 of the first 68 bits (excluding ccrc) is equal to the given value
+    auto checkCrc8 = [bits](int ccrc) -> bool {
+        uint8_t out = 0x3a;
+        for (int i = 0; i < 76; i++)
+            out = ((out << 1) | (i < 68 ? bits[i] : 0)) ^ ((out & 0x80) ? 0xb3 : 0);
+        return out == ccrc;
+    };
+
+    if (extractBits(0, 4 * 3) == 0b111111100100) {
+        if (checkCrc8(extractBits(4 * 17, 4 * 2))) {
+            int mode = extractBits(4 * 3, 4 * 2); // 8 bits
+            int cadr = extractBits(4 * 5, 4 * 2); // 8 bits
+            int fadr1 = extractBits(4 * 7, 4 * 5); // 20 bits
+            int fadr2 = extractBits(4 * 12, 4 * 5); // 20 bits
+            m_disc_code = optional<DiscCode>({mode, cadr, fadr1, fadr2});
+        } else {
+            m_disc_code = nullopt;
+            //cout << "CRC error" << endl;
+        }
+    } else {
+        m_disc_code = nullopt;
+        // cout << "cannot extract!" << endl;
+    }
 }
