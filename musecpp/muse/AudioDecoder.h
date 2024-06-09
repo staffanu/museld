@@ -13,19 +13,12 @@
 #include "musevk/VulkanBuffer.h"
 #include "BchDecoder.h"
 #include "AudioChannelDecoder.h"
-#include "AudioMode.h"
+#include "AudioDefs.h"
 
 class Logger;
 
 class AudioDecoder {
 public:
-    static const size_t c_max_output_samples = 2048;
-
-    struct AudioFrame
-    {
-        int16_t samples[4];
-    };
-
     explicit AudioDecoder(Logger &log);
     AudioDecoder(const AudioDecoder &) = delete;
     void operator=(const AudioDecoder &) = delete;
@@ -36,7 +29,7 @@ public:
                      std::shared_ptr<musevk::VulkanBuffer> const &audio_converted_freq,
                      AudioMode *audio_mode,
                      int *sample_count,
-                     AudioFrame output_samples[c_max_output_samples]);
+                     AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES]);
 
 private:
     static std::vector<std::pair<float, float>> defaultSymbolLocations();

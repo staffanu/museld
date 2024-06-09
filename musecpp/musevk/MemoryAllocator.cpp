@@ -4,9 +4,7 @@
 
 #include <iostream>
 #include <vector>
-#include <fmt/format.h>
 #include "MemoryAllocator.h"
-#include "../util/Logger.h"
 
 #define ALLOCATION_BLOCK_SIZE (16 * 1024 * 1024)
 

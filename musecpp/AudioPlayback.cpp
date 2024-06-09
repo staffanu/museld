@@ -47,7 +47,7 @@ void AudioPlayback::cleanup() {
 }
 
 void AudioPlayback::add_samples(AudioMode const &audio_mode, int const &sample_count,
-                                AudioDecoder::AudioFrame *output_samples) {
+                                AudioFrame *output_samples) {
     assert(audio_mode != MODE_UNKNOWN);
     if (audio_mode != m_current_mode) {
         m_current_mode = audio_mode;

@@ -9,8 +9,7 @@
 #include <fmt/format.h>
 #include "musevk/VulkanImage.h"
 #include "util/Logger.h"
-#include "AudioMode.h"
-#include "AudioDecoder.h"
+#include "AudioDefs.h"
 
 extern "C" {
 #include <libavutil/channel_layout.h>
@@ -48,7 +47,7 @@ public:
     bool init();
     void addVideoFrameWithAudio(std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
                                 std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V,
-                                AudioMode audio_mode, int number_of_samples, AudioDecoder::AudioFrame *audio_samples);
+                                AudioMode audio_mode, int number_of_samples, AudioFrame *audio_samples);
     void cleanup();
 
 private:

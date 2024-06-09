@@ -10,7 +10,7 @@
 #include <vulkan/vulkan.hpp>
 #include <memory>
 #include <mutex>
-#include "../util/Logger.h"
+#include "util/Logger.h"
 
 namespace musevk {
     struct AllocatedMemory {

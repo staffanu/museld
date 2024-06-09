@@ -24,23 +24,25 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ffast-math -fsanitize=address")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -ffast-math -UNDEBUG")
 
+include_directories(.)
+
 add_executable(musecpp
         main.cpp
-        FrameBuffer.cpp FrameBuffer.h
-        FieldBufferView.cpp FieldBufferView.h
-        AudioDecoder.cpp AudioDecoder.h
-        BchDecoder.cpp BchDecoder.h
-        AudioChannelDecoder.cpp AudioChannelDecoder.h
-        ControlSignalDecoder.cpp ControlSignalDecoder.h
-        Shaders.cpp Shaders.h
-        MuseDecoder.cpp MuseDecoder.h
         AudioPlayback.cpp AudioPlayback.h
         InputReader.cpp InputReader.h
-        ResamplingInputReader.cpp ResamplingInputReader.h
-        PhaseCorrect16MHzInputReader.cpp PhaseCorrect16MHzInputReader.h
-        RfDemodulator.cpp RfDemodulator.h
+        AudioDefs.h
         TextRenderer.cpp TextRenderer.h
-        AudioMode.h
+        muse/FrameBuffer.cpp muse/FrameBuffer.h
+        muse/FieldBufferView.cpp muse/FieldBufferView.h
+        muse/AudioDecoder.cpp muse/AudioDecoder.h
+        muse/BchDecoder.cpp muse/BchDecoder.h
+        muse/AudioChannelDecoder.cpp muse/AudioChannelDecoder.h
+        muse/ControlSignalDecoder.cpp muse/ControlSignalDecoder.h
+        muse/Shaders.cpp muse/Shaders.h
+        muse/MuseDecoder.cpp muse/MuseDecoder.h
+        muse/ResamplingInputReader.cpp muse/ResamplingInputReader.h
+        muse/PhaseCorrect16MHzInputReader.cpp muse/PhaseCorrect16MHzInputReader.h
+        muse/RfDemodulator.cpp muse/RfDemodulator.h
         util/PercentileFilter.cpp util/PercentileFilter.h
         util/Logger.cpp util/Logger.h
         util/ConstExprHelpers.h

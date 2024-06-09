@@ -4,4 +4,4 @@ cmake-build-relwithdebinfo/
 build-debug/
 build-release/
 build-relwithdebinfo/
-.idea
+.idea/

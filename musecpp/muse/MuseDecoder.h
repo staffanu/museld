@@ -47,7 +47,7 @@ public:
     // true if not eof.  In case of a read timeout also returns true so that we can check for key presses.
     bool next(bool efm_audio, AudioMode *audio_mode,
               int *sample_count,
-              AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples],
+              AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES],
               int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
               std::optional<FrameBuffer::DiscCode> *disc_code,
               FieldInterpolationMode field_interpolation_mode,

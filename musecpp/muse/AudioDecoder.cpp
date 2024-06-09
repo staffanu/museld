@@ -84,7 +84,7 @@ void AudioDecoder::decodeFrame(int frame_no,
                                shared_ptr<musevk::VulkanBuffer> const &audio_converted_freq,
                                AudioMode *audio_mode,
                                int *sample_count_out,
-                               AudioFrame output_samples[c_max_output_samples]) {
+                               AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES]) {
     auto t0 = chrono::high_resolution_clock::now();
 
     if (frame_no % 30 == 0 && m_log.isEnabled(eDebug, eAudio)) {

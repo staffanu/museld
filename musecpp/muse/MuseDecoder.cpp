@@ -77,7 +77,7 @@ bool MuseDecoder::initialize() {
 
 bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                        int *sample_count,
-                       AudioDecoder::AudioFrame output_samples[max(AudioDecoder::c_max_output_samples, EfmDecoder::c_max_output_samples)],
+                       AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES],
                        int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
                        optional<FrameBuffer::DiscCode> *disc_code,
                        FieldInterpolationMode field_interpolation_mode,

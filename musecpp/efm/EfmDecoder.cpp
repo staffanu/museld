@@ -127,7 +127,7 @@ EfmDecoder::~EfmDecoder() {
 
 void EfmDecoder::decode(int frame_no,
                         const std::array<bool, InputReader::InputReaderBlock::c_max_efm_data_size> &data, int input_data_size,
-                        int *sample_count, AudioDecoder::AudioFrame output_samples[c_max_output_samples]) {
+                        int *sample_count, AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES]) {
     auto t0 = chrono::high_resolution_clock::now();
 
     if (frame_no % 30 == 0 && m_log.isEnabled(eDebug, eAudio)) {
@@ -204,7 +204,7 @@ void EfmDecoder::decode(int frame_no,
     }
 }
 
-void EfmDecoder::handleFrame(int &sample_count, AudioDecoder::AudioFrame output_samples[2048]) {
+void EfmDecoder::handleFrame(int &sample_count, AudioFrame output_samples[2048]) {
     std::vector<ByteWithErasureFlag> c1_data(32);
 
     for (int i = 0; i < 32; i++) {
@@ -257,6 +257,6 @@ void EfmDecoder::handleFrame(int &sample_count, AudioDecoder::AudioFrame output_
             output_samples[sample_count].samples[1] = (int16_t) ((out[rh].byteValue() << 8) | out[rl].byteValue());
 
         sample_count++;
-        assert(sample_count <= c_max_output_samples);
+        assert(sample_count <= MAX_AUDIO_OUTPUT_SAMPLES);
     }
 }

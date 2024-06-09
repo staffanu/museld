@@ -3,6 +3,7 @@
 //
 
 #include "VideoFileWriter.h"
+#include "musevk/VulkanBuffer.h"
 
 bool VideoFileWriter::init() {
     avformat_alloc_output_context2(&m_format_context, nullptr, nullptr, m_filename.c_str());
@@ -47,7 +48,7 @@ bool VideoFileWriter::init() {
 void VideoFileWriter::addVideoFrameWithAudio(
         std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
         std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V,
-        AudioMode audio_mode, int number_of_samples, AudioDecoder::AudioFrame *audio_samples) {
+        AudioMode audio_mode, int number_of_samples, AudioFrame *audio_samples) {
 
     //av_compare_ts(m_video_stream.next_pts, m_video_stream.codec_context->time_base,
     //              m_audio_stream.next_pts, m_audio_stream.codec_context->time_base)

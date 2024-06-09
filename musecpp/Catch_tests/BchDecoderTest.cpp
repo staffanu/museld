@@ -4,7 +4,7 @@
 #include <catch2/catch.hpp>
 #include <algorithm>
 #include <iostream>
-#include "BchDecoder.h"
+#include "muse/BchDecoder.h"
 #include "util/Logger.h"
 
 void printData(std::vector<int> const &data) {

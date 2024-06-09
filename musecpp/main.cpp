@@ -2,14 +2,14 @@
 #include <fmt/format.h>
 #include <set>
 #include <functional>
-#include "Shaders.h"
-#include "MuseDecoder.h"
+#include "muse/Shaders.h"
+#include "muse/MuseDecoder.h"
 #include "musevk/VulkanManager.h"
 #include "MuseTypes.h"
 #include "AudioPlayback.h"
 #include "InputReader.h"
-#include "ResamplingInputReader.h"
-#include "PhaseCorrect16MHzInputReader.h"
+#include "muse/ResamplingInputReader.h"
+#include "muse/PhaseCorrect16MHzInputReader.h"
 #include "util/Logger.h"
 #include "musevk/TimestampQueryPool.h"
 #include "TextRenderer.h"
@@ -96,7 +96,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
 
     AudioMode audio_mode;
     int audio_sample_count;
-    AudioDecoder::AudioFrame audio_samples[AudioDecoder::c_max_output_samples];
+    AudioFrame audio_samples[MAX_AUDIO_OUTPUT_SAMPLES];
 
     {
         musevk::CommandPool command_pool(manager);

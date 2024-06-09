@@ -5,7 +5,7 @@
 #ifndef MUSECPP_EFMPLL_H
 #define MUSECPP_EFMPLL_H
 
-#include "../RfDemodulator.h"
+#include "muse/RfDemodulator.h"
 class Logger;
 
 class EfmPll {

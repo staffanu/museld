@@ -8,7 +8,7 @@ add_executable(Catch_tests_run
         ../efm/ReedSolomon.h
         ../efm/GFValue.h
         ../efm/ByteWithErasureFlag.h
-        ../BchDecoder.cpp ../BchDecoder.h
+        ../muse/BchDecoder.cpp ../muse/BchDecoder.h
 )
 
 target_link_libraries(Catch_tests_run

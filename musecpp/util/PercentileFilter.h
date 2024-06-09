@@ -5,7 +5,7 @@
 #ifndef MUSECPP_PERCENTILEFILTER_H
 #define MUSECPP_PERCENTILEFILTER_H
 
-#include "../MuseTypes.h"
+#include "MuseTypes.h"
 
 class PercentileFilter {
 public:

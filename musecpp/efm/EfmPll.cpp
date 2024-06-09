@@ -3,9 +3,7 @@
 //
 
 #include <fmt/format.h>
-#include <cassert>
 #include "EfmPll.h"
-#include "../util/Logger.h"
 
 const double EfmPll::c_G1 = 1 - exp(-2 * c_zeta * c_omega * c_Ts);
 const double EfmPll::c_G2 = 1 + exp(-2 * c_omega * c_zeta * c_Ts)

@@ -7,7 +7,8 @@
 
 #include <atomic>
 #include <portaudio.h>
-#include "AudioDecoder.h"
+#include "AudioDefs.h"
+#include "muse/AudioDecoder.h"
 
 class Logger;
 
@@ -17,7 +18,7 @@ public:
     void add_samples(
             AudioMode const &audio_mode,
             int const &sample_count,
-            AudioDecoder::AudioFrame output_samples[AudioDecoder::c_max_output_samples]);
+            AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES]);
     void cleanup();
 
 private:
@@ -27,7 +28,7 @@ private:
     static constexpr double c_audio_buffer_max_speed_adjust = 0.01;
 
     Logger &m_log;
-    AudioDecoder::AudioFrame m_audio_buffer[c_audio_buffer_size];
+    AudioFrame m_audio_buffer[c_audio_buffer_size];
     std::atomic<int> m_next_audio_buffer_write_ix;
     std::atomic<int> m_next_audio_buffer_read_ix;
     std::atomic<double> m_audio_speed_adjust; // m_audio_buffer to skip per sample -- 0.1 skips every 10th sample
