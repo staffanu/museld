@@ -10,7 +10,7 @@
 
 class MuseSignalGenerator {
 public:
-    explicit MuseSignalGenerator(std::function<std::array<std::array<uint8_t, 480>, 1125> const *()> const &get_next_frame_callback);
+    explicit MuseSignalGenerator(std::function<std::array<std::array<float, 480>, 1125> const *()> const &get_next_frame_callback);
     ~MuseSignalGenerator();
 
     void start();
@@ -23,7 +23,7 @@ private:
     void instance_fl2k_callback(fl2k_data_info_t *data_info);
 
     fl2k_dev_t *m_dev;
-    std::function<std::array<std::array<uint8_t, 480>, 1125> const *()> const &m_get_next_frame_callback;
+    std::function<std::array<std::array<float, 480>, 1125> const *()> const &m_get_next_frame_callback;
     int m_next_input_to_send;
     uint8_t *m_input_buffer;
     uint8_t *m_muse_tx_buffer; // transmitted in G

@@ -4,15 +4,25 @@
 #include <fcntl.h>
 #include "MuseSignalGenerator.h"
 
-std::array<uint8_t, 11> sync_signal = {64, 64, 64, 64, 64, 128, 192, 192, 192, 192, 192};
-uint8_t low_value = 16;
-uint8_t high_value = 239;
+#if false
+float low_vits_value = 16;
+float high_vits_value = 239;
+float low_ctrl_value = 16;
+float high_ctrl_value = 239;
+#else
+float low_vits_value = 0;
+float high_vits_value = 255;
+float low_ctrl_value = 0;
+float high_ctrl_value = 255;
+#endif
+float low_hd_value = 64;
+float high_hd_value = 192;
 
-std::vector<std::array<std::array<uint8_t, 480>, 1125>> frame_data;
+std::vector<std::array<std::array<float, 480>, 1125>> frame_data;
 
 static int next_frame_no = 0;
 
-std::array<std::array<uint8_t, 480>, 1125> *get_next_frame_callback() {
+std::array<std::array<float, 480>, 1125> *get_next_frame_callback() {
     auto v = &frame_data[next_frame_no++];
     if (next_frame_no == frame_data.size())
         next_frame_no = 0;
@@ -30,7 +40,7 @@ struct VideoPicture {
     std::array<std::array<double, MUSE_Y_BUF_WIDTH * 3>, MUSE_BUF_HEIGHT * 2> blue;
 };
 
-void fill_y_area(std::array<std::array<uint8_t, 480>, 1125> &frame, VideoPicture const &picture, int field_index,
+void fill_y_area(std::array<std::array<float, 480>, 1125> &frame, VideoPicture const &picture, int field_index,
                  int field_subsampling_phase, int frame_subsampling_phase) {
     int first_line = field_index ? 609 : 47;
     for (int line = first_line; line < first_line + MUSE_BUF_HEIGHT; line++) {
@@ -57,21 +67,21 @@ void fill_y_area(std::array<std::array<uint8_t, 480>, 1125> &frame, VideoPicture
             assert(YM_after_transmission_gamma >= 0);
             assert(YM_after_transmission_gamma <= 1.001);
 
-            frame[line - 1][pixel - 1] = (uint8_t)(YM_after_transmission_gamma * (239 - 16) + 16);
+            frame[line - 1][pixel - 1] = (float)(YM_after_transmission_gamma * (239 - 16) + 16);
         }
     }
 
     // TODO: equalization and non-linear processing
 }
 
-void fill_c_area(std::array<std::array<uint8_t, 480>, 1125> &frame, VideoPicture const &picture, int field_index, int subsampling_phase) {
+void fill_c_area(std::array<std::array<float, 480>, 1125> &frame, VideoPicture const &picture, int field_index, int subsampling_phase) {
     int first_line = field_index ? 605 : 43;
     for (int line = first_line; line < first_line + MUSE_BUF_HEIGHT; line++)
         for (int pixel = 12; pixel <= 105; pixel++)
             frame[line - 1][pixel - 1] = 128; // All b/w for now
 }
 
-void fill_control_signal(std::array<std::array<uint8_t, 480>, 1125> &frame, int field_index,
+void fill_control_signal(std::array<std::array<float, 480>, 1125> &frame, int field_index,
                          int field_subsampling_phase_y, int frame_subsampling_phase_y, int subsampling_phase_c) {
     std::vector<int> bits = {field_subsampling_phase_y,
                     0, 0, 0, 0, 0, 0, 0, // motion vectors
@@ -93,7 +103,7 @@ void fill_control_signal(std::array<std::array<uint8_t, 480>, 1125> &frame, int 
     for (int i = 0; i < 8; i++) {
         std::vector<int> group;
         std::copy(bits.cbegin() + 4 * i, bits.cbegin() + 4 * i + 4, std::back_inserter(group));
-        group.push_back(group[0] ^ group[1] ^ group[2]);
+        group.push_back(group[0] ^ group[1] ^ group[2]); // ecc bits
         group.push_back(group[1] ^ group[2] ^ group[3]);
         group.push_back(group[0] ^ group[1] ^ group[3]);
         group.push_back(group[0] ^ group[2] ^ group[3]);
@@ -102,7 +112,7 @@ void fill_control_signal(std::array<std::array<uint8_t, 480>, 1125> &frame, int 
     for (int i = 0; i < 16; i++)
         groups.push_back(groups[i % 8]);
 
-    // Is this right? Probably doesn't matter since it shouldn't be used
+    // Is this right? Probably doesn't matter since it shouldn't be used in a real decoder
     std::vector<int> groupE = {bits[20 - 1], bits[20 - 1], bits[20 - 1], bits[9 - 1], bits[9 - 1], bits[9 - 1], bits[10 - 1], bits[10 - 1]};
     groups.push_back(groupE);
 
@@ -117,24 +127,18 @@ void fill_control_signal(std::array<std::array<uint8_t, 480>, 1125> &frame, int 
         for (int pixel = 20; pixel <= 99; pixel++) {
             int groupIx = i * 5 + (pixel - 20) / 16;
             int bitIx = (pixel - 20) / 2 % 8;
-            frame[line - 1][pixel - 1] = groups[groupIx][bitIx] ? 239 : 16;
+            frame[line - 1][pixel - 1] = groups[groupIx][bitIx] ? high_ctrl_value : low_ctrl_value;
         }
     }
 }
 
 // frame_index decides the sub sampling phases.  picture1 and picture2 are the pictures used for the first and second field.
-std::array<std::array<uint8_t, 480>, 1125> make_frame(int frame_index, VideoPicture &picture1, VideoPicture &picture2) {
-    std::array<std::array<uint8_t, 480>, 1125> frame{};
-
-    for (int line = 1; line <= 1125; line++) {
-        bool sync_positive = line == 1 || (line > 3 && line % 2 == 0);
-        for (int pixel = 1; pixel <= 11; pixel++) // TODO: make pixels 1 and 11 the average of the preceding and next value
-            frame[line - 1][pixel - 1] = sync_positive ? sync_signal[pixel - 1] : 256 - sync_signal[pixel - 1];
-    }
+std::array<std::array<float, 480>, 1125> make_frame(int frame_index, VideoPicture &picture1, VideoPicture &picture2) {
+    std::array<std::array<float, 480>, 1125> frame{};
 
     for (int line = 1; line <= 2; line++)
         for (int pixel = 12; pixel <= 480; pixel++) {
-            uint8_t v = pixel <= 316 ? high_value : pixel >= 472 ? low_value : pixel >= 456 ? high_value : (pixel - 317) / 4 % 2 ? high_value : low_value;
+            float v = pixel <= 316 ? high_vits_value : pixel >= 472 ? low_vits_value : pixel >= 456 ? high_vits_value : (pixel - 317) / 4 % 2 ? high_vits_value : low_vits_value;
             if (line == 2)
                 v = 255 - v;
             frame[line - 1][pixel - 1] = v;
@@ -143,7 +147,7 @@ std::array<std::array<uint8_t, 480>, 1125> make_frame(int frame_index, VideoPict
     // First field audio
     for (int line = 3; line <= 46; line++)
         for (int pixel = (line <= 42 ? 12 : 106); pixel <= 480; pixel++)
-            frame[line - 1][pixel - 1] = 128;
+            frame[line - 1][pixel - 1] = 128; // no audio signal
 
     // Second field audio
     for (int line = 565; line <= 608; line++)
@@ -164,7 +168,7 @@ std::array<std::array<uint8_t, 480>, 1125> make_frame(int frame_index, VideoPict
 
     // Control signal for program information
     for (int pixel = 12; pixel <= 480; pixel++)
-        frame[564 - 1][pixel - 1] = 128;
+        frame[564 - 1][pixel - 1] = 128; // no signal
 
     fill_y_area(frame, picture1, 0, 1, (frame_index + 1) % 2);
     fill_y_area(frame, picture2, 1, 0, frame_index % 2);
@@ -177,12 +181,25 @@ std::array<std::array<uint8_t, 480>, 1125> make_frame(int frame_index, VideoPict
     // field 1 control signal contains data for the next frame field 0
     fill_control_signal(frame, 1, 1, (frame_index + 1 + 1) % 2, (frame_index + 1 + 1) % 2);
 
+    // fill in the HD signal last since it depends on the other data
+    for (int line = 1; line <= 1125; line++) {
+        bool sync_positive = line == 1 || (line > 3 && line % 2 == 0);
+        for (int pixel = 2; pixel <= 5; pixel++)
+            frame[line - 1][pixel - 1] = sync_positive ? low_hd_value : high_hd_value;
+        frame[line - 1][6 - 1] = 128;
+        for (int pixel = 7; pixel <= 10; pixel++)
+            frame[line - 1][pixel - 1] = sync_positive ? high_hd_value : low_hd_value;
+
+        frame[line - 1][1 - 1] = 0.5f * ((line == 1 ? 128.0f : frame[line - 1][0 - 1]) + frame[line - 1][2 - 1]);
+        frame[line - 1][11 - 1] = 0.5f * (frame[line - 1][10 - 1] + frame[line - 1][12 - 1]);
+    }
+
     return frame;
 }
 
 int main(int argc, char *argv[]) {
 
-    VideoPicture *picture = new VideoPicture();
+    auto *picture = new VideoPicture();
     for (int i = 0; i < MUSE_BUF_HEIGHT * 2; i++)
         for (int j = 0; j < MUSE_Y_BUF_WIDTH * 3; j++) {
             double v = (6 * j / (MUSE_Y_BUF_WIDTH * 3)) / 5.0;

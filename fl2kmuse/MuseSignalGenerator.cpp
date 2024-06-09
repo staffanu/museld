@@ -7,7 +7,7 @@
 #include <format>
 #include "MuseSignalGenerator.h"
 
-MuseSignalGenerator::MuseSignalGenerator(std::function<std::array<std::array<uint8_t, 480>, 1125> const *()> const &get_next_frame_callback) :
+MuseSignalGenerator::MuseSignalGenerator(std::function<std::array<std::array<float, 480>, 1125> const *()> const &get_next_frame_callback) :
         m_dev(nullptr),
         m_get_next_frame_callback(get_next_frame_callback),
         m_next_input_to_send(c_input_buffer_size),
@@ -36,7 +36,7 @@ void MuseSignalGenerator::start() {
     auto fl2k_callback = [](fl2k_data_info_t *data_info) {
         ((MuseSignalGenerator *)data_info->ctx)->instance_fl2k_callback(data_info);
     };
-    int r = fl2k_start_tx(m_dev, fl2k_callback, this, 10);
+    int r = fl2k_start_tx(m_dev, fl2k_callback, this, 0);
     if (r < 0)
         throw std::runtime_error("Couldn't start the transmission.");
 
@@ -58,6 +58,13 @@ void MuseSignalGenerator::instance_fl2k_callback(fl2k_data_info_t *data_info) {
     if (data_info->device_error)
         throw std::runtime_error("Device error, exiting.");
 
+    // input is floating point 0-255 muse range.
+    // output is 0-255 uint8 meaning 0-0.7 volts from the FL2K.
+    auto muse2byte = [](float v) {
+        float muse_voltage_range = 0.436;
+        return (uint8_t)((v - 128.0f) * muse_voltage_range / 0.7 + 128);
+    };
+
     data_info->sampletype_signed = 0;
 
     int bytes_written = 0;
@@ -68,7 +75,7 @@ void MuseSignalGenerator::instance_fl2k_callback(fl2k_data_info_t *data_info) {
             auto data = m_get_next_frame_callback();
             for (auto &line : *data)
                 for (auto pixel : line)
-                    m_input_buffer[count++] = pixel;
+                    m_input_buffer[count++] = muse2byte(pixel);
             m_next_input_to_send = 0;
             sync_samples = c_oversample_factor * 480; // keep high for one line
         }
