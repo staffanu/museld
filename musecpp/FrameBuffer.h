@@ -48,7 +48,7 @@ private:
     double m_input_samples_per_sample;
     std::shared_ptr<musevk::VulkanBuffer> m_data;
     std::vector<FieldBufferView> m_fields;
-    std::optional<DiscCode> m_discCode;
+    std::optional<DiscCode> m_disc_code;
 };
 
 #endif //MUSECPP_FRAMEBUFFER_H
