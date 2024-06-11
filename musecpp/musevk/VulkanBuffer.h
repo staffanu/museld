@@ -38,8 +38,16 @@ namespace musevk {
 
         void synchronizeForHostRead(CommandBuffer &command_buffer) final {
             assert(m_host_access == eHostRead || m_host_access == eHostReadWrite);
-            if (m_host_visible_buffer.has_value())
-                command_buffer.enqueueCopyRawBuffer(m_device_buffer, m_host_visible_buffer.value(), 0, 0, m_memory_size);
+            if (m_host_visible_buffer.has_value()) {
+                command_buffer.enqueueBufferBarrier(*this,
+                                                    vk::AccessFlagBits::eShaderWrite,
+                                                    vk::AccessFlagBits::eTransferRead,
+                                                    vk::PipelineStageFlagBits::eComputeShader,
+                                                    vk::PipelineStageFlagBits::eTransfer);
+
+                command_buffer.enqueueCopyRawBuffer(m_device_buffer, m_host_visible_buffer.value(), 0, 0,
+                                                    m_memory_size);
+            }
         };
 
         void synchronizeHostWrites(CommandBuffer &command_buffer) final {
