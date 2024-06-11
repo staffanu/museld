@@ -24,7 +24,7 @@ namespace musevk {
         eHostNone = 0,
         eHostRead = 1,
         eHostWrite = 2, // try to allocate a host visible buffer if possible
-        eHostWriteRarely = 3, // do ont care about whether the buffer is host writable -- insist more on a separate device local buffer
+        eHostWriteRarely = 3, // do not care about whether the buffer is host writable -- insist more on a separate device local buffer
         eHostReadWrite = 4
     };
 

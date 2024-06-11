@@ -138,6 +138,7 @@ void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_re
         return;
     }
 
+    // If we reach the end of the loop no suitable memory was found
     Logger &log = m_vulkan_manager.getLogger();
     log.error(eVideo, fmt::format("No available memory for host access type {}", (int)host_access));
     vk::PhysicalDeviceMemoryProperties memory_properties = m_vulkan_manager.getPhysicalDevice().getMemoryProperties();
@@ -161,25 +162,17 @@ void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_re
 
 std::string musevk::VulkanMemoryObject::memoryPropertyFlagsToString(VkMemoryPropertyFlags flags) {
     std::vector<std::string> result;
-    if (flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-        result.emplace_back("VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT");
-    if (flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
-        result.emplace_back("VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT");
-    if (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-        result.emplace_back("VK_MEMORY_PROPERTY_HOST_COHERENT_BIT");
-    if (flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)
-        result.emplace_back("VK_MEMORY_PROPERTY_HOST_CACHED_BIT");
-    if (flags & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT)
-        result.emplace_back("VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT");
-    if (flags & VK_MEMORY_PROPERTY_PROTECTED_BIT)
-        result.emplace_back("VK_MEMORY_PROPERTY_PROTECTED_BIT");
-    if (flags & VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD)
-        result.emplace_back("VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD");
-    if (flags & VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD)
-        result.emplace_back("VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD");
-    if (flags & VK_MEMORY_PROPERTY_RDMA_CAPABLE_BIT_NV)
-        result.emplace_back("VK_MEMORY_PROPERTY_RDMA_CAPABLE_BIT_NV");
-
+    #define CHECK_FLAG(bit) if (flags & bit) result.emplace_back(#bit)
+    CHECK_FLAG(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    CHECK_FLAG(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    CHECK_FLAG(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    CHECK_FLAG(VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+    CHECK_FLAG(VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT);
+    CHECK_FLAG(VK_MEMORY_PROPERTY_PROTECTED_BIT);
+    CHECK_FLAG(VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD);
+    CHECK_FLAG(VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD);
+    CHECK_FLAG(VK_MEMORY_PROPERTY_RDMA_CAPABLE_BIT_NV);
+    
     std::ostringstream ss;
     std::string delim;
     for (auto &s : result) {
