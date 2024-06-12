@@ -83,7 +83,14 @@ void main() {
     float16_t b = clamp((YM + BmYM + BmYM / 4.0hf - min_value) / range, 0.hf, 1.hf);
     float16_t r = clamp((YM + RmYM - min_value) / range, 0.hf, 1.hf);
 
-    imageStore(frame_out_image, ivec2(col, row), vec4(float(r), float(g), float(b), 1.f));
+    // r g b are in linear space, but using SMPTE C color primaries.
+    // Convert to sRGB colors used by Vulkan
+
+    float16_t r2 =  9.3892e-01hf * r +  5.0196e-02hf * g + 1.0270e-02hf * b;
+    float16_t g2 =  1.7760e-02hf * r +  9.6607e-01hf * g + 1.6424e-02hf * b;
+    float16_t b2 = -1.6205e-03hf * r + -4.3710e-03hf * g + 1.0053e+00hf * b;
+
+    imageStore(frame_out_image, ivec2(col, row), vec4(float(r2), float(g2), float(b2), 1.f));
 
     if (output_yuv != 0) {
         // A(x - B)^2.2 + C  Ratio of derivative in (0, 0) and (1, 1) should be 1:5.
