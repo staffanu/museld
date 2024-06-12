@@ -18,7 +18,7 @@ RfDemodulator::RfDemodulator(Logger &log, std::string executable_dir, std::strin
                              musevk::VulkanManager &vulkan_manager, bool benchmark_shaders)
 : m_log(log),
   m_executable_dir(std::move(executable_dir)),
-  m_filename(std::move(filename)),
+  m_filename(filename),
   m_vulkan_manager(vulkan_manager),
   m_benchmark_shaders(benchmark_shaders),
   m_input_fd(-1),
