@@ -65,17 +65,15 @@ namespace musevk {
     void VulkanImage::enqueueTransitionLayout(CommandBuffer &command_buffer, vk::ImageLayout new_layout,
                                               vk::PipelineStageFlagBits src_stage, vk::PipelineStageFlagBits dst_stage,
                                               vk::AccessFlags src_access_mask, vk::AccessFlags dst_access_mask) {
-        if (new_layout != m_layout) {
-            command_buffer.enqueueTransitionMemoryLayout(m_image,
-                                                         m_layout, new_layout,
-                                                         src_stage, dst_stage,
-                                                         src_access_mask, dst_access_mask);
-            m_layout = new_layout;
+        command_buffer.enqueueTransitionMemoryLayout(m_image,
+                                                     m_layout, new_layout,
+                                                     src_stage, dst_stage,
+                                                     src_access_mask, dst_access_mask);
+        m_layout = new_layout;
 
-            m_descriptor_image_info = vk::DescriptorImageInfo(
-                    nullptr,
-                    m_view,
-                    m_layout);
-        }
+        m_descriptor_image_info = vk::DescriptorImageInfo(
+                nullptr,
+                m_view,
+                m_layout);
     }
 }
