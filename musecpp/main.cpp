@@ -226,7 +226,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
 
             images.out_image->enqueueTransitionLayout(*command_buffer, vk::ImageLayout::eTransferSrcOptimal,
                                            vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer,
-                                           vk::AccessFlags(), vk::AccessFlagBits::eTransferRead);
+                                           vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead);
             command_buffer->enqueueTransitionMemoryLayout(swap_chain_image,
                                                           vk::ImageLayout::eUndefined,
                                                           vk::ImageLayout::eTransferDstOptimal,
