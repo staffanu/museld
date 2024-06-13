@@ -52,8 +52,16 @@ namespace musevk {
 
         void synchronizeHostWrites(CommandBuffer &command_buffer) final {
             assert(m_host_access == eHostWrite || m_host_access == eHostWriteRarely || m_host_access == eHostReadWrite);
-            if (m_host_visible_buffer.has_value())
-                command_buffer.enqueueCopyRawBuffer(m_host_visible_buffer.value(), m_device_buffer, 0, 0, m_memory_size);
+            if (m_host_visible_buffer.has_value()) {
+                command_buffer.enqueueCopyRawBuffer(m_host_visible_buffer.value(), m_device_buffer, 0, 0,
+                                                    m_memory_size);
+
+                command_buffer.enqueueBufferBarrier(*this,
+                                                    vk::AccessFlagBits::eTransferWrite,
+                                                    vk::AccessFlagBits::eShaderRead,
+                                                    vk::PipelineStageFlagBits::eTransfer,
+                                                    vk::PipelineStageFlagBits::eComputeShader);
+            }
         };
 
         vk::WriteDescriptorSet
