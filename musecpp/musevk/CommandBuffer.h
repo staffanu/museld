@@ -81,6 +81,9 @@ namespace musevk {
             maybeTimestamp(compute_shader->name(), vk::PipelineStageFlagBits::eComputeShader);
         }
 
+        // memory ranges that are invalidated before wait() returns
+        void invalidateMappedMemoryRangeLater(vk::MappedMemoryRange range);
+
         void enqueueResetQueryPool(vk::QueryPool const &pool, unsigned int first_query, unsigned int query_count);
 
         void enqueueWriteTimestamp(vk::PipelineStageFlagBits stage, vk::QueryPool const &pool, unsigned int query);
@@ -108,6 +111,7 @@ namespace musevk {
 
         bool m_recording = false;
         bool m_is_running = false;
+        std::vector<vk::MappedMemoryRange> m_memory_ranges_to_invalidate;
     };
 }
 

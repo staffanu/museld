@@ -146,6 +146,10 @@ namespace musevk {
                                          nullptr);
     }
 
+    void CommandBuffer::invalidateMappedMemoryRangeLater(vk::MappedMemoryRange range) {
+        m_memory_ranges_to_invalidate.push_back(range);
+    }
+
     void CommandBuffer::enqueueResetQueryPool(vk::QueryPool const &pool, unsigned int first_query, unsigned int query_count) {
         assert(m_recording);
         m_command_buffer.resetQueryPool(pool, first_query, query_count);
@@ -192,5 +196,9 @@ namespace musevk {
             throw std::runtime_error(fmt::format("waitForFences returned with result {}", (uint32_t)result));
         m_device.resetFences(m_fence);
         m_is_running = false;
+        if (!m_memory_ranges_to_invalidate.empty()) {
+            m_device.invalidateMappedMemoryRanges({m_memory_ranges_to_invalidate});
+            m_memory_ranges_to_invalidate.clear();
+        }
     }
 }

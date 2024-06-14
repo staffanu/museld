@@ -79,19 +79,22 @@ namespace musevk {
 
         // This will allocate device memory, and if required, also allocate a host visible buffer that
         // will be used for host read/writes in case there is no available memory type that is suitable
-        // for using a device buffer only.
+        // for using a device buffer only.  The allocated memory size might be larger than m_memory_size
+        // indicates due to limits on allocation size.
         void allocateMemory(vk::MemoryRequirements memory_requirements, HostAccess host_access);
 
         VulkanManager &m_vulkan_manager;
         uint32_t m_memory_size;
         HostAccess m_host_access;
+        vk::MemoryPropertyFlags m_device_memory_properties;
         AllocatedMemory m_allocated_device_memory;
+        std::optional<vk::MemoryPropertyFlags> m_host_memory_properties;
         std::optional<AllocatedMemory> m_allocated_host_visible_memory;
         std::optional<vk::Buffer> m_host_visible_buffer;
         void *m_raw_data;
 
     private:
-        std::optional<int32_t> getMemoryTypeIndex(vk::MemoryRequirements memory_requirements, vk::MemoryPropertyFlags properties);
+        std::optional<std::pair<int32_t, vk::MemoryPropertyFlags>> getMemoryTypeIndex(vk::MemoryRequirements memory_requirements, vk::MemoryPropertyFlags properties);
         static std::string memoryPropertyFlagsToString(VkMemoryPropertyFlags flags);
         static std::string memoryHeapFlagsToString(VkMemoryHeapFlags flags);
     };

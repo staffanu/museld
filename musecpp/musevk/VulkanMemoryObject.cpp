@@ -17,6 +17,7 @@ musevk::VulkanMemoryObject::~VulkanMemoryObject() {
 
 std::vector<std::pair<vk::MemoryPropertyFlags, std::optional<vk::MemoryPropertyFlags>>>
 musevk::VulkanMemoryObject::makeMemoryPropertyFlags(HostAccess host_access) {
+    // Notice we currently always use coherent memory (there are asserts in VulkanBuffer and VulkanImage that will trigger otherwise)
     switch (host_access) {
         case HostAccess::eHostNone:
             return {
@@ -27,6 +28,7 @@ musevk::VulkanMemoryObject::makeMemoryPropertyFlags(HostAccess host_access) {
                     std::make_pair(
                             vk::MemoryPropertyFlagBits::eDeviceLocal |
                             vk::MemoryPropertyFlagBits::eHostVisible |
+                            vk::MemoryPropertyFlagBits::eHostCoherent |
                             vk::MemoryPropertyFlagBits::eHostCached,
                             std::nullopt),
 
@@ -34,7 +36,8 @@ musevk::VulkanMemoryObject::makeMemoryPropertyFlags(HostAccess host_access) {
                             vk::MemoryPropertyFlagBits::eDeviceLocal,
                             std::make_optional(
                                     vk::MemoryPropertyFlagBits::eHostVisible |
-                                    vk::MemoryPropertyFlagBits::eHostCached))
+                                    vk::MemoryPropertyFlagBits::eHostCached |
+                                    vk::MemoryPropertyFlagBits::eHostCoherent))
             };
         case HostAccess::eHostWrite:
             return {
@@ -63,8 +66,8 @@ musevk::VulkanMemoryObject::makeMemoryPropertyFlags(HostAccess host_access) {
                     std::make_pair(
                             vk::MemoryPropertyFlagBits::eDeviceLocal |
                             vk::MemoryPropertyFlagBits::eHostVisible |
-                            vk::MemoryPropertyFlagBits::eHostCached |
-                            vk::MemoryPropertyFlagBits::eHostCoherent,
+                            vk::MemoryPropertyFlagBits::eHostCoherent |
+                            vk::MemoryPropertyFlagBits::eHostCached,
                             std::nullopt),
 
                     std::make_pair(
@@ -79,17 +82,17 @@ musevk::VulkanMemoryObject::makeMemoryPropertyFlags(HostAccess host_access) {
     }
 }
 
-std::optional<int32_t> musevk::VulkanMemoryObject::getMemoryTypeIndex(vk::MemoryRequirements memory_requirements, vk::MemoryPropertyFlags properties) {
-    std::optional<int32_t> memory_type_index = std::nullopt;
+std::optional<std::pair<int32_t, vk::MemoryPropertyFlags>> musevk::VulkanMemoryObject::getMemoryTypeIndex(vk::MemoryRequirements memory_requirements, vk::MemoryPropertyFlags properties) {
+    std::optional<std::pair<int32_t, vk::MemoryPropertyFlags>> memory_type_index_and_properties = std::nullopt;
     vk::PhysicalDeviceMemoryProperties memory_properties = m_vulkan_manager.getPhysicalDevice().getMemoryProperties();
     for (int32_t i = 0; i < memory_properties.memoryTypeCount; i++) {
         if (memory_requirements.memoryTypeBits & (1 << i) &&
             (memory_properties.memoryTypes[i].propertyFlags & properties) == properties) {
-            memory_type_index = std::make_optional(i);
+            memory_type_index_and_properties = std::make_optional(std::make_pair(i, memory_properties.memoryTypes[i].propertyFlags));
             break;
         }
     }
-    return memory_type_index;
+    return memory_type_index_and_properties;
 }
 
 void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_requirements, HostAccess host_access) {
@@ -106,25 +109,27 @@ void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_re
     vk::MemoryRequirements host_visible_buffer_memory_requirements = m_vulkan_manager.getDevice().getBufferMemoryRequirements(host_visible_buffer);
 
     for (std::pair<vk::MemoryPropertyFlags, std::optional<vk::MemoryPropertyFlags>> device_and_host_memory_flags : memory_property_priorities) {
-        std::optional<int32_t> device_memory_type_index = getMemoryTypeIndex(memory_requirements, device_and_host_memory_flags.first);
-        if (!device_memory_type_index.has_value())
+        std::optional<std::pair<int32_t, vk::MemoryPropertyFlags>> device_memory_type_index_and_properties = getMemoryTypeIndex(memory_requirements, device_and_host_memory_flags.first);
+        if (!device_memory_type_index_and_properties.has_value())
             continue;
 
-        std::optional<int32_t> host_visible_memory_type_index = std::nullopt;
+        std::optional<std::pair<int32_t, vk::MemoryPropertyFlags>> host_visible_memory_type_index_and_properties = std::nullopt;
         if (device_and_host_memory_flags.second.has_value()) {
-            host_visible_memory_type_index = getMemoryTypeIndex(host_visible_buffer_memory_requirements, device_and_host_memory_flags.second.value());
-            if (!host_visible_memory_type_index.has_value())
+            host_visible_memory_type_index_and_properties = getMemoryTypeIndex(host_visible_buffer_memory_requirements, device_and_host_memory_flags.second.value());
+            if (!host_visible_memory_type_index_and_properties.has_value())
                 continue;
         }
 
         // This might be host visible, and if it is, we do not have a host_visible_memory_type_index.
+        m_device_memory_properties = device_memory_type_index_and_properties->second;
         m_allocated_device_memory = m_memory_allocator.allocate(
-                memory_requirements, device_memory_type_index.value(),
-                (device_and_host_memory_flags.first & vk::MemoryPropertyFlagBits::eHostVisible) && !host_visible_memory_type_index.has_value());
+                memory_requirements, device_memory_type_index_and_properties.value().first,
+                (device_and_host_memory_flags.first & vk::MemoryPropertyFlagBits::eHostVisible) && !host_visible_memory_type_index_and_properties.has_value());
 
-        if (host_visible_memory_type_index.has_value()) {
+        if (host_visible_memory_type_index_and_properties.has_value()) {
+            m_host_memory_properties = host_visible_memory_type_index_and_properties.value().second;
             m_allocated_host_visible_memory = m_memory_allocator.allocate(host_visible_buffer_memory_requirements,
-                                                                          host_visible_memory_type_index.value(), true);
+                                                                          host_visible_memory_type_index_and_properties.value().first, true);
             m_vulkan_manager.getDevice().bindBufferMemory(host_visible_buffer, m_allocated_host_visible_memory.value().device_memory, m_allocated_host_visible_memory.value().offset);
             m_host_visible_buffer = host_visible_buffer;
         } else {
