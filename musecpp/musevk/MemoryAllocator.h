@@ -43,8 +43,10 @@ namespace musevk {
                         vk::Device &device)
                 : m_physical_device(physical_device),
                   m_device(device),
+                  m_non_coherent_atom_size(m_physical_device.getProperties().limits.nonCoherentAtomSize),
                   m_memory_pools(),
                   m_mutex() {
+
         }
 
         MemoryAllocator(MemoryAllocator &other) = delete;
@@ -69,6 +71,7 @@ namespace musevk {
             size_t free_offset;
             std::vector<AllocatedMemory> allocations;
             void *host_memory; // non-null if host visible
+            vk::DeviceSize m_non_coherent_atom_size;
 
             std::optional<AllocatedMemory> allocate(vk::MemoryRequirements memory_requirements);
 
@@ -79,6 +82,7 @@ namespace musevk {
             vk::Device device;
             std::pair<int32_t, bool> allocation_key;
             std::vector<MemoryBlock> blocks;
+            vk::DeviceSize m_non_coherent_atom_size;
 
             AllocatedMemory allocate(vk::MemoryRequirements memory_requirements);
             void free(AllocatedMemory &allocation);
@@ -86,6 +90,7 @@ namespace musevk {
 
         vk::PhysicalDevice &m_physical_device;
         vk::Device &m_device;
+        vk::DeviceSize m_non_coherent_atom_size;
         std::map<std::pair<int32_t, bool>, AllocationPool> m_memory_pools;
         std::mutex m_mutex;
     };

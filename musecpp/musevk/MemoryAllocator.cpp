@@ -16,7 +16,7 @@ namespace musevk {
         auto key = std::make_pair(memory_type_index, host_visible);
 
         if (m_memory_pools.find(key) == m_memory_pools.end())
-            m_memory_pools[key] = AllocationPool{m_device, key, {}};
+            m_memory_pools[key] = AllocationPool{m_device, key, {}, m_non_coherent_atom_size};
 
         return m_memory_pools[key].allocate(memory_requirements);
     }
@@ -34,10 +34,13 @@ namespace musevk {
     std::optional<AllocatedMemory> MemoryAllocator::MemoryBlock::allocate(vk::MemoryRequirements memory_requirements) {
         auto alignment = memory_requirements.alignment;
         auto rounded_offset = (free_offset + alignment - 1) / alignment * alignment;
-        if (rounded_offset + memory_requirements.size <= block_size) {
-            AllocatedMemory allocated { device_memory, rounded_offset, memory_requirements.size, allocation_key,
+
+        auto rounded_size = (memory_requirements.size + m_non_coherent_atom_size - 1) / m_non_coherent_atom_size * m_non_coherent_atom_size;
+
+        if (rounded_offset + rounded_size <= block_size) {
+            AllocatedMemory allocated { device_memory, rounded_offset, rounded_size, allocation_key,
                                         allocation_key.second ? (char *)host_memory + rounded_offset : nullptr };
-            free_offset = rounded_offset + memory_requirements.size;
+            free_offset = rounded_offset + rounded_size;
             allocations.push_back(allocated);
             return std::optional(allocated);
         } else
@@ -67,7 +70,7 @@ namespace musevk {
         auto ptr = allocation_key.second ?
                    device.mapMemory(device_memory, 0, VK_WHOLE_SIZE, vk::MemoryMapFlags()) : nullptr;
 
-        MemoryBlock block {device, allocation_key, device_memory, ALLOCATION_BLOCK_SIZE, 0, {}, ptr};
+        MemoryBlock block {device, allocation_key, device_memory, ALLOCATION_BLOCK_SIZE, 0, {}, ptr, m_non_coherent_atom_size};
         auto allocationOpt = block.allocate(memory_requirements);
         blocks.push_back(block);
 
