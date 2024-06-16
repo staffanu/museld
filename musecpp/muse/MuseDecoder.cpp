@@ -8,17 +8,18 @@
 #include <fmt/format.h>
 #include "musevk/VulkanManager.h"
 #include "musevk/TimestampQueryPool.h"
-#include "MuseTypes.h"
+#include "MuseConstants.h"
 #include "MuseDecoder.h"
 #include "FrameBuffer.h"
 #include "FieldBufferView.h"
 #include "InputReader.h"
+#include "MuseInputBlock.h"
 #include "Shaders.h"
 
 using namespace std;
 
 MuseDecoder::MuseDecoder(
-        Logger &log, InputReader &reader, Shaders &shaders, musevk::VulkanManager &manager,
+        Logger &log, InputReader<MuseInputBlock> &reader, Shaders &shaders, musevk::VulkanManager &manager,
         bool decode_video, bool decode_all_fields, bool decode_audio,
         musevk::TimestampQueryPool *timestamp_query_pool)
 : m_log(log),
@@ -91,8 +92,8 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
     if (m_timestamp_query_pool != nullptr)
         m_timestamp_query_pool->resetAndSubmit(*m_reset_timestamp_query_pool_command_buffer);
 
-    std::unique_ptr<InputReader::InputReaderBlock> input_block = nullptr;
-    InputReader::InputStatus input_status = InputReader::InputStatus::eNormal;
+    std::unique_ptr<MuseInputBlock> input_block = nullptr;
+    InputStatus input_status = InputStatus::eNormal;
     if (m_field_index == 0 && !redo_last_field) {
         auto frame_buffer = m_frame_buffers.back();
         m_frame_buffers.pop_back();
@@ -100,9 +101,9 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
 
         tie(input_block, input_status) = m_reader.getNextInputBuffer();
         switch (input_status) {
-            case InputReader::InputStatus::eEof:
+            case InputStatus::eEof:
                 return false;
-            case InputReader::InputStatus::eTimeout:
+            case InputStatus::eTimeout:
                 m_log.info(eDecoder, "Input timeout");
                 return true;
             default:
@@ -207,7 +208,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                                          m_field_index, time_us / 1000,
                                          m_total_elapsed_time_us / 1000 / m_frame_no));
 
-    if (input_status == InputReader::InputStatus::eBuffersFilled)
+    if (input_status == InputStatus::eBuffersFilled)
         m_field_index = 0; // skip second field -- next field will be from the next frame
     else
         m_field_index = (m_field_index + 1) % 2;

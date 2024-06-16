@@ -3,10 +3,12 @@
 //
 
 #include <thread>
+#include <utility>
 #include <vector>
 #include <iostream>
 #include <filesystem>
-#include "RfDemodulator.h"
+#include "MuseRfDemodulator.h"
+#include "MuseConstants.h"
 #include "musevk/VulkanUtil.h"
 #include "musevk/TimestampQueryPool.h"
 #include "musevk/TimestampStatistics.h"
@@ -14,108 +16,22 @@
 using namespace std;
 using namespace musevk;
 
-RfDemodulator::RfDemodulator(Logger &log, std::string executable_dir, std::string filename,
-                             musevk::VulkanManager &vulkan_manager, bool benchmark_shaders)
-: m_log(log),
-  m_executable_dir(std::move(executable_dir)),
-  m_filename(filename),
-  m_vulkan_manager(vulkan_manager),
-  m_benchmark_shaders(benchmark_shaders),
-  m_input_fd(-1),
-  m_input_is_fifo(filesystem::is_fifo(filename)),
-  m_total_samples_read(0),
-  m_demodulator_thread(nullptr),
-  m_vacant_blocks(),
-  m_filled_blocks(),
-  m_demodulated_block_mutex(),
-  m_input_file_mutex(),
-  m_cv_filled(),
-  m_cv_vacant(),
-  m_stop_request(false),
-  m_reader_thread_finished(false) {
+template<>
+constexpr float RfDemodulator<MuseDemodulatedBlock>::c_sample_frequency = 62.5e6f;
+
+// enough buffers for two frames
+template<>
+const int RfDemodulator<MuseDemodulatedBlock>::c_number_of_block_buffers = (int)(2 * MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH
+                                                   * c_sample_frequency / c_video_decimation_rate / 16.2e6 / MuseDemodulatedBlock::c_video_block_size);
+
+MuseRfDemodulator::MuseRfDemodulator(Logger &log, std::string filename, std::string executable_dir,
+                                     musevk::VulkanManager &vulkan_manager, bool benchmark_shaders)
+: RfDemodulator<MuseDemodulatedBlock>(log, std::move(filename), std::move(executable_dir), vulkan_manager, benchmark_shaders) {
 }
 
-bool RfDemodulator::initialize() {
-    m_input_fd = open(m_filename.c_str(), O_NONBLOCK);
-    if (m_input_fd == -1)
-        throw runtime_error(fmt::format("RfDemodulator: Unable to open input file {}", m_filename));
-
-#ifdef linux
-    if (m_input_is_fifo) {
-        m_log.debug(eInput, fmt::format("Pipe size: {}", fcntl(m_input_fd, F_GETPIPE_SZ)));
-        fcntl(m_input_fd, F_SETPIPE_SZ, 1024 * 1024);
-        m_log.debug(eInput, fmt::format("Pipe size now: {}", fcntl(m_input_fd, F_GETPIPE_SZ)));
-    }
-#endif
-
-    for (int i = 0; i < c_number_of_block_buffers; i++)
-        m_vacant_blocks.push_back(make_unique<DemodulatedBlock>(m_vulkan_manager));
-
-    m_demodulator_thread = new thread(&RfDemodulator::demodulate, this);
-#ifdef linux
-    pthread_setname_np(m_demodulator_thread->native_handle(), "musecpp-demod");
-#endif
-
-    return true;
-}
-
-std::unique_ptr<DemodulatedBlock> RfDemodulator::getNextDemodulatedBlock() {
-    std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
-    m_cv_filled.wait(
-            lock,
-            [this] { return m_reader_thread_finished || !m_filled_blocks.empty(); });
-    if (m_filled_blocks.empty())
-        return nullptr;
-
-    auto block = std::move(m_filled_blocks.front());
-    m_filled_blocks.pop_front();
-    return block;
-}
-
-void RfDemodulator::returnBlock(std::unique_ptr<DemodulatedBlock> &buffer) {
-    std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
-    m_cv_vacant.notify_one();
-    m_vacant_blocks.push_back(std::move(buffer));
-}
-
-void RfDemodulator::seek(double seconds) {
-    if (!m_input_is_fifo) {
-        std::unique_lock<std::mutex> lock(m_input_file_mutex);
-
-        long samples_to_seek = (long)(seconds * c_sample_frequency);
-        off_t bytes_to_seek = 2 * samples_to_seek;
-        m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples, {} bytes.",
-                                       seconds, samples_to_seek, bytes_to_seek));
-        lseek(m_input_fd, bytes_to_seek, SEEK_CUR);
-        m_total_samples_read = max(0L, m_total_samples_read + samples_to_seek); // FIXME: locking?
-
-        // Discard any filled buffers
-        std::unique_lock<std::mutex> lock2(m_demodulated_block_mutex);
-        for (auto &b : m_filled_blocks)
-            m_vacant_blocks.push_back(std::move(b));
-        m_filled_blocks.clear();
-        m_cv_vacant.notify_one();
-    }
-}
-
-void RfDemodulator::cleanup() {
-    {
-        std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
-        m_cv_vacant.notify_one();
-        m_cv_filled.notify_one();
-        m_stop_request = true;
-    }
-    m_log.debug(eInput, "RfDemodulator: requested stop");
-    m_demodulator_thread->join();
-    delete m_demodulator_thread;
-    close(m_input_fd);
-    m_vacant_blocks.clear();
-    m_filled_blocks.clear();
-}
-
-void RfDemodulator::demodulate() {
+void MuseRfDemodulator::demodulate() {
     assert(c_sample_block_size % c_video_decimation_rate == 0);
-    assert(c_efm_out_buffer_size == DemodulatedBlock::c_efm_block_size);
+    assert(c_efm_out_buffer_size == MuseDemodulatedBlock::c_efm_block_size);
 
     CommandPool command_pool(m_vulkan_manager);
     musevk::TimestampQueryPool *timestamp_query_pool =
@@ -191,7 +107,7 @@ void RfDemodulator::demodulate() {
             new ComputeShader(m_vulkan_manager.getDevice(),
                               "detect_dropouts",
                               {lowpass_in_buffer, dropout_buffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts.comp"), Size(DemodulatedBlock::c_video_block_size)));
+                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts.comp"), Size(MuseDemodulatedBlock::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
     // will have undefined output otherwise.
@@ -209,7 +125,7 @@ void RfDemodulator::demodulate() {
     while (!m_stop_request && readFloats(input_buffer->data<int16_t>() + c_bandpass_filter_size - 1, c_sample_block_size)) {
 
         // First get a free output block to write to
-        unique_ptr<DemodulatedBlock> block = nullptr;
+        unique_ptr<MuseDemodulatedBlock> block = nullptr;
         {
             std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
             if (m_input_is_fifo && m_vacant_blocks.empty()) {
@@ -221,7 +137,7 @@ void RfDemodulator::demodulate() {
             }
             m_cv_vacant.wait(lock, [this] { return m_stop_request || !m_vacant_blocks.empty(); });
             if (m_stop_request) {
-                m_log.info(eInput, "RfDemodulator: stop requested");
+                m_log.info(eInput, "MuseRfDemodulator: stop requested");
                 break;
             }
             block = std::move(m_vacant_blocks.front());
@@ -280,7 +196,7 @@ void RfDemodulator::demodulate() {
 
         // Detect dropouts
         command_buffer->enqueueComputeShader<uint32_t>(
-                detect_dropouts_shader, {DemodulatedBlock::c_video_block_size, c_lowpass_filter_size - 1, c_dropout_delay, c_video_decimation_rate});
+                detect_dropouts_shader, {MuseDemodulatedBlock::c_video_block_size, c_lowpass_filter_size - 1, c_dropout_delay, c_video_decimation_rate});
 
         // Copy data from dropout detection to the output buffer before writing over the first part of the buffer below
         command_buffer->enqueueCopyBuffer(*dropout_buffer, *block->dropouts, 0, 0, block->c_video_block_size * sizeof(uint8_t));
@@ -323,31 +239,4 @@ void RfDemodulator::demodulate() {
 
     delete timestamp_query_pool;
     timestamp_statistics.print_stats(0);
-}
-
-bool RfDemodulator::readFloats(int16_t *out, size_t n) {
-    int filled_bytes = 0;
-    do {
-        if (m_stop_request) {
-            m_log.info(eInput, "RfDemodulator: stop requested");
-            return false;
-        }
-        std::scoped_lock<std::mutex> lock(m_input_file_mutex);
-        ssize_t read_count = read(m_input_fd,
-                                  (void *)((char *)out + filled_bytes),
-                                  n * sizeof(int16_t) - filled_bytes);
-        if (read_count == -1 && errno == EAGAIN)
-            this_thread::sleep_for(chrono::milliseconds(1));
-        else if (read_count == 0) {
-            if (!m_input_is_fifo) {
-                m_log.info(eInput, "RfDemodulator: end of file");
-                return false;
-            }
-        } else if (read_count == -1)
-            throw runtime_error(fmt::format("Error reading from file: {}", strerror(errno)));
-        else
-            filled_bytes += (int)read_count;
-    } while (filled_bytes < n * sizeof(int16_t));
-
-    return true;
 }

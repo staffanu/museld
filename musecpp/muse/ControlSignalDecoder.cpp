@@ -7,7 +7,8 @@
 #include <sstream>
 #include <fmt/format.h>
 #include "util/Logger.h"
-#include "MuseTypes.h"
+#include "util/FmtAddons.h"
+#include "muse/MuseConstants.h"
 #include "ControlSignalDecoder.h"
 
 using namespace std;

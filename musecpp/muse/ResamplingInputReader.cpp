@@ -10,6 +10,8 @@
 #include "musevk/VulkanBuffer.h"
 #include "ResamplingInputReader.h"
 #include "util/Logger.h"
+#include "MuseConstants.h"
+#include "MuseInputBlock.h"
 
 using namespace std;
 
@@ -23,7 +25,7 @@ ResamplingInputReader::ResamplingInputReader(
                       initial_seek_seconds, output_filename),
           m_input_format(input_format),
           m_sample_rate(sample_rate),
-          m_efm_pll(log),
+          m_efm_pll(log, RfDemodulator<MuseDemodulatedBlock>::c_sample_frequency / MuseRfDemodulatorConstants::c_efm_decimation_rate),
           m_file_fd(-1),
           m_input_samples_decimation_rate(1),
           m_demodulator(nullptr),
@@ -37,8 +39,8 @@ ResamplingInputReader::ResamplingInputReader(
           m_pixel(1),
           m_line1_frame_pulse_sum(0),
           m_line2_frame_pulse_sum(0),
-          m_upper_percentile_filter(0.995f, 239.f),
-          m_lower_percentile_filter(0.005f, 16.f),
+          m_upper_percentile_filter(MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT, 0.995f, 239.f),
+          m_lower_percentile_filter(MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT, 0.005f, 16.f),
           m_max_frame_pulse_sum_difference(0),
           m_consecutive_good_syncs(0),
           m_missed_line_pulses(0),
@@ -46,7 +48,7 @@ ResamplingInputReader::ResamplingInputReader(
           m_error_sum(0) {
     if (demodulate) {
         m_input_format = eFloat;
-        m_demodulator = new RfDemodulator(log, executable_dir, m_filename, vulkan_manager, benchmark_shaders);
+        m_demodulator = new MuseRfDemodulator(log, executable_dir, m_filename, vulkan_manager, benchmark_shaders);
         m_sample_rate = 31.25e6;
     }
 
@@ -71,7 +73,7 @@ ResamplingInputReader::ResamplingInputReader(
     }
 }
 
-bool ResamplingInputReader::initialize(std::vector<std::unique_ptr<InputReader::InputReaderBlock>> &buffers) {
+bool ResamplingInputReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
     if (m_demodulator == nullptr) {
         m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
         if (m_file_fd == -1)
@@ -137,9 +139,9 @@ void ResamplingInputReader::seek(double seconds) {
             lseek(m_file_fd, bytes_to_seek, SEEK_CUR);
 
             // discard content in existing input buffers
-            move(m_filled_muse_input_buffers.begin(), m_filled_muse_input_buffers.end(),
-                 back_inserter(m_vacant_muse_input_buffers));
-            m_filled_muse_input_buffers.clear();
+            move(m_filled_input_buffers.begin(), m_filled_input_buffers.end(),
+                 back_inserter(m_vacant_input_buffers));
+            m_filled_input_buffers.clear();
             m_cv_vacant.notify_one();
         }
         setUnlocked(); // do not wait to discover that we lost sync
@@ -147,7 +149,7 @@ void ResamplingInputReader::seek(double seconds) {
 }
 
 void ResamplingInputReader::threadFunc() {
-    unique_ptr<InputReaderBlock> output_block = nullptr;
+    unique_ptr<MuseInputBlock> output_block = nullptr;
 
     for (m_last_input_sub_buffer_ix_read = 0; m_last_input_sub_buffer_ix_read < c_number_of_input_sub_buffers; m_last_input_sub_buffer_ix_read++) {
         readInput(nullptr);
@@ -157,20 +159,20 @@ void ResamplingInputReader::threadFunc() {
     for (;;) {
         if (output_block == nullptr) {
             unique_lock<std::mutex> lock(m_mutex);
-            if (m_input_is_realtime && m_vacant_muse_input_buffers.empty()) {
+            if (m_input_is_realtime && m_vacant_input_buffers.empty()) {
                 // discard a filled output_block -- this is better than having the writer to the fifo wait
                 m_log.warn(eInput, "Discarding filled block due to overrun");
-                assert(!m_filled_muse_input_buffers.empty());
-                m_vacant_muse_input_buffers.push_back(std::move(m_filled_muse_input_buffers.back()));
-                m_filled_muse_input_buffers.pop_back();
+                assert(!m_filled_input_buffers.empty());
+                m_vacant_input_buffers.push_back(std::move(m_filled_input_buffers.back()));
+                m_filled_input_buffers.pop_back();
             }
-            m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_muse_input_buffers.empty();});
+            m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_input_buffers.empty();});
             if (m_stop_request) {
                 m_log.info(eInput, "ResamplingInputReader: stop requested");
                 break;
             }
-            output_block = std::move(m_vacant_muse_input_buffers.front());
-            m_vacant_muse_input_buffers.pop_front();
+            output_block = std::move(m_vacant_input_buffers.front());
+            m_vacant_input_buffers.pop_front();
             output_block->efm_data_size = 0;;
         }
 
@@ -183,7 +185,7 @@ void ResamplingInputReader::threadFunc() {
         output_block->input_samples_per_muse_sample = m_input_samples_per_sample * m_input_samples_decimation_rate;
         std::unique_lock<std::mutex> lock(m_mutex);
         m_cv_filled.notify_one();
-        m_filled_muse_input_buffers.push_back(std::move(output_block));
+        m_filled_input_buffers.push_back(std::move(output_block));
         output_block = nullptr;
     }
 
@@ -192,7 +194,7 @@ void ResamplingInputReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
-bool ResamplingInputReader::readInput(std::unique_ptr<InputReaderBlock> const &output_block) {
+bool ResamplingInputReader::readInput(std::unique_ptr<MuseInputBlock> const &output_block) {
     uint8_t *read_ptr = m_input_buffer + m_bytes_per_sample * c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
     uint8_t *dropout_read_ptr = m_input_dropout_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
 
@@ -216,7 +218,7 @@ bool ResamplingInputReader::readInput(std::unique_ptr<InputReaderBlock> const &o
         assert (bytes_read == c_input_sub_buffer_size * m_bytes_per_sample);
         return true;
     } else {
-        m_input_samples_decimation_rate = RfDemodulatorConstants::c_video_decimation_rate;
+        m_input_samples_decimation_rate = MuseRfDemodulatorConstants::c_video_decimation_rate;
         auto block = m_demodulator->getNextDemodulatedBlock();
         if (block == nullptr) {
             m_log.info(eInput, "ResamplingInputReader: no more demodulated blocks");
@@ -229,9 +231,9 @@ bool ResamplingInputReader::readInput(std::unique_ptr<InputReaderBlock> const &o
         if (output_block != nullptr) {
             if (m_state == eLocked) {
                 int actual_output_size = m_efm_pll.reclock(block->efm_data->data<float>(),
-                                                           DemodulatedBlock::c_efm_block_size,
+                                                           MuseDemodulatedBlock::c_efm_block_size,
                                                            output_block->efm_data.data() + output_block->efm_data_size,
-                                                           InputReaderBlock::c_max_efm_data_size - output_block->efm_data_size);
+                                                           MuseInputBlock::c_max_efm_data_size - output_block->efm_data_size);
                 output_block->efm_data_size += actual_output_size;
                 assert(output_block->efm_data_size <= output_block->c_max_efm_data_size);
             } else
@@ -245,7 +247,7 @@ bool ResamplingInputReader::readInput(std::unique_ptr<InputReaderBlock> const &o
 
 bool ResamplingInputReader::resample(float *sample_out, uint8_t *dropout_out,
                                      double input_samples_per_sample,
-                                     std::unique_ptr<InputReaderBlock> const &output_block) {
+                                     std::unique_ptr<MuseInputBlock> const &output_block) {
 
     m_t += input_samples_per_sample;
 
@@ -302,7 +304,7 @@ bool ResamplingInputReader::resample(float *sample_out, uint8_t *dropout_out,
 }
 
 
-bool ResamplingInputReader::process(std::unique_ptr<InputReaderBlock> const &output_block) {
+bool ResamplingInputReader::process(std::unique_ptr<MuseInputBlock> const &output_block) {
     auto *output = output_block->video_data->data<float>();
     auto *dropout_output = output_block->dropout_data->data<uint8_t>();
 

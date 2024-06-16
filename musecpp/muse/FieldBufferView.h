@@ -6,7 +6,6 @@
 #define MUSECPP_FIELDBUFFERVIEW_H
 
 #include <cstdint>
-#include "MuseTypes.h"
 #include "musevk/CommandBuffer.h"
 #include "musevk/VulkanBuffer.h"
 #include "ControlSignalDecoder.h"

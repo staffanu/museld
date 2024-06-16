@@ -7,6 +7,7 @@
 #include "musevk/VulkanBuffer.h"
 #include "FrameBuffer.h"
 #include "FieldBufferView.h"
+#include "MuseConstants.h"
 #include "musevk/HalfFloatUtil.h"
 
 using namespace std;

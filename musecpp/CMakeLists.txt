@@ -29,9 +29,11 @@ include_directories(.)
 add_executable(musecpp
         main.cpp
         AudioPlayback.cpp AudioPlayback.h
-        InputReader.cpp InputReader.h
+        InputReader.h
         AudioDefs.h
         TextRenderer.cpp TextRenderer.h
+        RfDemodulator.h
+        InputBlockBase.h
         muse/FrameBuffer.cpp muse/FrameBuffer.h
         muse/FieldBufferView.cpp muse/FieldBufferView.h
         muse/AudioDecoder.cpp muse/AudioDecoder.h
@@ -42,7 +44,9 @@ add_executable(musecpp
         muse/MuseDecoder.cpp muse/MuseDecoder.h
         muse/ResamplingInputReader.cpp muse/ResamplingInputReader.h
         muse/PhaseCorrect16MHzInputReader.cpp muse/PhaseCorrect16MHzInputReader.h
-        muse/RfDemodulator.cpp muse/RfDemodulator.h
+        muse/MuseRfDemodulator.cpp muse/MuseRfDemodulator.h
+        muse/MuseInputBlock.h
+        muse/MuseConstants.h
         util/PercentileFilter.cpp util/PercentileFilter.h
         util/Logger.cpp util/Logger.h
         util/ConstExprHelpers.h
@@ -65,6 +69,7 @@ add_executable(musecpp
         efm/EfmPll.cpp efm/EfmPll.h
         efm/EfmDecoder.cpp efm/EfmDecoder.h
         efm/ByteWithErasureFlag.h
+        util/FmtAddons.h
 )
 if (HAVE_LIBAV)
     target_sources(musecpp PRIVATE

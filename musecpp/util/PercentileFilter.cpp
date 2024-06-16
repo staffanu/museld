@@ -4,8 +4,9 @@
 
 #include "PercentileFilter.h"
 
-PercentileFilter::PercentileFilter(float percentile, float initial_estimate)
-        : m_percentile(percentile),
+PercentileFilter::PercentileFilter(int update_threshold, float percentile, float initial_estimate)
+        : c_update_threshold(update_threshold),
+          c_percentile(percentile),
           m_current_estimate(initial_estimate),
           m_counter(0),
           m_under_count(0) {
@@ -13,4 +14,4 @@ PercentileFilter::PercentileFilter(float percentile, float initial_estimate)
 
 float PercentileFilter::getEstimate() const {
     return m_current_estimate;
-};
+}

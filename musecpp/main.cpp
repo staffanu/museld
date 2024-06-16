@@ -5,7 +5,7 @@
 #include "muse/Shaders.h"
 #include "muse/MuseDecoder.h"
 #include "musevk/VulkanManager.h"
-#include "MuseTypes.h"
+#include "muse/MuseConstants.h"
 #include "AudioPlayback.h"
 #include "InputReader.h"
 #include "muse/ResamplingInputReader.h"
@@ -43,7 +43,7 @@ void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "Error %d: %s\n", error, description); // FIXME: use logging framework
 }
 
-void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, InputReader &reader,
+void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, InputReader<MuseInputBlock> &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
                   bool start_paused, bool decode_video, Shaders::DropoutMode dropout_mode,
                   bool decode_audio, bool efm_audio, bool benchmark_shaders,
@@ -63,10 +63,10 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     vk::Device &device = manager.getDevice();
 
     {
-        std::vector<std::unique_ptr<InputReader::InputReaderBlock>> input_vulkan_buffers{};
+        std::vector<std::unique_ptr<MuseInputBlock>> input_vulkan_buffers{};
         for (int i = 0; i < INPUT_BUFFER_COUNT; i++)
             input_vulkan_buffers.push_back(
-                    make_unique<InputReader::InputReaderBlock>(
+                    make_unique<MuseInputBlock>(
                             make_unique<musevk::VulkanBuffer>(manager, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite),
                             make_unique<musevk::VulkanBuffer>(manager, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint8_t), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite)
                     ));
@@ -598,7 +598,7 @@ int main(int argc, char *argv[]) {
 
                 if (demodulate)
                     input_format = eOverSampledSignedShortsLittleEndian;
-                InputReader *reader;
+                InputReader<MuseInputBlock> *reader;
                 switch (input_format) {
                     case eOverSampledUnsignedBytes:
                     case eOverSampledSignedShortsLittleEndian:

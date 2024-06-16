@@ -126,7 +126,7 @@ EfmDecoder::~EfmDecoder() {
 }
 
 void EfmDecoder::decode(int frame_no,
-                        const std::array<bool, InputReader::InputReaderBlock::c_max_efm_data_size> &data, int input_data_size,
+                        const std::array<bool, InputBlockBase::c_max_efm_data_size> &data, int input_data_size,
                         int *sample_count, AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES]) {
     auto t0 = chrono::high_resolution_clock::now();
 

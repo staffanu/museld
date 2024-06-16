@@ -8,7 +8,7 @@
 #include <filesystem>
 #include <fmt/format.h>
 #include "musevk/VulkanBuffer.h"
-#include "MuseTypes.h"
+#include "MuseConstants.h"
 #include "PhaseCorrect16MHzInputReader.h"
 #include "util/Logger.h"
 
@@ -25,7 +25,7 @@ PhaseCorrect16MHzInputReader::PhaseCorrect16MHzInputReader(
         m_big_endian(big_endian) {
 }
 
-bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::unique_ptr<InputReader::InputReaderBlock>> &buffers) {
+bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
     auto [samples_to_skip, eq] = compute_initial_skip(m_log);
 
     m_input = ifstream(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
@@ -64,23 +64,23 @@ void PhaseCorrect16MHzInputReader::seek(double seconds) {
         m_input.seekg(samples_to_seek * 2, ifstream::cur);
 
         // discard content in existing input buffers
-        move(m_filled_muse_input_buffers.begin(), m_filled_muse_input_buffers.end(), back_inserter(m_vacant_muse_input_buffers));
-        m_filled_muse_input_buffers.clear();
-        m_log.error(eInput, fmt::format("sizes: {} {}", m_vacant_muse_input_buffers.size(), m_filled_muse_input_buffers.size()));
+        move(m_filled_input_buffers.begin(), m_filled_input_buffers.end(), back_inserter(m_vacant_input_buffers));
+        m_filled_input_buffers.clear();
+        m_log.error(eInput, fmt::format("sizes: {} {}", m_vacant_input_buffers.size(), m_filled_input_buffers.size()));
         m_cv_vacant.notify_one();
     }
 }
 
 void PhaseCorrect16MHzInputReader::threadFunc() {
     for (;;) {
-        unique_ptr<InputReaderBlock> buffer = nullptr;
+        unique_ptr<MuseInputBlock> buffer = nullptr;
         {
             std::unique_lock<std::mutex> lock(m_mutex);
-            m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_muse_input_buffers.empty();});
+            m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_input_buffers.empty();});
             if (m_stop_request)
                 break;
-            buffer = std::move(m_vacant_muse_input_buffers.front());
-            m_vacant_muse_input_buffers.pop_front();
+            buffer = std::move(m_vacant_input_buffers.front());
+            m_vacant_input_buffers.pop_front();
         }
 
         buffer->input_samples_per_muse_sample = 1;
@@ -91,7 +91,7 @@ void PhaseCorrect16MHzInputReader::threadFunc() {
 
         std::unique_lock<std::mutex> lock(m_mutex);
         m_cv_filled.notify_one();
-        m_filled_muse_input_buffers.push_back(std::move(buffer));
+        m_filled_input_buffers.push_back(std::move(buffer));
     }
     std::unique_lock<std::mutex> lock(m_mutex);
     m_cv_filled.notify_one();

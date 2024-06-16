@@ -4,7 +4,7 @@
 
 #include <stdexcept>
 #include <memory>
-#include "MuseTypes.h"
+#include "MuseConstants.h"
 #include "Shaders.h"
 #include "FieldBufferView.h"
 #include "musevk/VulkanManager.h"

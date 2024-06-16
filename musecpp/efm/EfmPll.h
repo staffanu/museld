@@ -5,32 +5,32 @@
 #ifndef MUSECPP_EFMPLL_H
 #define MUSECPP_EFMPLL_H
 
-#include "muse/RfDemodulator.h"
 class Logger;
 
 class EfmPll {
 public:
-    EfmPll(Logger &log);
+    EfmPll(Logger &log, double sample_frequency);
 
     int reclock(const float *input, int input_size, bool *output, int max_output_size);
 
 private:
-    static constexpr double c_sample_frequency = 62.5e6 / RfDemodulatorConstants::c_efm_decimation_rate;
     static constexpr double c_counter_max = 65536.0;
     static constexpr double c_nominal_frequency = 4321800;
-    static constexpr double c_nominal_add = c_counter_max * c_nominal_frequency / c_sample_frequency;
     static constexpr double c_max_error_sum = 0x7fffff;
     static constexpr double c_min_error_sum = -0x800000;
 
-    static constexpr double c_omega = 2 * M_PI * 10000; // un-dampened frequency
-    static constexpr double c_zeta = 0.71; // damping factor
-    static constexpr double c_Ts = 1 / c_sample_frequency;
-    static const double c_G1;
-    static const double c_G2;
-    static const double c_GpdGvcoG1;
-    static const double c_GpdGvcoG2;
-    static const double c_g1;
-    static const double c_g2;
+    const double c_sample_frequency;
+    const double c_nominal_add;
+
+    const double c_omega; // un-dampened frequency
+    const double c_zeta; // damping factor
+    const double c_Ts;
+    const double c_G1;
+    const double c_G2;
+    const double c_GpdGvcoG1; // P
+    const double c_GpdGvcoG2; // I
+    const double c_g1;
+    const double c_g2;
 
     Logger &m_log;
     double m_clk_counter;
