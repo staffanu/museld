@@ -20,13 +20,24 @@
 #include "util/Logger.h"
 #include "RfDemodulator.h"
 #include "musevk/VulkanManager.h"
+#include "MuseConstants.h"
 
 namespace MuseRfDemodulatorConstants {
+
+    static constexpr float c_sample_frequency = 62.5e6f;
+
     // The filters assume an input sampling rate of 62.5 MHz.  In order to allow that to be set in runtime
     // we could link against the gnuradio libraries.
     static constexpr int c_sample_block_size = 512 * 1024;
     static constexpr int c_video_decimation_rate = 2;
     static constexpr int c_efm_decimation_rate = 4;
+
+    static constexpr int c_video_block_size = c_sample_block_size / c_video_decimation_rate;
+    static constexpr int c_efm_block_size = c_sample_block_size / c_efm_decimation_rate;
+
+    // enough buffers for two frames
+    static constexpr int c_number_of_block_buffers = (int)(2 * MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH
+                                                           * c_sample_frequency / c_video_decimation_rate / 16.2e6 / c_video_block_size);
 
     // FIR band-pass filter to filter out noise over 22.5 MHz and also the pilot signal and EFM.
     // The pilot signal isn't completely suppressed but that doesn't seem to matter.
@@ -145,8 +156,6 @@ struct MuseDemodulatedBlock {
                 vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, musevk::HostAccess::eHostRead);;
     }
 
-    static constexpr int c_video_block_size = c_sample_block_size / c_video_decimation_rate;
-    static constexpr int c_efm_block_size = c_sample_block_size / c_efm_decimation_rate;
     long input_offset; // the number of samples in the input before this block
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropouts; // 1-to-1 with the video_data array. 0 or 1 for now, but could indicate how certain we are in the future
@@ -189,10 +198,9 @@ private:
 
     // We need to delay the output of the detected dropouts as much as the rest of the filter chain delays the video signal
     static constexpr int c_dropout_delay = c_lowpass_filter_size / c_video_decimation_rate / 2 + c_rrc_filter_size / 2 - 1;
-    static constexpr int c_dropout_buffer_size = MuseDemodulatedBlock::c_video_block_size + c_dropout_delay;
+    static constexpr int c_dropout_buffer_size = c_video_block_size + c_dropout_delay;
 
     static constexpr int c_efm_equalization_in_buffer_size = c_sample_block_size / c_efm_decimation_rate + c_efm_equalization_filter_size - 1;
-    static constexpr int c_efm_out_buffer_size = c_sample_block_size / c_efm_decimation_rate;
 };
 
 #endif //MUSECPP_MUSERFDEMODULATOR_H

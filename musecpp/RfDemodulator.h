@@ -24,11 +24,10 @@
 template<class B>
 class RfDemodulator {
 public:
-    static const float c_sample_frequency;
-
     RfDemodulator(Logger &log, std::string executable_dir, std::string filename,
-                                    musevk::VulkanManager &vulkan_manager, bool benchmark_shaders)
-            : m_log(log),
+                  musevk::VulkanManager &vulkan_manager, bool benchmark_shaders, float sample_frequency)
+            : c_sample_frequency(sample_frequency),
+              m_log(log),
               m_executable_dir(std::move(executable_dir)),
               m_filename(std::move(filename)),
               m_vulkan_manager(vulkan_manager),
@@ -50,7 +49,7 @@ public:
     RfDemodulator(const RfDemodulator&) = delete;
     void operator=(const RfDemodulator&) = delete;
 
-    bool initialize() {
+    bool initialize(int number_of_block_buffers) {
         m_input_fd = open(m_filename.c_str(), O_NONBLOCK);
         if (m_input_fd == -1)
             throw std::runtime_error(fmt::format("RfDemodulator: Unable to open input file {}", m_filename));
@@ -63,7 +62,7 @@ public:
         }
 #endif
 
-        for (int i = 0; i < c_number_of_block_buffers; i++)
+        for (int i = 0; i < number_of_block_buffers; i++)
             m_vacant_blocks.push_back(std::make_unique<B>(m_vulkan_manager));
 
         m_demodulator_thread = new std::thread(&RfDemodulator<B>::demodulate, this);
@@ -129,8 +128,6 @@ public:
     }
 
 protected:
-    static const int c_number_of_block_buffers;
-
     virtual void demodulate() = 0;
 
     bool readFloats(int16_t *out, size_t n) {
@@ -160,6 +157,7 @@ protected:
         return true;
     }
 
+    const float c_sample_frequency;
     Logger &m_log;
     const std::string m_executable_dir;
     const std::string m_filename;

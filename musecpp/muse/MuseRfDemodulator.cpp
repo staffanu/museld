@@ -16,22 +16,14 @@
 using namespace std;
 using namespace musevk;
 
-template<>
-constexpr float RfDemodulator<MuseDemodulatedBlock>::c_sample_frequency = 62.5e6f;
-
-// enough buffers for two frames
-template<>
-const int RfDemodulator<MuseDemodulatedBlock>::c_number_of_block_buffers = (int)(2 * MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH
-                                                   * c_sample_frequency / c_video_decimation_rate / 16.2e6 / MuseDemodulatedBlock::c_video_block_size);
-
 MuseRfDemodulator::MuseRfDemodulator(Logger &log, std::string filename, std::string executable_dir,
                                      musevk::VulkanManager &vulkan_manager, bool benchmark_shaders)
-: RfDemodulator<MuseDemodulatedBlock>(log, std::move(filename), std::move(executable_dir), vulkan_manager, benchmark_shaders) {
+: RfDemodulator<MuseDemodulatedBlock>(log, std::move(filename), std::move(executable_dir), vulkan_manager, benchmark_shaders,
+                                      MuseRfDemodulatorConstants::c_sample_frequency) {
 }
 
 void MuseRfDemodulator::demodulate() {
     assert(c_sample_block_size % c_video_decimation_rate == 0);
-    assert(c_efm_out_buffer_size == MuseDemodulatedBlock::c_efm_block_size);
 
     CommandPool command_pool(m_vulkan_manager);
     musevk::TimestampQueryPool *timestamp_query_pool =
@@ -107,7 +99,7 @@ void MuseRfDemodulator::demodulate() {
             new ComputeShader(m_vulkan_manager.getDevice(),
                               "detect_dropouts",
                               {lowpass_in_buffer, dropout_buffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts.comp"), Size(MuseDemodulatedBlock::c_video_block_size)));
+                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts.comp"), Size(MuseRfDemodulatorConstants::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
     // will have undefined output otherwise.
@@ -184,22 +176,22 @@ void MuseRfDemodulator::demodulate() {
                 {c_rrc_filter_size, c_sample_block_size / c_video_decimation_rate, /* out offset */ 0, /* decimation */ 1}, 1);
 
         // EFM
-        input_fir_filter_shader->updateWorkgroup(Size(c_efm_out_buffer_size));
+        input_fir_filter_shader->updateWorkgroup(Size(MuseRfDemodulatorConstants::c_efm_block_size));
         command_buffer->enqueueComputeShader<uint32_t>(
                 input_fir_filter_shader,
-                {c_rrc_filter_size, c_efm_out_buffer_size, /* out offset */ c_efm_equalization_filter_size - 1, c_efm_decimation_rate}, 2);
+                {c_rrc_filter_size, MuseRfDemodulatorConstants::c_efm_block_size, /* out offset */ c_efm_equalization_filter_size - 1, c_efm_decimation_rate}, 2);
 
         fir_filter_shader->updateBufferDescriptorsInSet(2, {efm_equalization_filter, efm_equalization_in_buffer, block->efm_data});
         command_buffer->enqueueComputeShader<uint32_t>(
                 fir_filter_shader,
-                {c_efm_equalization_filter_size, c_efm_out_buffer_size, /* out offset */ 0, /* decimation */ 1}, 2);
+                {c_efm_equalization_filter_size, MuseRfDemodulatorConstants::c_efm_block_size, /* out offset */ 0, /* decimation */ 1}, 2);
 
         // Detect dropouts
         command_buffer->enqueueComputeShader<uint32_t>(
-                detect_dropouts_shader, {MuseDemodulatedBlock::c_video_block_size, c_lowpass_filter_size - 1, c_dropout_delay, c_video_decimation_rate});
+                detect_dropouts_shader, {MuseRfDemodulatorConstants::c_video_block_size, c_lowpass_filter_size - 1, c_dropout_delay, c_video_decimation_rate});
 
         // Copy data from dropout detection to the output buffer before writing over the first part of the buffer below
-        command_buffer->enqueueCopyBuffer(*dropout_buffer, *block->dropouts, 0, 0, block->c_video_block_size * sizeof(uint8_t));
+        command_buffer->enqueueCopyBuffer(*dropout_buffer, *block->dropouts, 0, 0, MuseRfDemodulatorConstants::c_video_block_size * sizeof(uint8_t));
 
         // Ensure data can be read from the host later
         block->video_data->synchronizeForHostRead(*command_buffer);

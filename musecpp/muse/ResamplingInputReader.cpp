@@ -25,7 +25,7 @@ ResamplingInputReader::ResamplingInputReader(
                       initial_seek_seconds, output_filename),
           m_input_format(input_format),
           m_sample_rate(sample_rate),
-          m_efm_pll(log, RfDemodulator<MuseDemodulatedBlock>::c_sample_frequency / MuseRfDemodulatorConstants::c_efm_decimation_rate),
+          m_efm_pll(log, MuseRfDemodulatorConstants::c_sample_frequency / MuseRfDemodulatorConstants::c_efm_decimation_rate),
           m_file_fd(-1),
           m_input_samples_decimation_rate(1),
           m_demodulator(nullptr),
@@ -86,7 +86,7 @@ bool ResamplingInputReader::initialize(std::vector<std::unique_ptr<MuseInputBloc
         }
 #endif
     } else {
-        m_demodulator->initialize();
+        m_demodulator->initialize(MuseRfDemodulatorConstants::c_number_of_block_buffers);
     }
 
     m_input_samples_per_sample_ref = m_sample_rate / 16.2e6;
@@ -224,14 +224,14 @@ bool ResamplingInputReader::readInput(std::unique_ptr<MuseInputBlock> const &out
             m_log.info(eInput, "ResamplingInputReader: no more demodulated blocks");
             return false;
         }
-        memcpy(read_ptr, block->video_data->data<float>(), block->c_video_block_size * sizeof(float));
-        memcpy(dropout_read_ptr, block->dropouts->data<uint8_t>(), block->c_video_block_size * sizeof(uint8_t));
+        memcpy(read_ptr, block->video_data->data<float>(), MuseRfDemodulatorConstants::c_video_block_size * sizeof(float));
+        memcpy(dropout_read_ptr, block->dropouts->data<uint8_t>(), MuseRfDemodulatorConstants::c_video_block_size * sizeof(uint8_t));
         m_input_sub_buffer_input_offsets[m_last_input_sub_buffer_ix_read] = block->input_offset;
 
         if (output_block != nullptr) {
             if (m_state == eLocked) {
                 int actual_output_size = m_efm_pll.reclock(block->efm_data->data<float>(),
-                                                           MuseDemodulatedBlock::c_efm_block_size,
+                                                           MuseRfDemodulatorConstants::c_efm_block_size,
                                                            output_block->efm_data.data() + output_block->efm_data_size,
                                                            MuseInputBlock::c_max_efm_data_size - output_block->efm_data_size);
                 output_block->efm_data_size += actual_output_size;
