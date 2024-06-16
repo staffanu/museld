@@ -192,13 +192,13 @@ void Shaders::applyEqAndDeemphasisAndGamma(
 }
 
 void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
-    if (field.control_data().has_value())
+    if (field.control_data())
         field.control_data().value().log_control_data();
 
     int field_parity = field.m_field_parity;
-    int frame_phase_y = field.control_data().has_value() ?
+    int frame_phase_y = field.control_data() ?
                         field.control_data().value().frame_subsampling_phase_Y.value_or(0) : 0;
-    int frame_phase_c = field.control_data().has_value() ?
+    int frame_phase_c = field.control_data() ?
                         field.control_data().value().frame_subsampling_phase_C.value_or(0) : 0;
 //    int field_phase = field.control_data().value().field_subsampling_phase_Y.value_or(0);
 
@@ -277,10 +277,10 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
     assert(fields.size() >= 5);
     if (!all_of(fields.cbegin(), fields.cend(),
                 [](const reference_wrapper<FieldBufferView> f) -> bool {
-                    return f.get().control_data().has_value() &&
-                           f.get().control_data().value().field_subsampling_phase_Y.has_value() &&
-                           f.get().control_data().value().frame_subsampling_phase_Y.has_value() &&
-                           f.get().control_data().value().frame_subsampling_phase_C.has_value();
+                    return f.get().control_data() &&
+                           f.get().control_data().value().field_subsampling_phase_Y &&
+                           f.get().control_data().value().frame_subsampling_phase_Y &&
+                           f.get().control_data().value().frame_subsampling_phase_C;
                 })) {
         m_log.warn(eVideo, "Unknown phases for inter frame interpolation");
         return false;

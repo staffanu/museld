@@ -48,7 +48,7 @@ bool InputReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>
     pthread_setname_np(m_reader_thread->native_handle(), "musecpp-reader");
 #endif
 
-    if (m_output_filename.has_value()) {
+    if (m_output_filename) {
         m_output_file_fd = open(m_output_filename.value().c_str(),
                                 O_WRONLY | O_TRUNC | O_CREAT,
                                 S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);

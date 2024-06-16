@@ -192,7 +192,7 @@ namespace musevk {
             auto properties = device.getProperties();
             m_log.debug(eVideo, std::format("Checking device {}", string(properties.deviceName)));
             auto queue_families = isDeviceSuitable(device);
-            if (queue_families.has_value()) {
+            if (queue_families) {
                 found = true;
                 m_physical_device = device;
                 m_queue_families = queue_families.value();

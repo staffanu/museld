@@ -130,7 +130,7 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, float const *data, std::
     edge_detection_prohibited = vector_index_to_bit_opt(result, 14);
 
     auto motion_int_opt = vector_to_int_opt(vector(result.cbegin() + 15, result.cbegin() + 18));
-    if (motion_int_opt.has_value()) {
+    if (motion_int_opt) {
         switch (motion_int_opt.value()) {
             case 0:
                 motion_information = optional(Normal);
@@ -170,11 +170,11 @@ void ControlSignalDecoder::log_control_data() const {
             "motion: {}, extent: {}, still: {}",
             field_subsampling_phase_Y, frame_subsampling_phase_Y, frame_subsampling_phase_C,
             horizontal_motion_vector, vertical_motion_vector,
-            motion_sensitivity_ctrl.has_value() ? motion_sensitivity_ctrl.value() != 0 ? "motion_sensitivity_ctrl set, " : "" : "motion_sensitivity_ctrl unknown, ",
-            edge_detection_prohibited.has_value() ? edge_detection_prohibited.value() != 0 ? "edge_detection_prohibited set, " : "" : "edge_detection_prohibited unknown, ",
-            motion_information.has_value() ? motionInformationToString(motion_information.value()) : "nullopt", motion_extent,
+            motion_sensitivity_ctrl ? motion_sensitivity_ctrl.value() != 0 ? "motion_sensitivity_ctrl set, " : "" : "motion_sensitivity_ctrl unknown, ",
+            edge_detection_prohibited ? edge_detection_prohibited.value() != 0 ? "edge_detection_prohibited set, " : "" : "edge_detection_prohibited unknown, ",
+            motion_information ? motionInformationToString(motion_information.value()) : "nullopt", motion_extent,
             still_picture));
-//    if (motion_information.has_value() && motion_information.value() == SceneChange)
+//    if (motion_information && motion_information.value() == SceneChange)
 //        m_log.error(eVideo, "***SCENE CHANGE***");
 }
 

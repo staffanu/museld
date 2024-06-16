@@ -61,7 +61,7 @@ namespace musevk {
     AllocatedMemory MemoryAllocator::AllocationPool::allocate(vk::MemoryRequirements memory_requirements) {
         for (auto it = blocks.begin(); it != blocks.end(); it++) {
             auto allocationOpt = it->allocate(memory_requirements);
-            if (allocationOpt.has_value())
+            if (allocationOpt)
                 return allocationOpt.value();
         }
         vk::MemoryAllocateInfo memoryAllocateInfo(ALLOCATION_BLOCK_SIZE, allocation_key.first);
@@ -74,7 +74,7 @@ namespace musevk {
         auto allocationOpt = block.allocate(memory_requirements);
         blocks.push_back(block);
 
-        assert(allocationOpt.has_value());
+        assert(allocationOpt);
         return allocationOpt.value();
     }
 

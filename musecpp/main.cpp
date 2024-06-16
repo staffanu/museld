@@ -76,7 +76,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
 
 #ifdef HAVE_LIBAV
     unique_ptr<VideoFileWriter> vfw = nullptr;
-    if (output_filename.has_value()) {
+    if (output_filename) {
         vfw = make_unique<VideoFileWriter>(output_filename.value(), log, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, decode_all_fields ? 60 : 30);
         if (!vfw->init())
             throw runtime_error("Cannot initialize output encoder");
@@ -212,11 +212,11 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                     redo_last_field = true;
             }
             if (show_disc_code) {
-                string disc_code_string1 = disc_code.has_value() ?
+                string disc_code_string1 = disc_code ?
                                           std::format("{}{} {}",
                                                       disc_code->pf() ? "TOC " : "", disc_code->sz() ? "20 cm" : "30 cm", disc_code->df() ? "CLV" : "CAV")
                                                       : "No disc code";
-                string disc_code_string2 = disc_code.has_value() ?
+                string disc_code_string2 = disc_code ?
                                            std::format("Chapter {} Frame {}", disc_code->chapter(), disc_code->frame()) : "";
                 text_renderer.drawText(images.out_image, 90, 900, disc_code_string1, 2, *command_buffer);
                 text_renderer.drawText(images.out_image, 90, 955, disc_code_string2, 2, *command_buffer);

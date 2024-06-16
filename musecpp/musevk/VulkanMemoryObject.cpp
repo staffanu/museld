@@ -8,11 +8,11 @@
 #include "VulkanManager.h"
 
 musevk::VulkanMemoryObject::~VulkanMemoryObject() {
-    if (m_host_visible_buffer.has_value())
+    if (m_host_visible_buffer)
         m_vulkan_manager.getDevice().destroy(m_host_visible_buffer.value());
 
     m_vulkan_manager.getMemoryAllocator().free(m_allocated_device_memory);
-    if (m_allocated_host_visible_memory.has_value())
+    if (m_allocated_host_visible_memory)
         m_vulkan_manager.getMemoryAllocator().free(m_allocated_host_visible_memory.value());
 };
 
@@ -111,13 +111,13 @@ void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_re
 
     for (std::pair<vk::MemoryPropertyFlags, std::optional<vk::MemoryPropertyFlags>> device_and_host_memory_flags : memory_property_priorities) {
         std::optional<std::pair<int32_t, vk::MemoryPropertyFlags>> device_memory_type_index_and_properties = getMemoryTypeIndex(memory_requirements, device_and_host_memory_flags.first);
-        if (!device_memory_type_index_and_properties.has_value())
+        if (!device_memory_type_index_and_properties)
             continue;
 
         std::optional<std::pair<int32_t, vk::MemoryPropertyFlags>> host_visible_memory_type_index_and_properties = std::nullopt;
-        if (device_and_host_memory_flags.second.has_value()) {
+        if (device_and_host_memory_flags.second) {
             host_visible_memory_type_index_and_properties = getMemoryTypeIndex(host_visible_buffer_memory_requirements, device_and_host_memory_flags.second.value());
-            if (!host_visible_memory_type_index_and_properties.has_value())
+            if (!host_visible_memory_type_index_and_properties)
                 continue;
         }
 
@@ -125,9 +125,9 @@ void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_re
         m_device_memory_properties = device_memory_type_index_and_properties->second;
         m_allocated_device_memory = m_memory_allocator.allocate(
                 memory_requirements, device_memory_type_index_and_properties.value().first,
-                (device_and_host_memory_flags.first & vk::MemoryPropertyFlagBits::eHostVisible) && !host_visible_memory_type_index_and_properties.has_value());
+                (device_and_host_memory_flags.first & vk::MemoryPropertyFlagBits::eHostVisible) && !host_visible_memory_type_index_and_properties);
 
-        if (host_visible_memory_type_index_and_properties.has_value()) {
+        if (host_visible_memory_type_index_and_properties) {
             m_host_memory_properties = host_visible_memory_type_index_and_properties.value().second;
             m_allocated_host_visible_memory = m_memory_allocator.allocate(host_visible_buffer_memory_requirements,
                                                                           host_visible_memory_type_index_and_properties.value().first, true);
