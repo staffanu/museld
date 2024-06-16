@@ -2,7 +2,8 @@
 // Created by staffanu on 2/7/24.
 //
 
-#include <fmt/format.h>
+#include <format>
+#include <cmath>
 #include "util/Logger.h"
 #include "EfmPll.h"
 
@@ -26,7 +27,7 @@ EfmPll::EfmPll(Logger &log, double sample_frequency)
           m_toggle_count(0),
           m_toggle_pos(0) {
 
-    log.debug(eInput | eAudio, fmt::format("c_g1={:.5f} c_g2={:.7f}", c_g1, c_g2));
+    log.debug(eInput | eAudio, std::format("c_g1={:.5f} c_g2={:.7f}", c_g1, c_g2));
 }
 
 int EfmPll::reclock(const float *input, int input_size, bool *output, int max_output_size) {

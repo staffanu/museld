@@ -5,7 +5,7 @@
 #include <vector>
 #include <cassert>
 #include <sstream>
-#include <fmt/format.h>
+#include <format>
 #include "util/Logger.h"
 #include "util/FmtAddons.h"
 #include "muse/MuseConstants.h"
@@ -163,7 +163,7 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, float const *data, std::
 }
 
 void ControlSignalDecoder::log_control_data() const {
-    m_log.info(eVideo, fmt::format(
+    m_log.info(eVideo, std::format(
             "phases (fieldY frameY frameC): {}{}{}, "
             "motion vector: ({}, {}), "
             "{}{}"

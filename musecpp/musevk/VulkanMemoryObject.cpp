@@ -2,7 +2,8 @@
 // Created by staffanu on 3/16/24.
 //
 
-#include <fmt/format.h>
+#include <format>
+#include <sstream>
 #include "VulkanMemoryObject.h"
 #include "VulkanManager.h"
 
@@ -145,24 +146,24 @@ void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_re
 
     // If we reach the end of the loop no suitable memory was found
     Logger &log = m_vulkan_manager.getLogger();
-    log.error(eVideo, fmt::format("No available memory for host access type {}", (int)host_access));
+    log.error(eVideo, std::format("No available memory for host access type {}", (int)host_access));
     vk::PhysicalDeviceMemoryProperties memory_properties = m_vulkan_manager.getPhysicalDevice().getMemoryProperties();
 
     log.error(eVideo, "Available memory types:");
     for (uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
         const VkMemoryType &memType = memory_properties.memoryTypes[i];
-        log.error(eVideo, fmt::format("Memory Type {}: heap index {}, property flags({}): {}",
+        log.error(eVideo, std::format("Memory Type {}: heap index {}, property flags({}): {}",
                                       i, memType.heapIndex, memType.propertyFlags, memoryPropertyFlagsToString(memType.propertyFlags)));
     }
 
     log.error(eVideo, "Available memory heaps:");
     for (uint32_t i = 0; i < memory_properties.memoryHeapCount; ++i) {
         const VkMemoryHeap &memHeap = memory_properties.memoryHeaps[i];
-        log.error(eVideo, fmt::format("Memory Heap {}: size {}, flags({}): {}",
+        log.error(eVideo, std::format("Memory Heap {}: size {}, flags({}): {}",
                                       i, memHeap.size, memHeap.flags, memoryHeapFlagsToString(memHeap.flags)));
     }
 
-    throw std::runtime_error(fmt::format("No available memory for host access type {}", (int)host_access));
+    throw std::runtime_error(std::format("No available memory for host access type {}", (int)host_access));
 }
 
 std::string musevk::VulkanMemoryObject::memoryPropertyFlagsToString(VkMemoryPropertyFlags flags) {

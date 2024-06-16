@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <fstream>
-#include <fmt/format.h>
+#include <format>
 #include <cassert>
 #include <complex>
 #include <array>
@@ -52,13 +52,13 @@ public:
     bool initialize(int number_of_block_buffers) {
         m_input_fd = open(m_filename.c_str(), O_NONBLOCK);
         if (m_input_fd == -1)
-            throw std::runtime_error(fmt::format("RfDemodulator: Unable to open input file {}", m_filename));
+            throw std::runtime_error(std::format("RfDemodulator: Unable to open input file {}", m_filename));
 
 #ifdef linux
         if (m_input_is_fifo) {
-            m_log.debug(eInput, fmt::format("Pipe size: {}", fcntl(m_input_fd, F_GETPIPE_SZ)));
+            m_log.debug(eInput, std::format("Pipe size: {}", fcntl(m_input_fd, F_GETPIPE_SZ)));
             fcntl(m_input_fd, F_SETPIPE_SZ, 1024 * 1024);
-            m_log.debug(eInput, fmt::format("Pipe size now: {}", fcntl(m_input_fd, F_GETPIPE_SZ)));
+            m_log.debug(eInput, std::format("Pipe size now: {}", fcntl(m_input_fd, F_GETPIPE_SZ)));
         }
 #endif
 
@@ -98,7 +98,7 @@ public:
 
             long samples_to_seek = (long)(seconds * c_sample_frequency);
             off_t bytes_to_seek = 2 * samples_to_seek;
-            m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples, {} bytes.",
+            m_log.info(eInput, std::format("Seeking relative time {} s, {} samples, {} bytes.",
                                            seconds, samples_to_seek, bytes_to_seek));
             lseek(m_input_fd, bytes_to_seek, SEEK_CUR);
             m_total_samples_read = std::max(0L, m_total_samples_read + samples_to_seek); // FIXME: locking?
@@ -149,7 +149,7 @@ protected:
                     return false;
                 }
             } else if (read_count == -1)
-                throw std::runtime_error(fmt::format("Error reading from file: {}", strerror(errno)));
+                throw std::runtime_error(std::format("Error reading from file: {}", strerror(errno)));
             else
                 filled_bytes += (int)read_count;
         } while (filled_bytes < n * sizeof(int16_t));

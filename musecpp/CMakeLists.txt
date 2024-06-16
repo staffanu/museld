@@ -1,10 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
 project(musecpp)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(fmt REQUIRED)
 find_package(glfw3 3.3 REQUIRED)
 find_package(Vulkan REQUIRED)
 
@@ -81,7 +80,6 @@ target_link_libraries(musecpp
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
-        PRIVATE fmt::fmt
         PRIVATE ${LIBAV_LIBRARIES}
 )
 

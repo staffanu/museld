@@ -2,7 +2,7 @@
 // Created by staffanu on 2/8/24.
 //
 
-#include <fmt/format.h>
+#include <format>
 #include <cassert>
 #include "EfmDecoder.h"
 
@@ -153,7 +153,7 @@ void EfmDecoder::decode(int frame_no,
             m_consecutive_syncs += 1;
             if (m_consecutive_syncs >= 3 && !m_locked) {
                 m_locked = true;
-                m_log.debug(eAudio, fmt::format("efm locked index {}", m_total_bits));
+                m_log.debug(eAudio, std::format("efm locked index {}", m_total_bits));
             }
         } else if (m_bits_since_sync == 588 && m_locked) {
             m_bit_index = 0;
@@ -163,7 +163,7 @@ void EfmDecoder::decode(int frame_no,
             m_consecutive_syncs = 0;
             if (m_consecutive_sync_failures >= 7 && m_locked) {
                 m_locked = false;
-                m_log.debug(eAudio, fmt::format("efm lock lost index {}", m_total_bits));
+                m_log.debug(eAudio, std::format("efm lock lost index {}", m_total_bits));
             }
         } else if (m_byte_index < 33) {
             if (m_bit_index == 16) {
@@ -189,7 +189,7 @@ void EfmDecoder::decode(int frame_no,
 
     if (frame_no % 30 == 0) {
         m_log.info(eAudio | ePerformance,
-                   fmt::format("Time spent decoding last second: {:.1f} ms; efm frame count: {}, "
+                   std::format("Time spent decoding last second: {:.1f} ms; efm frame count: {}, "
                                "input erasure rate: {:.0f} ppm, past c1 erasure rate: {:.0f} ppm, output erasure rate: {:.0f} ppm",
                                (double)m_total_time_us_last_second / 1000.0 / 30,
                                m_efm_frame_count_last_second,

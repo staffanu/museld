@@ -5,7 +5,7 @@
 #include <string>
 #include <map>
 #include <chrono>
-#include <fmt/format.h>
+#include <format>
 #include "musevk/VulkanManager.h"
 #include "musevk/TimestampQueryPool.h"
 #include "MuseConstants.h"
@@ -119,7 +119,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
         else
             m_eq = {m_eq.first * 0.9 + eq_estimate.first * 0.1, m_eq.second * 0.9 + eq_estimate.second * 0.1};
         if (m_frame_no % 30 == 0)
-            m_log.info(eDecoder, fmt::format("eq: {}, {}", m_eq.first, m_eq.second));
+            m_log.info(eDecoder, std::format("eq: {}, {}", m_eq.first, m_eq.second));
 
         m_first_stage_command_buffer->begin();
 
@@ -162,13 +162,13 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                 m_frame_buffers[2]->get_field(decoded_field_index)};
 
         if (m_shaders.decodeInterFrameAndDetectMotion(*m_second_stage_command_buffer, fields, true)) {
-            m_log.debug(eVideo, fmt::format("Field {} inter-frame interpolation success", decoded_field_index));
+            m_log.debug(eVideo, std::format("Field {} inter-frame interpolation success", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
                                                  field_interpolation_mode == FieldInterpolationMode::eForceIntraField,
                                                  field_interpolation_mode == FieldInterpolationMode::eForceInterFrame,
                                                  output_yuv);
         } else {
-            m_log.warn(eVideo, fmt::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
+            m_log.warn(eVideo, std::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false, output_yuv);
         }
     }
@@ -204,7 +204,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
     auto t1 = chrono::high_resolution_clock::now();
     long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
     m_total_elapsed_time_us += time_us;
-    m_log.info(ePerformance, fmt::format("Field {} elapsed time {} ms; {} ms/frame",
+    m_log.info(ePerformance, std::format("Field {} elapsed time {} ms; {} ms/frame",
                                          m_field_index, time_us / 1000,
                                          m_total_elapsed_time_us / 1000 / m_frame_no));
 

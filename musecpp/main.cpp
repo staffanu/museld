@@ -1,5 +1,5 @@
 #include <filesystem>
-#include <fmt/format.h>
+#include <format>
 #include <set>
 #include <functional>
 #include "muse/Shaders.h"
@@ -188,7 +188,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 if (xpos >= 0 && ypos >= 0 && xpos < xsize && ypos < ysize) {
                     int field_x = (int)(xpos / xsize * MUSE_Y_BUF_WIDTH);
                     int field_y = (int)(ypos / ysize * MUSE_BUF_HEIGHT);
-                    cursor_string = fmt::format("({}, {}) ({}, {})",
+                    cursor_string = std::format("({}, {}) ({}, {})",
                                                 (int)(xpos / xsize * MUSE_Y_BUF_WIDTH * 3),
                                                 (int)(ypos / ysize * MUSE_BUF_HEIGHT * 2),
                                                 field_x, field_y);
@@ -197,7 +197,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                         long field_offset = last_buffer_file_offset // start of sound data
                                 + (long)((field_parity ? 565 : 2) * MUSE_TOTAL_WIDTH * input_samples_per_muse_sample);
                         string offset_string =
-                                fmt::format("{} {} {} Y {} Cr {} Cb {}",
+                                std::format("{} {} {} Y {} Cr {} Cb {}",
                                             last_buffer_file_offset,
                                             field_parity ? "ODD" : "EVEN",
                                             field_offset,
@@ -213,11 +213,11 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             }
             if (show_disc_code) {
                 string disc_code_string1 = disc_code.has_value() ?
-                                          fmt::format("{}{} {}",
+                                          std::format("{}{} {}",
                                                       disc_code->pf() ? "TOC " : "", disc_code->sz() ? "20 cm" : "30 cm", disc_code->df() ? "CLV" : "CAV")
                                                       : "No disc code";
                 string disc_code_string2 = disc_code.has_value() ?
-                                           fmt::format("Chapter {} Frame {}", disc_code->chapter(), disc_code->frame()) : "";
+                                           std::format("Chapter {} Frame {}", disc_code->chapter(), disc_code->frame()) : "";
                 text_renderer.drawText(images.out_image, 90, 900, disc_code_string1, 2, *command_buffer);
                 text_renderer.drawText(images.out_image, 90, 955, disc_code_string2, 2, *command_buffer);
                 if (paused)
@@ -376,13 +376,13 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 zoom_factor = (zoom_factor * 2) % 7;
                 zoom_center.first = max(0.5 / zoom_factor, min(1.0 - 0.5 / zoom_factor, zoom_center.first));
                 zoom_center.second = max(0.5 / zoom_factor, min(1.0 - 0.5 / zoom_factor, zoom_center.second));
-                osd_text = fmt::format("ZOOM {}", zoom_factor);
+                osd_text = std::format("ZOOM {}", zoom_factor);
             }
         }
         auto t1 = chrono::high_resolution_clock::now();
         auto time_us = (double) chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
         log.info(eApplication | ePerformance,
-            fmt::format("Total {} frames.  Avg {:.3f} ms/frame ({:.3f} frames/s)",
+            std::format("Total {} frames.  Avg {:.3f} ms/frame ({:.3f} frames/s)",
                         field_count / 2,
                         time_us / 1000.0 / field_count * 2,
                         1000000.0 / time_us * field_count / 2));

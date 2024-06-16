@@ -6,7 +6,7 @@
 #include <map>
 #include <cassert>
 #include <filesystem>
-#include <fmt/format.h>
+#include <format>
 #include "musevk/VulkanBuffer.h"
 #include "MuseConstants.h"
 #include "PhaseCorrect16MHzInputReader.h"
@@ -34,7 +34,7 @@ bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::unique_ptr<MuseIn
     off_t samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
     assert(samples_per_frame >= samples_to_skip);
     vector<float> skip_buffer(samples_per_frame);
-    m_log.info(eInput, fmt::format("Skipping {} initial samples", samples_to_skip));
+    m_log.info(eInput, std::format("Skipping {} initial samples", samples_to_skip));
     readFloats(m_input, skip_buffer.data(), samples_to_skip);
 
     return InputReader::initialize(buffers);
@@ -59,14 +59,14 @@ void PhaseCorrect16MHzInputReader::seek(double seconds) {
 
         off_t samples_to_seek = frames_to_seek * samples_per_frame;
         double actual_seek_time = (double)frames_to_seek / 30.0;
-        m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples.",
+        m_log.info(eInput, std::format("Seeking relative time {} s, {} samples.",
                                        actual_seek_time, samples_to_seek));
         m_input.seekg(samples_to_seek * 2, ifstream::cur);
 
         // discard content in existing input buffers
         move(m_filled_input_buffers.begin(), m_filled_input_buffers.end(), back_inserter(m_vacant_input_buffers));
         m_filled_input_buffers.clear();
-        m_log.error(eInput, fmt::format("sizes: {} {}", m_vacant_input_buffers.size(), m_filled_input_buffers.size()));
+        m_log.error(eInput, std::format("sizes: {} {}", m_vacant_input_buffers.size(), m_filled_input_buffers.size()));
         m_cv_vacant.notify_one();
     }
 }
@@ -119,7 +119,7 @@ pair<int, pair<float, float>> PhaseCorrect16MHzInputReader::compute_initial_skip
     auto y1 = sorted[500];
     auto y2 = sorted[480 * 1125 * 2 - 500];
     pair<float, float> eq = {(y2 - y1) / (239.0f - 16.0f), y1 - 16.0f};
-    log.info(eInput, fmt::format("Initial eq: {}, {}", eq.first, eq.second));
+    log.info(eInput, std::format("Initial eq: {}, {}", eq.first, eq.second));
 
     // The rest of the code only checks the signal for rising or falling values, and never uses the actual
     // values directly.  We do not need to do any equalization for this.

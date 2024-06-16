@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <fstream>
-#include <fmt/format.h>
+#include <format>
 #include <cassert>
 #include <complex>
 #include <array>

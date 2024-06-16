@@ -4,7 +4,7 @@
 
 #include <sys/fcntl.h>
 #include <unistd.h>
-#include <fmt/format.h>
+#include <format>
 #include "musevk/VulkanBuffer.h"
 #include "InputReader.h"
 #include "util/Logger.h"
@@ -41,7 +41,7 @@ bool InputReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>
         m_vacant_input_buffers.push_back(std::move(b));
     buffers.clear();
 
-    m_log.debug(eInput, fmt::format("Using {} input buffers", m_vacant_input_buffers.size()));
+    m_log.debug(eInput, std::format("Using {} input buffers", m_vacant_input_buffers.size()));
 
     m_reader_thread = new std::thread(&InputReader::threadFunc, this);
 #ifdef linux
@@ -53,7 +53,7 @@ bool InputReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>
                                 O_WRONLY | O_TRUNC | O_CREAT,
                                 S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         if (m_output_file_fd == -1)
-            throw std::runtime_error(fmt::format("Unable to open output file for writing: {}",
+            throw std::runtime_error(std::format("Unable to open output file for writing: {}",
                                             strerror(errno)));
 
         m_file_write_buffer = malloc(InputBlock::c_requiredFileWriteBufferSize);
@@ -104,13 +104,13 @@ InputReader<InputBlock>::getNextInputBuffer() {
 
         auto filled_buffers = m_filled_input_buffers.size();
         if (filled_buffers == 0 && !m_reader_thread_finished) {
-            m_log.warn(eInput, fmt::format("getNextInputBuffer: no filled buffers after this one"));
+            m_log.warn(eInput, std::format("getNextInputBuffer: no filled buffers after this one"));
             hint = InputStatus::eBuffersEmpty;
         } else if (m_vacant_input_buffers.empty() && m_input_is_realtime) {
-            m_log.warn(eInput, fmt::format("getNextInputBuffer: no vacant buffers available"));
+            m_log.warn(eInput, std::format("getNextInputBuffer: no vacant buffers available"));
             hint = InputStatus::eBuffersFilled;
         } else if (m_get_input_buffers_count % 30 == 0)
-            m_log.debug(eInput, fmt::format("getNextInputBuffer: {} buffers filled", filled_buffers));
+            m_log.debug(eInput, std::format("getNextInputBuffer: {} buffers filled", filled_buffers));
     }
 
     if (m_output_file_fd != -1)

@@ -2,7 +2,7 @@
 // Created by staffanu on 5/31/23.
 //
 
-#include <fmt/format.h>
+#include <format>
 #include "ComputeShader.h"
 
 using namespace std;
@@ -202,13 +202,13 @@ namespace musevk {
         if (group_count_x > limits.maxComputeWorkGroupCount[0]
             || group_count_y > limits.maxComputeWorkGroupCount[1]
             || group_count_z > limits.maxComputeWorkGroupCount[2])
-            throw std::runtime_error(fmt::format("Dispatch workgroup count too high: x: count={}, limit={}; y: count={}, limit={}; z: count={}, limit={}",
+            throw std::runtime_error(std::format("Dispatch workgroup count too high: x: count={}, limit={}; y: count={}, limit={}; z: count={}, limit={}",
                                                  group_count_x, limits.maxComputeWorkGroupCount[0],
                                                  group_count_y, limits.maxComputeWorkGroupCount[1],
                                                  group_count_z, limits.maxComputeWorkGroupCount[2]));
 
 //        if (group_count_x * group_count_y * group_count_z > limits.maxComputeWorkGroupInvocations)
-//            throw std::runtime_error(fmt::format("Dispatch total count too high: count={}, limit={}",
+//            throw std::runtime_error(std::format("Dispatch total count too high: count={}, limit={}",
 //                                                 group_count_x * group_count_y * group_count_z, limits.maxComputeWorkGroupInvocations));
 
         commandBuffer.dispatch(group_count_x, group_count_y, group_count_z);

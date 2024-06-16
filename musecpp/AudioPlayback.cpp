@@ -3,7 +3,7 @@
 //
 
 #include <cassert>
-#include <fmt/format.h>
+#include <format>
 #include "AudioPlayback.h"
 #include "util/Logger.h"
 
@@ -32,7 +32,7 @@ AudioPlayback::AudioPlayback(Logger &log)
     PaHostApiIndex count = Pa_GetHostApiCount();
     for (PaHostApiIndex i = 0; i < count; i++) {
         auto *info = Pa_GetHostApiInfo(i);
-        m_log.debug(eAudio, fmt::format("Host API {}: type id={}, device ocunt={}, default device={}",
+        m_log.debug(eAudio, std::format("Host API {}: type id={}, device ocunt={}, default device={}",
                                         info->name, (int)info->type, info->deviceCount, (int)info->defaultOutputDevice));
     }
 }
@@ -75,7 +75,7 @@ void AudioPlayback::add_samples(AudioMode const &audio_mode, int const &sample_c
         else
             m_audio_speed_adjust = 0;
 
-        m_log.debug(eAudio, fmt::format("Audio buffer size: {}, adjustment: {:.5f}",
+        m_log.debug(eAudio, std::format("Audio buffer size: {}, adjustment: {:.5f}",
                                         audio_buffer_size, (double)m_audio_speed_adjust));
     }
 
@@ -91,7 +91,7 @@ void AudioPlayback::add_samples(AudioMode const &audio_mode, int const &sample_c
             discard_count++;
     }
     if (discard_count != 0)
-        m_log.error(eAudio, fmt::format("Discarded {} samples", discard_count));
+        m_log.error(eAudio, std::format("Discarded {} samples", discard_count));
 }
 
 int AudioPlayback::audioCallbackMember(void *output_buffer, unsigned long frames_per_buffer,
@@ -119,7 +119,7 @@ int AudioPlayback::audioCallbackMember(void *output_buffer, unsigned long frames
         }
     }
     if (underrun_count)
-        m_log.info(eAudio, fmt::format("Audio buffer underrun: {} missing samples", underrun_count));
+        m_log.info(eAudio, std::format("Audio buffer underrun: {} missing samples", underrun_count));
     return 0;
 }
 
@@ -127,14 +127,14 @@ void AudioPlayback::openStream() {
     PaDeviceIndex count = Pa_GetDeviceCount();
     for (PaDeviceIndex i = 0; i < count; i++) {
         auto *info = Pa_GetDeviceInfo(i);
-        m_log.debug(eAudio, fmt::format("Device {}: {}, maximum {} output channels",
+        m_log.debug(eAudio, std::format("Device {}: {}, maximum {} output channels",
                                         i, info->name, info->maxOutputChannels));
     }
 
     PaDeviceIndex device_index = Pa_GetDefaultOutputDevice();
     auto *info = Pa_GetDeviceInfo(device_index);
     m_channels_used = min(m_current_mode == MODE_A ? 4 : 2, info->maxOutputChannels);
-    m_log.info(eAudio, fmt::format("Using device {}: maximum {} output channels, {} used.",
+    m_log.info(eAudio, std::format("Using device {}: maximum {} output channels, {} used.",
                                    info->name, info->maxOutputChannels, m_channels_used));
 
     PaStreamParameters parameters {

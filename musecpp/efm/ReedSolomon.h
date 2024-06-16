@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <sstream>
-#include <fmt/format.h>
+#include <format>
 #include "GFValue.h"
 #include "ByteWithErasureFlag.h"
 #include "util/Logger.h"
@@ -185,7 +185,7 @@ private:
             if (data[i].isErased())
                 erasure_positions.push_back(i);
         if (erasure_positions.size() > syndromes.size()) {
-            addDiagnosticCounter(fmt::format("erasure decoding not performed for {} erasures", erasure_positions.size()));
+            addDiagnosticCounter(std::format("erasure decoding not performed for {} erasures", erasure_positions.size()));
             return false;
         } else {
             std::vector<GF> x(erasure_positions.size());
@@ -208,10 +208,10 @@ private:
                     auto error = y[i];
                     data[errorPos] = ByteWithErasureFlag(data[errorPos].gfValue<irreducible_poly, alpha_decimal>() + error * m_alpha.pow(errorPos * m_fcr).inverse(), true);
                 }
-                addDiagnosticCounter(fmt::format("erasure decoding failed for {} erasures", erasure_positions.size()));
+                addDiagnosticCounter(std::format("erasure decoding failed for {} erasures", erasure_positions.size()));
                 return false;
             } else {
-                addDiagnosticCounter(fmt::format("corrected {} erasures", erasure_positions.size()));
+                addDiagnosticCounter(std::format("corrected {} erasures", erasure_positions.size()));
                 return true;
             }
         }
@@ -258,7 +258,7 @@ private:
                     auto check1 = GF(1) + x0.inverse() * x2;
                     auto check2 = GF(1) + x2prime;
                     if (check1 == GF(0) || check2 == GF(0)) {
-                        addDiagnosticCounter(fmt::format("single correction with two erasures failed zero inverse {} {}",
+                        addDiagnosticCounter(std::format("single correction with two erasures failed zero inverse {} {}",
                                                  check1.getInt(), check2.getInt()));
                         return false;
                     } else {
@@ -373,7 +373,7 @@ void ReedSolomon<irreducible_poly, alpha>::doDecode(std::vector<ByteWithErasureF
             m_statistics["input ok"]++;
         } else {
             uneraseAll(data);
-            addDiagnosticCounter(fmt::format("syndromes zero with {} erasures, un-erased", number_of_erasures));
+            addDiagnosticCounter(std::format("syndromes zero with {} erasures, un-erased", number_of_erasures));
             m_statistics["input ok despite erasures"]++;
         }
     } else {

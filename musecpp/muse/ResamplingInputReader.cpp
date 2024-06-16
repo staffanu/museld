@@ -4,7 +4,7 @@
 
 #include <fcntl.h>
 #include <unistd.h>
-#include <fmt/format.h>
+#include <format>
 #include <cassert>
 #include <filesystem>
 #include "musevk/VulkanBuffer.h"
@@ -77,12 +77,12 @@ bool ResamplingInputReader::initialize(std::vector<std::unique_ptr<MuseInputBloc
     if (m_demodulator == nullptr) {
         m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
         if (m_file_fd == -1)
-            throw runtime_error(fmt::format("ResamplingInputReader: Unable to open input file {}", m_filename));
+            throw runtime_error(std::format("ResamplingInputReader: Unable to open input file {}", m_filename));
 #ifdef linux
         if (filesystem::is_fifo(m_filename)) {
-            m_log.debug(eInput, fmt::format("Pipe size: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
+            m_log.debug(eInput, std::format("Pipe size: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
             fcntl(m_file_fd, F_SETPIPE_SZ, 1024 * 1024);
-            m_log.debug(eInput, fmt::format("Pipe size now: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
+            m_log.debug(eInput, std::format("Pipe size now: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
         }
 #endif
     } else {
@@ -101,7 +101,7 @@ bool ResamplingInputReader::initialize(std::vector<std::unique_ptr<MuseInputBloc
     m_g1 = m_G1 / m_GpdGvco;
     m_g2 = m_G2 / m_GpdGvco;
 
-    m_log.debug(eInput, fmt::format("m_g1={:.5f} m_g2={:.7f}", m_g1, m_g2));
+    m_log.debug(eInput, std::format("m_g1={:.5f} m_g2={:.7f}", m_g1, m_g2));
 
     m_input_buffer = (uint8_t *)calloc(m_bytes_per_sample, c_input_buffer_size);
     m_input_dropout_buffer = (uint8_t *)calloc(1, c_input_buffer_size);
@@ -134,7 +134,7 @@ void ResamplingInputReader::seek(double seconds) {
 
             off_t samples_to_seek = (off_t) (seconds * 16.2e6 * m_input_samples_per_sample);
             off_t bytes_to_seek = m_bytes_per_sample * samples_to_seek;
-            m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples, {} bytes.",
+            m_log.info(eInput, std::format("Seeking relative time {} s, {} samples, {} bytes.",
                                            seconds, samples_to_seek, bytes_to_seek));
             lseek(m_file_fd, bytes_to_seek, SEEK_CUR);
 
@@ -211,7 +211,7 @@ bool ResamplingInputReader::readInput(std::unique_ptr<MuseInputBlock> const &out
                     return false;
                 }
             } else if (read_count == -1)
-                throw runtime_error(fmt::format("Error reading from file: {}", strerror(errno)));
+                throw runtime_error(std::format("Error reading from file: {}", strerror(errno)));
             else
                 bytes_read += (int) read_count;
         }
@@ -341,7 +341,7 @@ bool ResamplingInputReader::process(std::unique_ptr<MuseInputBlock> const &outpu
                     m_max_frame_pulse_sum_difference = max(m_max_frame_pulse_sum_difference, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum);
                     if (m_line1_frame_pulse_sum - m_line2_frame_pulse_sum > threshold) {
 
-                        m_log.info(eInput, fmt::format("New state eLocked at line {}, diff={}, threshold={}",
+                        m_log.info(eInput, std::format("New state eLocked at line {}, diff={}, threshold={}",
                                                        m_line, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold));
                         // copy the two last lines to lines 1 and 2 so that the first frame is complete -- ignore dropouts
                         for (int i = 0; i < MUSE_TOTAL_WIDTH; i++) {
@@ -363,7 +363,7 @@ bool ResamplingInputReader::process(std::unique_ptr<MuseInputBlock> const &outpu
                         if (m_missed_line_pulses < 3)
                             m_missed_line_pulses += 1;
                         else {
-                            m_log.warn(eInput, fmt::format("Missed line pulses (diff={}, threshold={}): New state eSearching at line {}",
+                            m_log.warn(eInput, std::format("Missed line pulses (diff={}, threshold={}): New state eSearching at line {}",
                                                            m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold, m_line));
                             m_state = eSearching;
                         }
@@ -394,7 +394,7 @@ bool ResamplingInputReader::process(std::unique_ptr<MuseInputBlock> const &outpu
                 m_consecutive_good_syncs = m_sync_is_good ? m_consecutive_good_syncs + 1 :
                                            m_consecutive_good_syncs >= 2 ? m_consecutive_good_syncs - 2 : 0;
                 if (m_consecutive_good_syncs >= 50) {
-                    m_log.info(eInput, fmt::format("New state eLockedHoriz at line {}", m_line));
+                    m_log.info(eInput, std::format("New state eLockedHoriz at line {}", m_line));
                     m_state = eLockedHoriz;
                     m_line2_frame_pulse_sum = 0;
                     m_max_frame_pulse_sum_difference = 0;
@@ -408,7 +408,7 @@ bool ResamplingInputReader::process(std::unique_ptr<MuseInputBlock> const &outpu
 
                 if (m_state == eLockedHoriz) {
                     float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
-                    m_log.info(eInput, fmt::format(
+                    m_log.info(eInput, std::format(
                             "Locked horizontally, but frame pulses not found (max sum={}, threshold={}): New state eSearching at line {}",
                             m_max_frame_pulse_sum_difference, threshold, m_line));
                 }

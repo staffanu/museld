@@ -2,7 +2,7 @@
 // Created by Staffan Ulfberg on 6/16/23.
 //
 
-#include <fmt/format.h>
+#include <format>
 #include <cassert>
 #include "BchDecoder.h"
 #include "util/Logger.h"
