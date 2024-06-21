@@ -2,8 +2,8 @@
 // Created by staffanu on 5/22/23.
 //
 
-#ifndef MUSECPP_MUSEDECODER_H
-#define MUSECPP_MUSEDECODER_H
+#ifndef MUSECPP_SDDECODER_H
+#define MUSECPP_SDDECODER_H
 
 #include <deque>
 #include "musevk/TimestampStatistics.h"
@@ -12,7 +12,7 @@
 #include "Shaders.h"
 #include "FrameBuffer.h"
 #include "musevk/CommandPool.h"
-#include "MuseInputBlock.h"
+#include "SdInputBlock.h"
 #include "Decoder.h"
 
 namespace musevk {
@@ -23,22 +23,22 @@ template<class InputBlock> class InputReader;
 class Logger;
 class Shaders;
 
-class MuseDecoder : public Decoder {
+class SdDecoder : public Decoder {
 public:
     /// \param decode_all_fields If false, skips decoding of the first field of each
     /// frame individually, so next should be called 30 times per second instead of 60;
     /// useful for slow hardware.
-    MuseDecoder(Logger &log,
-                InputReader<MuseInputBlock> &reader,
+    SdDecoder(Logger &log,
+                InputReader<SdInputBlock> &reader,
                 Shaders &shaders,
                 musevk::VulkanManager &manager,
                 bool decode_video,
                 bool decode_all_fields,
                 bool decode_audio,
                 musevk::TimestampQueryPool *timestamp_query_pool);
-    ~MuseDecoder();
-    MuseDecoder(const MuseDecoder&) = delete;
-    void operator=(const MuseDecoder&) = delete;
+    ~SdDecoder();
+    SdDecoder(const SdDecoder&) = delete;
+    void operator=(const SdDecoder&) = delete;
 
     [[nodiscard]] bool initialize() override;
 
@@ -55,7 +55,7 @@ public:
 
 private:
     Logger &m_log;
-    InputReader<MuseInputBlock> &m_reader;
+    InputReader<SdInputBlock> &m_reader;
     Shaders &m_shaders;
     musevk::VulkanManager &m_manager;
     musevk::CommandPool m_command_pool;
@@ -79,4 +79,4 @@ private:
 };
 
 
-#endif //MUSECPP_MUSEDECODER_H
+#endif //MUSECPP_SDDECODER_H

@@ -17,6 +17,8 @@
 #ifdef HAVE_LIBAV
 # include "VideoFileWriter.h"
 #include "musevk/CommandPool.h"
+#include "sdtv/SdInputReader.h"
+#include "Decoder.h"
 
 #endif
 
@@ -43,7 +45,8 @@ void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "Error %d: %s\n", error, description); // FIXME: use logging framework
 }
 
-void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, InputReader<MuseInputBlock> &reader,
+template<class InputBlock>
+void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, InputReader<InputBlock> &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
                   bool start_paused, bool decode_video, Shaders::DropoutMode dropout_mode,
                   bool decode_audio, bool efm_audio, bool benchmark_shaders,
@@ -63,13 +66,9 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     vk::Device &device = manager.getDevice();
 
     {
-        std::vector<std::unique_ptr<MuseInputBlock>> input_vulkan_buffers{};
+        std::vector<std::unique_ptr<InputBlock>> input_vulkan_buffers{};
         for (int i = 0; i < INPUT_BUFFER_COUNT; i++)
-            input_vulkan_buffers.push_back(
-                    make_unique<MuseInputBlock>(
-                            make_unique<musevk::VulkanBuffer>(manager, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite),
-                            make_unique<musevk::VulkanBuffer>(manager, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint8_t), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite)
-                    ));
+            input_vulkan_buffers.push_back(InputBlockFactory<InputBlock>::makeBlock(manager));
         if (!reader.initialize(input_vulkan_buffers))
             throw runtime_error("InputReader initialization failed");
     }
@@ -104,15 +103,27 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         Shaders shaders(log, executable_dir, manager, command_pool);
         TextRenderer text_renderer(executable_dir, manager, command_pool);
 
-        auto decoder = MuseDecoder(log,
-                                   reader,
-                                   shaders,
-                                   manager,
-                                   decode_video,
-                                   decode_all_fields,
-                                   decode_audio,
-                                   timestamp_query_pool);
-        if (!decoder.initialize())
+        std:unique_ptr<Decoder> decoder = nullptr;
+        if (std::is_same<InputBlock, MuseInputBlock>::value) {
+            decoder = std::make_unique<MuseDecoder>(log,
+                                        (InputReader<MuseInputBlock> &)reader,
+                                       shaders,
+                                       manager,
+                                       decode_video,
+                                       decode_all_fields,
+                                       decode_audio,
+                                       timestamp_query_pool);
+        } else {
+            decoder = std::make_unique<SdDecoder>(log,
+                                                    (InputReader<SdInputBlock> &)reader,
+                                                    shaders,
+                                                    manager,
+                                                    decode_video,
+                                                    decode_all_fields,
+                                                    decode_audio,
+                                                    timestamp_query_pool);
+        }
+        if (!decoder->initialize())
             throw runtime_error("MuseDecoder initialization failed");
         auto images = shaders.getResultImages();
 
@@ -120,7 +131,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         int field_count = 0;
         bool paused = false;
         int paused_countdown = start_paused ? 5 : 0;
-        MuseDecoder::FieldInterpolationMode field_interpolation_mode = MuseDecoder::FieldInterpolationMode::eNormal;
+        Decoder::FieldInterpolationMode field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
         bool redo_last_field = false;
         bool enable_non_linear = true;
         bool enable_cursor = false;
@@ -137,7 +148,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         int field_parity;
 
         while (paused && !redo_last_field ||
-            decoder.next(efm_audio, &audio_mode, &audio_sample_count, audio_samples,
+            decoder->next(efm_audio, &audio_mode, &audio_sample_count, audio_samples,
                          &field_parity, &last_buffer_file_offset, &input_samples_per_muse_sample, &disc_code,
                          field_interpolation_mode, redo_last_field, enable_non_linear, dropout_mode, output_filename.has_value())) {
 
@@ -193,7 +204,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                                                 (int)(ypos / ysize * MUSE_BUF_HEIGHT * 2),
                                                 field_x, field_y);
                     text_renderer.drawText(images.out_image, 10, 8, cursor_string, 1, *command_buffer);
-                    if (field_interpolation_mode == MuseDecoder::FieldInterpolationMode::eForceIntraField && paused) {
+                    if (field_interpolation_mode == Decoder::FieldInterpolationMode::eForceIntraField && paused) {
                         long field_offset = last_buffer_file_offset // start of sound data
                                 + (long)((field_parity ? 565 : 2) * MUSE_TOTAL_WIDTH * input_samples_per_muse_sample);
                         string offset_string =
@@ -318,21 +329,21 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 zoom_center.second = min(1.0 - 0.5 / zoom_factor, zoom_center.second + zoom_step / zoom_factor);
             }
             if (check_glfw_key(window, GLFW_KEY_1)) {
-                field_interpolation_mode = MuseDecoder::FieldInterpolationMode::eNormal;
+                field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
                 if (paused)
                     redo_last_field = true;
                 log.info(eApplication | eVideo, "Field interpolation determined by motion detection");
                 osd_text = "MOTION NORMAL";
             }
             if (check_glfw_key(window, GLFW_KEY_2)) {
-                field_interpolation_mode = MuseDecoder::FieldInterpolationMode::eForceIntraField;
+                field_interpolation_mode = Decoder::FieldInterpolationMode::eForceIntraField;
                 if (paused)
                     redo_last_field = true;
                 log.info(eApplication | eVideo, "Field interpolation forced to intra field only");
                 osd_text = "MOTION ALL";
             }
             if (check_glfw_key(window, GLFW_KEY_3)) {
-                field_interpolation_mode = MuseDecoder::FieldInterpolationMode::eForceInterFrame;
+                field_interpolation_mode = Decoder::FieldInterpolationMode::eForceInterFrame;
                 if (paused)
                     redo_last_field = true;
                 log.info(eApplication | eVideo, "Inter-frame interpolation forced");
@@ -387,7 +398,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                         time_us / 1000.0 / field_count * 2,
                         1000000.0 / time_us * field_count / 2));
         if (benchmark_shaders)
-            decoder.output_benchmark_results();
+            decoder->output_benchmark_results();
+        decoder = nullptr;
     }
 
     delete timestamp_query_pool;
@@ -437,6 +449,7 @@ int main(int argc, char *argv[]) {
     bool decode_audio = true;
     bool efm_audio = false;
     bool benchmark_shaders = false;
+    bool sdtv_mode = false;
 
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -469,6 +482,9 @@ int main(int argc, char *argv[]) {
     });
     options.emplace_back("--demodulate", [&] () mutable -> void {
         demodulate = true;
+    });
+    options.emplace_back("--sdtv", [&] () mutable -> void {
+        sdtv_mode = true;
     });
     options.emplace_back("--fifo", [&] () mutable -> void {
         input_is_fifo = true;
@@ -596,36 +612,48 @@ int main(int argc, char *argv[]) {
 
                 musevk::VulkanManager manager(log);
 
-                if (demodulate)
-                    input_format = eOverSampledSignedShortsLittleEndian;
-                InputReader<MuseInputBlock> *reader;
-                switch (input_format) {
-                    case eOverSampledUnsignedBytes:
-                    case eOverSampledSignedShortsLittleEndian:
-                        reader = new ResamplingInputReader(
-                                log, executable_dir, manager, *it,
-                                input_format == eOverSampledSignedShortsLittleEndian
-                                ? ResamplingInputReader::eSignedShortLittleEndian
-                                : ResamplingInputReader::eUnsignedByte,
-                                input_sample_frequency, initial_seek_seconds, demodulate, benchmark_shaders,
-                                muse_output_filename);
-                        break;
-                    case eLittleEndianShorts:
-                    case eBigEndianShorts:
-                        reader = new PhaseCorrect16MHzInputReader(log, *it,
-                                                                  input_format == eBigEndianShorts,
-                                                                  initial_seek_seconds, muse_output_filename);
-                        break;
-                    case eUnknown:
-                    default:
-                        cerr << "No input format specified" << endl;
-                        exit(EXIT_FAILURE);
+                if (sdtv_mode) {
+                    auto *reader = new SdInputReader(
+                                    log, executable_dir, manager, *it,
+                                    input_sample_frequency, initial_seek_seconds, benchmark_shaders,
+                                    muse_output_filename);
+                    process_file(log, executable_dir, manager, *reader, decode_all_fields,
+                                 full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
+                                 efm_audio,
+                                 benchmark_shaders, output_filename);
+                    delete reader;
+                } else {
+                    if (demodulate)
+                        input_format = eOverSampledSignedShortsLittleEndian;
+                    InputReader<MuseInputBlock> *reader;
+                    switch (input_format) {
+                        case eOverSampledUnsignedBytes:
+                        case eOverSampledSignedShortsLittleEndian:
+                            reader = new ResamplingInputReader(
+                                    log, executable_dir, manager, *it,
+                                    input_format == eOverSampledSignedShortsLittleEndian
+                                    ? ResamplingInputReader::eSignedShortLittleEndian
+                                    : ResamplingInputReader::eUnsignedByte,
+                                    input_sample_frequency, initial_seek_seconds, demodulate, benchmark_shaders,
+                                    muse_output_filename);
+                            break;
+                        case eLittleEndianShorts:
+                        case eBigEndianShorts:
+                            reader = new PhaseCorrect16MHzInputReader(log, *it,
+                                                                      input_format == eBigEndianShorts,
+                                                                      initial_seek_seconds, muse_output_filename);
+                            break;
+                        case eUnknown:
+                        default:
+                            cerr << "No input format specified" << endl;
+                            exit(EXIT_FAILURE);
+                    }
+                    process_file(log, executable_dir, manager, *reader, decode_all_fields,
+                                 full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
+                                 efm_audio,
+                                 benchmark_shaders, output_filename);
+                    delete reader;
                 }
-                process_file(log, executable_dir, manager, *reader, decode_all_fields,
-                             full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio, efm_audio,
-                             benchmark_shaders, output_filename);
-                delete reader;
-
                 it++;
             }
         }

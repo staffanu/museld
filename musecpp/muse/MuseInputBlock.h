@@ -7,6 +7,7 @@
 
 #include <array>
 #include "musevk/VulkanBuffer.h"
+#include "musevk/VulkanManager.h"
 #include "InputBlockBase.h"
 #include "MuseConstants.h"
 
@@ -38,6 +39,17 @@ public:
     double input_samples_per_muse_sample;
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropout_data;
+};
+
+template<>
+class InputBlockFactory<MuseInputBlock> {
+public:
+    static std::unique_ptr<MuseInputBlock> makeBlock(musevk::VulkanManager &manager) {
+        return std::make_unique<MuseInputBlock>(
+                std::make_unique<musevk::VulkanBuffer>(manager, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(float), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite),
+                std::make_unique<musevk::VulkanBuffer>(manager, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH, sizeof(uint8_t), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite)
+        );
+    }
 };
 
 #endif //MUSECPP_MUSEINPUTBLOCK_H

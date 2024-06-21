@@ -18,4 +18,10 @@ protected:
       efm_data() {}
 };
 
+template<class B>
+class InputBlockFactory {
+public:
+//    static B makeBlock();
+};
+
 #endif //MUSECPP_INPUTBLOCKBASE_H

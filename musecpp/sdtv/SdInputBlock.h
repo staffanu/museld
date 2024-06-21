@@ -1,0 +1,42 @@
+//
+// Created by staffanu on 6/16/24.
+//
+
+#ifndef MUSECPP_SDINPUTBLOCK_H
+#define MUSECPP_SDINPUTBLOCK_H
+
+#include <array>
+#include "musevk/VulkanBuffer.h"
+#include "InputBlockBase.h"
+
+// A block contains a full frame of data, sampled at 16.2 MHz
+class SdInputBlock : public InputBlockBase {
+public:
+    SdInputBlock(std::shared_ptr<musevk::VulkanBuffer> v, std::shared_ptr<musevk::VulkanBuffer> d)
+            : InputBlockBase(),
+              input_offset(0),
+              input_samples_per_muse_sample(0),
+              video_data(std::move(v)),
+              dropout_data(std::move(d)) {
+    };
+
+    static constexpr size_t c_requiredFileWriteBufferSize = 0;
+
+    long input_offset;
+    double input_samples_per_muse_sample;
+    std::shared_ptr<musevk::VulkanBuffer> video_data;
+    std::shared_ptr<musevk::VulkanBuffer> dropout_data;
+};
+
+template<>
+class InputBlockFactory<SdInputBlock> {
+public:
+    static std::unique_ptr<SdInputBlock> makeBlock(musevk::VulkanManager &manager) {
+        return std::make_unique<SdInputBlock>(
+                std::make_unique<musevk::VulkanBuffer>(manager, 720 * 480, sizeof(float), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite),
+                std::make_unique<musevk::VulkanBuffer>(manager, 720 * 480, sizeof(uint8_t), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite)
+        );
+    }
+};
+
+#endif //MUSECPP_SDINPUTBLOCK_H

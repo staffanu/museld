@@ -4,12 +4,16 @@ project(musecpp)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake-modules" ${CMAKE_MODULE_PATH})
+
 find_package(glfw3 3.3 REQUIRED)
 find_package(Vulkan REQUIRED)
 
-SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake-modules" ${CMAKE_MODULE_PATH})
 find_package(PORTAUDIO REQUIRED)
 include_directories("${PORTAUDIO_INCLUDE_DIRS}")
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GNURADIO REQUIRED gnuradio-filter)
 
 find_package(LIBAV)
 if (HAVE_LIBAV)
@@ -46,6 +50,9 @@ add_executable(musecpp
         muse/MuseRfDemodulator.cpp muse/MuseRfDemodulator.h
         muse/MuseInputBlock.h
         muse/MuseConstants.h
+        sdtv/SdRfDemodulator.cpp sdtv/SdRfDemodulator.h
+        sdtv/SdInputReader.h sdtv/SdInputReader.cpp
+        sdtv/SdInputBlock.h
         util/PercentileFilter.cpp util/PercentileFilter.h
         util/Logger.cpp util/Logger.h
         util/ConstExprHelpers.h
@@ -69,6 +76,7 @@ add_executable(musecpp
         efm/EfmDecoder.cpp efm/EfmDecoder.h
         efm/ByteWithErasureFlag.h
         util/FmtAddons.h
+        Decoder.h
 )
 if (HAVE_LIBAV)
     target_sources(musecpp PRIVATE
@@ -81,6 +89,7 @@ target_link_libraries(musecpp
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
         PRIVATE ${LIBAV_LIBRARIES}
+        PRIVATE ${GNURADIO_LIBRARIES}
 )
 
 set(GLSLC "glslc")

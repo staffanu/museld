@@ -8,18 +8,15 @@
 #include <format>
 #include "musevk/VulkanManager.h"
 #include "musevk/TimestampQueryPool.h"
-#include "MuseConstants.h"
-#include "MuseDecoder.h"
-#include "FrameBuffer.h"
-#include "FieldBufferView.h"
+#include "SdDecoder.h"
 #include "InputReader.h"
-#include "MuseInputBlock.h"
-#include "Shaders.h"
+#include "SdInputBlock.h"
+#include "muse/Shaders.h"
 
 using namespace std;
 
-MuseDecoder::MuseDecoder(
-        Logger &log, InputReader<MuseInputBlock> &reader, Shaders &shaders, musevk::VulkanManager &manager,
+SdDecoder::SdDecoder(
+        Logger &log, InputReader<SdInputBlock> &reader, Shaders &shaders, musevk::VulkanManager &manager,
         bool decode_video, bool decode_all_fields, bool decode_audio,
         musevk::TimestampQueryPool *timestamp_query_pool)
 : Decoder(),
@@ -46,7 +43,7 @@ MuseDecoder::MuseDecoder(
   m_frame_buffers() {
 }
 
-MuseDecoder::~MuseDecoder() {
+SdDecoder::~SdDecoder() {
     while (!m_frame_buffers.empty()) {
         delete m_frame_buffers.back();
         m_frame_buffers.pop_back();
@@ -54,14 +51,14 @@ MuseDecoder::~MuseDecoder() {
     m_manager.getDevice().destroy(m_first_stage_complete_semaphore);
 }
 
-bool MuseDecoder::initialize() {
+bool SdDecoder::initialize() {
     // Always keep the three latest frames (required for motion detection) -- pretend we have three already
     // The newest frame is always at index 0
     for (int i = 0; i < 3; i++)
         m_frame_buffers.push_back(
                 new FrameBuffer(m_log, -i,
                                 make_unique<musevk::VulkanBuffer>(
-                                        m_manager, musevk::Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT), 2 /* sizeof(float16) */,
+                                        m_manager, musevk::Size(720, 480), 2 /* sizeof(float16) */,
                                         vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostRead)));
 
     for (int i = 0; i < 3; i++)
@@ -77,7 +74,7 @@ bool MuseDecoder::initialize() {
     return true;
 }
 
-bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
+bool SdDecoder::next(bool efm_audio, AudioMode *audio_mode,
                        int *sample_count,
                        AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES],
                        int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
@@ -93,7 +90,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
     if (m_timestamp_query_pool != nullptr)
         m_timestamp_query_pool->resetAndSubmit(*m_reset_timestamp_query_pool_command_buffer);
 
-    std::unique_ptr<MuseInputBlock> input_block = nullptr;
+    std::unique_ptr<SdInputBlock> input_block = nullptr;
     InputStatus input_status = InputStatus::eNormal;
     if (m_field_index == 0 && !redo_last_field) {
         auto frame_buffer = m_frame_buffers.back();
@@ -151,7 +148,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
         *last_frame_buffer_input_offset = m_frame_buffers[0]->getInputOffset();
-        *input_samples_per_muse_sample = m_frame_buffers[0]->getInputSamplesPerMuseSample();
+        *input_samples_per_muse_sample = m_frame_buffers[0]->getInputSamplesPerSdSample();
         *field_parity = decoded_field_index;
 
         m_shaders.decodeIntraField(*m_second_stage_command_buffer, m_frame_buffers[0]->get_field(decoded_field_index));
@@ -219,6 +216,6 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
     return true;
 }
 
-void MuseDecoder::output_benchmark_results() {
+void SdDecoder::output_benchmark_results() {
     m_timestamp_statistics.print_stats(3);
 }
