@@ -21,6 +21,8 @@ public:
     };
 
     static constexpr size_t c_requiredFileWriteBufferSize = 0;
+
+    // 13.5e6 = 858 * 525 * 30 / 1.001
     static constexpr int c_samples_per_video_line = 858;
     static constexpr double c_video_sampling_frequency = 13.5e6;
     static constexpr int c_total_video_lines = 525;
@@ -41,8 +43,10 @@ class InputBlockFactory<NtscInputBlock> {
 public:
     static std::unique_ptr<NtscInputBlock> makeBlock(musevk::VulkanManager &manager) {
         return std::make_unique<NtscInputBlock>(
-                std::make_unique<musevk::VulkanBuffer>(manager, 720 * 480, sizeof(float), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite),
-                std::make_unique<musevk::VulkanBuffer>(manager, 720 * 480, sizeof(uint8_t), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite)
+                std::make_unique<musevk::VulkanBuffer>(manager, NtscInputBlock::c_samples_per_video_line * NtscInputBlock::c_total_video_lines,
+                                                       sizeof(float), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite),
+                std::make_unique<musevk::VulkanBuffer>(manager, NtscInputBlock::c_samples_per_video_line * NtscInputBlock::c_total_video_lines,
+                                                       sizeof(uint8_t), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite)
         );
     }
 };

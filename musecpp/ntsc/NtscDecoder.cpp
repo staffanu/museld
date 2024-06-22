@@ -31,7 +31,7 @@ NtscDecoder::NtscDecoder(
   m_decode_all_fields(decode_all_fields),
   m_decode_audio(decode_audio),
   m_timestamp_query_pool(timestamp_query_pool),
-  m_eq{-1, -1},
+  m_eq{1, 0},
   m_first_stage_complete_semaphore(manager.getDevice().createSemaphore(vk::SemaphoreCreateInfo())),
   m_reset_timestamp_query_pool_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
   m_first_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
@@ -58,11 +58,11 @@ bool NtscDecoder::initialize() {
     for (int i = 0; i < 2; i++)
         m_frames.push_back(new NtscFrame(m_log, -i, m_manager));
 
-//    for (int i = 0; i < 3; i++)
-//        for (int parity = 0; parity <= 1; parity++) {
-//            m_frame_buffers[i]->get_field(parity).set_prev_field(
-//                    &m_frame_buffers[parity == 1 ? i : (i + 1) % 3]->get_field(1 - parity));
-//        }
+    for (int i = 0; i < 2; i++)
+        for (int parity = 0; parity <= 1; parity++) {
+            m_frames[i]->get_field(parity).set_prev_field(
+                    &m_frames[parity == 1 ? i : (i + 1) % 2]->get_field(1 - parity));
+        }
 
     m_frame_no = 0;
     m_field_index = 0;
@@ -90,9 +90,9 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
     std::unique_ptr<NtscInputBlock> input_block = nullptr;
     InputStatus input_status = InputStatus::eNormal;
     if (m_field_index == 0 && !redo_last_field) {
-        auto frame_buffer = m_frames.back();
+        auto frame = m_frames.back();
         m_frames.pop_back();
-        m_frames.push_front(frame_buffer);
+        m_frames.push_front(frame);
 
         tie(input_block, input_status) = m_reader.getNextInputBuffer();
         switch (input_status) {
@@ -105,7 +105,7 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
                 assert(input_block != nullptr);
                 break;
         }
-        // frame_buffer->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_muse_sample);
+        frame->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_muse_sample);
         shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
 
         // auto eq_estimate = FrameBuffer::EstimateEq(input_vulkan_buffer->data<float>());
@@ -124,10 +124,10 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
 
 //        m_shaders.applyEqAndDeemphasisAndGamma(*m_first_stage_command_buffer,
 //                                               input_vulkan_buffer, input_block->dropout_data,
-//                                               frame_buffer->data(),
+//                                               frame->data(),
 //                                               m_eq, enable_non_linear, dropout_mode);
-//        frame_buffer->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
-//        m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame_buffer->data());
+//        frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
+//        m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame->data());
         m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
     }
 

@@ -30,6 +30,9 @@ protected:
     void threadFunc() override;
 
 private:
+    enum PulseType { NormalSync, EqualizationPulse, BroadPulse };
+    int expectedPulseSamplesForHalfLine(int line, int half);
+
     // takes output_block as parameter in order to fill in efm data when getting a new demodulated block
     bool resample(float *sample_out, uint8_t *dropout_out,
                   double input_samples_per_sample,
@@ -88,13 +91,15 @@ private:
         eSearching, eLocked, eLockedHoriz
     };
 
-    int m_pixel;
+    int m_sample_ix;
     int m_line;
     PllState m_state;
+    float m_half_line_pulse_error_sum;
     PercentileFilter m_lower_percentile_filter;
     int m_consecutive_good_syncs;
-    int m_missed_line_pulses;
     long m_frame_start_offset;
+    float m_sample_history[4];
+    int m_sample_history_ix;
 
     double m_error_sum;
 };

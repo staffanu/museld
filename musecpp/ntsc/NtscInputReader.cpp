@@ -33,12 +33,14 @@ NtscInputReader::NtscInputReader(
           m_last_input_sub_buffer_ix_read(0),
           m_t(0.0),
           m_state(eSearching),
+          m_half_line_pulse_error_sum(0.f),
           m_line(1),
-          m_pixel(1),
-          m_lower_percentile_filter(-1, 0.005f, 0.f),
+          m_sample_ix(1),
+          m_lower_percentile_filter(NtscInputBlock::c_samples_per_video_line * NtscInputBlock::c_total_video_lines, 0.005f, 0.f),
           m_consecutive_good_syncs(0),
-          m_missed_line_pulses(0),
           m_frame_start_offset(0L),
+          m_sample_history{0, 0, 0, 0},
+          m_sample_history_ix(0),
           m_error_sum(0) {
 
     m_demodulator = new NtscRfDemodulator(log, executable_dir, m_filename, vulkan_manager, benchmark_shaders);
@@ -63,11 +65,11 @@ bool NtscInputReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &b
         m_demodulator->initialize(NtscRfDemodulatorConstants::c_number_of_block_buffers);
     }
 
-    m_input_samples_per_sample_ref = m_sample_rate / 16.2e6;
+    m_input_samples_per_sample_ref = m_sample_rate / NtscInputBlock::c_video_sampling_frequency;
     m_input_samples_per_sample = m_input_samples_per_sample_ref;
     m_omega = 2 * M_PI * 3000 / m_sample_rate;
     m_zeta = 0.75;
-    m_Ts = m_input_samples_per_sample_ref * 480;
+    m_Ts = m_input_samples_per_sample_ref * NtscInputBlock::c_samples_per_video_line;
     m_G1 = 1 - exp(-2 * m_zeta * m_omega * m_Ts);
     m_G2 = 1 + exp(-2 * m_omega * m_zeta * m_Ts) -
            2 * exp(-m_omega * m_zeta * m_Ts) * cos(m_omega * m_Ts * sqrt(1 - m_zeta * m_zeta));
@@ -75,7 +77,7 @@ bool NtscInputReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &b
     m_g1 = m_G1 / m_GpdGvco;
     m_g2 = m_G2 / m_GpdGvco;
 
-    m_log.debug(eInput, std::format("m_g1={:.5f} m_g2={:.7f}", m_g1, m_g2));
+    m_log.debug(eInput, std::format("NtscInputReader: m_g1={:.5f} m_g2={:.7f}", m_g1, m_g2));
 
     m_input_buffer = (uint8_t *)calloc(m_bytes_per_sample, c_input_buffer_size);
     m_input_dropout_buffer = (uint8_t *)calloc(1, c_input_buffer_size);
@@ -106,7 +108,7 @@ void NtscInputReader::seek(double seconds) {
         } else {
             std::unique_lock<std::mutex> lock(m_mutex);
 
-            off_t samples_to_seek = (off_t) (seconds * 16.2e6 * m_input_samples_per_sample);
+            off_t samples_to_seek = (off_t) (seconds * NtscInputBlock::c_video_sampling_frequency * m_input_samples_per_sample);
             off_t bytes_to_seek = m_bytes_per_sample * samples_to_seek;
             m_log.info(eInput, std::format("Seeking relative time {} s, {} samples, {} bytes.",
                                            seconds, samples_to_seek, bytes_to_seek));
@@ -195,6 +197,13 @@ bool NtscInputReader::readInput(std::unique_ptr<NtscInputBlock> const &output_bl
     }
 
     m_demodulator->returnBlock(block);
+
+    int fd = open("videodata.floats",
+                  O_WRONLY | O_TRUNC | O_CREAT,
+                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    write(fd, read_ptr, NtscRfDemodulatorConstants::c_video_block_size * sizeof(float));
+    close(fd);
+
     return true;
 }
 
@@ -250,76 +259,38 @@ bool NtscInputReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
     while (resample(&sample, &dropout, m_input_samples_per_sample, output_block)) {
         m_lower_percentile_filter.update(sample);
 
-        int output_index = -1;//MUSE_TOTAL_WIDTH * (m_line - 1) + m_pixel - 1;
+        int output_index = NtscInputBlock::c_samples_per_video_line * (m_line - 1) + m_sample_ix - 1;
         output[output_index] = sample;
         dropout_output[output_index] = dropout;
+        m_sample_history[m_sample_history_ix++] = sample;
+        if (m_sample_history_ix == 4)
+            m_sample_history_ix = 0;
 
-        if (m_state == eLockedHoriz || m_state == eLocked && m_line <= 2) {
-            if (m_pixel == 312) {
-                     } else if (m_pixel >= 313 && m_pixel <= 478) { // skip the two last pixels: especially line 2 often has bad values
-                int pulsePixel = m_pixel - 313;
-                float pulseValue = (pulsePixel < 144 ? pulsePixel / 4 % 2 == 0 : pulsePixel < 160) ? 1.f : -1.f;
+        if (m_state == eLockedHoriz || m_state == eLocked && (m_line <= 9 || m_line >= 264 && m_line <= 271)) {
+            int expectedPulseSamples = expectedPulseSamplesForHalfLine(m_line, m_sample_ix >= NtscInputBlock::c_samples_per_video_line / 2);
+            int halfLineSampleIx = m_sample_ix % (NtscInputBlock::c_samples_per_video_line / 2);
+            float expectedVoltage = halfLineSampleIx <= expectedPulseSamples ? 0.f : 0.3f;
+            m_half_line_pulse_error_sum += pow(sample - expectedVoltage, 2.f);
 
-            // We calculate the sums over 164 pixels, so if the signal levels of the high and low parts of the signal
-            // differ by d, a perfect fit with the frame sync signals should have a difference between line 1 and line 2
-            // of 166 * d.  If the input is scaled according to the MUSE specification, d = 239 - 16 = 223,
-            // so the difference should be 37018.  In practice, for a correctly scaled input signal we get around 27000,
-            // or 73 % of the theoretical value.  The percentile filters estimate the upper/lower signal values, but there
-            // is some variation due to the content of the rest of the signal, so we set the thresholds lower.
-            if (m_pixel == 480) {
+            if (m_sample_ix == NtscInputBlock::c_samples_per_video_line) {
                 if (m_state == eLockedHoriz) {
-//                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
-//                    m_max_frame_pulse_sum_difference = max(m_max_frame_pulse_sum_difference, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum);
-//                    if (m_line1_frame_pulse_sum - m_line2_frame_pulse_sum > threshold) {
-
-//                        m_log.info(eInput, std::format("New state eLocked at line {}, diff={}, threshold={}",
-//                                                       m_line, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold));
-                        // copy the two last lines to lines 1 and 2 so that the first frame is complete -- ignore dropouts
-//                        for (int i = 0; i < MUSE_TOTAL_WIDTH; i++) {
-//                            output[i] = output[(m_line - 2) * MUSE_TOTAL_WIDTH + i];
-//                            output[i + MUSE_TOTAL_WIDTH] = output[(m_line - 1) * MUSE_TOTAL_WIDTH + i];
-//                        }
-//                        m_line = 2;
-//                        m_state = eLocked;
-//
-//                        m_frame_start_offset = m_input_sub_buffer_input_offsets[((size_t)m_t & c_input_buffer_size_mask) >> c_input_sub_buffer_size_bits]
-//                                - MUSE_TOTAL_WIDTH * 2 - 1;
-                    }
+                    // check if syncs are correct or drop lock
                 }
-                if (m_state == eLocked && m_line == 2) {
-
-//                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
-//                    if (m_line1_frame_pulse_sum - m_line2_frame_pulse_sum > threshold)
-                        m_missed_line_pulses = 0;
-                    //else
-                    {
-                        if (m_missed_line_pulses < 3)
-                            m_missed_line_pulses += 1;
-                        else {
-//                            m_log.warn(eInput, std::format("Missed line pulses (diff={}, threshold={}): New state eSearching at line {}",
-//                                                           m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold, m_line));
-                            m_state = eSearching;
-                        }
-                    }
-                }
+                m_half_line_pulse_error_sum = 0;
             }
         }
 
-        if (m_pixel == 8) {
-            // When locked: line 1: positive, line 2: negative, line 3: negative, m_line 4: positive, then alternating up to 1125
-            bool sync_should_be_positive = m_line == 1 || (m_line > 3 && m_line % 2 == 0);
+        if (m_sample_ix == 1) { // The sync defines the start of a line
+            float sample0 = m_sample_history[(m_sample_history_ix + 4 - 2) % 4];
+            float sample1 = m_sample_history[(m_sample_history_ix + 4 - 1) % 4];
+            float sample2 = m_sample_history[m_sample_history_ix];
 
-            float sample0 = output[output_index - 4];
-            float sample2 = output[output_index - 2];
-            float sample4 = output[output_index];
-
-            bool m_sync_is_good = (sync_should_be_positive && sample0 < sample2 && sample2 < sample4) ||
-                                  (!sync_should_be_positive && sample0 > sample2 && sample2 > sample4);
+            bool m_sync_is_good = sample0 > 0.15f && sample2 < 0.15f && sample1 < 0.3f;
 
             if (m_sync_is_good) {
-                double avgLevel = (sample0 + sample4) / 2;
-                double new_error = std::clamp(sync_should_be_positive ? sample2 - avgLevel : avgLevel - sample2, -10000.0, 10000.0); // negative means we sampled too early
-                m_error_sum = std::clamp(m_error_sum + new_error, -15000.0, 15000.0);
+                double avgLevel = (sample0 + sample2) / 2;
+                double new_error = std::clamp(avgLevel - sample1, -10.0, 10.0); // negative means we sampled too early
+                m_error_sum = std::clamp(m_error_sum + new_error, -15.0, 15.0);
                 m_input_samples_per_sample =
                         m_input_samples_per_sample_ref - new_error * m_g1 - m_error_sum * m_g2;
             }
@@ -332,28 +303,25 @@ bool NtscInputReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
                 }
             }
             if ((m_state == eSearching && ((m_consecutive_good_syncs < 5 && m_line == 50) || m_line == 100)) ||
-                (m_state == eLockedHoriz && m_line == 1125)) {
+                (m_state == eLockedHoriz && m_line == NtscInputBlock::c_total_video_lines)) {
                 m_consecutive_good_syncs = 0;
                 m_error_sum = 0;
                 m_input_samples_per_sample = m_input_samples_per_sample_ref;
 
                 if (m_state == eLockedHoriz) {
-//                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
-//                    m_log.info(eInput, std::format(
-//                            "Locked horizontally, but frame pulses not found (max sum={}, threshold={}): New state eSearching at line {}",
-//                            m_max_frame_pulse_sum_difference, threshold, m_line));
+                    m_log.info(eInput, "Locked horizontally, but frame pulses not found");
                 }
-                m_state = eSearching; // TODO: add to VHDL
+                m_state = eSearching;
                 m_line = 3;
-                m_pixel = 263; // "random", start search from new position
+                m_sample_ix = 263; // "random", start search from new position
             }
         }
 
-        if (m_pixel < 480)
-            m_pixel++;
+        if (m_sample_ix < NtscInputBlock::c_samples_per_video_line)
+            m_sample_ix++;
         else {
-            m_pixel = 1;
-            if (m_line != 1125)
+            m_sample_ix = 1;
+            if (m_line != NtscInputBlock::c_total_video_lines)
                 m_line++;
             else {
                 m_line = 1;
@@ -369,4 +337,39 @@ void NtscInputReader::setUnlocked() {
     m_state = eSearching;
     m_line = 333; // make sure we do not recognize old data and immediately re-lock
     m_log.info(eInput, "state externally set to eSearching");
+}
+
+int NtscInputReader::expectedPulseSamplesForHalfLine(int line, int halfLine) {
+    const double normalPulseTime = 4.7e-9;
+    const double equalizationPulseTime = normalPulseTime / 2;
+    const double broadPulseTime =  NtscInputBlock::c_samples_per_video_line / NtscInputBlock::c_video_sampling_frequency - normalPulseTime;
+
+    const int equalizationPulseSamples = equalizationPulseTime * NtscInputBlock::c_video_sampling_frequency;
+    const int broadPulseSamples = broadPulseTime * NtscInputBlock::c_video_sampling_frequency;
+
+    switch (line) {
+        case 1:
+        case 2:
+        case 3:
+        case 7:
+        case 8:
+        case 9:
+        case 264:
+        case 265:
+        case 270:
+        case 271:
+            return equalizationPulseSamples;
+        case 4:
+        case 5:
+        case 6:
+        case 267:
+        case 268:
+            return broadPulseSamples;
+        case 266:
+            return line == 0 ? equalizationPulseSamples : broadPulseSamples;
+        case 269:
+            return line == 0 ? broadPulseSamples : equalizationPulseSamples;
+        default:
+            throw std::runtime_error("Impossible case");
+    }
 }
