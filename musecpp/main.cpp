@@ -14,8 +14,8 @@
 #include "muse/PhaseCorrect16MHzInputReader.h"
 #include "muse/MuseDecoder.h"
 #include "muse/MuseConstants.h"
-#include "sdtv/SdInputReader.h"
-#include "sdtv/SdDecoder.h"
+#include "ntsc/NtscInputReader.h"
+#include "ntsc/NtscDecoder.h"
 
 #ifdef HAVE_LIBAV
 # include "VideoFileWriter.h"
@@ -113,15 +113,15 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                                                     decode_audio,
                                                     timestamp_query_pool);
         } else {
-            decoder = std::make_unique<SdDecoder>(log,
-                                                  (InputReader<SdInputBlock> &)reader,
-                                                  manager,
-                                                  command_pool,
-                                                  executable_dir,
-                                                  decode_video,
-                                                  decode_all_fields,
-                                                  decode_audio,
-                                                  timestamp_query_pool);
+            decoder = std::make_unique<NtscDecoder>(log,
+                                                    (InputReader<NtscInputBlock> &)reader,
+                                                    manager,
+                                                    command_pool,
+                                                    executable_dir,
+                                                    decode_video,
+                                                    decode_all_fields,
+                                                    decode_audio,
+                                                    timestamp_query_pool);
         }
 
         if (!decoder->initialize())
@@ -446,7 +446,7 @@ int main(int argc, char *argv[]) {
     bool decode_audio = true;
     bool efm_audio = false;
     bool benchmark_shaders = false;
-    bool sdtv_mode = false;
+    bool ntsc_mode = false;
 
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -480,8 +480,8 @@ int main(int argc, char *argv[]) {
     options.emplace_back("--demodulate", [&] () mutable -> void {
         demodulate = true;
     });
-    options.emplace_back("--sdtv", [&] () mutable -> void {
-        sdtv_mode = true;
+    options.emplace_back("--ntsc", [&] () mutable -> void {
+        ntsc_mode = true;
     });
     options.emplace_back("--fifo", [&] () mutable -> void {
         input_is_fifo = true;
@@ -609,15 +609,15 @@ int main(int argc, char *argv[]) {
 
                 musevk::VulkanManager manager(log);
 
-                if (sdtv_mode) {
-                    auto *reader = new SdInputReader(
+                if (ntsc_mode) {
+                    auto *reader = new NtscInputReader(
                                     log, executable_dir, manager, *it,
                                     input_sample_frequency, initial_seek_seconds, benchmark_shaders,
                                     muse_output_filename);
-                    process_file<SdInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                 full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
-                                 efm_audio,
-                                 benchmark_shaders, output_filename);
+                    process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
+                                                 full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
+                                                 efm_audio,
+                                                 benchmark_shaders, output_filename);
                     delete reader;
                 } else {
                     if (demodulate)

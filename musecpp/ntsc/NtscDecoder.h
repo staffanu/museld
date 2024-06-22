@@ -2,38 +2,38 @@
 // Created by staffanu on 5/22/23.
 //
 
-#ifndef MUSECPP_SDDECODER_H
-#define MUSECPP_SDDECODER_H
+#ifndef MUSECPP_NTSCDECODER_H
+#define MUSECPP_NTSCDECODER_H
 
 #include <deque>
 #include "musevk/TimestampStatistics.h"
 #include "efm/EfmDecoder.h"
 #include "musevk/CommandPool.h"
-#include "SdInputBlock.h"
+#include "NtscInputBlock.h"
 #include "Decoder.h"
-#include "SdFrame.h"
-#include "SdShaders.h"
+#include "NtscFrame.h"
+#include "NtscShaders.h"
 
 namespace musevk {
     class TimestampQueryPool;
 }
 template<class InputBlock> class InputReader;
 class Logger;
-class SdShaders;
+class NtscShaders;
 
-class SdDecoder : public Decoder {
+class NtscDecoder : public Decoder {
 public:
     /// \param decode_all_fields If false, skips decoding of the first field of each
     /// frame individually, so next should be called 30 times per second instead of 60;
     /// useful for slow hardware.
-    SdDecoder(
-            Logger &log, InputReader<SdInputBlock> &reader, musevk::VulkanManager &manager,
+    NtscDecoder(
+            Logger &log, InputReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
             musevk::CommandPool &command_pool, std::string const &executable_dir,
             bool decode_video, bool decode_all_fields, bool decode_audio,
             musevk::TimestampQueryPool *timestamp_query_pool);
-    ~SdDecoder();
-    SdDecoder(const SdDecoder&) = delete;
-    void operator=(const SdDecoder&) = delete;
+    ~NtscDecoder();
+    NtscDecoder(const NtscDecoder&) = delete;
+    void operator=(const NtscDecoder&) = delete;
 
     [[nodiscard]] bool initialize() override;
 
@@ -51,9 +51,9 @@ public:
 
 private:
     Logger &m_log;
-    InputReader<SdInputBlock> &m_reader;
+    InputReader<NtscInputBlock> &m_reader;
     musevk::VulkanManager &m_manager;
-    SdShaders m_shaders;
+    NtscShaders m_shaders;
     const bool m_decode_video;
     const bool m_decode_all_fields;
     const bool m_decode_audio;
@@ -69,8 +69,8 @@ private:
     int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field
     long m_total_elapsed_time_us;
     EfmDecoder m_efm_decoder;
-    std::deque<SdFrame *> m_frames; // The front (index 0) is the newest received frame; we keep two frames.
+    std::deque<NtscFrame *> m_frames; // The front (index 0) is the newest received frame; we keep two frames.
 };
 
 
-#endif //MUSECPP_SDDECODER_H
+#endif //MUSECPP_NTSCDECODER_H

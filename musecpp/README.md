@@ -1,15 +1,29 @@
 ## CPU/GPU Real-time MUSE Decoder
 
-This C++ project contains a complete MUSE decoder that decodes MUSE video in real-time.  I've developed the
-software on a Lenovo Carbon X1 Gen 9 (Intel Core i7-1185G7, 3.0 GHz, 4 cores, integrated graphics), and
-tested that it works and on a MacBook Pro with an M2 processor, and also on an older Intel iMac.
+This project contains a complete MUSE decoder that decodes MUSE video in real-time, either from the MUSE output of
+a MUSE capable LaserDisc player, or, from the RF output on a modified MUSE player.
+
+To add an RF output, see for
+example https://github.com/simoninns/DomesdayDuplicator/wiki/LDV4300D-RF-Output -- the description is for a non-MUSE
+capable player, but the procedure is very similar: the difference between players is just where to tap the RF signal.
+Access to the player's service manual is very helpful here.
+
+The code is mostly written in C++, with filters for demodulation and video processing done by the GPU,
+using Vulkan and GLSL.
+
+I've developed the software on a Lenovo Carbon X1 Gen 9 (Intel Core i7-1185G7, 3.0 GHz, 4 cores, integrated graphics).
+It is just barely fast enough to perform demodulation and playback at the same time, and unfortunately thermal
+throttling makes the video unstable after a while.
+
+I've also tested the software on a MacBook Pro with an M2 processor, an Asus PN51 with a Ryzen 3 5300U CPU,
+and also on a 2017 Intel iMac.  The iMac is the fastest, due to having a discrete GPU.  The Asus is the cheapest
+computer I could find to place by my TV to work as a MUSE decoder.
 
 I tried running it on an NVIDIA Jetson Nano and also on the Raspberry Pi 5, but performance was much worse
-than I hoped for in both cases.
-For both these targets some code changes are needed due to some unsupported Vulkan features, and those changes
-have not been merged to the main branch.
-
-The code is mostly written in C++, with video filtering done by the GPU, using Vulkan and GLSL.
+than I hoped for in both cases.  The Jetson Nano could be worth another attempt, since the GPU code has since
+been modified to handle the available memory types much better.  For both these targets some code changes are
+needed due to some unsupported Vulkan features, and those changes have not been merged to the main branch; indeed
+I'm not sure if I even have them anymore.
 
 The project uses cmake, and the following commands should build the project on Ubuntu.  This also installs most
 of the dependencies, but you also require a C++ compiler, and I didn't want to pick one for you.  g++ or clang should
@@ -238,9 +252,9 @@ this information either, since they are mostly constant.
 
 > Audio channel mapping
 
-I'm using the Portaudio library to output audio.  For four-channel (mode A) MUSE audio the channels aren't mapped correctly,
-and I don't understand if it is possible to query the library which channel is which.  The short term plan is to make it right on
-my laptop, but I suspect the channel indices might differ depending on audio hardware.
+The Portaudio library is used for audio output.  For four-channel (mode A) MUSE audio, I've made the code right on my
+computer, but I don't understand if it is possible to query the library which channel is which, so probably the channels
+will be mixed up on other hardware/drivers.
 
 > Adjustable RF input sample rate
 

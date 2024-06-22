@@ -2,27 +2,27 @@
 // Created by staffanu on 6/30/23.
 //
 
-#ifndef MUSECPP_SDINPUTREADER_H
-#define MUSECPP_SDINPUTREADER_H
+#ifndef MUSECPP_NTSCINPUTREADER_H
+#define MUSECPP_NTSCINPUTREADER_H
 
 #include "InputReader.h"
-#include "SdRfDemodulator.h"
+#include "NtscRfDemodulator.h"
 #include "efm/EfmPll.h"
 #include "util/PercentileFilter.h"
 #include "util/ConstExprHelpers.h"
-#include "SdInputBlock.h"
+#include "NtscInputBlock.h"
 
-class SdInputReader : public InputReader<SdInputBlock> {
+class NtscInputReader : public InputReader<NtscInputBlock> {
 public:
-    explicit SdInputReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
-                                   const std::string &filename,
-                                   double sample_rate, double initial_seek_seconds,
-                                   bool benchmark_shaders,
-                                   const std::optional<std::string> &output_filename);
-    SdInputReader(const SdInputReader&) = delete;
-    void operator=(const SdInputReader&) = delete;
+    explicit NtscInputReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
+                             const std::string &filename,
+                             double sample_rate, double initial_seek_seconds,
+                             bool benchmark_shaders,
+                             const std::optional<std::string> &output_filename);
+    NtscInputReader(const NtscInputReader&) = delete;
+    void operator=(const NtscInputReader&) = delete;
 
-    bool initialize(std::vector<std::unique_ptr<SdInputBlock>> &buffers) override;
+    bool initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) override;
     void cleanup() override;
     void seek(double seconds) override;
 
@@ -33,12 +33,12 @@ private:
     // takes output_block as parameter in order to fill in efm data when getting a new demodulated block
     bool resample(float *sample_out, uint8_t *dropout_out,
                   double input_samples_per_sample,
-                  std::unique_ptr<SdInputBlock> const &output_block);
+                  std::unique_ptr<NtscInputBlock> const &output_block);
 
     // takes output_block as parameter in order to fill in efm data when getting a new demodulated block
-    bool readInput(std::unique_ptr<SdInputBlock> const &output_block);
+    bool readInput(std::unique_ptr<NtscInputBlock> const &output_block);
 
-    [[nodiscard]] bool process(std::unique_ptr<SdInputBlock> const &output_block);
+    [[nodiscard]] bool process(std::unique_ptr<NtscInputBlock> const &output_block);
     void setUnlocked();
 
     EfmPll m_efm_pll;
@@ -46,13 +46,13 @@ private:
     double m_sample_rate;
     int m_input_samples_decimation_rate;
 
-    SdRfDemodulator *m_demodulator;
+    NtscRfDemodulator *m_demodulator;
 
     // The input buffer (and also the input dropout buffer) is a multiple of the demodulated block size.
     // (The same is used if reading from file for simplicity.)
     // The total buffer size needs to be a power of two.
     static constexpr int c_number_of_input_sub_buffers = 2;
-    static constexpr size_t c_input_sub_buffer_size = SdRfDemodulatorConstants::c_video_block_size;
+    static constexpr size_t c_input_sub_buffer_size = NtscRfDemodulatorConstants::c_video_block_size;
     static constexpr size_t c_input_buffer_size = c_input_sub_buffer_size * c_number_of_input_sub_buffers;
     static_assert((c_input_sub_buffer_size & (c_input_sub_buffer_size - 1)) == 0); // ensure power of two
     static_assert((c_number_of_input_sub_buffers & (c_number_of_input_sub_buffers - 1)) == 0);
@@ -91,11 +91,7 @@ private:
     int m_pixel;
     int m_line;
     PllState m_state;
-    float m_line1_frame_pulse_sum;
-    float m_line2_frame_pulse_sum;
-    PercentileFilter m_upper_percentile_filter;
     PercentileFilter m_lower_percentile_filter;
-    float m_max_frame_pulse_sum_difference;
     int m_consecutive_good_syncs;
     int m_missed_line_pulses;
     long m_frame_start_offset;
@@ -103,4 +99,4 @@ private:
     double m_error_sum;
 };
 
-#endif //MUSECPP_SDINPUTREADER_H
+#endif //MUSECPP_NTSCINPUTREADER_H

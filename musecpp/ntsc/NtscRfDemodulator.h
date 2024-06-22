@@ -2,8 +2,8 @@
 // Created by staffanu on 12/10/23.
 //
 
-#ifndef MUSECPP_SDRFDEMODULATOR_H
-#define MUSECPP_SDRFDEMODULATOR_H
+#ifndef MUSECPP_NTSCRFDEMODULATOR_H
+#define MUSECPP_NTSCRFDEMODULATOR_H
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -22,7 +22,7 @@
 #include "RfDemodulator.h"
 #include "musevk/VulkanManager.h"
 
-namespace SdRfDemodulatorConstants {
+namespace NtscRfDemodulatorConstants {
     static constexpr float c_sample_frequency = 40.0e6f;
 
     static constexpr int c_sample_block_size = 512 * 1024;
@@ -38,20 +38,20 @@ namespace SdRfDemodulatorConstants {
     static constexpr int c_number_of_block_buffers = (int)(2 * c_sample_frequency / 30 / c_sample_block_size);
 }
 
-struct SdDemodulatedBlock {
-    explicit SdDemodulatedBlock(musevk::VulkanManager &vulkan_manager)
+struct NtscDemodulatedBlock {
+    explicit NtscDemodulatedBlock(musevk::VulkanManager &vulkan_manager)
     : input_offset(0) {
         video_data = std::make_unique<musevk::VulkanBuffer>(
-                vulkan_manager, musevk::Size(SdRfDemodulatorConstants::c_video_block_size), sizeof(float),
+                vulkan_manager, musevk::Size(NtscRfDemodulatorConstants::c_video_block_size), sizeof(float),
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);
         efm_data = std::make_unique<musevk::VulkanBuffer>(
-                vulkan_manager, musevk::Size(SdRfDemodulatorConstants::c_efm_block_size), sizeof(float),
+                vulkan_manager, musevk::Size(NtscRfDemodulatorConstants::c_efm_block_size), sizeof(float),
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);
         dropouts = std::make_unique<musevk::VulkanBuffer>(
-                vulkan_manager, musevk::Size(SdRfDemodulatorConstants::c_video_block_size), sizeof(uint8_t),
+                vulkan_manager, musevk::Size(NtscRfDemodulatorConstants::c_video_block_size), sizeof(uint8_t),
                 vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, musevk::HostAccess::eHostRead);;
         audio_data = std::make_unique<musevk::VulkanBuffer>(
-                vulkan_manager, musevk::Size(SdRfDemodulatorConstants::c_audio_block_size), sizeof(float),
+                vulkan_manager, musevk::Size(NtscRfDemodulatorConstants::c_audio_block_size), sizeof(float),
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);
     }
 
@@ -62,12 +62,12 @@ struct SdDemodulatedBlock {
     std::shared_ptr<musevk::VulkanBuffer> audio_data;
 };
 
-class SdRfDemodulator : public RfDemodulator<SdDemodulatedBlock> {
+class NtscRfDemodulator : public RfDemodulator<NtscDemodulatedBlock> {
 public:
-    SdRfDemodulator(Logger &log, std::string filename, std::string executable_dir,
+    NtscRfDemodulator(Logger &log, std::string filename, std::string executable_dir,
                       musevk::VulkanManager &vulkan_manager, bool benchmark_shaders);
-    SdRfDemodulator(const SdRfDemodulator&) = delete;
-    void operator=(const SdRfDemodulator&) = delete;
+    NtscRfDemodulator(const NtscRfDemodulator&) = delete;
+    void operator=(const NtscRfDemodulator&) = delete;
 
 protected:
     void demodulate() override;
@@ -77,4 +77,4 @@ private:
     static constexpr float c_frequency_deviation = 0.85e6f;
 };
 
-#endif //MUSECPP_SDRFDEMODULATOR_H
+#endif //MUSECPP_NTSCRFDEMODULATOR_H

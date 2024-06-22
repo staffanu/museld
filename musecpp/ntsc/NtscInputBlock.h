@@ -2,17 +2,17 @@
 // Created by staffanu on 6/16/24.
 //
 
-#ifndef MUSECPP_SDINPUTBLOCK_H
-#define MUSECPP_SDINPUTBLOCK_H
+#ifndef MUSECPP_NTSCINPUTBLOCK_H
+#define MUSECPP_NTSCINPUTBLOCK_H
 
 #include <array>
 #include "musevk/VulkanBuffer.h"
 #include "InputBlockBase.h"
 
 // A block contains a full frame of data, sampled at 16.2 MHz
-class SdInputBlock : public InputBlockBase {
+class NtscInputBlock : public InputBlockBase {
 public:
-    SdInputBlock(std::shared_ptr<musevk::VulkanBuffer> v, std::shared_ptr<musevk::VulkanBuffer> d)
+    NtscInputBlock(std::shared_ptr<musevk::VulkanBuffer> v, std::shared_ptr<musevk::VulkanBuffer> d)
             : InputBlockBase(),
               input_offset(0),
               input_samples_per_muse_sample(0),
@@ -21,6 +21,10 @@ public:
     };
 
     static constexpr size_t c_requiredFileWriteBufferSize = 0;
+    static constexpr int c_samples_per_video_line = 858;
+    static constexpr double c_video_sampling_frequency = 13.5e6;
+    static constexpr int c_total_video_lines = 525;
+
 
     long input_offset;
     double input_samples_per_muse_sample;
@@ -33,14 +37,14 @@ public:
 };
 
 template<>
-class InputBlockFactory<SdInputBlock> {
+class InputBlockFactory<NtscInputBlock> {
 public:
-    static std::unique_ptr<SdInputBlock> makeBlock(musevk::VulkanManager &manager) {
-        return std::make_unique<SdInputBlock>(
+    static std::unique_ptr<NtscInputBlock> makeBlock(musevk::VulkanManager &manager) {
+        return std::make_unique<NtscInputBlock>(
                 std::make_unique<musevk::VulkanBuffer>(manager, 720 * 480, sizeof(float), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite),
                 std::make_unique<musevk::VulkanBuffer>(manager, 720 * 480, sizeof(uint8_t), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite)
         );
     }
 };
 
-#endif //MUSECPP_SDINPUTBLOCK_H
+#endif //MUSECPP_NTSCINPUTBLOCK_H

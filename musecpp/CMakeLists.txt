@@ -55,12 +55,12 @@ add_executable(musecpp
         muse/MuseInputBlock.h
         muse/MuseConstants.h
         muse/DiscCode.h muse/DiscCode.cpp
-        sdtv/SdRfDemodulator.cpp sdtv/SdRfDemodulator.h
-        sdtv/SdInputReader.h sdtv/SdInputReader.cpp
-        sdtv/SdInputBlock.h
-        sdtv/SdDecoder.h sdtv/SdDecoder.cpp
-        sdtv/SdShaders.h sdtv/SdShaders.cpp
-        sdtv/SdFrame.h sdtv/SdFrame.cpp
+        ntsc/NtscRfDemodulator.cpp ntsc/NtscRfDemodulator.h
+        ntsc/NtscInputReader.h ntsc/NtscInputReader.cpp
+        ntsc/NtscInputBlock.h
+        ntsc/NtscDecoder.h ntsc/NtscDecoder.cpp
+        ntsc/NtscShaders.h ntsc/NtscShaders.cpp
+        ntsc/NtscFrame.h ntsc/NtscFrame.cpp
         util/PercentileFilter.cpp util/PercentileFilter.h
         util/Logger.cpp util/Logger.h
         util/ConstExprHelpers.h

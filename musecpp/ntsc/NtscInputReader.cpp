@@ -8,13 +8,13 @@
 #include <cassert>
 #include <filesystem>
 #include "musevk/VulkanBuffer.h"
-#include "SdInputReader.h"
-#include "SdRfDemodulator.h"
+#include "NtscInputReader.h"
+#include "NtscRfDemodulator.h"
 #include "util/Logger.h"
 
 using namespace std;
 
-SdInputReader::SdInputReader(
+NtscInputReader::NtscInputReader(
         Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
         const std::string &filename, double sample_rate,
         double initial_seek_seconds, bool benchmark_shaders,
@@ -23,7 +23,7 @@ SdInputReader::SdInputReader(
                       filesystem::is_fifo(filename),
                       initial_seek_seconds, output_filename),
           m_sample_rate(sample_rate),
-          m_efm_pll(log, 40e6 / SdRfDemodulatorConstants::c_efm_decimation_rate),
+          m_efm_pll(log, 40e6 / NtscRfDemodulatorConstants::c_efm_decimation_rate),
           m_file_fd(-1),
           m_input_samples_decimation_rate(1),
           m_demodulator(nullptr),
@@ -35,27 +35,23 @@ SdInputReader::SdInputReader(
           m_state(eSearching),
           m_line(1),
           m_pixel(1),
-          m_line1_frame_pulse_sum(0),
-          m_line2_frame_pulse_sum(0),
-          m_upper_percentile_filter(-1, 0.995f, 239.f),
-          m_lower_percentile_filter(-1, 0.005f, 16.f), // FIXME
-          m_max_frame_pulse_sum_difference(0),
+          m_lower_percentile_filter(-1, 0.005f, 0.f),
           m_consecutive_good_syncs(0),
           m_missed_line_pulses(0),
           m_frame_start_offset(0L),
           m_error_sum(0) {
 
-    m_demodulator = new SdRfDemodulator(log, executable_dir, m_filename, vulkan_manager, benchmark_shaders);
+    m_demodulator = new NtscRfDemodulator(log, executable_dir, m_filename, vulkan_manager, benchmark_shaders);
     m_sample_rate = 31.25e6;
 
     m_bytes_per_sample = 4;
 }
 
-bool SdInputReader::initialize(std::vector<std::unique_ptr<SdInputBlock>> &buffers) {
+bool NtscInputReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) {
     if (m_demodulator == nullptr) {
         m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
         if (m_file_fd == -1)
-            throw runtime_error(std::format("SdInputReader: Unable to open input file {}", m_filename));
+            throw runtime_error(std::format("NtscInputReader: Unable to open input file {}", m_filename));
 #ifdef linux
         if (filesystem::is_fifo(m_filename)) {
             m_log.debug(eInput, std::format("Pipe size: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
@@ -64,7 +60,7 @@ bool SdInputReader::initialize(std::vector<std::unique_ptr<SdInputBlock>> &buffe
         }
 #endif
     } else {
-        m_demodulator->initialize(SdRfDemodulatorConstants::c_number_of_block_buffers);
+        m_demodulator->initialize(NtscRfDemodulatorConstants::c_number_of_block_buffers);
     }
 
     m_input_samples_per_sample_ref = m_sample_rate / 16.2e6;
@@ -88,7 +84,7 @@ bool SdInputReader::initialize(std::vector<std::unique_ptr<SdInputBlock>> &buffe
     return InputReader::initialize(buffers);
 }
 
-void SdInputReader::cleanup() {
+void NtscInputReader::cleanup() {
     InputReader::cleanup();
 
     free(m_input_buffer);
@@ -103,7 +99,7 @@ void SdInputReader::cleanup() {
         close(m_file_fd);
 }
 
-void SdInputReader::seek(double seconds) {
+void NtscInputReader::seek(double seconds) {
     if (!m_input_is_realtime) {
         if (m_demodulator != nullptr) {
             m_demodulator->seek(seconds);
@@ -126,8 +122,8 @@ void SdInputReader::seek(double seconds) {
     }
 }
 
-void SdInputReader::threadFunc() {
-    unique_ptr<SdInputBlock> output_block = nullptr;
+void NtscInputReader::threadFunc() {
+    unique_ptr<NtscInputBlock> output_block = nullptr;
 
     for (m_last_input_sub_buffer_ix_read = 0; m_last_input_sub_buffer_ix_read < c_number_of_input_sub_buffers; m_last_input_sub_buffer_ix_read++) {
         readInput(nullptr);
@@ -146,7 +142,7 @@ void SdInputReader::threadFunc() {
             }
             m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_input_buffers.empty();});
             if (m_stop_request) {
-                m_log.info(eInput, "SdInputReader: stop requested");
+                m_log.info(eInput, "NtscInputReader: stop requested");
                 break;
             }
             output_block = std::move(m_vacant_input_buffers.front());
@@ -155,7 +151,7 @@ void SdInputReader::threadFunc() {
         }
 
         if (!process(output_block)) {
-            m_log.info(eInput, "SdInputReader: end of file");
+            m_log.info(eInput, "NtscInputReader: end of file");
             break;
         }
 
@@ -172,26 +168,26 @@ void SdInputReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
-bool SdInputReader::readInput(std::unique_ptr<SdInputBlock> const &output_block) {
+bool NtscInputReader::readInput(std::unique_ptr<NtscInputBlock> const &output_block) {
     uint8_t *read_ptr = m_input_buffer + m_bytes_per_sample * c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
     uint8_t *dropout_read_ptr = m_input_dropout_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
 
-    m_input_samples_decimation_rate = SdRfDemodulatorConstants::c_video_decimation_rate;
+    m_input_samples_decimation_rate = NtscRfDemodulatorConstants::c_video_decimation_rate;
     auto block = m_demodulator->getNextDemodulatedBlock();
     if (block == nullptr) {
-        m_log.info(eInput, "SdInputReader: no more demodulated blocks");
+        m_log.info(eInput, "NtscInputReader: no more demodulated blocks");
         return false;
     }
-    memcpy(read_ptr, block->video_data->data<float>(), SdRfDemodulatorConstants::c_video_block_size * sizeof(float));
-    memcpy(dropout_read_ptr, block->dropouts->data<uint8_t>(), SdRfDemodulatorConstants::c_video_block_size * sizeof(uint8_t));
+    memcpy(read_ptr, block->video_data->data<float>(), NtscRfDemodulatorConstants::c_video_block_size * sizeof(float));
+    memcpy(dropout_read_ptr, block->dropouts->data<uint8_t>(), NtscRfDemodulatorConstants::c_video_block_size * sizeof(uint8_t));
     m_input_sub_buffer_input_offsets[m_last_input_sub_buffer_ix_read] = block->input_offset;
 
     if (output_block != nullptr) {
         if (m_state == eLocked) {
             int actual_output_size = m_efm_pll.reclock(block->efm_data->data<float>(),
-                                                       SdRfDemodulatorConstants::c_efm_block_size,
+                                                       NtscRfDemodulatorConstants::c_efm_block_size,
                                                        output_block->efm_data.data() + output_block->efm_data_size,
-                                                       SdInputBlock::c_max_efm_data_size - output_block->efm_data_size);
+                                                       NtscInputBlock::c_max_efm_data_size - output_block->efm_data_size);
             output_block->efm_data_size += actual_output_size;
             assert(output_block->efm_data_size <= output_block->c_max_efm_data_size);
         } else
@@ -202,9 +198,9 @@ bool SdInputReader::readInput(std::unique_ptr<SdInputBlock> const &output_block)
     return true;
 }
 
-bool SdInputReader::resample(float *sample_out, uint8_t *dropout_out,
-                             double input_samples_per_sample,
-                             std::unique_ptr<SdInputBlock> const &output_block) {
+bool NtscInputReader::resample(float *sample_out, uint8_t *dropout_out,
+                               double input_samples_per_sample,
+                               std::unique_ptr<NtscInputBlock> const &output_block) {
 
     m_t += input_samples_per_sample;
 
@@ -243,7 +239,7 @@ bool SdInputReader::resample(float *sample_out, uint8_t *dropout_out,
 }
 
 
-bool SdInputReader::process(std::unique_ptr<SdInputBlock> const &output_block) {
+bool NtscInputReader::process(std::unique_ptr<NtscInputBlock> const &output_block) {
     auto *output = output_block->video_data->data<float>();
     auto *dropout_output = output_block->dropout_data->data<uint8_t>();
 
@@ -252,7 +248,6 @@ bool SdInputReader::process(std::unique_ptr<SdInputBlock> const &output_block) {
     float sample;
     uint8_t dropout;
     while (resample(&sample, &dropout, m_input_samples_per_sample, output_block)) {
-        m_upper_percentile_filter.update(sample);
         m_lower_percentile_filter.update(sample);
 
         int output_index = -1;//MUSE_TOTAL_WIDTH * (m_line - 1) + m_pixel - 1;
@@ -261,13 +256,10 @@ bool SdInputReader::process(std::unique_ptr<SdInputBlock> const &output_block) {
 
         if (m_state == eLockedHoriz || m_state == eLocked && m_line <= 2) {
             if (m_pixel == 312) {
-                m_line1_frame_pulse_sum = m_line2_frame_pulse_sum;
-                m_line2_frame_pulse_sum = 0;
-            } else if (m_pixel >= 313 && m_pixel <= 478) { // skip the two last pixels: especially line 2 often has bad values
+                     } else if (m_pixel >= 313 && m_pixel <= 478) { // skip the two last pixels: especially line 2 often has bad values
                 int pulsePixel = m_pixel - 313;
                 float pulseValue = (pulsePixel < 144 ? pulsePixel / 4 % 2 == 0 : pulsePixel < 160) ? 1.f : -1.f;
-                m_line2_frame_pulse_sum += pulseValue * sample;
-            }
+
             // We calculate the sums over 164 pixels, so if the signal levels of the high and low parts of the signal
             // differ by d, a perfect fit with the frame sync signals should have a difference between line 1 and line 2
             // of 166 * d.  If the input is scaled according to the MUSE specification, d = 239 - 16 = 223,
@@ -276,12 +268,12 @@ bool SdInputReader::process(std::unique_ptr<SdInputBlock> const &output_block) {
             // is some variation due to the content of the rest of the signal, so we set the thresholds lower.
             if (m_pixel == 480) {
                 if (m_state == eLockedHoriz) {
-                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
-                    m_max_frame_pulse_sum_difference = max(m_max_frame_pulse_sum_difference, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum);
-                    if (m_line1_frame_pulse_sum - m_line2_frame_pulse_sum > threshold) {
+//                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
+//                    m_max_frame_pulse_sum_difference = max(m_max_frame_pulse_sum_difference, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum);
+//                    if (m_line1_frame_pulse_sum - m_line2_frame_pulse_sum > threshold) {
 
-                        m_log.info(eInput, std::format("New state eLocked at line {}, diff={}, threshold={}",
-                                                       m_line, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold));
+//                        m_log.info(eInput, std::format("New state eLocked at line {}, diff={}, threshold={}",
+//                                                       m_line, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold));
                         // copy the two last lines to lines 1 and 2 so that the first frame is complete -- ignore dropouts
 //                        for (int i = 0; i < MUSE_TOTAL_WIDTH; i++) {
 //                            output[i] = output[(m_line - 2) * MUSE_TOTAL_WIDTH + i];
@@ -295,15 +287,17 @@ bool SdInputReader::process(std::unique_ptr<SdInputBlock> const &output_block) {
                     }
                 }
                 if (m_state == eLocked && m_line == 2) {
-                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
-                    if (m_line1_frame_pulse_sum - m_line2_frame_pulse_sum > threshold)
+
+//                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
+//                    if (m_line1_frame_pulse_sum - m_line2_frame_pulse_sum > threshold)
                         m_missed_line_pulses = 0;
-                    else {
+                    //else
+                    {
                         if (m_missed_line_pulses < 3)
                             m_missed_line_pulses += 1;
                         else {
-                            m_log.warn(eInput, std::format("Missed line pulses (diff={}, threshold={}): New state eSearching at line {}",
-                                                           m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold, m_line));
+//                            m_log.warn(eInput, std::format("Missed line pulses (diff={}, threshold={}): New state eSearching at line {}",
+//                                                           m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold, m_line));
                             m_state = eSearching;
                         }
                     }
@@ -335,8 +329,6 @@ bool SdInputReader::process(std::unique_ptr<SdInputBlock> const &output_block) {
                 if (m_consecutive_good_syncs >= 50) {
                     m_log.info(eInput, std::format("New state eLockedHoriz at line {}", m_line));
                     m_state = eLockedHoriz;
-                    m_line2_frame_pulse_sum = 0;
-                    m_max_frame_pulse_sum_difference = 0;
                 }
             }
             if ((m_state == eSearching && ((m_consecutive_good_syncs < 5 && m_line == 50) || m_line == 100)) ||
@@ -346,10 +338,10 @@ bool SdInputReader::process(std::unique_ptr<SdInputBlock> const &output_block) {
                 m_input_samples_per_sample = m_input_samples_per_sample_ref;
 
                 if (m_state == eLockedHoriz) {
-                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
-                    m_log.info(eInput, std::format(
-                            "Locked horizontally, but frame pulses not found (max sum={}, threshold={}): New state eSearching at line {}",
-                            m_max_frame_pulse_sum_difference, threshold, m_line));
+//                    float threshold = 223.0f * 0.25f * (m_upper_percentile_filter.getEstimate() - m_lower_percentile_filter.getEstimate());
+//                    m_log.info(eInput, std::format(
+//                            "Locked horizontally, but frame pulses not found (max sum={}, threshold={}): New state eSearching at line {}",
+//                            m_max_frame_pulse_sum_difference, threshold, m_line));
                 }
                 m_state = eSearching; // TODO: add to VHDL
                 m_line = 3;
@@ -373,7 +365,7 @@ bool SdInputReader::process(std::unique_ptr<SdInputBlock> const &output_block) {
     return false;
 }
 
-void SdInputReader::setUnlocked() {
+void NtscInputReader::setUnlocked() {
     m_state = eSearching;
     m_line = 333; // make sure we do not recognize old data and immediately re-lock
     m_log.info(eInput, "state externally set to eSearching");

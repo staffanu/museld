@@ -2,8 +2,8 @@
 // Created by staffanu on 6/22/24.
 //
 
-#ifndef MUSECPP_SDSHADERS_H
-#define MUSECPP_SDSHADERS_H
+#ifndef MUSECPP_NTSCSHADERS_H
+#define MUSECPP_NTSCSHADERS_H
 
 #include <string>
 #include "musevk/VulkanManager.h"
@@ -11,12 +11,12 @@
 #include "util/Logger.h"
 #include "ResultImages.h"
 
-class SdShaders {
+class NtscShaders {
 public:
-    SdShaders(Logger &log, std::string const &executable_dir, musevk::VulkanManager &manager, musevk::CommandPool &command_pool);
+    NtscShaders(Logger &log, std::string const &executable_dir, musevk::VulkanManager &manager, musevk::CommandPool &command_pool);
 
-    SdShaders(SdShaders &other) = delete;
-    void operator=(const SdShaders &) = delete;
+    NtscShaders(NtscShaders &other) = delete;
+    void operator=(const NtscShaders &) = delete;
 
     ResultImages getResultImages();
 
@@ -32,4 +32,4 @@ private:
 };
 
 
-#endif //MUSECPP_SDSHADERS_H
+#endif //MUSECPP_NTSCSHADERS_H

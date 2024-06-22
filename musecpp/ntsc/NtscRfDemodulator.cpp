@@ -8,22 +8,22 @@
 #include <iostream>
 #include <filesystem>
 #include <algorithm>
-#include "SdRfDemodulator.h"
+#include "NtscRfDemodulator.h"
 #include "musevk/VulkanUtil.h"
 #include "musevk/TimestampQueryPool.h"
 #include "musevk/TimestampStatistics.h"
 
 using namespace std;
 using namespace musevk;
-using namespace SdRfDemodulatorConstants;
+using namespace NtscRfDemodulatorConstants;
 
-SdRfDemodulator::SdRfDemodulator(Logger &log, std::string filename, std::string executable_dir,
+NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string filename, std::string executable_dir,
                                      musevk::VulkanManager &vulkan_manager, bool benchmark_shaders)
-: RfDemodulator<SdDemodulatedBlock>(log, std::move(filename), std::move(executable_dir), vulkan_manager, benchmark_shaders,
-                                    SdRfDemodulatorConstants::c_sample_frequency) {
+: RfDemodulator<NtscDemodulatedBlock>(log, std::move(filename), std::move(executable_dir), vulkan_manager, benchmark_shaders,
+                                      NtscRfDemodulatorConstants::c_sample_frequency) {
 }
 
-void SdRfDemodulator::demodulate() {
+void NtscRfDemodulator::demodulate() {
     assert(c_sample_block_size % c_video_decimation_rate == 0);
 
     CommandPool command_pool(m_vulkan_manager);
@@ -145,7 +145,7 @@ void SdRfDemodulator::demodulate() {
             new ComputeShader(m_vulkan_manager.getDevice(),
                               "detect_dropouts",
                               {lowpass_in_buffer, dropout_buffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts.comp"), Size(SdRfDemodulatorConstants::c_video_block_size)));
+                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts.comp"), Size(NtscRfDemodulatorConstants::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
     // will have undefined output otherwise.
@@ -162,7 +162,7 @@ void SdRfDemodulator::demodulate() {
     while (!m_stop_request && readFloats(input_buffer->data<int16_t>() + bandpass_filter_def.size() - 1, c_sample_block_size)) {
 
         // First get a free output block to write to
-        unique_ptr<SdDemodulatedBlock> block = nullptr;
+        unique_ptr<NtscDemodulatedBlock> block = nullptr;
         {
             std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
             if (m_input_is_fifo && m_vacant_blocks.empty()) {
@@ -217,22 +217,22 @@ void SdRfDemodulator::demodulate() {
                 {(uint32_t)lowpass_filter_def.size(), c_sample_block_size / c_video_decimation_rate, /* out offset */ 0, c_video_decimation_rate}, 0);
 
         // EFM
-        input_fir_filter_shader->updateWorkgroup(Size(SdRfDemodulatorConstants::c_efm_block_size));
+        input_fir_filter_shader->updateWorkgroup(Size(NtscRfDemodulatorConstants::c_efm_block_size));
         command_buffer->enqueueComputeShader<uint32_t>(
                 input_fir_filter_shader,
-                {(uint32_t)efm_lowpass_filter_def.size(), SdRfDemodulatorConstants::c_efm_block_size, /* out offset */ (uint32_t)efm_equalization_filter_def.size() - 1, c_efm_decimation_rate}, 2);
+                {(uint32_t)efm_lowpass_filter_def.size(), NtscRfDemodulatorConstants::c_efm_block_size, /* out offset */ (uint32_t)efm_equalization_filter_def.size() - 1, c_efm_decimation_rate}, 2);
 
         fir_filter_shader->updateBufferDescriptorsInSet(1, {efm_equalization_filter, efm_equalization_in_buffer, block->efm_data});
         command_buffer->enqueueComputeShader<uint32_t>(
                 fir_filter_shader,
-                {(uint32_t)efm_equalization_filter_def.size(), SdRfDemodulatorConstants::c_efm_block_size, /* out offset */ 0, /* decimation */ 1}, 1);
+                {(uint32_t)efm_equalization_filter_def.size(), NtscRfDemodulatorConstants::c_efm_block_size, /* out offset */ 0, /* decimation */ 1}, 1);
 
         // Detect dropouts FIXME update for LD
         command_buffer->enqueueComputeShader<uint32_t>(
-                detect_dropouts_shader, {SdRfDemodulatorConstants::c_video_block_size, (uint32_t)lowpass_filter_def.size() - 1, (uint32_t)dropout_delay, c_video_decimation_rate});
+                detect_dropouts_shader, {NtscRfDemodulatorConstants::c_video_block_size, (uint32_t)lowpass_filter_def.size() - 1, (uint32_t)dropout_delay, c_video_decimation_rate});
 
         // Copy data from dropout detection to the output buffer before writing over the first part of the buffer below
-        command_buffer->enqueueCopyBuffer(*dropout_buffer, *block->dropouts, 0, 0, SdRfDemodulatorConstants::c_video_block_size * sizeof(uint8_t));
+        command_buffer->enqueueCopyBuffer(*dropout_buffer, *block->dropouts, 0, 0, NtscRfDemodulatorConstants::c_video_block_size * sizeof(uint8_t));
 
         // Ensure data can be read from the host later
         block->video_data->synchronizeForHostRead(*command_buffer);

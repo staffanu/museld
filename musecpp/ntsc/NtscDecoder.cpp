@@ -8,17 +8,17 @@
 #include <format>
 #include "musevk/VulkanManager.h"
 #include "musevk/TimestampQueryPool.h"
-#include "SdDecoder.h"
+#include "NtscDecoder.h"
 #include "InputReader.h"
-#include "SdInputBlock.h"
-#include "SdShaders.h"
+#include "NtscInputBlock.h"
+#include "NtscShaders.h"
 
 using namespace std;
 
 
 
-SdDecoder::SdDecoder(
-        Logger &log, InputReader<SdInputBlock> &reader, musevk::VulkanManager &manager,
+NtscDecoder::NtscDecoder(
+        Logger &log, InputReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
         musevk::CommandPool &command_pool, std::string const &executable_dir,
         bool decode_video, bool decode_all_fields, bool decode_audio,
         musevk::TimestampQueryPool *timestamp_query_pool)
@@ -26,7 +26,7 @@ SdDecoder::SdDecoder(
   m_log(log),
   m_reader(reader),
   m_manager(manager),
-  m_shaders(SdShaders(log, executable_dir, manager, command_pool)),
+  m_shaders(NtscShaders(log, executable_dir, manager, command_pool)),
   m_decode_video(decode_video),
   m_decode_all_fields(decode_all_fields),
   m_decode_audio(decode_audio),
@@ -44,7 +44,7 @@ SdDecoder::SdDecoder(
   m_frames() {
 }
 
-SdDecoder::~SdDecoder() {
+NtscDecoder::~NtscDecoder() {
     while (!m_frames.empty()) {
         delete m_frames.back();
         m_frames.pop_back();
@@ -52,11 +52,11 @@ SdDecoder::~SdDecoder() {
     m_manager.getDevice().destroy(m_first_stage_complete_semaphore);
 }
 
-bool SdDecoder::initialize() {
+bool NtscDecoder::initialize() {
     // Always keep the two latest frames (required for motion detection) -- pretend we have two already
     // The newest frame is always at index 0
     for (int i = 0; i < 2; i++)
-        m_frames.push_back(new SdFrame(m_log, -i, m_manager));
+        m_frames.push_back(new NtscFrame(m_log, -i, m_manager));
 
 //    for (int i = 0; i < 3; i++)
 //        for (int parity = 0; parity <= 1; parity++) {
@@ -71,7 +71,7 @@ bool SdDecoder::initialize() {
     return true;
 }
 
-bool SdDecoder::next(bool efm_audio, AudioMode *audio_mode,
+bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
                        int *sample_count,
                        AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES],
                        int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
@@ -87,7 +87,7 @@ bool SdDecoder::next(bool efm_audio, AudioMode *audio_mode,
     if (m_timestamp_query_pool != nullptr)
         m_timestamp_query_pool->resetAndSubmit(*m_reset_timestamp_query_pool_command_buffer);
 
-    std::unique_ptr<SdInputBlock> input_block = nullptr;
+    std::unique_ptr<NtscInputBlock> input_block = nullptr;
     InputStatus input_status = InputStatus::eNormal;
     if (m_field_index == 0 && !redo_last_field) {
         auto frame_buffer = m_frames.back();
@@ -140,7 +140,7 @@ bool SdDecoder::next(bool efm_audio, AudioMode *audio_mode,
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
 //        *last_frame_buffer_input_offset = m_frames[0]->getInputOffset();
-//        *input_samples_per_muse_sample = m_frame_buffers[0]->getInputSamplesPerSdSample();
+//        *input_samples_per_muse_sample = m_frame_buffers[0]->getInputSamplesPerNtscSample();
         *field_parity = decoded_field_index;
 
 //        m_shaders.decodeIntraField(*m_second_stage_command_buffer, m_frame_buffers[0]->get_field(decoded_field_index));
@@ -210,10 +210,10 @@ bool SdDecoder::next(bool efm_audio, AudioMode *audio_mode,
     return true;
 }
 
-void SdDecoder::outputBenchmarkResults() {
+void NtscDecoder::outputBenchmarkResults() {
     m_timestamp_statistics.print_stats(3);
 }
 
-ResultImages SdDecoder::getResultImages() {
+ResultImages NtscDecoder::getResultImages() {
     return m_shaders.getResultImages();
 }
