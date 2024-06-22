@@ -6,8 +6,9 @@
 #define MUSECPP_DECODER_H
 
 #include "AudioDefs.h"
-#include "muse/FrameBuffer.h"
-#include "muse/Shaders.h"
+#include "DropoutMode.h"
+#include "DiscInfo.h"
+#include "ResultImages.h"
 
 class Decoder {
 public:
@@ -24,11 +25,13 @@ public:
                       int *sample_count,
                       AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES],
                       int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
-                      std::optional<FrameBuffer::DiscCode> *disc_code,
+                      std::shared_ptr<DiscInfo> *disc_info,
                       FieldInterpolationMode field_interpolation_mode,
-                      bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode, bool output_yuv) = 0;
+                      bool redo_last_field, bool enable_non_linear, DropoutMode dropout_mode, bool output_yuv) = 0;
 
-    virtual void output_benchmark_results() = 0;
+    virtual void outputBenchmarkResults() = 0;
+
+    virtual ResultImages getResultImages() = 0;
 
 protected:
     Decoder() = default;

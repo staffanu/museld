@@ -12,6 +12,8 @@ public:
     int efm_data_size;
     std::array<bool, c_max_efm_data_size> efm_data;
 
+    virtual void writeToFile(int fd, void *buffer) = 0;
+
 protected:
     InputBlockBase()
     : efm_data_size(0),

@@ -2,24 +2,23 @@
 #include <format>
 #include <set>
 #include <functional>
-#include "muse/Shaders.h"
-#include "muse/MuseDecoder.h"
+#include "musevk/TimestampQueryPool.h"
 #include "musevk/VulkanManager.h"
-#include "muse/MuseConstants.h"
+#include "musevk/CommandPool.h"
+#include "util/Logger.h"
 #include "AudioPlayback.h"
 #include "InputReader.h"
+#include "TextRenderer.h"
+#include "Decoder.h"
 #include "muse/ResamplingInputReader.h"
 #include "muse/PhaseCorrect16MHzInputReader.h"
-#include "util/Logger.h"
-#include "musevk/TimestampQueryPool.h"
-#include "TextRenderer.h"
+#include "muse/MuseDecoder.h"
+#include "muse/MuseConstants.h"
+#include "sdtv/SdInputReader.h"
+#include "sdtv/SdDecoder.h"
 
 #ifdef HAVE_LIBAV
 # include "VideoFileWriter.h"
-#include "musevk/CommandPool.h"
-#include "sdtv/SdInputReader.h"
-#include "Decoder.h"
-
 #endif
 
 #define INPUT_BUFFER_COUNT 6
@@ -48,7 +47,7 @@ void glfw_error_callback(int error, const char* description) {
 template<class InputBlock>
 void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, InputReader<InputBlock> &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
-                  bool start_paused, bool decode_video, Shaders::DropoutMode dropout_mode,
+                  bool start_paused, bool decode_video, DropoutMode dropout_mode,
                   bool decode_audio, bool efm_audio, bool benchmark_shaders,
                   optional<string> const &output_filename) {
     glfwSetErrorCallback(glfw_error_callback);
@@ -100,32 +99,34 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     {
         musevk::CommandPool command_pool(manager);
         auto command_buffer = command_pool.createCommandBuffer();
-        Shaders shaders(log, executable_dir, manager, command_pool);
         TextRenderer text_renderer(executable_dir, manager, command_pool);
 
         std:unique_ptr<Decoder> decoder = nullptr;
         if (std::is_same<InputBlock, MuseInputBlock>::value) {
             decoder = std::make_unique<MuseDecoder>(log,
-                                        (InputReader<MuseInputBlock> &)reader,
-                                       shaders,
-                                       manager,
-                                       decode_video,
-                                       decode_all_fields,
-                                       decode_audio,
-                                       timestamp_query_pool);
-        } else {
-            decoder = std::make_unique<SdDecoder>(log,
-                                                    (InputReader<SdInputBlock> &)reader,
-                                                    shaders,
+                                                    (InputReader<MuseInputBlock> &)reader,
                                                     manager,
+                                                    command_pool,
+                                                    executable_dir,
                                                     decode_video,
                                                     decode_all_fields,
                                                     decode_audio,
                                                     timestamp_query_pool);
+        } else {
+            decoder = std::make_unique<SdDecoder>(log,
+                                                  (InputReader<SdInputBlock> &)reader,
+                                                  manager,
+                                                  command_pool,
+                                                  executable_dir,
+                                                  decode_video,
+                                                  decode_all_fields,
+                                                  decode_audio,
+                                                  timestamp_query_pool);
         }
+
         if (!decoder->initialize())
             throw runtime_error("MuseDecoder initialization failed");
-        auto images = shaders.getResultImages();
+        auto images = decoder->getResultImages();
 
         auto t0 = chrono::high_resolution_clock::now();
         int field_count = 0;
@@ -144,12 +145,12 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         int osd_text_remaining_frames = 0;
         double input_samples_per_muse_sample;
         long last_buffer_file_offset;
-        std::optional<FrameBuffer::DiscCode> disc_code;
+        std::shared_ptr<DiscInfo> disc_info = nullptr;
         int field_parity;
 
         while (paused && !redo_last_field ||
             decoder->next(efm_audio, &audio_mode, &audio_sample_count, audio_samples,
-                         &field_parity, &last_buffer_file_offset, &input_samples_per_muse_sample, &disc_code,
+                         &field_parity, &last_buffer_file_offset, &input_samples_per_muse_sample, &disc_info,
                          field_interpolation_mode, redo_last_field, enable_non_linear, dropout_mode, output_filename.has_value())) {
 
             if (!paused)
@@ -223,14 +224,10 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                     redo_last_field = true;
             }
             if (show_disc_code) {
-                string disc_code_string1 = disc_code ?
-                                          std::format("{}{} {}",
-                                                      disc_code->pf() ? "TOC " : "", disc_code->sz() ? "20 cm" : "30 cm", disc_code->df() ? "CLV" : "CAV")
-                                                      : "No disc code";
-                string disc_code_string2 = disc_code ?
-                                           std::format("Chapter {} Frame {}", disc_code->chapter(), disc_code->frame()) : "";
-                text_renderer.drawText(images.out_image, 90, 900, disc_code_string1, 2, *command_buffer);
-                text_renderer.drawText(images.out_image, 90, 955, disc_code_string2, 2, *command_buffer);
+                auto disc_info_strings = disc_info ? disc_info->asStrings() : std::vector<std::string>{"No disc info"};
+                for (int i = disc_info_strings.size() - 1, y = 955; i >= 0; i--, y -= 55) {
+                    text_renderer.drawText(images.out_image, 90, y, disc_info_strings[i], 2, *command_buffer);
+                }
                 if (paused)
                     redo_last_field = true;
             }
@@ -355,16 +352,16 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             }
             if (check_glfw_key(window, GLFW_KEY_D)) {
                 switch (dropout_mode) {
-                    case Shaders::DropoutMode::eNormal:
-                        dropout_mode = Shaders::DropoutMode::eDisabled;
+                    case DropoutMode::eNormal:
+                        dropout_mode = DropoutMode::eDisabled;
                         osd_text = "DROPOUT DISABLED";
                         break;
-                    case Shaders::DropoutMode::eDisabled:
-                        dropout_mode = Shaders::DropoutMode::eHighlight;
+                    case DropoutMode::eDisabled:
+                        dropout_mode = DropoutMode::eHighlight;
                         osd_text = "DROPOUT HIGHLIGHT";
                         break;
-                    case Shaders::DropoutMode::eHighlight:
-                        dropout_mode = Shaders::DropoutMode::eNormal;
+                    case DropoutMode::eHighlight:
+                        dropout_mode = DropoutMode::eNormal;
                         osd_text = "DROPOUT ENABLED";
                         break;
                 }
@@ -398,7 +395,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                         time_us / 1000.0 / field_count * 2,
                         1000000.0 / time_us * field_count / 2));
         if (benchmark_shaders)
-            decoder->output_benchmark_results();
+            decoder->outputBenchmarkResults();
         decoder = nullptr;
     }
 
@@ -445,7 +442,7 @@ int main(int argc, char *argv[]) {
     optional<string> muse_output_filename; // always written as little endian unsigned short values
     optional<string> output_filename; // format selected automatically from filename
     bool decode_video = true;
-    Shaders::DropoutMode dropout_mode = Shaders::DropoutMode::eNormal;
+    DropoutMode dropout_mode = DropoutMode::eNormal;
     bool decode_audio = true;
     bool efm_audio = false;
     bool benchmark_shaders = false;
@@ -518,10 +515,10 @@ int main(int argc, char *argv[]) {
         decode_video = false;
     });
     options.emplace_back("--no-dropout", [&] () mutable -> void {
-        dropout_mode = Shaders::DropoutMode::eDisabled;
+        dropout_mode = DropoutMode::eDisabled;
     });
     options.emplace_back("--highlight-dropout", [&] () mutable -> void {
-        dropout_mode = Shaders::DropoutMode::eHighlight;
+        dropout_mode = DropoutMode::eHighlight;
     });
     options.emplace_back("--no-audio", [&] () mutable -> void {
         decode_audio = false;
@@ -617,7 +614,7 @@ int main(int argc, char *argv[]) {
                                     log, executable_dir, manager, *it,
                                     input_sample_frequency, initial_seek_seconds, benchmark_shaders,
                                     muse_output_filename);
-                    process_file(log, executable_dir, manager, *reader, decode_all_fields,
+                    process_file<SdInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                  full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
                                  efm_audio,
                                  benchmark_shaders, output_filename);
@@ -648,7 +645,7 @@ int main(int argc, char *argv[]) {
                             cerr << "No input format specified" << endl;
                             exit(EXIT_FAILURE);
                     }
-                    process_file(log, executable_dir, manager, *reader, decode_all_fields,
+                    process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                  full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
                                  efm_audio,
                                  benchmark_shaders, output_filename);

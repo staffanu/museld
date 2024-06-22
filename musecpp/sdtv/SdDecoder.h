@@ -8,34 +8,29 @@
 #include <deque>
 #include "musevk/TimestampStatistics.h"
 #include "efm/EfmDecoder.h"
-#include "AudioDecoder.h"
-#include "Shaders.h"
-#include "FrameBuffer.h"
 #include "musevk/CommandPool.h"
 #include "SdInputBlock.h"
 #include "Decoder.h"
+#include "SdFrame.h"
+#include "SdShaders.h"
 
 namespace musevk {
     class TimestampQueryPool;
 }
-class AudioDecoder;
 template<class InputBlock> class InputReader;
 class Logger;
-class Shaders;
+class SdShaders;
 
 class SdDecoder : public Decoder {
 public:
     /// \param decode_all_fields If false, skips decoding of the first field of each
     /// frame individually, so next should be called 30 times per second instead of 60;
     /// useful for slow hardware.
-    SdDecoder(Logger &log,
-                InputReader<SdInputBlock> &reader,
-                Shaders &shaders,
-                musevk::VulkanManager &manager,
-                bool decode_video,
-                bool decode_all_fields,
-                bool decode_audio,
-                musevk::TimestampQueryPool *timestamp_query_pool);
+    SdDecoder(
+            Logger &log, InputReader<SdInputBlock> &reader, musevk::VulkanManager &manager,
+            musevk::CommandPool &command_pool, std::string const &executable_dir,
+            bool decode_video, bool decode_all_fields, bool decode_audio,
+            musevk::TimestampQueryPool *timestamp_query_pool);
     ~SdDecoder();
     SdDecoder(const SdDecoder&) = delete;
     void operator=(const SdDecoder&) = delete;
@@ -47,18 +42,18 @@ public:
               int *sample_count,
               AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES],
               int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
-              std::optional<FrameBuffer::DiscCode> *disc_code,
+              std::shared_ptr<DiscInfo> *disc_code,
               FieldInterpolationMode field_interpolation_mode,
-              bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode, bool output_yuv) override;
+              bool redo_last_field, bool enable_non_linear, DropoutMode dropout_mode, bool output_yuv) override;
 
-    void output_benchmark_results() override;
+    void outputBenchmarkResults() override;
+    ResultImages getResultImages() override;
 
 private:
     Logger &m_log;
     InputReader<SdInputBlock> &m_reader;
-    Shaders &m_shaders;
     musevk::VulkanManager &m_manager;
-    musevk::CommandPool m_command_pool;
+    SdShaders m_shaders;
     const bool m_decode_video;
     const bool m_decode_all_fields;
     const bool m_decode_audio;
@@ -73,9 +68,8 @@ private:
     int m_frame_no;
     int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field
     long m_total_elapsed_time_us;
-    AudioDecoder m_audio_decoder;
     EfmDecoder m_efm_decoder;
-    std::deque<FrameBuffer *> m_frame_buffers; // The front (index 0) is the newest received frame
+    std::deque<SdFrame *> m_frames; // The front (index 0) is the newest received frame; we keep two frames.
 };
 
 

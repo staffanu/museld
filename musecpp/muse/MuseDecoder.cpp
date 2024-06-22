@@ -19,24 +19,24 @@
 using namespace std;
 
 MuseDecoder::MuseDecoder(
-        Logger &log, InputReader<MuseInputBlock> &reader, Shaders &shaders, musevk::VulkanManager &manager,
+        Logger &log, InputReader<MuseInputBlock> &reader, musevk::VulkanManager &manager,
+        musevk::CommandPool &command_pool, std::string const &executable_dir,
         bool decode_video, bool decode_all_fields, bool decode_audio,
         musevk::TimestampQueryPool *timestamp_query_pool)
 : Decoder(),
   m_log(log),
   m_reader(reader),
-  m_shaders(shaders),
   m_manager(manager),
-  m_command_pool(manager),
+  m_shaders(Shaders(log, executable_dir, m_manager, command_pool)),
   m_decode_video(decode_video),
   m_decode_all_fields(decode_all_fields),
   m_decode_audio(decode_audio),
   m_timestamp_query_pool(timestamp_query_pool),
   m_eq{-1, -1},
   m_first_stage_complete_semaphore(manager.getDevice().createSemaphore(vk::SemaphoreCreateInfo())),
-  m_reset_timestamp_query_pool_command_buffer(m_command_pool.createCommandBuffer(timestamp_query_pool)),
-  m_first_stage_command_buffer(m_command_pool.createCommandBuffer(timestamp_query_pool)),
-  m_second_stage_command_buffer(m_command_pool.createCommandBuffer(timestamp_query_pool)),
+  m_reset_timestamp_query_pool_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
+  m_first_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
+  m_second_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
   m_timestamp_statistics(),
   m_frame_no(-1),
   m_field_index(0),
@@ -81,9 +81,9 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                        int *sample_count,
                        AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES],
                        int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
-                       optional<FrameBuffer::DiscCode> *disc_code,
+                       shared_ptr<DiscInfo> *disc_code,
                        FieldInterpolationMode field_interpolation_mode,
-                       bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode, bool output_yuv) {
+                       bool redo_last_field, bool enable_non_linear, DropoutMode dropout_mode, bool output_yuv) {
     *sample_count = 0;
 
     if (redo_last_field) // undo the field advance from the previous call
@@ -219,6 +219,10 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
     return true;
 }
 
-void MuseDecoder::output_benchmark_results() {
+void MuseDecoder::outputBenchmarkResults() {
     m_timestamp_statistics.print_stats(3);
+}
+
+ResultImages MuseDecoder::getResultImages() {
+    return m_shaders.getResultImages();
 }

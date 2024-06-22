@@ -2,13 +2,13 @@
 // Created by staffanu on 4/9/23.
 //
 
-#include <numeric>
 #include <utility>
 #include "musevk/VulkanBuffer.h"
 #include "FrameBuffer.h"
 #include "FieldBufferView.h"
 #include "MuseConstants.h"
 #include "musevk/HalfFloatUtil.h"
+#include "util/LinearRegression.h"
 
 using namespace std;
 
@@ -18,7 +18,7 @@ FrameBuffer::FrameBuffer(Logger &log, int frame_no, std::shared_ptr<musevk::Vulk
   m_input_samples_per_sample(0),
   m_data(std::move(data)),
   m_fields({FieldBufferView(log, frame_no, m_data, 0), FieldBufferView(log, frame_no, m_data, 1) }),
-  m_disc_code(nullopt) {
+  m_disc_code(nullptr) {
 }
 
 void FrameBuffer::set_frame_no(int frame_no, long input_offset, double input_samples_per_sample) {
@@ -58,30 +58,15 @@ std::pair<float, float> FrameBuffer::EstimateEq(float const *data) {
     vector<pair<float, float>> v = {{0.0f , avg_low}, {128.0f, avg_blanking }, {255.0f, avg_high }};
     // This is according to the documentation available, but it seems in reality the levels are 0 and 255?
     // vector<pair<float, float>> v = {{16.0f , avg_low}, {128.0f, avg_blanking }, {239.0f, avg_high }};
-    auto eq = FrameBuffer::LinearRegression(v);
+    auto eq = LinearRegression::linearRegression(v);
     return eq;
-}
-
-pair<float, float> FrameBuffer::LinearRegression(vector<pair<float, float>> const &values) {
-    float sum_x = accumulate(values.begin(), values.end(), 0.0f,
-                              [](float acc, pair<float, float> v) { return acc + v.first; });
-    float sum_y = accumulate(values.begin(), values.end(), 0.0f,
-                              [](float acc, pair<float, float> v) { return acc + v.second; });
-    float sum_xx = accumulate(values.begin(), values.end(), 0.0f,
-                              [](float acc, pair<float, float> v) { return acc + v.first * v.first; });
-    float sum_xy = accumulate(values.begin(), values.end(), 0.0f,
-                              [](float acc, pair<float, float> v) { return acc + v.first * v.second; });
-    int n = (int)values.size();
-    float a = ((float)n * sum_xy - sum_x * sum_y) / ((float)n * sum_xx - sum_x * sum_x);
-    float b = (sum_y - a * sum_x) / (float)n;
-    return {a, b};
 }
 
 FieldBufferView &FrameBuffer::get_field(int parity) {
     return m_fields[parity];
 }
 
-std::optional<FrameBuffer::DiscCode> FrameBuffer::getDiscCode() const {
+std::shared_ptr<DiscCode> FrameBuffer::getDiscCode() const {
     return m_disc_code;
 }
 
@@ -125,13 +110,13 @@ void FrameBuffer::processDiscCode() {
             int cadr = extractBits(4 * 5, 4 * 2); // 8 bits
             int fadr1 = extractBits(4 * 7, 4 * 5); // 20 bits
             int fadr2 = extractBits(4 * 12, 4 * 5); // 20 bits
-            m_disc_code = optional<DiscCode>({mode, cadr, fadr1, fadr2});
+            m_disc_code = std::make_shared<DiscCode>(mode, cadr, fadr1, fadr2);
         } else {
-            m_disc_code = nullopt;
+            m_disc_code = nullptr;
             //cout << "CRC error" << endl;
         }
     } else {
-        m_disc_code = nullopt;
+        m_disc_code = nullptr;
         // cout << "cannot extract!" << endl;
     }
 }

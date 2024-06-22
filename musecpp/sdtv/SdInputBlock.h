@@ -26,6 +26,10 @@ public:
     double input_samples_per_muse_sample;
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropout_data;
+
+    void writeToFile(int fd, void *buffer) override {
+        throw std::runtime_error("SD data cannot be written to file (file format remains to be defined)");
+    }
 };
 
 template<>

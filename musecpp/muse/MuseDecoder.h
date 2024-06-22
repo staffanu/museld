@@ -30,8 +30,9 @@ public:
     /// useful for slow hardware.
     MuseDecoder(Logger &log,
                 InputReader<MuseInputBlock> &reader,
-                Shaders &shaders,
                 musevk::VulkanManager &manager,
+                musevk::CommandPool &command_pool,
+                std::string const &executable_dir,
                 bool decode_video,
                 bool decode_all_fields,
                 bool decode_audio,
@@ -47,18 +48,18 @@ public:
               int *sample_count,
               AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES],
               int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
-              std::optional<FrameBuffer::DiscCode> *disc_code,
+              std::shared_ptr<DiscInfo> *disc_code,
               FieldInterpolationMode field_interpolation_mode,
-              bool redo_last_field, bool enable_non_linear, Shaders::DropoutMode dropout_mode, bool output_yuv) override;
+              bool redo_last_field, bool enable_non_linear, DropoutMode dropout_mode, bool output_yuv) override;
 
-    void output_benchmark_results() override;
+    void outputBenchmarkResults() override;
+    ResultImages getResultImages() override;
 
 private:
     Logger &m_log;
     InputReader<MuseInputBlock> &m_reader;
-    Shaders &m_shaders;
     musevk::VulkanManager &m_manager;
-    musevk::CommandPool m_command_pool;
+    Shaders m_shaders;
     const bool m_decode_video;
     const bool m_decode_all_fields;
     const bool m_decode_audio;

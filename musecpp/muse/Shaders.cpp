@@ -16,7 +16,6 @@ using namespace musevk;
 Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &manager, CommandPool &command_pool)
 : m_log(log),
   m_vulkan_manager(manager),
-  m_command_pool(command_pool),
   m_non_linear_processed_buffer(createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)),
   m_interpolated32_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
   m_intermediate_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
@@ -42,7 +41,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_image_V_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(MUSE_Y_BUF_WIDTH * 3 / 2, MUSE_BUF_HEIGHT * 2 / 2), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
-  m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
+  m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
           Size(9, 7), // Notice the total size should not be larger than the workgroup size!
           {
                   -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
@@ -53,7 +52,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   0.000205, 0.000474, -0.005036, -0.012591, 0.010491, -0.012591, -0.005036, 0.000474, 0.000205,
                   -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
           })),
-  m_color_filter_single_field_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
+  m_color_filter_single_field_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
           Size(9, 5), // Notice the total size should not be larger than the workgroup size!
           {
                   0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
@@ -62,7 +61,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
                   0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
           })),
-  m_color_filter_inter_frame_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
+  m_color_filter_inter_frame_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
           Size(5, 7), // Notice the total size should not be larger than the workgroup size!
           {
                  -0.000343, -0.002317, -0.004290, -0.002317, -0.000343,
@@ -73,7 +72,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                  0.000920, 0.006212, 0.011504, 0.006212, 0.000920,
                  -0.000343, -0.002317, -0.004290, -0.002317, -0.000343,
          })),
-  m_filter_2_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
+  m_filter_2_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
           Size(19),
           {
                   // cutoff 0.25, transition 0.05, sampling freq 1, Rectangular: 19 coeffs (25 non-zero).  Looks +/- 9 samples in each direction
@@ -84,7 +83,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   0.061716249977351118, 0.000000000000000019, -0.044083035698107946, -0.000000000000000019,
                   0.034286805542972851
           })),
-  m_filter_4_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
+  m_filter_4_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
           Size(31),
           {
                   // cutoff 0.125, transition 0.03, sampling freq 1, Rectangular: 31 coeffs (25 non-zero).  Looks +/- 15 samples in each direction
@@ -382,7 +381,7 @@ void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_onl
     }
 }
 
-Shaders::ResultImages Shaders::getResultImages() {
+ResultImages Shaders::getResultImages() {
     return ResultImages { m_image_out, m_image_Y_out, m_image_V_out, m_image_U_out};
 }
 
