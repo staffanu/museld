@@ -7,7 +7,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.hpp>
-#include <fmt/format.h>
+#include <format>
 #include "VulkanManager.h"
 #include "VulkanBuffer.h"
 
@@ -190,14 +190,14 @@ namespace musevk {
         bool found = false;
         for (auto &device: devices) {
             auto properties = device.getProperties();
-            m_log.debug(eVideo, fmt::format("Checking device {}", string(properties.deviceName)));
+            m_log.debug(eVideo, std::format("Checking device {}", string(properties.deviceName)));
             auto queue_families = isDeviceSuitable(device);
-            if (queue_families.has_value()) {
+            if (queue_families) {
                 found = true;
                 m_physical_device = device;
                 m_queue_families = queue_families.value();
                 m_physical_device_properties = properties;
-                m_log.info(eVideo, fmt::format("Picked device {}", string(properties.deviceName)));
+                m_log.info(eVideo, std::format("Picked device {}", string(properties.deviceName)));
                 break;
             }
         }
@@ -259,7 +259,7 @@ namespace musevk {
         bool shaderInt16 = features2.get<vk::PhysicalDeviceFeatures2>().features.shaderInt16;
         bool storagePushConstant16 = features2.get<vk::PhysicalDeviceVulkan11Features>().storagePushConstant16;
 
-        m_log.debug(eVideo, fmt::format("device features: storageBuffer16BitAccess: {}, uniformAndStorageBuffer8BitAccess: {}, "
+        m_log.debug(eVideo, std::format("device features: storageBuffer16BitAccess: {}, uniformAndStorageBuffer8BitAccess: {}, "
                                         "shaderInt8: {}, "
                                         "uniformAndStorageBuffer16BitAccess: {}, shaderFloat16: {}, shaderInt16: {}, "
                                         "storagePushConstant16: {}",
@@ -432,7 +432,7 @@ namespace musevk {
 
         m_swap_chain_image_format = surfaceFormat.format;
         m_swap_chain_extent = extent;
-        m_log.info(eVideo, fmt::format("Swap chain created with extent {}x{}", extent.width, extent.height));
+        m_log.info(eVideo, std::format("Swap chain created with extent {}x{}", extent.width, extent.height));
     }
 
     VKAPI_ATTR VkBool32 VKAPI_CALL VulkanManager::debugCallback(
@@ -463,7 +463,7 @@ namespace musevk {
                     severity = LogPriority::eError;
                     break;
                 default:
-                    throw runtime_error(fmt::format("Unknown message_severity {}", (int)message_severity));
+                    throw runtime_error(std::format("Unknown message_severity {}", (int)message_severity));
             }
             string type_string;
             switch (message_type) {
@@ -484,7 +484,7 @@ namespace musevk {
                     break;
             }
 
-            m_log.log(severity, eVideo, fmt::format("Vulkan validation: ({}) {}", type_string, callback_data->pMessage));
+            m_log.log(severity, eVideo, std::format("Vulkan validation: ({}) {}", type_string, callback_data->pMessage));
         }
 
         return VK_FALSE;

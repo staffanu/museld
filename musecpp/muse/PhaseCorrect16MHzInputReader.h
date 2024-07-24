@@ -7,14 +7,15 @@
 
 #include <fstream>
 #include "InputReader.h"
+#include "muse/MuseInputBlock.h"
 
-class PhaseCorrect16MHzInputReader : public InputReader {
+class PhaseCorrect16MHzInputReader : public InputReader<MuseInputBlock> {
 public:
     explicit PhaseCorrect16MHzInputReader(Logger &log, const std::string &filename, bool big_endian,
                                           double initial_seek_seconds,
                                           const std::optional<std::string> &output_filename);
 
-    bool initialize(std::vector<std::unique_ptr<InputReader::InputReaderBlock>> &buffers) override;
+    bool initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) override;
     void cleanup() override;
 
     void seek(double seconds) override;

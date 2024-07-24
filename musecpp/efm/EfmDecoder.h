@@ -9,6 +9,8 @@
 #include "AudioDefs.h"
 #include "InputReader.h"
 #include "ReedSolomon.h"
+#include "InputBlockBase.h"
+
 class Logger;
 
 class EfmDecoder {
@@ -18,7 +20,7 @@ public:
 
     // output samples are written to the first two channels
     void decode(int frame_no,
-                const std::array<bool, InputReader::InputReaderBlock::c_max_efm_data_size> &data, int input_data_size,
+                const std::array<bool, InputBlockBase::c_max_efm_data_size> &data, int input_data_size,
                 int *sample_count, AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES]);
 
 private:

@@ -12,12 +12,13 @@
 #include "Shaders.h"
 #include "FrameBuffer.h"
 #include "musevk/CommandPool.h"
+#include "MuseInputBlock.h"
 
 namespace musevk {
     class TimestampQueryPool;
 }
 class AudioDecoder;
-class InputReader;
+template<class InputBlock> class InputReader;
 class Logger;
 class Shaders;
 
@@ -27,7 +28,7 @@ public:
     /// frame individually, so next should be called 30 times per second instead of 60;
     /// useful for slow hardware.
     MuseDecoder(Logger &log,
-                InputReader &reader,
+                InputReader<MuseInputBlock> &reader,
                 Shaders &shaders,
                 musevk::VulkanManager &manager,
                 bool decode_video,
@@ -57,7 +58,7 @@ public:
 
 private:
     Logger &m_log;
-    InputReader &m_reader;
+    InputReader<MuseInputBlock> &m_reader;
     Shaders &m_shaders;
     musevk::VulkanManager &m_manager;
     musevk::CommandPool m_command_pool;

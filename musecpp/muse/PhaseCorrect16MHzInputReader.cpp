@@ -6,9 +6,9 @@
 #include <map>
 #include <cassert>
 #include <filesystem>
-#include <fmt/format.h>
+#include <format>
 #include "musevk/VulkanBuffer.h"
-#include "MuseTypes.h"
+#include "MuseConstants.h"
 #include "PhaseCorrect16MHzInputReader.h"
 #include "util/Logger.h"
 
@@ -25,7 +25,7 @@ PhaseCorrect16MHzInputReader::PhaseCorrect16MHzInputReader(
         m_big_endian(big_endian) {
 }
 
-bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::unique_ptr<InputReader::InputReaderBlock>> &buffers) {
+bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
     auto [samples_to_skip, eq] = compute_initial_skip(m_log);
 
     m_input = ifstream(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
@@ -34,7 +34,7 @@ bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::unique_ptr<InputR
     off_t samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
     assert(samples_per_frame >= samples_to_skip);
     vector<float> skip_buffer(samples_per_frame);
-    m_log.info(eInput, fmt::format("Skipping {} initial samples", samples_to_skip));
+    m_log.info(eInput, std::format("Skipping {} initial samples", samples_to_skip));
     readFloats(m_input, skip_buffer.data(), samples_to_skip);
 
     return InputReader::initialize(buffers);
@@ -59,28 +59,28 @@ void PhaseCorrect16MHzInputReader::seek(double seconds) {
 
         off_t samples_to_seek = frames_to_seek * samples_per_frame;
         double actual_seek_time = (double)frames_to_seek / 30.0;
-        m_log.info(eInput, fmt::format("Seeking relative time {} s, {} samples.",
+        m_log.info(eInput, std::format("Seeking relative time {} s, {} samples.",
                                        actual_seek_time, samples_to_seek));
         m_input.seekg(samples_to_seek * 2, ifstream::cur);
 
         // discard content in existing input buffers
-        move(m_filled_muse_input_buffers.begin(), m_filled_muse_input_buffers.end(), back_inserter(m_vacant_muse_input_buffers));
-        m_filled_muse_input_buffers.clear();
-        m_log.error(eInput, fmt::format("sizes: {} {}", m_vacant_muse_input_buffers.size(), m_filled_muse_input_buffers.size()));
+        move(m_filled_input_buffers.begin(), m_filled_input_buffers.end(), back_inserter(m_vacant_input_buffers));
+        m_filled_input_buffers.clear();
+        m_log.error(eInput, std::format("sizes: {} {}", m_vacant_input_buffers.size(), m_filled_input_buffers.size()));
         m_cv_vacant.notify_one();
     }
 }
 
 void PhaseCorrect16MHzInputReader::threadFunc() {
     for (;;) {
-        unique_ptr<InputReaderBlock> buffer = nullptr;
+        unique_ptr<MuseInputBlock> buffer = nullptr;
         {
             std::unique_lock<std::mutex> lock(m_mutex);
-            m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_muse_input_buffers.empty();});
+            m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_input_buffers.empty();});
             if (m_stop_request)
                 break;
-            buffer = std::move(m_vacant_muse_input_buffers.front());
-            m_vacant_muse_input_buffers.pop_front();
+            buffer = std::move(m_vacant_input_buffers.front());
+            m_vacant_input_buffers.pop_front();
         }
 
         buffer->input_samples_per_muse_sample = 1;
@@ -91,7 +91,7 @@ void PhaseCorrect16MHzInputReader::threadFunc() {
 
         std::unique_lock<std::mutex> lock(m_mutex);
         m_cv_filled.notify_one();
-        m_filled_muse_input_buffers.push_back(std::move(buffer));
+        m_filled_input_buffers.push_back(std::move(buffer));
     }
     std::unique_lock<std::mutex> lock(m_mutex);
     m_cv_filled.notify_one();
@@ -119,7 +119,7 @@ pair<int, pair<float, float>> PhaseCorrect16MHzInputReader::compute_initial_skip
     auto y1 = sorted[500];
     auto y2 = sorted[480 * 1125 * 2 - 500];
     pair<float, float> eq = {(y2 - y1) / (239.0f - 16.0f), y1 - 16.0f};
-    log.info(eInput, fmt::format("Initial eq: {}, {}", eq.first, eq.second));
+    log.info(eInput, std::format("Initial eq: {}, {}", eq.first, eq.second));
 
     // The rest of the code only checks the signal for rising or falling values, and never uses the actual
     // values directly.  We do not need to do any equalization for this.

@@ -53,7 +53,7 @@ namespace musevk {
             std::optional<uint32_t> presentFamily;
 
             [[nodiscard]] bool isComplete() const {
-                return graphicsAndComputeFamily.has_value() && presentFamily.has_value();
+                return graphicsAndComputeFamily && presentFamily;
             }
         };
         QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice &device);

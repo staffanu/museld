@@ -4,7 +4,7 @@
 
 #include <ostream>
 #include <bitset>
-#include <fmt/format.h>
+#include <format>
 #include "AudioDecoder.h"
 #include "util/Logger.h"
 #include "musevk/HalfFloatUtil.h"
@@ -135,7 +135,7 @@ void AudioDecoder::decodeFrame(int frame_no,
                     no_not_updated_symbol_locations++;
                     if (no_not_updated_symbol_locations <= 3)
                         m_log.debug(eAudio,
-                                    fmt::format("Not updating symbol location due to too far from default location: "
+                                    std::format("Not updating symbol location due to too far from default location: "
                                                 "presumed symbol {}=({}, {})", closest.first, xin, yin));
                 }
             }
@@ -157,7 +157,7 @@ void AudioDecoder::decodeFrame(int frame_no,
         }
     }
     if (no_not_updated_symbol_locations > 3)
-        m_log.debug(eAudio, fmt::format("Total number of not updated symbol location = {}",
+        m_log.debug(eAudio, std::format("Total number of not updated symbol location = {}",
                                         no_not_updated_symbol_locations));
 
     bool printed_searching = false;
@@ -202,13 +202,13 @@ void AudioDecoder::decodeFrame(int frame_no,
             })->first;
             if (majority != m_active_control_signal) {
                 m_active_control_signal = majority;
-                m_log.info(eAudio, fmt::format("audio control signal now: {}", bitset<22>(m_active_control_signal).to_string()));
+                m_log.info(eAudio, std::format("audio control signal now: {}", bitset<22>(m_active_control_signal).to_string()));
                 auto mode = detectModeFromControlData(majority);
                 if (mode != m_active_audio_mode) {
                     m_active_audio_mode = mode;
                     *audio_mode = mode;
                     sample_count = 0;
-                    m_log.info(eAudio, fmt::format("audio mode now: {}", (int)m_active_audio_mode));
+                    m_log.info(eAudio, std::format("audio mode now: {}", (int)m_active_audio_mode));
                 }
             }
 
@@ -286,7 +286,7 @@ void AudioDecoder::decodeFrame(int frame_no,
     auto t1 = chrono::high_resolution_clock::now();
     m_total_time_us += chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
     if (frame_no % 30 == 0) {
-        m_log.info(eAudio | ePerformance, fmt::format("Avg audio decoding time last second: {:.1f} ms/frame",
+        m_log.info(eAudio | ePerformance, std::format("Avg audio decoding time last second: {:.1f} ms/frame",
                                                       (double) m_total_time_us / 1000.0/ 30));
         m_total_time_us = 0;
     }

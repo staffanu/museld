@@ -2,7 +2,7 @@
 // Created by staffanu on 5/25/23.
 //
 
-#include <fmt/format.h>
+#include <format>
 #include "CommandBuffer.h"
 #include "VulkanBuffer.h"
 #include "TimestampQueryPool.h"
@@ -193,7 +193,7 @@ namespace musevk {
         assert(m_is_running);
         auto result = m_device.waitForFences(m_fence, VK_TRUE, UINT64_MAX);
         if (result != vk::Result::eSuccess)
-            throw std::runtime_error(fmt::format("waitForFences returned with result {}", (uint32_t)result));
+            throw std::runtime_error(std::format("waitForFences returned with result {}", (uint32_t)result));
         m_device.resetFences(m_fence);
         m_is_running = false;
         if (!m_memory_ranges_to_invalidate.empty()) {

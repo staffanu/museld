@@ -34,13 +34,13 @@ bool VideoFileWriter::init() {
     if (!(m_format_context->oformat->flags & AVFMT_NOFILE)) {
         int ret = avio_open(&m_format_context->pb, m_filename.c_str(), AVIO_FLAG_WRITE);
         if (ret < 0)
-            throw std::runtime_error(fmt::format("Could not open '{}': {}}", m_filename, av_err2string(ret)));
+            throw std::runtime_error(std::format("Could not open '{}': {}", m_filename, av_err2string(ret)));
     }
 
     // Write the stream header, if any
     int ret = avformat_write_header(m_format_context, &opt);
     if (ret < 0)
-        throw std::runtime_error(fmt::format("Error occurred when opening output file: {}", av_err2string(ret)));
+        throw std::runtime_error(std::format("Error occurred when opening output file: {}", av_err2string(ret)));
 
     return true;
 }
@@ -138,7 +138,7 @@ void VideoFileWriter::initStream(OutputStream *ost, enum AVCodecID codec_id) {
 
     ost->codec = avcodec_find_encoder(codec_id);
     if (!ost->codec)
-        throw std::runtime_error(fmt::format("Could not find encoder for {}", avcodec_get_name(codec_id)));
+        throw std::runtime_error(std::format("Could not find encoder for {}", avcodec_get_name(codec_id)));
 
     AVCodecContext *c = avcodec_alloc_context3(ost->codec);
     if (!c)
@@ -169,7 +169,7 @@ void VideoFileWriter::initVideo(AVDictionary *opt_arg) {
     int ret = avcodec_open2(c, m_video_stream.codec, &opt);
     av_dict_free(&opt);
     if (ret < 0)
-        throw std::runtime_error(fmt::format("Could not open video codec: {}", av_err2string(ret)));
+        throw std::runtime_error(std::format("Could not open video codec: {}", av_err2string(ret)));
 
     m_video_stream.frame = av_frame_alloc();
     if (!m_video_stream.frame)
@@ -210,7 +210,7 @@ void VideoFileWriter::initAudio(AVDictionary *opt_arg) {
     int ret = avcodec_open2(c, m_audio_stream.codec, &opt);
     av_dict_free(&opt);
     if (ret < 0)
-        throw std::runtime_error(fmt::format("Could not open audio codec: {}", av_err2string(ret)));
+        throw std::runtime_error(std::format("Could not open audio codec: {}", av_err2string(ret)));
 
     int nb_samples = c->codec->capabilities & AV_CODEC_CAP_VARIABLE_FRAME_SIZE ? 1024 : c->frame_size;
 
@@ -289,21 +289,21 @@ bool VideoFileWriter::writeFrame(AVCodecContext *c, AVStream *st, AVFrame *frame
     // send the frame to the encoder
     int ret = avcodec_send_frame(c, frame);
     if (ret < 0)
-        throw std::runtime_error(fmt::format("Error sending a frame to the encoder: {}", av_err2string(ret)));
+        throw std::runtime_error(std::format("Error sending a frame to the encoder: {}", av_err2string(ret)));
 
     while (true) {
         ret = avcodec_receive_packet(c, pkt);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
             break;
         else if (ret < 0)
-            throw std::runtime_error(fmt::format("Error encoding a frame: {}", av_err2string(ret)));
+            throw std::runtime_error(std::format("Error encoding a frame: {}", av_err2string(ret)));
 
         // rescale output packet timestamp values from codec to stream timebase
         av_packet_rescale_ts(pkt, c->time_base, st->time_base);
         pkt->stream_index = st->index;
 
         AVRational *time_base = &m_format_context->streams[pkt->stream_index]->time_base;
-        m_log.debug(eOutput, fmt::format("pts:{} pts_time:{} dts:{} dts_time:{} duration:{} duration_time:{} stream_index:{}",
+        m_log.debug(eOutput, std::format("pts:{} pts_time:{} dts:{} dts_time:{} duration:{} duration_time:{} stream_index:{}",
                                          av_ts2string(pkt->pts), av_ts2timestring(pkt->pts, time_base),
                                          av_ts2string(pkt->dts), av_ts2timestring(pkt->dts, time_base),
                                          av_ts2string(pkt->duration), av_ts2timestring(pkt->duration, time_base),
@@ -315,7 +315,7 @@ bool VideoFileWriter::writeFrame(AVCodecContext *c, AVStream *st, AVFrame *frame
          * its contents and resets pkt), so that no unreferencing is necessary.
          * This would be different if one used av_write_frame(). */
         if (ret < 0)
-            throw std::runtime_error(fmt::format("Error while writing output packet: {}", av_err2string(ret)));
+            throw std::runtime_error(std::format("Error while writing output packet: {}", av_err2string(ret)));
     }
     return ret == AVERROR_EOF;
 }

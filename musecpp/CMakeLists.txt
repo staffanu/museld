@@ -1,10 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
 project(musecpp)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(fmt REQUIRED)
 find_package(glfw3 3.3 REQUIRED)
 find_package(Vulkan REQUIRED)
 
@@ -29,9 +28,11 @@ include_directories(.)
 add_executable(musecpp
         main.cpp
         AudioPlayback.cpp AudioPlayback.h
-        InputReader.cpp InputReader.h
+        InputReader.h
         AudioDefs.h
         TextRenderer.cpp TextRenderer.h
+        RfDemodulator.h
+        InputBlockBase.h
         muse/FrameBuffer.cpp muse/FrameBuffer.h
         muse/FieldBufferView.cpp muse/FieldBufferView.h
         muse/AudioDecoder.cpp muse/AudioDecoder.h
@@ -42,7 +43,9 @@ add_executable(musecpp
         muse/MuseDecoder.cpp muse/MuseDecoder.h
         muse/ResamplingInputReader.cpp muse/ResamplingInputReader.h
         muse/PhaseCorrect16MHzInputReader.cpp muse/PhaseCorrect16MHzInputReader.h
-        muse/RfDemodulator.cpp muse/RfDemodulator.h
+        muse/MuseRfDemodulator.cpp muse/MuseRfDemodulator.h
+        muse/MuseInputBlock.h
+        muse/MuseConstants.h
         util/PercentileFilter.cpp util/PercentileFilter.h
         util/Logger.cpp util/Logger.h
         util/ConstExprHelpers.h
@@ -65,6 +68,7 @@ add_executable(musecpp
         efm/EfmPll.cpp efm/EfmPll.h
         efm/EfmDecoder.cpp efm/EfmDecoder.h
         efm/ByteWithErasureFlag.h
+        util/FmtAddons.h
 )
 if (HAVE_LIBAV)
     target_sources(musecpp PRIVATE
@@ -76,7 +80,6 @@ target_link_libraries(musecpp
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
-        PRIVATE fmt::fmt
         PRIVATE ${LIBAV_LIBRARIES}
 )
 

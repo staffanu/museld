@@ -2,26 +2,32 @@
 // Created by staffanu on 2/7/24.
 //
 
-#include <fmt/format.h>
+#include <format>
+#include <cmath>
+#include "util/Logger.h"
 #include "EfmPll.h"
 
-const double EfmPll::c_G1 = 1 - exp(-2 * c_zeta * c_omega * c_Ts);
-const double EfmPll::c_G2 = 1 + exp(-2 * c_omega * c_zeta * c_Ts)
-                            - 2 * exp(-c_omega * c_zeta * c_Ts) * cos(c_omega * c_Ts * sqrt(1 - c_zeta * c_zeta));
-const double EfmPll::c_GpdGvcoG1 = 1 / 5.0; // P
-const double EfmPll::c_GpdGvcoG2 = 1; // I
-const double EfmPll::c_g1 = c_G1 / c_GpdGvcoG1;
-const double EfmPll::c_g2 = c_G2 / c_GpdGvcoG2;
-
-EfmPll::EfmPll(Logger &log)
-        : m_log(log),
+EfmPll::EfmPll(Logger &log, double sample_frequency)
+        : c_sample_frequency(sample_frequency),
+          c_nominal_add(c_counter_max * c_nominal_frequency / c_sample_frequency),
+          c_omega(2 * M_PI * 10000),
+          c_zeta(0.71),
+          c_Ts(1 / c_sample_frequency),
+          c_G1(1 - exp(-2 * c_zeta * c_omega * c_Ts)),
+          c_G2(1 + exp(-2 * c_omega * c_zeta * c_Ts) - 2 * exp(-c_omega * c_zeta * c_Ts) * cos(c_omega * c_Ts * sqrt(1 - c_zeta * c_zeta))),
+          c_GpdGvcoG1(1 / 5.0),
+          c_GpdGvcoG2(1),
+          c_g1(c_G1 / c_GpdGvcoG1),
+          c_g2(c_G2 / c_GpdGvcoG2),
+          m_log(log),
           m_clk_counter(0),
           m_prev_in(false),
           m_error_sum(0),
           m_filter_out(0),
           m_toggle_count(0),
           m_toggle_pos(0) {
-    log.debug(eInput | eAudio, fmt::format("c_g1={:.5f} c_g2={:.7f}", c_g1, c_g2));
+
+    log.debug(eInput | eAudio, std::format("c_g1={:.5f} c_g2={:.7f}", c_g1, c_g2));
 }
 
 int EfmPll::reclock(const float *input, int input_size, bool *output, int max_output_size) {

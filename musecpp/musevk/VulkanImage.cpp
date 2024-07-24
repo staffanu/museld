@@ -64,7 +64,7 @@ namespace musevk {
 
     void VulkanImage::synchronizeForHostRead(CommandBuffer &command_buffer) {
         assert(m_host_access == eHostRead || m_host_access == eHostReadWrite);
-        if (m_host_visible_buffer.has_value()) {
+        if (m_host_visible_buffer) {
             command_buffer.enqueueTransitionMemoryLayout(m_image,
                                                          m_layout, m_layout,
                                                          vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer,
@@ -75,7 +75,7 @@ namespace musevk {
                                        vk::Offset3D(0, 0, 0), vk::Extent3D(m_width, m_height, 1));
             command_buffer.enqueueCopyImageToBuffer(m_image, m_layout, m_host_visible_buffer.value(), region);
 
-            assert(m_host_memory_properties.has_value() &&
+            assert(m_host_memory_properties &&
                    (m_host_memory_properties.value() & vk::MemoryPropertyFlagBits::eHostCoherent));
         } else {
             assert(m_device_memory_properties & vk::MemoryPropertyFlagBits::eHostCoherent);
@@ -87,7 +87,7 @@ namespace musevk {
 
     void VulkanImage::synchronizeHostWrites(CommandBuffer &command_buffer) {
         assert(m_host_access == eHostWrite || m_host_access == eHostWriteRarely || m_host_access == eHostReadWrite);
-        if (m_host_visible_buffer.has_value()) {
+        if (m_host_visible_buffer) {
             // Notice: this has never been tested so could be wrong!
             vk::BufferImageCopy region(0, m_width, m_height,
                                        vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
@@ -98,7 +98,7 @@ namespace musevk {
                                                          m_layout, m_layout,
                                                          vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader,
                                                          vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eShaderRead);
-            assert(m_host_memory_properties.has_value() &&
+            assert(m_host_memory_properties &&
                    (m_host_memory_properties.value() & vk::MemoryPropertyFlagBits::eHostCoherent));
         } else {
             assert(m_device_memory_properties & vk::MemoryPropertyFlagBits::eHostCoherent);

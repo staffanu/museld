@@ -6,7 +6,7 @@
 #define MUSECPP_VIDEOFILEWRITER_H
 
 #include <string>
-#include <fmt/format.h>
+#include <format>
 #include "musevk/VulkanImage.h"
 #include "util/Logger.h"
 #include "AudioDefs.h"

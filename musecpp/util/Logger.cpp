@@ -4,7 +4,7 @@
 
 #include <chrono>
 #include <iostream>
-#include <fmt/format.h>
+#include <format>
 #include <fmt/chrono.h>
 #include <sstream>
 #include "Logger.h"
@@ -65,7 +65,7 @@ void Logger::log(LogPriority priority, LogCategoryFlags categorization, const st
         auto tp = chrono::time_point_cast<chrono::milliseconds>(chrono::system_clock::now());
         auto ms = tp.time_since_epoch().count() % milli::den;
         ostringstream ss;
-        ss << fmt::format("{:%Y-%m-%d %H:%M:%S}.{:03d} [{}] (",
+        ss << std::format("{:%Y-%m-%d %H:%M:%S}.{:03d} [{}] (",
                           tp, ms, c_priority_names.at(priority));
         bool first = true;
         bool do_log = false;

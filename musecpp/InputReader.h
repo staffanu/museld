@@ -17,44 +17,26 @@ namespace musevk {
 }
 class Logger;
 
+enum class InputStatus {
+    eNormal = 0,
+    eBuffersEmpty = 1,
+    eBuffersFilled = 2, // buffers all filled, real-time input
+    eTimeout = 3, // returned value is null
+    eEof = 4, // returned value is null
+};
+
+template<class InputBlock>
 class InputReader {
 public:
-    // A block contains a full frame of data, sampled at 16.2 MHz
-    struct InputReaderBlock {
-        static constexpr int c_max_efm_data_size = 150000; // a bit above 7350 / 30 * 588;
-        InputReaderBlock(std::shared_ptr<musevk::VulkanBuffer> v, std::shared_ptr<musevk::VulkanBuffer> d)
-                : input_offset(0),
-                  input_samples_per_muse_sample(0),
-                  video_data(std::move(v)),
-                  dropout_data(std::move(d)),
-                  efm_data_size(0),
-                  efm_data() {
-        };
-        long input_offset;
-        double input_samples_per_muse_sample;
-        std::shared_ptr<musevk::VulkanBuffer> video_data;
-        std::shared_ptr<musevk::VulkanBuffer> dropout_data;
-        int efm_data_size;
-        std::array<bool, c_max_efm_data_size> efm_data;
-    };
-
     void operator=(const InputReader&) = delete;
     InputReader(const InputReader&) = delete;
     virtual ~InputReader() = default;
 
-    [[nodiscard]] virtual bool initialize(std::vector<std::unique_ptr<InputReaderBlock>> &buffers);
+    [[nodiscard]] virtual bool initialize(std::vector<std::unique_ptr<InputBlock>> &buffers);
     virtual void cleanup();
 
-    enum class InputStatus {
-        eNormal = 0,
-        eBuffersEmpty = 1,
-        eBuffersFilled = 2, // buffers all filled, real-time input
-        eTimeout = 3, // returned value is null
-        eEof = 4, // returned value is null
-    };
-
-    std::pair<std::unique_ptr<InputReaderBlock>, InputStatus> getNextInputBuffer();
-    void returnBuffer(std::unique_ptr<InputReaderBlock> &buffer);
+    std::pair<std::unique_ptr<InputBlock>, InputStatus> getNextInputBuffer();
+    void returnBuffer(std::unique_ptr<InputBlock> &buffer);
     virtual void seek(double seconds) = 0;
 
 protected:
@@ -72,9 +54,8 @@ protected:
     const double m_initial_seek_seconds;
     const std::optional<std::string> m_output_filename;
     int m_output_file_fd;
-    int16_t *m_output_short_buffer;
-    std::deque<std::unique_ptr<InputReaderBlock>> m_vacant_muse_input_buffers;
-    std::deque<std::unique_ptr<InputReaderBlock>> m_filled_muse_input_buffers;
+    std::deque<std::unique_ptr<InputBlock>> m_vacant_input_buffers;
+    std::deque<std::unique_ptr<InputBlock>> m_filled_input_buffers;
     std::atomic<bool> m_stop_request;
     std::atomic<bool> m_reader_thread_finished;
     std::mutex m_mutex;
@@ -84,6 +65,9 @@ protected:
 
 private:
     std::thread *m_reader_thread;
+    void *m_file_write_buffer;
 };
+
+#include "InputReader.impl.h"
 
 #endif //MUSECPP_INPUTREADER_H
