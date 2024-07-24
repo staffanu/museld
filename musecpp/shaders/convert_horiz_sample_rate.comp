@@ -1,12 +1,12 @@
 #version 450
 
 // This shader should be invoked with global invocation ids
-// from (0, 0) to (source_width * upsmple_factor / downsample_factor, source_height)
+// from (0, 0) to (source_width * upsample_factor / downsample_factor, source_height)
 
 #include "muse.h"
 
 layout(push_constant) uniform PushConstants {
-    uint filter_size;
+    uint filter_size; // assumed to be odd
     uint upsample_factor_i;
     uint downsample_factor;
     uint source_y_offset;

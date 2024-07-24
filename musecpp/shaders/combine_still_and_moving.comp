@@ -17,23 +17,23 @@ layout(set = 0, binding = 0) buffer readonly field_Y_buffer {
 };
 
 layout(set = 0, binding = 1) buffer readonly field_r_buffer {
-    float16_t field_r[][MUSE_Y_BUF_WIDTH];
+    float16_t field_r[][MUSE_Y_BUF_WIDTH / 2];
 };
 
 layout(set = 0, binding = 2) buffer readonly field_b_buffer {
-    float16_t field_b[][MUSE_Y_BUF_WIDTH];
+    float16_t field_b[][MUSE_Y_BUF_WIDTH / 2];
 };
 
 layout(set = 0, binding = 3) buffer readonly inter_frame_Y_buffer {
     float16_t inter_frame_y[][MUSE_Y_BUF_WIDTH * 3];
 };
 
-layout(set = 0, binding = 4) buffer readonly inter_frame_r_buffer {
-    float16_t inter_frame_r[][MUSE_Y_BUF_WIDTH];
+layout(set = 0, binding = 4) buffer readonly restrict inter_frame_r_buffer {
+    float16_t inter_frame_r[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 5) buffer readonly inter_frame_b_buffer {
-    float16_t inter_frame_b[][MUSE_Y_BUF_WIDTH];
+layout(set = 0, binding = 5) buffer readonly restrict inter_frame_b_buffer {
+    float16_t inter_frame_b[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 6) buffer readonly movement_buffer {
@@ -54,6 +54,86 @@ layout(set = 0, binding = 10) buffer writeonly frame_out_v_buffer {
     uint16_t frame_out_v[][MUSE_Y_BUF_WIDTH * 3 / 2];
 };
 
+// Low-pass filter with cutoff frequency 0.10 Hz, transition bandwith 0.07 Hz, hamming window (from fiiir.com).
+// We really only use half of the coefficients but the whole filter is included for simplicity.
+#define HORIZ_FILTER_SIZE 45
+float16_t filter_coeffs[HORIZ_FILTER_SIZE] = {
+0.001100491752087050hf,
+0.000754230965311477hf,
+-0.000000000000000001hf,
+-0.001196746309279428hf,
+-0.002572792474257432hf,
+-0.003424321133680980hf,
+-0.002791134869290828hf,
+0.000000000000000002hf,
+0.004661397071478517hf,
+0.009554031866536968hf,
+0.011967588542619059hf,
+0.009181907646237716hf,
+-0.000000000000000005hf,
+-0.013915628301852992hf,
+-0.027656733226986648hf,
+-0.034098118054577083hf,
+-0.026223968384762739hf,
+0.000000000000000007hf,
+0.043345162676397778hf,
+0.096684967495892171hf,
+0.148498079648214015hf,
+0.186163117945688628hf,
+0.199936934288449525hf,
+0.186163117945688628hf,
+0.148498079648214043hf,
+0.096684967495892171hf,
+0.043345162676397792hf,
+0.000000000000000007hf,
+-0.026223968384762746hf,
+-0.034098118054577083hf,
+-0.027656733226986658hf,
+-0.013915628301852992hf,
+-0.000000000000000005hf,
+0.009181907646237721hf,
+0.011967588542619062hf,
+0.009554031866536972hf,
+0.004661397071478519hf,
+0.000000000000000002hf,
+-0.002791134869290830hf,
+-0.003424321133680984hf,
+-0.002572792474257432hf,
+-0.001196746309279430hf,
+-0.000000000000000001hf,
+0.000754230965311477hf,
+0.001100491752087050hf,
+};
+
+float16_t resample_r(uint row, uint col) {
+    int N = HORIZ_FILTER_SIZE / 2;
+    int hiFreqIx = int(col);
+    if (col % 3 == 0) {
+        return inter_frame_r[row][col / 3];
+    } else {
+        float16_t s = 0.hf;
+        for (int l = (hiFreqIx - N + 2) / 3; l <= (hiFreqIx + N) / 3; l++) {
+            float16_t v = l >= 0 && l < MUSE_Y_BUF_WIDTH ? inter_frame_r[row][l] : 128.hf;
+            s += v * filter_coeffs[3 * l - hiFreqIx + N];
+        }
+        return s * 3.hf;
+    }
+}
+
+float16_t resample_b(uint row, uint col) {
+    int N = HORIZ_FILTER_SIZE / 2;
+    int hiFreqIx = int(col);
+    if (true || col % 3 == 0) {
+        return inter_frame_b[row][col / 3];
+    } else {
+        float16_t s = 0.hf;
+        for (int l = (hiFreqIx - N + 2) / 3; l <= (hiFreqIx + N) / 3; l++) {
+            float16_t v = l >= 0 && l < MUSE_Y_BUF_WIDTH ? inter_frame_b[row][l] : 128.hf;
+            s += v * filter_coeffs[3 * l - hiFreqIx + N];
+        }
+        return s * 3.hf;
+    }
+}
 
 void main() {
     uint row = gl_GlobalInvocationID.y;
@@ -63,11 +143,11 @@ void main() {
         return;
 
     float16_t YM_field = field_y[row][col];
-    float16_t RmYM_field = field_r[row / 2][col / 3] - 128.0hf;
-    float16_t BmYM_field = field_b[row / 2][col / 3] - 128.0hf;
+    float16_t RmYM_field = field_r[row / 4][col / 6] - 128.0hf;
+    float16_t BmYM_field = field_b[row / 4][col / 6] - 128.0hf;
     float16_t YM_inter_frame = inter_frame_y[row][col];
-    float16_t RmYM_inter_frame = inter_frame_r[row / 2][col / 3] - 128.0hf;
-    float16_t BmYM_inter_frame = inter_frame_b[row / 2][col / 3] - 128.0hf;
+    float16_t RmYM_inter_frame = resample_r(row, col) - 128.0hf;
+    float16_t BmYM_inter_frame = resample_b(row, col) - 128.0hf;
 
     float16_t movement = force_field_only != 0 ?
         1.0hf : force_inter_frame_only != 0 ?
@@ -89,6 +169,10 @@ void main() {
     float16_t r2 =  9.3892e-01hf * r +  5.0196e-02hf * g + 1.0270e-02hf * b;
     float16_t g2 =  1.7760e-02hf * r +  9.6607e-01hf * g + 1.6424e-02hf * b;
     float16_t b2 = -1.6205e-03hf * r + -4.3710e-03hf * g + 1.0053e+00hf * b;
+
+//r2 = (RmYM_field + 128.hf) / 256.hf;
+//g2 = (RmYM_field + 128.hf) / 256.hf;
+//b2 = (RmYM_field + 128.hf) / 256.hf;
 
     imageStore(frame_out_image, ivec2(col, row), vec4(float(r2), float(g2), float(b2), 1.f));
 

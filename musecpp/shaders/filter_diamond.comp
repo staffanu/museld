@@ -10,7 +10,7 @@ layout(push_constant) uniform PushConstants {
     uint filter_width;
     uint frame_buffer_height;
     uint frame_buffer_width;
-    uint phase;
+    uint phase;  // Fills in pixels at (i, j) where (i + j) % 2 == phase
 };
 
 layout(set = 0, binding = 0) buffer readonly filter_input {

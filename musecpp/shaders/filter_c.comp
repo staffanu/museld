@@ -1,0 +1,135 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// from (0, 0) until (MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT).
+//
+// Filters the chroma information in place.
+// The is_red flag tells whether to filter the R och B color information -- the difference is
+// that the first red signal is on rows 0 and 1, while the first blue signal is on rows 2 and 3.
+// The phase input says whether the first two rows of information are aligned to the left (1)
+// or top the right (0).
+// If filter_stage is 0, the rows containing color informatation (2 out of 4 rows) are filtered
+// horizontally.  If filter_stage is 1, the other two rows are filled in.
+
+#include "muse.h"
+
+// Low-pass filter with cutoff frequency 0.2 Hz, transition bandwith 0.05 Hz, rectangular window (from fiiir.com).
+// We really only use half of the coefficients but the whole filter is included for simplicity.
+#define HORIZ_FILTER_SIZE 63
+float16_t filter_coeffs[HORIZ_FILTER_SIZE] = {
+0.000780916776897215hf,
+-0.000000000000000001hf,
+-0.000933028269872013hf,
+-0.000675249874195993hf,
+0.000812356791573653hf,
+0.001603814308324245hf,
+-0.000000000000000003hf,
+-0.002407871131369289hf,
+-0.001813895687479526hf,
+0.002196904425984004hf,
+0.004275042070536313hf,
+-0.000000000000000005hf,
+-0.006055920772694355hf,
+-0.004412639081075587hf,
+0.005174337929885570hf,
+0.009772284469869795hf,
+-0.000000000000000009hf,
+-0.013177524446737816hf,
+-0.009427265637540537hf,
+0.010905785350338036hf,
+0.020428091240915765hf,
+-0.000000000000000012hf,
+-0.027623446493709555hf,
+-0.020032794491919834hf,
+0.023752349707743797hf,
+0.046275967677881696hf,
+-0.000000000000000015hf,
+-0.072831076709504755hf,
+-0.061024986756633315hf,
+0.092629652216635383hf,
+0.301891068993472456hf,
+0.399834254785349286hf,
+0.301891068993472456hf,
+0.092629652216635383hf,
+-0.061024986756633315hf,
+-0.072831076709504769hf,
+-0.000000000000000015hf,
+0.046275967677881703hf,
+0.023752349707743797hf,
+-0.020032794491919838hf,
+-0.027623446493709555hf,
+-0.000000000000000012hf,
+0.020428091240915758hf,
+0.010905785350338038hf,
+-0.009427265637540544hf,
+-0.013177524446737818hf,
+-0.000000000000000009hf,
+0.009772284469869792hf,
+0.005174337929885571hf,
+-0.004412639081075588hf,
+-0.006055920772694355hf,
+-0.000000000000000005hf,
+0.004275042070536313hf,
+0.002196904425984005hf,
+-0.001813895687479526hf,
+-0.002407871131369289hf,
+-0.000000000000000003hf,
+0.001603814308324247hf,
+0.000812356791573653hf,
+-0.000675249874195994hf,
+-0.000933028269872014hf,
+-0.000000000000000001hf,
+0.000780916776897215hf
+};
+
+layout(push_constant) uniform PushConstants {
+    uint is_red;
+    uint filter_stage;
+};
+
+layout(set = 0, binding = 0) buffer c_buffer {
+    float16_t c_data[][MUSE_Y_BUF_WIDTH];
+};
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= MUSE_BUF_HEIGHT || col >= MUSE_Y_BUF_WIDTH)
+        return;
+
+    switch (filter_stage) {
+        case 0: // Fill in the missing samples in the rows that do have samples (rows 0, 1 for red, 2, 3 for blue, and so on) by filtering horizontally
+        {
+            uint y = row / 2 * 4 + (row & 1u) + (is_red != 0 ? 0 : 2);
+            uint known_pixels_phase = 1 - (row & 1u);
+            if (col % 2 != known_pixels_phase) {
+                int W = HORIZ_FILTER_SIZE / 2;
+                int W_odd =  (W - 1) / 2 * 2 + 1; // rounded down to odd value
+                float16_t s = 0.hf;
+                for (int i = -W_odd; i <= W_odd; i += 2) {
+                    float16_t v;
+                    if (col + i >= 0 && col + i < MUSE_Y_BUF_WIDTH)
+                        v = c_data[y][col + i];
+                    else
+                        v = 128.hf;
+                    s += v * filter_coeffs[W + i];
+                }
+                c_data[y][col] = s * 2.hf; // * 2 since we need to amplify the signal to compensate for missing samples
+            }
+        }
+        break;
+        case 1: // Fill in the missing samples in the rows without samples (rows 0, 1 for blue, 2, 3 for red, and so on) by filtering vertically
+        {
+            uint y = row / 2 * 4 + (row & 1u) + (is_red != 0 ? 2 : 0);
+            uint source_y;
+            if ((row & 1u) == 0) {
+                source_y = y == 0 ? 2 : y - 1;
+            } else {
+                source_y = y == 2 * MUSE_BUF_HEIGHT - 1 ? MUSE_BUF_HEIGHT - 3 : y + 1;
+            }
+            c_data[y][col] = c_data[source_y][col];
+        }
+        break;
+    }
+}

@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(glfw3 3.3 REQUIRED)
 find_package(Vulkan REQUIRED)
 
+#SET(ENV{PKG_CONFIG_PATH} "/usr/local/lib/pkgconfig/")
 SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake-modules" ${CMAKE_MODULE_PATH})
 find_package(PORTAUDIO REQUIRED)
 include_directories("${PORTAUDIO_INCLUDE_DIRS}")

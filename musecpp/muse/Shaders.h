@@ -80,7 +80,11 @@ private:
 
     void decodeC(musevk::CommandBuffer &sq, int descriptor_set_index,
                  std::shared_ptr<musevk::VulkanBuffer> const &input_frame,
-                 int frame_phase_c, int field_parity, bool zero_non_sample_points);
+                 int frame_phase_c, int field_parity, bool clear_output);
+
+    void decodeC2(musevk::CommandBuffer &sq, int descriptor_set_index,
+                 std::shared_ptr<musevk::VulkanBuffer> const &input_frame,
+                 int frame_phase_c, int field_parity);
 
     void makeFieldFromConsecutiveFrames(musevk::CommandBuffer &sq,
                                         int copy_y_descriptor_set_first_index,
@@ -103,6 +107,8 @@ private:
     std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_4_to_3_algo;
     std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_2_to_3_algo;
     std::shared_ptr<musevk::ComputeShader> m_decode_c_algo;
+    std::shared_ptr<musevk::ComputeShader> m_filter_c_algo;
+    std::shared_ptr<musevk::ComputeShader> m_decode_c2_algo;
     std::shared_ptr<musevk::ComputeShader> m_detect_motion_algo;
     std::shared_ptr<musevk::ComputeShader> m_combine_still_and_moving_algo;
     std::shared_ptr<musevk::ComputeShader> m_convert_audio_sample_rate_algo;
@@ -112,18 +118,18 @@ private:
 
     // temporary data used by the single field decoder and inter-frame interpolation
     std::shared_ptr<musevk::VulkanBuffer> m_interpolated32_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH * 2
-    std::shared_ptr<musevk::VulkanBuffer> m_intermediate_r_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
-    std::shared_ptr<musevk::VulkanBuffer> m_intermediate_b_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
+    std::shared_ptr<musevk::VulkanBuffer> m_intermediate_r_buffer; // MUSE_BUF_HEIGHT * 2 * MUSE_BUF_Y_WIDTH
+    std::shared_ptr<musevk::VulkanBuffer> m_intermediate_b_buffer; // MUSE_BUF_HEIGHT * 2 * MUSE_BUF_Y_WIDTH
 
     // output from single field decoder -- when combining the two results
     std::shared_ptr<musevk::VulkanBuffer> m_field_Y_buffer;
-    std::shared_ptr<musevk::VulkanBuffer> m_field_r_buffer;
-    std::shared_ptr<musevk::VulkanBuffer> m_field_b_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_field_r_buffer; // MUSE_BUF_HEIGHT / 2 * MUSE_BUF_Y_WIDTH / 2
+    std::shared_ptr<musevk::VulkanBuffer> m_field_b_buffer; // MUSE_BUF_HEIGHT / 2 * MUSE_BUF_Y_WIDTH / 2
 
     // output from inter-frame interpolation
     std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_Y_buffer; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
-    std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_r_buffer;
-    std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_b_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_r_buffer; // MUSE_BUF_HEIGHT * 2 * MUSE_BUF_Y_WIDTH
+    std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_b_buffer; // MUSE_BUF_HEIGHT * 2 * MUSE_BUF_Y_WIDTH
 
     int m_current_movement_buffer_index;
     std::vector<std::shared_ptr<musevk::VulkanBuffer>> m_movement_buffers; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3

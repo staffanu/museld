@@ -19,14 +19,14 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_command_pool(command_pool),
   m_non_linear_processed_buffer(createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)),
   m_interpolated32_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
-  m_intermediate_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
-  m_intermediate_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
+  m_intermediate_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH)),
+  m_intermediate_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH)),
   m_field_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3)),
-  m_field_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
-  m_field_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
+  m_field_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT / 2, MUSE_Y_BUF_WIDTH / 2)),
+  m_field_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT / 2, MUSE_Y_BUF_WIDTH / 2)),
   m_inter_frame_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3)),
-  m_inter_frame_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
-  m_inter_frame_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
+  m_inter_frame_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH)),
+  m_inter_frame_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH)),
   m_current_movement_buffer_index(0),
   m_movement_buffers({ createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3),
                        createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3) }),
@@ -63,15 +63,19 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
           })),
   m_color_filter_inter_frame_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
-          Size(5, 7), // Notice the total size should not be larger than the workgroup size!
+          Size(5, 11), // Notice the total size should not be larger than the workgroup size!
           {
-                 -0.000343, -0.002317, -0.004290, -0.002317, -0.000343,
-                 0.000920, 0.006212, 0.011504, 0.006212, 0.000920,
-                 0.009256, 0.062476, 0.115696, 0.062476, 0.009256,
-                 0.016049, 0.108329, 0.200609, 0.108329, 0.016049,
-                 0.009256, 0.062476, 0.115696, 0.062476, 0.009256,
-                 0.000920, 0.006212, 0.011504, 0.006212, 0.000920,
-                 -0.000343, -0.002317, -0.004290, -0.002317, -0.000343,
+                                                                                             -0.000437, -0.000350, 0.002325, -0.000350, -0.000437,
+                                                                                             -0.000696, 0.000751, 0.007629, 0.000751, -0.000696,
+                                                                                             -0.000773, 0.007703, 0.029050, 0.007703, -0.000773,
+                                                                                             0.000312, 0.024256, 0.070268, 0.024256, 0.000312,
+                                                                                             0.002089, 0.043715, 0.114850, 0.043715, 0.002089,
+                                                                                             0.002973, 0.052536, 0.134449, 0.052536, 0.002973,
+                                                                                             0.002089, 0.043715, 0.114850, 0.043715, 0.002089,
+                                                                                             0.000312, 0.024256, 0.070268, 0.024256, 0.000312,
+                                                                                             -0.000773, 0.007703, 0.029050, 0.007703, -0.000773,
+                                                                                             -0.000696, 0.000751, 0.007629, 0.000751, -0.000696,
+                                                                                             -0.000437, -0.000350, 0.002325, -0.000350, -0.000437,
          })),
   m_filter_2_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
           Size(19),
@@ -118,7 +122,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
     m_diamond_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "diamond",
             {eBuffer, eBuffer}, sizeof(uint32_t) * 5,
-            VulkanUtil::loadSpirv(executable_dir, "filter_diamond.comp"), Size(0), 2));
+            VulkanUtil::loadSpirv(executable_dir, "filter_diamond.comp"), Size(0), 4));
     m_filter_image_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "filter_image",
             {eBuffer, eBuffer, eBuffer}, sizeof(float) * 5,
@@ -146,10 +150,21 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
             Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2)));
     m_decode_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "decode_c",
-            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
-            VulkanUtil::loadSpirv(executable_dir, "decode_c.comp"),
-            Size(m_intermediate_r_buffer->size().x_size, m_intermediate_r_buffer->size().y_size), 5));
+                                                                  "decode_c",
+                                                                  {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
+                                                                  VulkanUtil::loadSpirv(executable_dir, "decode_c.comp"),
+                                                                  Size(MUSE_C_BUF_WIDTH, MUSE_BUF_HEIGHT * 2), 4));
+    m_filter_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+                                                                  "filter_c",
+                                                                  {eBuffer}, sizeof(uint32_t) * 2,
+                                                                  VulkanUtil::loadSpirv(executable_dir, "filter_c.comp"),
+                                                                  Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT), 2));
+    m_decode_c2_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+                                                                  "decode_c2",
+                                                                  {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 2,
+                                                                  VulkanUtil::loadSpirv(executable_dir, "decode_c2.comp"),
+                                                                  Size(MUSE_C_BUF_WIDTH, MUSE_BUF_HEIGHT / 2), 5));
+//    Size(m_intermediate_r_buffer->size().x_size, m_intermediate_r_buffer->size().y_size), 5));
     m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "detect_motion",
             {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
@@ -214,9 +229,11 @@ void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
     sq.enqueueComputeShader(m_fill_empty_lines_algo,
                             vector{m_field_Y_buffer->size().y_size, m_field_Y_buffer->size().x_size, (unsigned)field_parity});
 
-    decodeC(sq, 0, field.m_data, frame_phase_c, field_parity, true);
-    filterImage(sq, 0, m_color_filter_single_field_buffer, m_intermediate_r_buffer, m_field_r_buffer, 8);
-    filterImage(sq, 1, m_color_filter_single_field_buffer, m_intermediate_b_buffer, m_field_b_buffer, 8);
+    decodeC2(sq, 0, field.m_data, frame_phase_c, field_parity);
+//    filterImage(sq, 0, m_color_filter_single_field_buffer, m_intermediate_r_buffer, m_field_r_buffer, 8);
+//    filterImage(sq, 1, m_color_filter_single_field_buffer, m_intermediate_b_buffer, m_field_b_buffer, 8);
+    filterImageDiamond(sq, 2, frame_phase_c ^ field_parity, m_field_r_buffer);
+    filterImageDiamond(sq, 3, 1 - frame_phase_c ^ field_parity, m_field_b_buffer);
 }
 
 void Shaders::copyYForInterpolation(CommandBuffer &sq, int descriptor_set_index,
@@ -261,12 +278,23 @@ void Shaders::filterImage(CommandBuffer &sq, int descriptor_set_index,
 
 void Shaders::decodeC(CommandBuffer &sq, int descriptor_set_index,
                       shared_ptr<VulkanBuffer> const &input_frame,
-                      int frame_phase_c, int field_parity, bool zero_non_sample_points) {
+                      int frame_phase_c, int field_parity, bool clear_output) {
     m_decode_c_algo->updateBufferDescriptorsInSet(descriptor_set_index,
-            {input_frame, m_intermediate_r_buffer, m_intermediate_b_buffer});
+                                                  {input_frame, m_inter_frame_r_buffer, m_inter_frame_b_buffer});
     sq.enqueueComputeShader(
             m_decode_c_algo,
-            vector{frame_phase_c, field_parity, zero_non_sample_points ? 1 : 0},
+            vector{frame_phase_c, field_parity, clear_output ? 1 : 0},
+            descriptor_set_index);
+}
+
+void Shaders::decodeC2(CommandBuffer &sq, int descriptor_set_index,
+                      shared_ptr<VulkanBuffer> const &input_frame,
+                      int frame_phase_c, int field_parity) {
+    m_decode_c2_algo->updateBufferDescriptorsInSet(descriptor_set_index,
+                                                  {input_frame, m_field_r_buffer, m_field_b_buffer});
+    sq.enqueueComputeShader(
+            m_decode_c2_algo,
+            vector{frame_phase_c, field_parity},
             descriptor_set_index);
 }
 
@@ -321,9 +349,16 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
     filterImageDiamond(sq, 1, field_parities[0] ^ field_phases_y[0], m_inter_frame_Y_buffer);
 
     for (int i = 0; i < 4; i++)
-        decodeC(sq, 1 + i, fields[i].get().m_data, frame_phases_c[i], field_parities[i], i == 0);
-    filterImage(sq, 2, m_color_filter_inter_frame_buffer, m_intermediate_r_buffer, m_inter_frame_r_buffer, 2);
-    filterImage(sq, 3, m_color_filter_inter_frame_buffer, m_intermediate_b_buffer, m_inter_frame_b_buffer, 2);
+        decodeC(sq, i, fields[i].get().m_data, frame_phases_c[i], field_parities[i], i == 0);
+    //filterImage(sq, 2, m_color_filter_inter_frame_buffer, m_intermediate_r_buffer, m_inter_frame_r_buffer, 4);
+    //filterImage(sq, 3, m_color_filter_inter_frame_buffer, m_intermediate_b_buffer, m_inter_frame_b_buffer, 4);
+
+    m_filter_c_algo->updateBufferDescriptorsInSet(0, {m_inter_frame_r_buffer});
+    sq.enqueueComputeShader(m_filter_c_algo, vector{1u /* is_red */, 0u /* algo stage */}, 0);
+    sq.enqueueComputeShader(m_filter_c_algo, vector{1u /* is_red */, 1u /* algo stage */}, 0);
+    m_filter_c_algo->updateBufferDescriptorsInSet(1, {m_inter_frame_b_buffer});
+    sq.enqueueComputeShader(m_filter_c_algo, vector{0u /* is_red */, 0u /* algo stage */}, 1);
+    sq.enqueueComputeShader(m_filter_c_algo, vector{0u /* is_red */, 1u /* algo stage */}, 1);
 
     m_current_movement_buffer_index = 1 - m_current_movement_buffer_index;
     m_detect_motion_algo->updateBufferDescriptorsInSet(0, {
