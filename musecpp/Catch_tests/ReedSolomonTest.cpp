@@ -1,9 +1,9 @@
 //
 // Created by staffanu on 2/10/24.
 //
-#define CATCH_CONFIG_MAIN
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 #include <algorithm>
+#include <iostream>
 #include "efm/ReedSolomon.h"
 #include "util/Logger.h"
 

@@ -1,4 +1,4 @@
-find_package(Catch2 2.13 REQUIRED)
+find_package(Catch2 3 REQUIRED)
 
 include_directories("..")
 add_executable(Catch_tests_run
