@@ -62,10 +62,19 @@ void NtscRfDemodulator::demodulate() {
     // FIR lowpass filter for the demodulated signal
     std::vector<float> lowpass_filter_def =
             gr::filter::firdes::low_pass(1.0, 40e6, 5.0e6, 2e6, gr::fft::window::WIN_RECTANGULAR);
-    std::reverse(lowpass_filter_def.begin(), lowpass_filter_def.end());
+    std::reverse(lowpass_filter_def.begin(), lowpass_filter_def.end()); // should be symmetric, so really unnecessary
 
     shared_ptr<VulkanBuffer> lowpass_filter =
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(lowpass_filter_def.size()), lowpass_filter_def);
+
+    // FIR de-emphasis filter (applied to the decimated lowpass filtered signal)
+    // For NTSC, the two frequencies are 3.125 MHz and 8.33 MHz
+    std::vector<float> deemphasis_filter_def =
+            gr::filter::firdes::low_pass(1.0, 20e6, 1e6, 5e6, gr::fft::window::WIN_RECTANGULAR);
+    std::reverse(deemphasis_filter_def.begin(), deemphasis_filter_def.end());
+
+    shared_ptr<VulkanBuffer> deemphasis_filter =
+            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(deemphasis_filter_def.size()), deemphasis_filter_def);
 
     // Lowpass filter for EFM
     auto efm_lowpass_filter_def = std::vector<float> {
@@ -95,6 +104,7 @@ void NtscRfDemodulator::demodulate() {
     const int input_buffer_size = c_sample_block_size + (int)bandpass_filter_def.size() - 1;
     const int analytic_buffer_size = c_sample_block_size + 1;
     const int lowpass_in_buffer_size = c_sample_block_size + (int)lowpass_filter_def.size() - 1;
+    const int deemphasis_in_buffer_size = c_sample_block_size + (int)deemphasis_filter_def.size() - 1;
 
     // We need to delay the output of the detected dropouts as much as the rest of the filter chain delays the video signal
     const int dropout_delay = (int)lowpass_filter_def.size() / c_video_decimation_rate / 2 - 1;
@@ -113,6 +123,9 @@ void NtscRfDemodulator::demodulate() {
 
     shared_ptr<VulkanBuffer> lowpass_in_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(lowpass_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+
+    shared_ptr<VulkanBuffer> equalization_in_buffer = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(deemphasis_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
     shared_ptr<VulkanBuffer> efm_equalization_in_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(efm_equalization_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
@@ -134,7 +147,9 @@ void NtscRfDemodulator::demodulate() {
     shared_ptr<ComputeShader> fir_filter_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager.getDevice(), "fir_filter",
                               {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 2));
+                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 3));
+
+    fir_filter_shader->updateBufferDescriptorsInSet(0, {lowpass_filter, lowpass_in_buffer, equalization_in_buffer});
 
     shared_ptr<ComputeShader> fm_quadrature_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager.getDevice(), "fm_quadrature",
@@ -202,7 +217,7 @@ void NtscRfDemodulator::demodulate() {
                 {(uint32_t)bandpass_filter_def.size(), c_sample_block_size, /* out offset */ 1, /* decimation */ 1}, 1);
 
         // Demodulate the analytic signal, and scale to the standard MUSE range
-        // +/- 1 corresponds to the white/sync level, which we represent as 0 to 1.
+        // +/- 1 corresponds to the white/sync level, which we scale to [0, 1].
         // With 40 MHz sample rate, 8.5 MHz center, 0.85 MHz deviation, the possible output swing is between ???.
         command_buffer->enqueueComputeShader<float>(fm_quadrature_shader,
                                                     {c_sample_block_size, (float)lowpass_filter_def.size() - 1,
@@ -210,11 +225,15 @@ void NtscRfDemodulator::demodulate() {
 
         // Lowpass filter the demodulated signal, and down-sample (decimate by factor 2)
         fir_filter_shader->updateWorkgroup(Size(c_sample_block_size / c_video_decimation_rate));
-        fir_filter_shader->updateBufferDescriptorsInSet(0, {lowpass_filter, lowpass_in_buffer, block->video_data});
-
         command_buffer->enqueueComputeShader<uint32_t>(
                 fir_filter_shader,
                 {(uint32_t)lowpass_filter_def.size(), c_sample_block_size / c_video_decimation_rate, /* out offset */ 0, c_video_decimation_rate}, 0);
+
+        // Run the down-sampled signal through the de-emphasis filter and store in the output block
+        fir_filter_shader->updateBufferDescriptorsInSet(1, {deemphasis_filter, equalization_in_buffer, block->video_data});
+        command_buffer->enqueueComputeShader<uint32_t>(
+                fir_filter_shader,
+                {(uint32_t)deemphasis_filter_def.size(), c_sample_block_size / c_video_decimation_rate, /* out offset */ 0, /* decimation */ 1}, 1);
 
         // EFM
         input_fir_filter_shader->updateWorkgroup(Size(NtscRfDemodulatorConstants::c_efm_block_size));
@@ -222,10 +241,10 @@ void NtscRfDemodulator::demodulate() {
                 input_fir_filter_shader,
                 {(uint32_t)efm_lowpass_filter_def.size(), NtscRfDemodulatorConstants::c_efm_block_size, /* out offset */ (uint32_t)efm_equalization_filter_def.size() - 1, c_efm_decimation_rate}, 2);
 
-        fir_filter_shader->updateBufferDescriptorsInSet(1, {efm_equalization_filter, efm_equalization_in_buffer, block->efm_data});
+        fir_filter_shader->updateBufferDescriptorsInSet(2, {efm_equalization_filter, efm_equalization_in_buffer, block->efm_data});
         command_buffer->enqueueComputeShader<uint32_t>(
                 fir_filter_shader,
-                {(uint32_t)efm_equalization_filter_def.size(), NtscRfDemodulatorConstants::c_efm_block_size, /* out offset */ 0, /* decimation */ 1}, 1);
+                {(uint32_t)efm_equalization_filter_def.size(), NtscRfDemodulatorConstants::c_efm_block_size, /* out offset */ 0, /* decimation */ 1}, 2);
 
         // Detect dropouts FIXME update for LD
         command_buffer->enqueueComputeShader<uint32_t>(

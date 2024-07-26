@@ -292,6 +292,11 @@ distorted the phase of the signal too much.  Adaptive equalization could be used
 the book by Yuichi Ninomiya (see the list below) describes how to do this in Chapter 4.12.  I've not spent any serious
 time trying to understand this in detail, however.
 
+> EFM deemphasis
+
+Add deemphasis to the EFM audio if it has emphasis.  Need to decode the EFM bits that say if it does;
+I don't know how common this is.
+
 ### Information on MUSE
 
 The information on MUSE that is available is quite sparse, and some of it is out of date.  Of course, it is all out of date
