@@ -66,7 +66,6 @@ void PhaseCorrect16MHzInputReader::seek(double seconds) {
         // discard content in existing input buffers
         move(m_filled_input_buffers.begin(), m_filled_input_buffers.end(), back_inserter(m_vacant_input_buffers));
         m_filled_input_buffers.clear();
-        m_log.error(eInput, std::format("sizes: {} {}", m_vacant_input_buffers.size(), m_filled_input_buffers.size()));
         m_cv_vacant.notify_one();
     }
 }
