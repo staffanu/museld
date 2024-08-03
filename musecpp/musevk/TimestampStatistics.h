@@ -21,22 +21,12 @@ namespace musevk {
         };
 
         void add_timestamps(std::vector<std::pair<std::string, int>> timestamps);
+        void print_stats(int min_samples_threshold);
 
-        void print_stats(int min_samples_threshold) {
-            for (auto timestamp_set: m_data) {
-                if (timestamp_set.second[0].m_total.m_n >= min_samples_threshold) {
-                    for (int i = 0; i < timestamp_set.first.size(); i++) {
-                        std::cout << std::setw(30) << timestamp_set.first[i] << ": ";
-                        timestamp_set.second[i].print_stats();
-                    }
-                    std::cout << std::endl;
-                }
-            }
-        }
     private:
         struct SingleStatistic {
             SingleStatistic() : m_min(INT32_MAX), m_max(0), m_sum(0), m_sum2(0), m_n(0) {}
-            int m_sum;
+            long m_sum;
             long m_sum2;
             int m_n;
             int m_min;
@@ -56,7 +46,7 @@ namespace musevk {
                 char s[100];
                 snprintf(s, sizeof(s), "n=%-4d mean %5d (stddev %4d) (%5d-%5d)",
                          m_n,
-                         m_sum / m_n,
+                         (int)(m_sum / m_n),
                          (int)sqrt((double)m_sum2 / m_n - ((double)m_sum / m_n) * ((double)m_sum / m_n)),
                          m_min,
                          m_max);
