@@ -44,7 +44,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
           Size(9, 7), // Notice the total size should not be larger than the workgroup size!
-          {
+          { // Notice we really only use half of the coefficients, so this could be made smaller!
                   -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
                   0.000205, 0.000474, -0.005036, -0.012591, 0.010491, -0.012591, -0.005036, 0.000474, 0.000205,
                   -0.000724, -0.002093, -0.022435, 0.024072, 0.164560, 0.024072, -0.022435, -0.002093, -0.000724,
@@ -233,7 +233,7 @@ void Shaders::copyYForInterpolation(CommandBuffer &sq, int descriptor_set_index,
 void Shaders::filterImageDiamond(CommandBuffer &sq, int descriptor_set_index,
                                  int phase, shared_ptr<VulkanBuffer> const &buffer) {
     m_diamond_algo->updateBufferDescriptorsInSet(descriptor_set_index, {m_diamond_filter_buffer, buffer});
-    m_diamond_algo->updateWorkgroup(buffer->size());
+    m_diamond_algo->updateWorkgroup(Size(buffer->size().x_size / 2, buffer->size().y_size));
     sq.enqueueComputeShader(
             m_diamond_algo,
             vector{m_diamond_filter_buffer->size().y_size, m_diamond_filter_buffer->size().x_size,
