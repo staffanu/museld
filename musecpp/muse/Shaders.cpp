@@ -44,7 +44,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
           Size(9, 7), // Notice the total size should not be larger than the workgroup size!
-          {
+          { // Notice we really only use half of the coefficients, so this could be made smaller!
                   -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
                   0.000205, 0.000474, -0.005036, -0.012591, 0.010491, -0.012591, -0.005036, 0.000474, 0.000205,
                   -0.000724, -0.002093, -0.022435, 0.024072, 0.164560, 0.024072, -0.022435, -0.002093, -0.000724,
@@ -132,21 +132,16 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             {m_field_Y_buffer}, sizeof(uint32_t) * 3,
             VulkanUtil::loadSpirv(executable_dir, "fill_empty_lines.comp"),
             Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2)));
-    m_convert_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "convert_sample_rate",
-            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 13,
-            VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
-            Size(m_interpolated32_buffer->size().x_size / 4, m_interpolated32_buffer->size().y_size), 3));
     m_convert_sample_rate_4_to_3_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "convert_sample_rate_4_to_3",
             {m_filter_4_to_3_buffer, m_interpolated32_buffer,
-             m_inter_frame_Y_buffer}, sizeof(uint32_t) * 13,
+             m_inter_frame_Y_buffer}, sizeof(uint32_t) * 12,
              VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
             Size(m_inter_frame_Y_buffer->size().x_size, m_inter_frame_Y_buffer->size().y_size / 2)));
     m_convert_sample_rate_2_to_3_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "convert_sample_rate_2_to_3",
             {m_filter_2_to_3_buffer, m_interpolated32_buffer, m_field_Y_buffer},
-            sizeof(uint32_t) * 13,
+            sizeof(uint32_t) * 12,
             VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
             Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2)));
     m_decode_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
@@ -224,7 +219,7 @@ void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
             m_convert_sample_rate_2_to_3_algo,
             vector{m_filter_2_to_3_buffer->size().x_size, 3u, 2u, 0u, 0u,
                    m_interpolated32_buffer->size().y_size, m_interpolated32_buffer->size().x_size,
-                   uint(1 - field_parity), 2u, 0u, 1u, 0u, 1u});
+                   uint(1 - field_parity), 2u, 0u, 1u, 0u});
 
     sq.enqueueComputeShader(m_fill_empty_lines_algo,
                             vector{m_field_Y_buffer->size().y_size, m_field_Y_buffer->size().x_size, (unsigned)field_parity});
@@ -250,7 +245,7 @@ void Shaders::copyYForInterpolation(CommandBuffer &sq, int descriptor_set_index,
 void Shaders::filterImageDiamond(CommandBuffer &sq, int descriptor_set_index,
                                  int phase, shared_ptr<VulkanBuffer> const &buffer) {
     m_diamond_algo->updateBufferDescriptorsInSet(descriptor_set_index, {m_diamond_filter_buffer, buffer});
-    m_diamond_algo->updateWorkgroup(buffer->size());
+    m_diamond_algo->updateWorkgroup(Size(buffer->size().x_size / 2, buffer->size().y_size));
     sq.enqueueComputeShader(
             m_diamond_algo,
             vector{m_diamond_filter_buffer->size().y_size, m_diamond_filter_buffer->size().x_size,
@@ -392,7 +387,7 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
     sq.enqueueComputeShader(
             m_convert_sample_rate_4_to_3_algo,
             vector{m_filter_4_to_3_buffer->size().x_size, 3u, 4u, 0u, 0u, m_interpolated32_buffer->size().y_size,
-                        m_interpolated32_buffer->size().x_size, uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases, 1u});
+                        m_interpolated32_buffer->size().x_size, uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases});
 }
 
 void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only, bool output_yuv) {

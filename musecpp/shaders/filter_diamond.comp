@@ -2,15 +2,20 @@
 
 // This shader should be invoked with global invocation ids
 // from (0, 0) to (frame_buffer_width / 2, frame_buffer_height)
+// The input frame buffer has valid values only in a quincunx lattice,
+// and only every other horizontal pixel is filled in -- the others
+// maintain their original values.  If phase == 0, then the top left
+// pixel is filled in.  If phase == 1 the top left pixel is part of the
+// input lattice, so pixels with x + y being odd are filled in.
 
 #include "muse.h"
 
 layout(push_constant) uniform PushConstants {
-    uint filter_height;
-    uint filter_width;
-    uint frame_buffer_height;
-    uint frame_buffer_width;
-    uint phase;  // Fills in pixels at (i, j) where (i + j) % 2 == phase
+    int filter_height;
+    int filter_width;
+    int frame_buffer_height;
+    int frame_buffer_width;
+    int phase;
 };
 
 layout(set = 0, binding = 0) buffer readonly filter_input {
@@ -27,32 +32,48 @@ shared float16_t shared_filter[MAX_FILTER_SIZE];
 void main() {
     // This converts the local index to a one-dimensional index
     uint local_ix = gl_LocalInvocationID.x + gl_WorkGroupSize.x * gl_LocalInvocationID.y;
-    if (local_ix < filter_width * filter_height)
-            shared_filter[local_ix] = diamond_filter[local_ix];
+    if (local_ix < filter_width * filter_height) {
+        shared_filter[local_ix] = diamond_filter[local_ix];
+    }
 
     barrier();
 
-    uint row = gl_GlobalInvocationID.y;
-    uint invocation_x = gl_GlobalInvocationID.x;
-    uint col = (phase + row) % 2 + invocation_x * 2;
+    int row = int(gl_GlobalInvocationID.y);
+    int invocation_x = int(gl_GlobalInvocationID.x);
+    int col = (phase + row) % 2 + invocation_x * 2;
 
     if (row >= frame_buffer_height || col >= frame_buffer_width)
         return;
 
-    uint H = filter_height / 2;
-    uint W = filter_width / 2;
-    uint W_odd =  (W - 1) / 2 * 2 + 1;// rounded down to odd value
+    int H = filter_height / 2;
+    int W = filter_width / 2;
+
+    int i_start_odd = -((min(H, row) + 1) / 2 * 2 - 1);
+    int i_start_even = -min(H, row) / 2 * 2;
+    int j_start_odd = -((min(W, col) + 1) / 2 * 2 - 1);
+    int j_start_even = -min(W, col) / 2 * 2;
+
+    int i_max = min(H, frame_buffer_height - row - 1);
+    int j_max = min(W, frame_buffer_width - col - 1);
 
     float16_t s = 0.hf;
-    int i_start = -int(min(H, row));
-    int i_max = int(min(H, frame_buffer_height - row - 1));
-    for (int i = i_start; i <= i_max; i++) {
-        int j_start = i % 2 == 0 ? -int(W_odd) : -int(W);
-        int j_max = int(min(W, frame_buffer_width - col - 1));
-        for (int j = j_start; j <= j_max; j += 2)
-            if (col + j >= 0)
-                s += frame_buffer[(row + i) * frame_buffer_width + col + j] *
-                    shared_filter[(i + H) * filter_width + j + W];
+
+    // First loop over odd values of i; splitting this into two loops makes the boundaries
+    // of the inner loop simpler.
+    for (int i = i_start_odd; i <= i_max; i += 2) {
+        for (int j = j_start_even; j <= j_max; j += 2) {
+            s += frame_buffer[(row + i) * frame_buffer_width + col + j] *
+                shared_filter[(i + H) * filter_width + j + W];
+        }
     }
+
+    // Then cover the even values of i
+    for (int i = i_start_even; i <= i_max; i += 2) {
+        for (int j = j_start_odd; j <= j_max; j += 2) {
+            s += frame_buffer[(row + i) * frame_buffer_width + col + j] *
+                shared_filter[(i + H) * filter_width + j + W];
+        }
+    }
+
     frame_buffer[row * frame_buffer_width + col] = clamp(s * 2.hf, 0.hf, 255.hf);
 }
