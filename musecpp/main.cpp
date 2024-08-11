@@ -186,11 +186,13 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 double xpos, ypos;
                 glfwGetCursorPos(window, &xpos, &ypos);
                 if (xpos >= 0 && ypos >= 0 && xpos < xsize && ypos < ysize) {
-                    int field_x = (int)(xpos / xsize * MUSE_Y_BUF_WIDTH);
-                    int field_y = (int)(ypos / ysize * MUSE_BUF_HEIGHT);
+                    double rel_x = (xpos / xsize - 0.5) / zoom_factor + zoom_center.first;
+                    double rel_y = (ypos / ysize - 0.5) / zoom_factor + zoom_center.second;
+                    int field_x = (int)(rel_x * MUSE_Y_BUF_WIDTH);
+                    int field_y = (int)(rel_y * MUSE_BUF_HEIGHT);
                     cursor_string = std::format("({}, {}) ({}, {})",
-                                                (int)(xpos / xsize * MUSE_Y_BUF_WIDTH * 3),
-                                                (int)(ypos / ysize * MUSE_BUF_HEIGHT * 2),
+                                                (int)(rel_x * MUSE_Y_BUF_WIDTH * 3),
+                                                (int)(rel_y * MUSE_BUF_HEIGHT * 2),
                                                 field_x, field_y);
                     text_renderer.drawText(images.out_image, 10, 8, cursor_string, 1, *command_buffer);
                     if (field_interpolation_mode == MuseDecoder::FieldInterpolationMode::eForceIntraField && paused) {
