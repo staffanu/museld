@@ -32,7 +32,7 @@ AudioPlayback::AudioPlayback(Logger &log)
     PaHostApiIndex count = Pa_GetHostApiCount();
     for (PaHostApiIndex i = 0; i < count; i++) {
         auto *info = Pa_GetHostApiInfo(i);
-        m_log.debug(eAudio, std::format("Host API {}: type id={}, device ocunt={}, default device={}",
+        m_log.debug(eAudio, std::format("Host API {}: type id={}, device count={}, default device={}",
                                         info->name, (int)info->type, info->deviceCount, (int)info->defaultOutputDevice));
     }
 }

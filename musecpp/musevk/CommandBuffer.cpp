@@ -191,9 +191,13 @@ namespace musevk {
 
     void CommandBuffer::wait() {
         assert(m_is_running);
-        auto result = m_device.waitForFences(m_fence, VK_TRUE, UINT64_MAX);
-        if (result != vk::Result::eSuccess)
-            throw std::runtime_error(std::format("waitForFences returned with result {}", (uint32_t)result));
+        try { // TODO: figure out why waitForFences returns a result when it throws an exception on errors
+            auto result = m_device.waitForFences(m_fence, VK_TRUE, UINT64_MAX);
+            if (result != vk::Result::eSuccess)
+                throw std::runtime_error(std::format("waitForFences returned with result {}", (uint32_t)result));
+        } catch (vk::SystemError &x) {
+            throw std::runtime_error(std::format("waitForFences threw exception {}", x.what()));
+        }
         m_device.resetFences(m_fence);
         m_is_running = false;
         if (!m_memory_ranges_to_invalidate.empty()) {

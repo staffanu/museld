@@ -5,7 +5,6 @@
 #include <chrono>
 #include <iostream>
 #include <format>
-#include <fmt/chrono.h>
 #include <sstream>
 #include "Logger.h"
 

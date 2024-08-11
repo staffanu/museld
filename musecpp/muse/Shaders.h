@@ -89,7 +89,6 @@ private:
     std::shared_ptr<musevk::ComputeShader> m_diamond_algo;
     std::shared_ptr<musevk::ComputeShader> m_filter_image_algo;
     std::shared_ptr<musevk::ComputeShader> m_fill_empty_lines_algo;
-    std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_algo;
     std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_4_to_3_algo;
     std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_2_to_3_algo;
     std::shared_ptr<musevk::ComputeShader> m_decode_c_algo;

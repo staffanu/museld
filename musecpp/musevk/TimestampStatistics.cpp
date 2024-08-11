@@ -6,7 +6,8 @@
 
 using namespace std;
 
-namespace musevk {
+namespace musevk
+{
     void TimestampStatistics::add_timestamps(vector<pair<string, int>> timestamps) {
         auto labels = vector<string>();
         for (auto &timestamp: timestamps)
@@ -29,5 +30,17 @@ namespace musevk {
                 int timeSincePrevious = i == 0 ? 0 : t - timestamps[i - 1].second;
                 it->second[i].merge(t, timeSincePrevious);
             }
+    }
+
+    void TimestampStatistics::print_stats(int min_samples_threshold) {
+        for (auto timestamp_set: m_data) {
+            if (timestamp_set.second[0].m_total.m_n >= min_samples_threshold) {
+                for (int i = 0; i < timestamp_set.first.size(); i++) {
+                    std::cout << std::setw(30) << timestamp_set.first[i] << ": ";
+                    timestamp_set.second[i].print_stats();
+                }
+                std::cout << std::endl;
+            }
+        }
     }
 }
