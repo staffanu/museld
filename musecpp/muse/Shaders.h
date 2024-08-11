@@ -72,12 +72,6 @@ private:
     void filterImageDiamond(musevk::CommandBuffer &sq, int descriptor_set_index,
                             int phase, std::shared_ptr<musevk::VulkanBuffer> const &buffer);
 
-    void filterImage(musevk::CommandBuffer &sq, int descriptor_set_index,
-                     std::shared_ptr<musevk::VulkanBuffer> const &filter,
-                     std::shared_ptr<musevk::VulkanBuffer> const &source,
-                     std::shared_ptr<musevk::VulkanBuffer> const &dest,
-                     float multiplier);
-
     void decodeC(musevk::CommandBuffer &sq, int descriptor_set_index,
                  std::shared_ptr<musevk::VulkanBuffer> const &input_frame,
                  int frame_phase_c, int field_parity, bool clear_output);
@@ -101,7 +95,6 @@ private:
     std::shared_ptr<musevk::ComputeShader> m_apply_deemphasis_and_gamma_algo;
     std::shared_ptr<musevk::ComputeShader> m_copy_y_for_interpolation_algo;
     std::shared_ptr<musevk::ComputeShader> m_diamond_algo;
-    std::shared_ptr<musevk::ComputeShader> m_filter_image_algo;
     std::shared_ptr<musevk::ComputeShader> m_fill_empty_lines_algo;
     std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_4_to_3_algo;
     std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_2_to_3_algo;
@@ -147,9 +140,6 @@ private:
 
     // filter definitions
     std::shared_ptr<musevk::VulkanBuffer> m_diamond_filter_buffer;
-    std::shared_ptr<musevk::VulkanBuffer> m_color_filter_single_field_buffer;
-    std::shared_ptr<musevk::VulkanBuffer> m_color_filter_inter_frame_buffer;
-
     std::shared_ptr<musevk::VulkanBuffer> m_filter_2_to_3_buffer;
     std::shared_ptr<musevk::VulkanBuffer> m_filter_4_to_3_buffer;
 };

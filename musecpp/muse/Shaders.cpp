@@ -53,30 +53,6 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   0.000205, 0.000474, -0.005036, -0.012591, 0.010491, -0.012591, -0.005036, 0.000474, 0.000205,
                   -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
           })),
-  m_color_filter_single_field_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
-          Size(9, 5), // Notice the total size should not be larger than the workgroup size!
-          {
-                  0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
-                  0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
-                  0.008117, 0.021787, 0.054789, 0.087791, 0.101461, 0.087791, 0.054789, 0.021787, 0.008117,
-                  0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
-                  0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
-          })),
-  m_color_filter_inter_frame_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
-          Size(5, 11), // Notice the total size should not be larger than the workgroup size!
-          {
-                                                                                             -0.000437, -0.000350, 0.002325, -0.000350, -0.000437,
-                                                                                             -0.000696, 0.000751, 0.007629, 0.000751, -0.000696,
-                                                                                             -0.000773, 0.007703, 0.029050, 0.007703, -0.000773,
-                                                                                             0.000312, 0.024256, 0.070268, 0.024256, 0.000312,
-                                                                                             0.002089, 0.043715, 0.114850, 0.043715, 0.002089,
-                                                                                             0.002973, 0.052536, 0.134449, 0.052536, 0.002973,
-                                                                                             0.002089, 0.043715, 0.114850, 0.043715, 0.002089,
-                                                                                             0.000312, 0.024256, 0.070268, 0.024256, 0.000312,
-                                                                                             -0.000773, 0.007703, 0.029050, 0.007703, -0.000773,
-                                                                                             -0.000696, 0.000751, 0.007629, 0.000751, -0.000696,
-                                                                                             -0.000437, -0.000350, 0.002325, -0.000350, -0.000437,
-         })),
   m_filter_2_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
           Size(19),
           {
@@ -123,10 +99,6 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             "diamond",
             {eBuffer, eBuffer}, sizeof(uint32_t) * 5,
             VulkanUtil::loadSpirv(executable_dir, "filter_diamond.comp"), Size(0), 4));
-    m_filter_image_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "filter_image",
-            {eBuffer, eBuffer, eBuffer}, sizeof(float) * 5,
-            VulkanUtil::loadSpirv(executable_dir, "filter_image.comp"), Size(0), 4));
     m_fill_empty_lines_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "fill_empty_lines",
             {m_field_Y_buffer}, sizeof(uint32_t) * 3,
@@ -225,8 +197,6 @@ void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
                             vector{m_field_Y_buffer->size().y_size, m_field_Y_buffer->size().x_size, (unsigned)field_parity});
 
     decodeC2(sq, 0, field.m_data, frame_phase_c, field_parity);
-//    filterImage(sq, 0, m_color_filter_single_field_buffer, m_intermediate_r_buffer, m_field_r_buffer, 8);
-//    filterImage(sq, 1, m_color_filter_single_field_buffer, m_intermediate_b_buffer, m_field_b_buffer, 8);
     filterImageDiamond(sq, 2, frame_phase_c ^ field_parity, m_field_r_buffer);
     filterImageDiamond(sq, 3, 1 - frame_phase_c ^ field_parity, m_field_b_buffer);
 }
@@ -250,24 +220,6 @@ void Shaders::filterImageDiamond(CommandBuffer &sq, int descriptor_set_index,
             m_diamond_algo,
             vector{m_diamond_filter_buffer->size().y_size, m_diamond_filter_buffer->size().x_size,
                    buffer->size().y_size, buffer->size().x_size, (unsigned)phase},
-            descriptor_set_index);
-}
-
-void Shaders::filterImage(CommandBuffer &sq, int descriptor_set_index,
-                          shared_ptr<musevk::VulkanBuffer> const &filter,
-                          shared_ptr<musevk::VulkanBuffer> const &source,
-                          shared_ptr<musevk::VulkanBuffer> const &dest,
-                          float multiplier) {
-    assert(source->size() == dest->size());
-
-    m_filter_image_algo->updateBufferDescriptorsInSet(
-            descriptor_set_index,
-            {filter, source, dest});
-    m_filter_image_algo->updateWorkgroup(source->size());
-    sq.enqueueComputeShader(
-            m_filter_image_algo,
-            vector{(float)filter->size().y_size, (float)filter->size().x_size, (float)source->size().y_size,
-                        (float)source->size().x_size, multiplier},
             descriptor_set_index);
 }
 
@@ -345,8 +297,6 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
 
     for (int i = 0; i < 4; i++)
         decodeC(sq, i, fields[i].get().m_data, frame_phases_c[i], field_parities[i], i == 0);
-    //filterImage(sq, 2, m_color_filter_inter_frame_buffer, m_intermediate_r_buffer, m_inter_frame_r_buffer, 4);
-    //filterImage(sq, 3, m_color_filter_inter_frame_buffer, m_intermediate_b_buffer, m_inter_frame_b_buffer, 4);
 
     m_filter_c_algo->updateBufferDescriptorsInSet(0, {m_inter_frame_r_buffer});
     sq.enqueueComputeShader(m_filter_c_algo, vector{1u /* is_red */, 0u /* algo stage */}, 0);
