@@ -72,14 +72,6 @@ private:
     void filterImageDiamond(musevk::CommandBuffer &sq, int descriptor_set_index,
                             int phase, std::shared_ptr<musevk::VulkanBuffer> const &buffer);
 
-    void decodeC(musevk::CommandBuffer &sq, int descriptor_set_index,
-                 std::shared_ptr<musevk::VulkanBuffer> const &input_frame,
-                 int frame_phase_c, int field_parity, bool clear_output);
-
-    void decodeC2(musevk::CommandBuffer &sq, int descriptor_set_index,
-                 std::shared_ptr<musevk::VulkanBuffer> const &input_frame,
-                 int frame_phase_c, int field_parity);
-
     void makeFieldFromConsecutiveFrames(musevk::CommandBuffer &sq,
                                         int copy_y_descriptor_set_first_index,
                                         FieldBufferView &field_a, unsigned int field_a_frame_phase_y,
@@ -100,7 +92,7 @@ private:
     std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_2_to_3_algo;
     std::shared_ptr<musevk::ComputeShader> m_decode_c_algo;
     std::shared_ptr<musevk::ComputeShader> m_filter_c_algo;
-    std::shared_ptr<musevk::ComputeShader> m_decode_c2_algo;
+    std::shared_ptr<musevk::ComputeShader> m_decode_c_single_field_algo;
     std::shared_ptr<musevk::ComputeShader> m_detect_motion_algo;
     std::shared_ptr<musevk::ComputeShader> m_combine_still_and_moving_algo;
     std::shared_ptr<musevk::ComputeShader> m_convert_audio_sample_rate_algo;

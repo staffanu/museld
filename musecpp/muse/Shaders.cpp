@@ -126,11 +126,11 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                                                                   {eBuffer}, sizeof(uint32_t) * 2,
                                                                   VulkanUtil::loadSpirv(executable_dir, "filter_c.comp"),
                                                                   Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT), 2));
-    m_decode_c2_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-                                                                  "decode_c2",
-                                                                  {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 2,
-                                                                  VulkanUtil::loadSpirv(executable_dir, "decode_c2.comp"),
-                                                                  Size(MUSE_C_BUF_WIDTH, MUSE_BUF_HEIGHT / 2), 5));
+    m_decode_c_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+                                                                               "decode_c_single_field",
+                                                                               {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 2,
+                                                                               VulkanUtil::loadSpirv(executable_dir, "decode_c_single_field.comp"),
+                                                                               Size(MUSE_C_BUF_WIDTH, MUSE_BUF_HEIGHT / 2), 5));
 //    Size(m_intermediate_r_buffer->size().x_size, m_intermediate_r_buffer->size().y_size), 5));
     m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "detect_motion",
@@ -196,7 +196,9 @@ void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
     sq.enqueueComputeShader(m_fill_empty_lines_algo,
                             vector{m_field_Y_buffer->size().y_size, m_field_Y_buffer->size().x_size, (unsigned)field_parity});
 
-    decodeC2(sq, 0, field.m_data, frame_phase_c, field_parity);
+    m_decode_c_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, m_field_r_buffer, m_field_b_buffer});
+    sq.enqueueComputeShader(m_decode_c_single_field_algo, vector{frame_phase_c, field_parity}, 0);
+
     filterImageDiamond(sq, 2, frame_phase_c ^ field_parity, m_field_r_buffer);
     filterImageDiamond(sq, 3, 1 - frame_phase_c ^ field_parity, m_field_b_buffer);
 }
@@ -220,28 +222,6 @@ void Shaders::filterImageDiamond(CommandBuffer &sq, int descriptor_set_index,
             m_diamond_algo,
             vector{m_diamond_filter_buffer->size().y_size, m_diamond_filter_buffer->size().x_size,
                    buffer->size().y_size, buffer->size().x_size, (unsigned)phase},
-            descriptor_set_index);
-}
-
-void Shaders::decodeC(CommandBuffer &sq, int descriptor_set_index,
-                      shared_ptr<VulkanBuffer> const &input_frame,
-                      int frame_phase_c, int field_parity, bool clear_output) {
-    m_decode_c_algo->updateBufferDescriptorsInSet(descriptor_set_index,
-                                                  {input_frame, m_inter_frame_r_buffer, m_inter_frame_b_buffer});
-    sq.enqueueComputeShader(
-            m_decode_c_algo,
-            vector{frame_phase_c, field_parity, clear_output ? 1 : 0},
-            descriptor_set_index);
-}
-
-void Shaders::decodeC2(CommandBuffer &sq, int descriptor_set_index,
-                      shared_ptr<VulkanBuffer> const &input_frame,
-                      int frame_phase_c, int field_parity) {
-    m_decode_c2_algo->updateBufferDescriptorsInSet(descriptor_set_index,
-                                                  {input_frame, m_field_r_buffer, m_field_b_buffer});
-    sq.enqueueComputeShader(
-            m_decode_c2_algo,
-            vector{frame_phase_c, field_parity},
             descriptor_set_index);
 }
 
@@ -295,8 +275,10 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
                                    field_phases_y[1]);
     filterImageDiamond(sq, 1, field_parities[0] ^ field_phases_y[0], m_inter_frame_Y_buffer);
 
-    for (int i = 0; i < 4; i++)
-        decodeC(sq, i, fields[i].get().m_data, frame_phases_c[i], field_parities[i], i == 0);
+    for (int i = 0; i < 4; i++) {
+            m_decode_c_algo->updateBufferDescriptorsInSet(i, {fields[i].get().m_data, m_inter_frame_r_buffer, m_inter_frame_b_buffer});
+            sq.enqueueComputeShader(m_decode_c_algo, vector{frame_phases_c[i], field_parities[i], i == 0 ? 1 : 0}, i);
+    }
 
     m_filter_c_algo->updateBufferDescriptorsInSet(0, {m_inter_frame_r_buffer});
     sq.enqueueComputeShader(m_filter_c_algo, vector{1u /* is_red */, 0u /* algo stage */}, 0);
