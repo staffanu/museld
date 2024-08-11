@@ -88,14 +88,12 @@ private:
     std::shared_ptr<musevk::ComputeShader> m_copy_y_for_interpolation_algo;
     std::shared_ptr<musevk::ComputeShader> m_diamond_algo;
     std::shared_ptr<musevk::ComputeShader> m_fill_empty_lines_algo;
-    std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_4_to_3_algo;
-    std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_2_to_3_algo;
+    std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_algo;
     std::shared_ptr<musevk::ComputeShader> m_decode_c_algo;
     std::shared_ptr<musevk::ComputeShader> m_filter_c_algo;
     std::shared_ptr<musevk::ComputeShader> m_decode_c_single_field_algo;
     std::shared_ptr<musevk::ComputeShader> m_detect_motion_algo;
     std::shared_ptr<musevk::ComputeShader> m_combine_still_and_moving_algo;
-    std::shared_ptr<musevk::ComputeShader> m_convert_audio_sample_rate_algo;
 
     // temporary data used for the output of non-linear processing to the de-emphasis filter
     std::shared_ptr<musevk::VulkanBuffer> m_non_linear_processed_buffer; // MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH

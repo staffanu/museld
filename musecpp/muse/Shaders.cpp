@@ -104,18 +104,11 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             {m_field_Y_buffer}, sizeof(uint32_t) * 3,
             VulkanUtil::loadSpirv(executable_dir, "fill_empty_lines.comp"),
             Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2)));
-    m_convert_sample_rate_4_to_3_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "convert_sample_rate_4_to_3",
-            {m_filter_4_to_3_buffer, m_interpolated32_buffer,
-             m_inter_frame_Y_buffer}, sizeof(uint32_t) * 12,
+    m_convert_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+            "convert_sample_rate",
+            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 12,
              VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
-            Size(m_inter_frame_Y_buffer->size().x_size, m_inter_frame_Y_buffer->size().y_size / 2)));
-    m_convert_sample_rate_2_to_3_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "convert_sample_rate_2_to_3",
-            {m_filter_2_to_3_buffer, m_interpolated32_buffer, m_field_Y_buffer},
-            sizeof(uint32_t) * 12,
-            VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
-            Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2)));
+            Size(0), 4));
     m_decode_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
                                                                   "decode_c",
                                                                   {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
@@ -131,7 +124,6 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                                                                                {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 2,
                                                                                VulkanUtil::loadSpirv(executable_dir, "decode_c_single_field.comp"),
                                                                                Size(MUSE_C_BUF_WIDTH, MUSE_BUF_HEIGHT / 2), 5));
-//    Size(m_intermediate_r_buffer->size().x_size, m_intermediate_r_buffer->size().y_size), 5));
     m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "detect_motion",
             {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
@@ -142,11 +134,6 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             sizeof(uint32_t) * 3,
             VulkanUtil::loadSpirv(executable_dir, "combine_still_and_moving.comp"),
             Size(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)));
-    m_convert_audio_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "convert_audio_sample_rate",
-            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 13,
-            VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
-            Size(MUSE_TOTAL_WIDTH, 44), 2));
 }
 
 std::shared_ptr<musevk::VulkanBuffer> Shaders::createMuseBuffer(unsigned int height, unsigned int width, HostAccess host_access) {
@@ -187,11 +174,13 @@ void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
     copyYForInterpolation(sq, 0, field.m_data, m_interpolated32_buffer, field_parity, frame_phase_y, true);
     filterImageDiamond(sq, 0, frame_phase_y, m_interpolated32_buffer);
 
+    m_convert_sample_rate_algo->updateBufferDescriptorsInSet(1, {m_filter_2_to_3_buffer, m_interpolated32_buffer, m_field_Y_buffer});
+    m_convert_sample_rate_algo->updateWorkgroup(Size(m_inter_frame_Y_buffer->size().x_size, m_inter_frame_Y_buffer->size().y_size / 2));
     sq.enqueueComputeShader(
-            m_convert_sample_rate_2_to_3_algo,
+            m_convert_sample_rate_algo,
             vector{m_filter_2_to_3_buffer->size().x_size, 3u, 2u, 0u, 0u,
                    m_interpolated32_buffer->size().y_size, m_interpolated32_buffer->size().x_size,
-                   uint(1 - field_parity), 2u, 0u, 1u, 0u});
+                   uint(1 - field_parity), 2u, 0u, 1u, 0u}, 1);
 
     sq.enqueueComputeShader(m_fill_empty_lines_algo,
                             vector{m_field_Y_buffer->size().y_size, m_field_Y_buffer->size().x_size, (unsigned)field_parity});
@@ -316,10 +305,12 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
     copyYForInterpolation(sq, copy_y_descriptor_set_first_index + 1, field_b.m_data, m_interpolated32_buffer,
                           fields_parity, field_b_frame_phase_y, false);
 
+    m_convert_sample_rate_algo->updateBufferDescriptorsInSet(0, {m_filter_4_to_3_buffer, m_interpolated32_buffer, m_inter_frame_Y_buffer});
+    m_convert_sample_rate_algo->updateWorkgroup(Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2));
     sq.enqueueComputeShader(
-            m_convert_sample_rate_4_to_3_algo,
+            m_convert_sample_rate_algo,
             vector{m_filter_4_to_3_buffer->size().x_size, 3u, 4u, 0u, 0u, m_interpolated32_buffer->size().y_size,
-                        m_interpolated32_buffer->size().x_size, uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases});
+                        m_interpolated32_buffer->size().x_size, uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases}, 0);
 }
 
 void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only, bool output_yuv) {
@@ -350,15 +341,14 @@ Shaders::ResultImages Shaders::getResultImages() {
 
 void Shaders::convertAudioSampleRate(musevk::CommandBuffer &sq, shared_ptr<VulkanBuffer> const &frame) {
     for (int i = 0; i < 2; i++) {
-        m_convert_audio_sample_rate_algo->updateBufferDescriptorsInSet(
-                i,
-                {m_filter_4_to_3_buffer, frame, m_audio_data});
+        m_convert_sample_rate_algo->updateBufferDescriptorsInSet(2 + i, {m_filter_4_to_3_buffer, frame, m_audio_data});
+        m_convert_sample_rate_algo->updateWorkgroup(Size(MUSE_TOTAL_WIDTH, 44));
         sq.enqueueComputeShader(
-                m_convert_audio_sample_rate_algo,
+                m_convert_sample_rate_algo,
                 vector{m_filter_4_to_3_buffer->size().x_size, 3u, 4u,
                        2u + 562u * i, 2u, 44u, (uint32_t)MUSE_TOTAL_WIDTH,
-                       44u * i, 1u, 0u, 1u, 0u, 1u},
-                i);
+                       44u * i, 1u, 0u, 1u, 0u},
+                2 + i);
     }
     m_audio_data->synchronizeForHostRead(sq);
 }
