@@ -43,26 +43,29 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_image_V_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(MUSE_Y_BUF_WIDTH * 3 / 2, MUSE_BUF_HEIGHT * 2 / 2), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
-          Size(9, 7), // Notice the total size should not be larger than the workgroup size!
-          { // Notice we really only use half of the coefficients, so this could be made smaller!
-                  -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
-                  0.000205, 0.000474, -0.005036, -0.012591, 0.010491, -0.012591, -0.005036, 0.000474, 0.000205,
-                  -0.000724, -0.002093, -0.022435, 0.024072, 0.164560, 0.024072, -0.022435, -0.002093, -0.000724,
-                  0.001410, 0.006845, 0.006383, 0.146909, 0.398459, 0.146909, 0.006383, 0.006845, 0.001410,
-                  -0.000724, -0.002093, -0.022435, 0.024072, 0.164560, 0.024072, -0.022435, -0.002093, -0.000724,
-                  0.000205, 0.000474, -0.005036, -0.012591, 0.010491, -0.012591, -0.005036, 0.000474, 0.000205,
-                  -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
+          Size(7, 7), // Notice the total size should not be larger than the workgroup size!
+          { // Filter taken from "Perfect reconstruction filter banks for HDTV representation and coding",
+            // Martin VETTERLI, Jelena KOVAČEVIĆ, Didier J. LEGALL, Signal Processing: Image Communication 2 (1990) 349-363.
+            // Notice we really only use half of the coefficients -- if we were to compute the filter response
+            // for a point on the sampling grid, we would get the center coefficient (0.5) and then only zeros.
+            0.000000, 0.000000, 0.000000, 0.001953, 0.000000, 0.000000, 0.000000,
+            0.000000, 0.000000, -0.017578, 0.000000, -0.017578, 0.000000, 0.000000,
+            0.000000, -0.017578, 0.000000, 0.158203, 0.000000, -0.017578, 0.000000,
+            0.001953, 0.000000, 0.158203, 0.500000, 0.158203, 0.000000, 0.001953,
+            0.000000, -0.017578, 0.000000, 0.158203, 0.000000, -0.017578, 0.000000,
+            0.000000, 0.000000, -0.017578, 0.000000, -0.017578, 0.000000, 0.000000,
+            0.000000, 0.000000, 0.000000, 0.001953, 0.000000, 0.000000, 0.000000,
           })),
   m_filter_2_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
-          Size(19),
+          Size(23),
           {
-                  // cutoff 0.25, transition 0.05, sampling freq 1, Rectangular: 19 coeffs (25 non-zero).  Looks +/- 9 samples in each direction
-                  0.034286805542972851, -0.000000000000000019, -0.044083035698107946, 0.000000000000000019,
-                  0.061716249977351118, -0.000000000000000019, -0.102860416628918538,
-                  0.000000000000000019, 0.308581249886755615, 0.484718293839893788, 0.308581249886755615,
-                  0.000000000000000019, -0.102860416628918538, -0.000000000000000019,
-                  0.061716249977351118, 0.000000000000000019, -0.044083035698107946, -0.000000000000000019,
-                  0.034286805542972851
+                  // cutoff 0.13, transition 0.04, sampling freq 1, Rectangular: 23 coeffs.
+                  0.011535573644165619, 0.028343512638849419, 0.029017564543303277, 0.009264361317176931,
+                  -0.022812544748930134, -0.048790425225316521, -0.048220863875547020, -0.009337994190492636,
+                  0.063321981397163357, 0.148716625702280530, 0.217248198720414731, 0.243428020153864499,
+                  0.217248198720414731, 0.148716625702280530, 0.063321981397163357, -0.009337994190492636,
+                  -0.048220863875547020, -0.048790425225316521, -0.022812544748930134, 0.009264361317176931,
+                  0.029017564543303277, 0.028343512638849419, 0.011535573644165619
           })),
   m_filter_4_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
           Size(31),
