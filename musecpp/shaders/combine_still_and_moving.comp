@@ -56,80 +56,34 @@ layout(set = 0, binding = 10) buffer writeonly frame_out_v_buffer {
 
 // Low-pass filter with cutoff frequency 0.10 Hz, transition bandwith 0.07 Hz, hamming window (from fiiir.com).
 // We really only use half of the coefficients but the whole filter is included for simplicity.
-#define HORIZ_FILTER_SIZE 45
-float16_t filter_coeffs[HORIZ_FILTER_SIZE] = {
-0.001100491752087050hf,
-0.000754230965311477hf,
--0.000000000000000001hf,
--0.001196746309279428hf,
--0.002572792474257432hf,
--0.003424321133680980hf,
--0.002791134869290828hf,
-0.000000000000000002hf,
-0.004661397071478517hf,
-0.009554031866536968hf,
-0.011967588542619059hf,
-0.009181907646237716hf,
--0.000000000000000005hf,
--0.013915628301852992hf,
--0.027656733226986648hf,
--0.034098118054577083hf,
--0.026223968384762739hf,
-0.000000000000000007hf,
-0.043345162676397778hf,
-0.096684967495892171hf,
-0.148498079648214015hf,
-0.186163117945688628hf,
-0.199936934288449525hf,
-0.186163117945688628hf,
-0.148498079648214043hf,
-0.096684967495892171hf,
-0.043345162676397792hf,
-0.000000000000000007hf,
--0.026223968384762746hf,
--0.034098118054577083hf,
--0.027656733226986658hf,
--0.013915628301852992hf,
--0.000000000000000005hf,
-0.009181907646237721hf,
-0.011967588542619062hf,
-0.009554031866536972hf,
-0.004661397071478519hf,
-0.000000000000000002hf,
--0.002791134869290830hf,
--0.003424321133680984hf,
--0.002572792474257432hf,
--0.001196746309279430hf,
--0.000000000000000001hf,
-0.000754230965311477hf,
-0.001100491752087050hf,
-};
+#define HORIZ_FILTER_SIZE 5
+float16_t filter_coeffs[HORIZ_FILTER_SIZE] = { 0.111111hf, 0.222222hf, 0.333333hf, 0.222222hf, 0.111111hf };
 
 float16_t resample_r(uint row, uint col) {
-    int N = HORIZ_FILTER_SIZE / 2;
-    int hiFreqIx = int(col);
-    if (col % 3 == 0) {
+    const int N = HORIZ_FILTER_SIZE / 2;
+    if (col % 3 == 1) {
         return inter_frame_r[row][col / 3];
     } else {
+        int hiFreqIx = int(col);
         float16_t s = 0.hf;
-        for (int l = (hiFreqIx - N + 2) / 3; l <= (hiFreqIx + N) / 3; l++) {
+        for (int l = (hiFreqIx - N + 1) / 3; l <= (hiFreqIx + N - 1) / 3; l++) {
             float16_t v = l >= 0 && l < MUSE_Y_BUF_WIDTH ? inter_frame_r[row][l] : 128.hf;
-            s += v * filter_coeffs[3 * l - hiFreqIx + N];
+            s += v * filter_coeffs[3 * l + 1 - hiFreqIx + N];
         }
         return s * 3.hf;
     }
 }
 
 float16_t resample_b(uint row, uint col) {
-    int N = HORIZ_FILTER_SIZE / 2;
-    int hiFreqIx = int(col);
-    if (true || col % 3 == 0) {
+    const int N = HORIZ_FILTER_SIZE / 2;
+    if (col % 3 == 1) {
         return inter_frame_b[row][col / 3];
     } else {
+        int hiFreqIx = int(col);
         float16_t s = 0.hf;
-        for (int l = (hiFreqIx - N + 2) / 3; l <= (hiFreqIx + N) / 3; l++) {
+        for (int l = (hiFreqIx - N + 1) / 3; l <= (hiFreqIx + N - 1) / 3; l++) {
             float16_t v = l >= 0 && l < MUSE_Y_BUF_WIDTH ? inter_frame_b[row][l] : 128.hf;
-            s += v * filter_coeffs[3 * l - hiFreqIx + N];
+            s += v * filter_coeffs[3 * l + 1 - hiFreqIx + N];
         }
         return s * 3.hf;
     }
@@ -191,8 +145,8 @@ void main() {
 
         frame_out_y[row][col] = uint16_t(clamp(YM01postGamma * 256.hf, 0.hf, 255.hf) * 256.hf);
         if ((row & 1) == 0 && (col & 1) == 0) {
-            frame_out_u[row / 2][col / 2] = uint16_t(clamp((BmYM + 128.hf) * 256.hf, 0.hf, 65535.hf));
-            frame_out_v[row / 2][col / 2] = uint16_t(clamp((RmYM + 128.hf) * 256.hf, 0.hf, 65535.hf));
+            frame_out_u[row / 2][col / 2] = uint16_t(clamp((BmYM + 128.hf), 0.hf, 255.hf) * 256.hf);
+            frame_out_v[row / 2][col / 2] = uint16_t(clamp((RmYM + 128.hf), 0.hf, 255.hf) * 256.hf);
         }
     }
 }
