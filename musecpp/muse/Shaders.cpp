@@ -206,6 +206,29 @@ void Shaders::copyYForInterpolation(CommandBuffer &sq, int descriptor_set_index,
             descriptor_set_index);
 }
 
+void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only,
+                                         unsigned int field_parity, bool output_yuv) {
+    m_image_out->enqueueTransitionLayout(sq, vk::ImageLayout::eGeneral,
+                                         vk::PipelineStageFlagBits::eTopOfPipe,
+                                         vk::PipelineStageFlagBits::eComputeShader,
+                                         vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
+    m_combine_still_and_moving_algo->updateBufferDescriptorsInSet(
+            0,
+            {m_field_Y_buffer, m_field_r_buffer,
+             m_field_b_buffer, m_inter_frame_Y_buffer,
+             m_inter_frame_r_buffer, m_inter_frame_b_buffer,
+             m_movement_buffers[m_current_movement_buffer_index], m_image_out,
+             m_image_Y_out, m_image_U_out, m_image_V_out});
+    sq.enqueueComputeShader(m_combine_still_and_moving_algo,
+                            vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u, field_parity, output_yuv ? 1u : 0u});
+
+    if (output_yuv) {
+        m_image_Y_out->synchronizeForHostRead(sq);
+        m_image_U_out->synchronizeForHostRead(sq);
+        m_image_V_out->synchronizeForHostRead(sq);
+    }
+}
+
 void Shaders::filterImageDiamond(CommandBuffer &sq, int descriptor_set_index,
                                  int phase, shared_ptr<VulkanBuffer> const &buffer) {
     m_diamond_algo->updateBufferDescriptorsInSet(descriptor_set_index, {m_diamond_filter_buffer, buffer});
@@ -314,28 +337,6 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
             m_convert_sample_rate_algo,
             vector{m_filter_4_to_3_buffer->size().x_size, 3u, 4u, 0u, 0u, m_interpolated32_buffer->size().y_size,
                         m_interpolated32_buffer->size().x_size, uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases}, 0);
-}
-
-void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only, bool output_yuv) {
-    m_image_out->enqueueTransitionLayout(sq, vk::ImageLayout::eGeneral,
-                                         vk::PipelineStageFlagBits::eTopOfPipe,
-                                         vk::PipelineStageFlagBits::eComputeShader,
-                                         vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
-    m_combine_still_and_moving_algo->updateBufferDescriptorsInSet(
-            0,
-            {m_field_Y_buffer, m_field_r_buffer,
-             m_field_b_buffer, m_inter_frame_Y_buffer,
-             m_inter_frame_r_buffer, m_inter_frame_b_buffer,
-             m_movement_buffers[m_current_movement_buffer_index], m_image_out,
-             m_image_Y_out, m_image_U_out, m_image_V_out});
-    sq.enqueueComputeShader(m_combine_still_and_moving_algo,
-                            vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u, output_yuv ? 1u : 0u});
-
-    if (output_yuv) {
-        m_image_Y_out->synchronizeForHostRead(sq);
-        m_image_U_out->synchronizeForHostRead(sq);
-        m_image_V_out->synchronizeForHostRead(sq);
-    }
 }
 
 Shaders::ResultImages Shaders::getResultImages() {

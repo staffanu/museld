@@ -3,29 +3,30 @@
 #include "muse.h"
 
 // This shader should be invoked with global invocation ids
-// from (0, 0) to (MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)
+// from (0, 0) until (MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)
 
 layout(push_constant) uniform PushConstants {
     // both set to 1 makes no sense
     uint force_field_only;
     uint force_inter_frame_only;
+    int field_parity; // Parity for the field buffer: 0 for first field (lower), 1 for second (upper)
     uint output_yuv;
 };
 
-layout(set = 0, binding = 0) buffer readonly field_Y_buffer {
-    float16_t field_y[][MUSE_Y_BUF_WIDTH * 3];
+layout(set = 0, binding = 0) buffer readonly restrict field_Y_buffer {
+    float16_t field_y[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH * 3];
 };
 
-layout(set = 0, binding = 1) buffer readonly field_r_buffer {
-    float16_t field_r[][MUSE_Y_BUF_WIDTH / 2];
+layout(set = 0, binding = 1) buffer readonly restrict field_r_buffer {
+    float16_t field_r[MUSE_BUF_HEIGHT / 2][MUSE_Y_BUF_WIDTH / 2];
 };
 
-layout(set = 0, binding = 2) buffer readonly field_b_buffer {
-    float16_t field_b[][MUSE_Y_BUF_WIDTH / 2];
+layout(set = 0, binding = 2) buffer readonly restrict field_b_buffer {
+    float16_t field_b[MUSE_BUF_HEIGHT / 2][MUSE_Y_BUF_WIDTH / 2];
 };
 
-layout(set = 0, binding = 3) buffer readonly inter_frame_Y_buffer {
-    float16_t inter_frame_y[][MUSE_Y_BUF_WIDTH * 3];
+layout(set = 0, binding = 3) buffer readonly restrict inter_frame_Y_buffer {
+    float16_t inter_frame_y[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH * 3];
 };
 
 layout(set = 0, binding = 4) buffer readonly restrict inter_frame_r_buffer {
@@ -37,56 +38,113 @@ layout(set = 0, binding = 5) buffer readonly restrict inter_frame_b_buffer {
 };
 
 layout(set = 0, binding = 6) buffer readonly movement_buffer {
-    float16_t movement_data[][MUSE_Y_BUF_WIDTH * 3];
+    float16_t movement_data[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH * 3];
 };
 
 layout(set = 0, binding = 7, rgba32f) uniform writeonly image2D frame_out_image;
 
 layout(set = 0, binding = 8) buffer writeonly frame_out_y_buffer {
-    uint16_t frame_out_y[][MUSE_Y_BUF_WIDTH * 3];
+    uint16_t frame_out_y[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH * 3];
 };
 
 layout(set = 0, binding = 9) buffer writeonly frame_out_u_buffer {
-    uint16_t frame_out_u[][MUSE_Y_BUF_WIDTH * 3 / 2];
+    uint16_t frame_out_u[MUSE_BUF_HEIGHT][MUSE_Y_BUF_WIDTH * 3 / 2];
 };
 
 layout(set = 0, binding = 10) buffer writeonly frame_out_v_buffer {
-    uint16_t frame_out_v[][MUSE_Y_BUF_WIDTH * 3 / 2];
+    uint16_t frame_out_v[MUSE_BUF_HEIGHT][MUSE_Y_BUF_WIDTH * 3 / 2];
 };
 
-// Low-pass filter with cutoff frequency 0.10 Hz, transition bandwith 0.07 Hz, hamming window (from fiiir.com).
-// We really only use half of the coefficients but the whole filter is included for simplicity.
-#define HORIZ_FILTER_SIZE 5
-float16_t filter_coeffs[HORIZ_FILTER_SIZE] = { 0.111111hf, 0.222222hf, 0.333333hf, 0.222222hf, 0.111111hf };
+// This is the filter implemented below
+// float16_t filter_coeffs[5] = { 0.111111hf, 0.222222hf, 0.333333hf, 0.222222hf, 0.111111hf };
+const float16_t fc0 = 0.111111hf;
+const float16_t fc1 = 0.222222hf;
+const float16_t fc2 = 0.333333hf;
 
-float16_t resample_r(uint row, uint col) {
-    const int N = HORIZ_FILTER_SIZE / 2;
-    if (col % 3 == 1) {
-        return inter_frame_r[row][col / 3];
-    } else {
-        int hiFreqIx = int(col);
-        float16_t s = 0.hf;
-        for (int l = (hiFreqIx - N + 1) / 3; l <= (hiFreqIx + N - 1) / 3; l++) {
-            float16_t v = l >= 0 && l < MUSE_Y_BUF_WIDTH ? inter_frame_r[row][l] : 128.hf;
-            s += v * filter_coeffs[3 * l + 1 - hiFreqIx + N];
-        }
-        return s * 3.hf;
+// Unfortunately having two versions of the interpolation functions is necessary since we cannot pass the buffer itself
+// to the function -- tried that and it seems that it is copied despite being read-only!
+float16_t resample_inter_frame_r(uint row, uint col) {
+    int c_div_3 = int(col) / 3;
+    float16_t s = 0.hf;
+    switch (col % 3) {
+        case 0:
+        s = (c_div_3 > 0 ? inter_frame_r[row][c_div_3 - 1] : 128.hf) * fc0;
+        s += inter_frame_r[row][c_div_3] * fc1; // filter_coeffs[3];
+        break;
+
+        case 1:
+        s = inter_frame_r[row][c_div_3] * fc2;
+        break;
+
+        case 2:
+        s = inter_frame_r[row][c_div_3] * fc1;
+        s += ((c_div_3 + 1) < MUSE_Y_BUF_WIDTH ? inter_frame_r[row][c_div_3 + 1] : 128.hf) * fc0; // filter_coeffs[4];
+        break;
     }
+    return s * 3.hf;
 }
 
-float16_t resample_b(uint row, uint col) {
-    const int N = HORIZ_FILTER_SIZE / 2;
-    if (col % 3 == 1) {
-        return inter_frame_b[row][col / 3];
-    } else {
-        int hiFreqIx = int(col);
-        float16_t s = 0.hf;
-        for (int l = (hiFreqIx - N + 1) / 3; l <= (hiFreqIx + N - 1) / 3; l++) {
-            float16_t v = l >= 0 && l < MUSE_Y_BUF_WIDTH ? inter_frame_b[row][l] : 128.hf;
-            s += v * filter_coeffs[3 * l + 1 - hiFreqIx + N];
-        }
-        return s * 3.hf;
+float16_t resample_inter_frame_b(uint row, uint col) {
+    int c_div_3 = int(col) / 3;
+    float16_t s = 0.hf;
+    switch (col % 3) {
+        case 0:
+        s = (c_div_3 > 0 ? inter_frame_b[row][c_div_3 - 1] : 128.hf) * fc0;
+        s += inter_frame_b[row][c_div_3] * fc1; // filter_coeffs[3];
+        break;
+
+        case 1:
+        s = inter_frame_b[row][c_div_3] * fc2;
+        break;
+
+        case 2:
+        s = inter_frame_b[row][c_div_3] * fc1;
+        s += ((c_div_3 + 1) < MUSE_Y_BUF_WIDTH ? inter_frame_b[row][c_div_3 + 1] : 128.hf) * fc0; // filter_coeffs[4];
+        break;
     }
+    return s * 3.hf;
+}
+
+float16_t resample_field_r(uint row, uint col) {
+    // position of the top left color sample on the full resolution grid
+    int top_left_y = 1 - field_parity;
+    int top_left_x = 3 * field_parity;
+
+    int tl_r = clamp((int(row) - top_left_y) / 4, 0, 32000); // row / col in the field color buffer
+    int tl_c = clamp((int(col) - top_left_x) / 6, 0, 32000); // clamp to avoid negative values
+    float16_t tl = field_r[tl_r][tl_c];
+    float16_t tr = field_r[tl_r][tl_c + 1];
+    float16_t bl = field_r[tl_r + 1][tl_c];
+    float16_t br = field_r[tl_r + 1][tl_c + 1];
+
+    float16_t y_part = clamp(float16_t((int(row) - top_left_y) - 4 * tl_r) / 4.hf, 0.hf, 1.hf);
+    float16_t x_part = clamp(float16_t((int(col) - top_left_x) - 6 * tl_c) / 6.hf, 0.hf, 1.hf);
+
+    return tl * (1.hf - y_part) * (1.hf - x_part)
+        + tr * (1.hf - y_part) * x_part
+        + bl * y_part * (1.hf - x_part)
+        + br * y_part * x_part;
+}
+
+float16_t resample_field_b(uint row, uint col) {
+    // position of the top left color sample on the full resolution grid
+    int top_left_y = 1 - field_parity;
+    int top_left_x = 3 * field_parity;
+
+    int tl_r = clamp((int(row) - top_left_y) / 4, 0, 32000); // row / col in the field color buffer
+    int tl_c = clamp((int(col) - top_left_x) / 6, 0, 32000); // clamp to avoid negative values
+    float16_t tl = field_b[tl_r][tl_c];
+    float16_t tr = field_b[tl_r][tl_c + 1];
+    float16_t bl = field_b[tl_r + 1][tl_c];
+    float16_t br = field_b[tl_r + 1][tl_c + 1];
+
+    float16_t y_part = clamp(float16_t((int(row) - top_left_y) - 4 * tl_r) / 4.hf, 0.hf, 1.hf);
+    float16_t x_part = clamp(float16_t((int(col) - top_left_x) - 6 * tl_c) / 6.hf, 0.hf, 1.hf);
+
+    return tl * (1.hf - y_part) * (1.hf - x_part)
+        + tr * (1.hf - y_part) * x_part
+        + bl * y_part * (1.hf - x_part)
+        + br * y_part * x_part;
 }
 
 void main() {
@@ -97,11 +155,11 @@ void main() {
         return;
 
     float16_t YM_field = field_y[row][col];
-    float16_t RmYM_field = field_r[row / 4][col / 6] - 128.0hf;
-    float16_t BmYM_field = field_b[row / 4][col / 6] - 128.0hf;
+    float16_t RmYM_field = resample_field_r(row, col) - 128.0hf;
+    float16_t BmYM_field = resample_field_b(row, col) - 128.0hf;
     float16_t YM_inter_frame = inter_frame_y[row][col];
-    float16_t RmYM_inter_frame = resample_r(row, col) - 128.0hf;
-    float16_t BmYM_inter_frame = resample_b(row, col) - 128.0hf;
+    float16_t RmYM_inter_frame = resample_inter_frame_r(row, col) - 128.0hf;
+    float16_t BmYM_inter_frame = resample_inter_frame_b(row, col) - 128.0hf;
 
     float16_t movement = force_field_only != 0 ?
         1.0hf : force_inter_frame_only != 0 ?
@@ -123,10 +181,6 @@ void main() {
     float16_t r2 =  9.3892e-01hf * r +  5.0196e-02hf * g + 1.0270e-02hf * b;
     float16_t g2 =  1.7760e-02hf * r +  9.6607e-01hf * g + 1.6424e-02hf * b;
     float16_t b2 = -1.6205e-03hf * r + -4.3710e-03hf * g + 1.0053e+00hf * b;
-
-//r2 = (RmYM_field + 128.hf) / 256.hf;
-//g2 = (RmYM_field + 128.hf) / 256.hf;
-//b2 = (RmYM_field + 128.hf) / 256.hf;
 
     imageStore(frame_out_image, ivec2(col, row), vec4(float(r2), float(g2), float(b2), 1.f));
 

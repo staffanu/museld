@@ -47,7 +47,8 @@ public:
                                          const std::vector<std::reference_wrapper<FieldBufferView>> &fields,
                                          bool use_prev_motion_info);
 
-    void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only, bool output_yuv);
+    void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only,
+                                    unsigned int field_parity, bool output_yuv);
 
     struct ResultImages {
         std::shared_ptr<musevk::VulkanImage> out_image;
