@@ -134,7 +134,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
     m_combine_still_and_moving_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "combine_still_and_moving",
             {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eImage, eBuffer, eBuffer, eBuffer},
-            sizeof(uint32_t) * 3,
+            sizeof(uint32_t) * 4,
             VulkanUtil::loadSpirv(executable_dir, "combine_still_and_moving.comp"),
             Size(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)));
 }
