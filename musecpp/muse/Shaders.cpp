@@ -111,7 +111,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             "convert_sample_rate",
             {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 12,
              VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
-            Size(0), 4));
+            Size(0), 5));
     m_decode_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
                                                                   "decode_c",
                                                                   {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
@@ -177,13 +177,13 @@ void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
     copyYForInterpolation(sq, 0, field.m_data, m_interpolated32_buffer, field_parity, frame_phase_y, true);
     filterImageDiamond(sq, 0, frame_phase_y, m_interpolated32_buffer);
 
-    m_convert_sample_rate_algo->updateBufferDescriptorsInSet(1, {m_filter_2_to_3_buffer, m_interpolated32_buffer, m_field_Y_buffer});
+    m_convert_sample_rate_algo->updateBufferDescriptorsInSet(0, {m_filter_2_to_3_buffer, m_interpolated32_buffer, m_field_Y_buffer});
     m_convert_sample_rate_algo->updateWorkgroup(Size(m_inter_frame_Y_buffer->size().x_size, m_inter_frame_Y_buffer->size().y_size / 2));
     sq.enqueueComputeShader(
             m_convert_sample_rate_algo,
             vector{m_filter_2_to_3_buffer->size().x_size, 3u, 2u, 0u, 0u,
                    m_interpolated32_buffer->size().y_size, m_interpolated32_buffer->size().x_size,
-                   uint(1 - field_parity), 2u, 0u, 1u, 0u}, 1);
+                   uint(1 - field_parity), 2u, 0u, 1u, 0u}, 0);
 
     sq.enqueueComputeShader(m_fill_empty_lines_algo,
                             vector{m_field_Y_buffer->size().y_size, m_field_Y_buffer->size().x_size, (unsigned)field_parity});
@@ -284,9 +284,9 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
         return false;
     }
 
-    makeFieldFromConsecutiveFrames(sq, 1, fields[0], frame_phases_y[0], fields[2], frame_phases_y[2], field_parities[0],
+    makeFieldFromConsecutiveFrames(sq, 1, 1, fields[0], frame_phases_y[0], fields[2], frame_phases_y[2], field_parities[0],
                                    field_phases_y[0]);
-    makeFieldFromConsecutiveFrames(sq, 3, fields[1], frame_phases_y[1], fields[3], frame_phases_y[3], field_parities[1],
+    makeFieldFromConsecutiveFrames(sq, 3, 2, fields[1], frame_phases_y[1], fields[3], frame_phases_y[3], field_parities[1],
                                    field_phases_y[1]);
     filterImageDiamond(sq, 1, field_parities[0] ^ field_phases_y[0], m_inter_frame_Y_buffer);
 
@@ -323,6 +323,7 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
 
 void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
                                              int copy_y_descriptor_set_first_index,
+                                             int convert_sample_rate_descriptor_set_index,
                                              FieldBufferView &field_a, unsigned int field_a_frame_phase_y,
                                              FieldBufferView &field_b, unsigned int field_b_frame_phase_y,
                                              unsigned int fields_parity, unsigned int fields_phases) {
@@ -331,12 +332,12 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
     copyYForInterpolation(sq, copy_y_descriptor_set_first_index + 1, field_b.m_data, m_interpolated32_buffer,
                           fields_parity, field_b_frame_phase_y, false);
 
-    m_convert_sample_rate_algo->updateBufferDescriptorsInSet(0, {m_filter_4_to_3_buffer, m_interpolated32_buffer, m_inter_frame_Y_buffer});
+    m_convert_sample_rate_algo->updateBufferDescriptorsInSet(convert_sample_rate_descriptor_set_index, {m_filter_4_to_3_buffer, m_interpolated32_buffer, m_inter_frame_Y_buffer});
     m_convert_sample_rate_algo->updateWorkgroup(Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2));
     sq.enqueueComputeShader(
             m_convert_sample_rate_algo,
             vector{m_filter_4_to_3_buffer->size().x_size, 3u, 4u, 0u, 0u, m_interpolated32_buffer->size().y_size,
-                        m_interpolated32_buffer->size().x_size, uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases}, 0);
+                        m_interpolated32_buffer->size().x_size, uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases}, convert_sample_rate_descriptor_set_index);
 }
 
 Shaders::ResultImages Shaders::getResultImages() {
@@ -345,14 +346,14 @@ Shaders::ResultImages Shaders::getResultImages() {
 
 void Shaders::convertAudioSampleRate(musevk::CommandBuffer &sq, shared_ptr<VulkanBuffer> const &frame) {
     for (int i = 0; i < 2; i++) {
-        m_convert_sample_rate_algo->updateBufferDescriptorsInSet(2 + i, {m_filter_4_to_3_buffer, frame, m_audio_data});
+        m_convert_sample_rate_algo->updateBufferDescriptorsInSet(3 + i, {m_filter_4_to_3_buffer, frame, m_audio_data});
         m_convert_sample_rate_algo->updateWorkgroup(Size(MUSE_TOTAL_WIDTH, 44));
         sq.enqueueComputeShader(
                 m_convert_sample_rate_algo,
                 vector{m_filter_4_to_3_buffer->size().x_size, 3u, 4u,
                        2u + 562u * i, 2u, 44u, (uint32_t)MUSE_TOTAL_WIDTH,
                        44u * i, 1u, 0u, 1u, 0u},
-                2 + i);
+                3 + i);
     }
     m_audio_data->synchronizeForHostRead(sq);
 }

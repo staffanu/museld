@@ -75,6 +75,7 @@ private:
 
     void makeFieldFromConsecutiveFrames(musevk::CommandBuffer &sq,
                                         int copy_y_descriptor_set_first_index,
+                                        int convert_sample_rate_descriptor_set_index,
                                         FieldBufferView &field_a, unsigned int field_a_frame_phase_y,
                                         FieldBufferView &field_b, unsigned int field_b_frame_phase_y,
                                         unsigned int fields_parity, unsigned int fields_phases);
