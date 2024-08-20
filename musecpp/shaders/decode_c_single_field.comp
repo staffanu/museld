@@ -49,7 +49,7 @@ void main() {
     if (col * 2 + offset_b < MUSE_Y_BUF_WIDTH / 2)
         b_data[row][col * 2 + offset_b] = v_b;
 
-    // we could remove this since the diamond filter overwrites the non-decoded pixels
+    // we could remove this since the diamond filter overwrites the non-decoded pixels, but it helps debugging!
     if (col * 2 + 1 - offset_r < MUSE_Y_BUF_WIDTH / 2)
         r_data[row][col * 2 + 1 - offset_r] = 0.hf;
     if (col * 2 + 1 - offset_b < MUSE_Y_BUF_WIDTH / 2)

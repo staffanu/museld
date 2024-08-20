@@ -17,15 +17,15 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(set = 0, binding = 0) buffer readonly input_frame_buffer {
-    float16_t input_frame[][MUSE_TOTAL_WIDTH];
+    float16_t input_frame[MUSE_TOTAL_HEIGHT][MUSE_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 1) buffer writeonly r_data_buffer {
-    float16_t r_data[][MUSE_Y_BUF_WIDTH];
+    float16_t r_data[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 2) buffer writeonly b_data_buffer {
-    float16_t b_data[][MUSE_Y_BUF_WIDTH];
+    float16_t b_data[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH];
 };
 
 void main() {
@@ -58,7 +58,7 @@ void main() {
     float16_t v_r = input_frame[(line_r - 1)][MUSE_C_OFFSET + col];
     float16_t v_b = input_frame[(line_b - 1)][MUSE_C_OFFSET + col];
 
-    if (col * 4 + offset_r < MUSE_Y_BUF_WIDTH) // conditional since we could otherwise write outside the buffer by one pixel
+    if (col * 4 + offset_r < MUSE_Y_BUF_WIDTH) // conditional since we will otherwise write outside the buffer by one pixel
         r_data[row * 4 + 1 - field_parity][col * 4 + offset_r] = v_r;
     if (col * 4 + offset_b < MUSE_Y_BUF_WIDTH)
         b_data[row * 4 + 1 - field_parity + 2][col * 4 + offset_b] = v_b;
