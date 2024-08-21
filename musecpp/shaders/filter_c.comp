@@ -16,6 +16,7 @@
 // With this filter we could clearly simplify the code...
 #define HORIZ_FILTER_SIZE 3
 float16_t filter_coeffs[HORIZ_FILTER_SIZE] = { 0.25hf, 0.5hf, 0.25hf };
+//float16_t filter_coeffs[HORIZ_FILTER_SIZE] = { 0.0086207hf, 0.068966hf, 0.24138hf, 0.36207hf, 0.24138hf, 0.068966hf, 0.00086207hf };
 
 layout(push_constant) uniform PushConstants {
     uint is_red;
@@ -55,15 +56,18 @@ void main() {
         }
         break;
         case 1: // Fill in the missing samples in the rows without samples (rows 0, 1 for blue, 2, 3 for red, and so on) by filtering vertically
-        { // TODO: implement a real filter -- now we just copy!
+        {
             uint y = row / 2 * 4 + (row & 1u) + (is_red != 0 ? 2 : 0);
-            uint source_y;
+            uint source_y_close, source_y_far;
             if ((row & 1u) == 0) {
-                source_y = y == 0 ? 2 : y - 1;
+                source_y_close = y == 0 ? 2 : y - 1;
+                source_y_far = y == 2 * MUSE_BUF_HEIGHT - 2 ? y - 1 : y + 2;
             } else {
-                source_y = y == 2 * MUSE_BUF_HEIGHT - 1 ? MUSE_BUF_HEIGHT - 3 : y + 1;
+                source_y_close = y == 2 * MUSE_BUF_HEIGHT - 1 ? y - 2 : y + 1;
+                source_y_far = y == 1 ? 2 : y - 2;
             }
-            c_data[y][col] = c_data[source_y][col];
+            // Very simple "filter" just a weighted sum of the lines above and below
+            c_data[y][col] = 0.66667hf * c_data[source_y_close][col] + 0.33333hf * c_data[source_y_far][col];
         }
         break;
     }
