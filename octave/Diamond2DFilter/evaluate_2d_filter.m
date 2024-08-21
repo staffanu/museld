@@ -8,7 +8,9 @@
 % If F has even size, n should be even.
 % F needs to be either even size both horizontally and vertically, or even
 % in both directions.
-function e = evaluate_2d_filter(F, n, lb, ub, show=false)
+function e = evaluate_2d_filter(F, show=0)
+
+global n x y LB UB;
 
 pad_x = (n - size(F)(2)) / 2;
 pad_y = (n - size(F)(1)) / 2;
@@ -17,11 +19,14 @@ F2 = [ zeros(pad_y, n);
        zeros(size(F)(1), pad_x) F zeros(size(F)(1), pad_x);
        zeros(pad_y, n) ];
 
-x=y=linspace(-pi + pi / n, pi - pi/n, n);
-[xx, yy]=meshgrid(x, y);
+if size(LB)(1) != n || size(LB)(2) != n || size(UB)(1) != n || size(UB)(2) != n
+  error "Incorrect LB/UB dimension"
+endif
 
-LB=arrayfun(lb, xx, yy);
-UB=arrayfun(ub, xx, yy);
+%x=y=linspace(-pi + pi / n, pi - pi/n, n);
+%[xx, yy]=meshgrid(x, y);
+%LB=arrayfun(lb, xx, yy);
+%UB=arrayfun(ub, xx, yy);
 
 R=fftshift(fft2(ifftshift(F2)));
 if max(max(imag(R))) > 1e-8
@@ -33,8 +38,10 @@ e = sum(sum(((R > UB) .* (R - UB)).^2 + ((R < LB) .* (LB - R)).^2));
 
 if show == 1
   mesh(x, y, R);
+  pause(0.01);
 elseif show == 2
   contour(x, y, R);
+  pause(0.01);
 endif
 
 endfunction
