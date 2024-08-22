@@ -71,17 +71,5 @@ void main() {
         s += v * shared_filter[upsample_factor_i * l - hiFreqIx + N];
     }
 
-    // Hack to clear pixels on the "other" horizontal lines, and also adjacent pixels for debugging (if decoding only one field
-    // instead of four when doing intra frame interpolation, in order to clear pixels now written
-//    if (upsample_factor_i == 3 && downsample_factor == 4) {
-        // disable filter -- just pick the corresponding pixel; also will keep the original picture size instead of reducing a factor 4/3
-//        s = source[(source_row + source_y_offset) * source_width + source_x_offset + dest_col_filter_out] / upsample_factor / multiplier;
-//        uint dest_row2 = (1 - dest_start_row) + source_row * dest_row_step_size;
-//        uint dest_col2 = (1 - dest_start_col) + dest_col_filter_out * dest_col_step_size;
-//        dest[dest_row2 * dest_width + dest_col] = 0.hf;
-//        dest[dest_row * dest_width + dest_col2] = 0.hf;
-//        dest[dest_row2 * dest_width + dest_col2] = 0.hf;
-//    }
-
     dest[dest_row * dest_width + dest_col] = clamp(s * upsample_factor, 0.hf, 255.hf);
 }
