@@ -21,7 +21,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_interpolated32_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
   m_intermediate_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH)),
   m_intermediate_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH)),
-  m_field_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3)),
+  m_field_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 3)),
   m_field_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT / 2, MUSE_Y_BUF_WIDTH / 2)),
   m_field_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT / 2, MUSE_Y_BUF_WIDTH / 2)),
   m_inter_frame_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3)),
@@ -102,11 +102,6 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             "diamond",
             {eBuffer, eBuffer}, sizeof(uint32_t) * 5,
             VulkanUtil::loadSpirv(executable_dir, "filter_diamond.comp"), Size(0), 4));
-    m_fill_empty_lines_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "fill_empty_lines",
-            {m_field_Y_buffer}, sizeof(uint32_t) * 3,
-            VulkanUtil::loadSpirv(executable_dir, "fill_empty_lines.comp"),
-            Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2)));
     m_convert_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "convert_sample_rate",
             {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 12,
@@ -183,10 +178,7 @@ void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
             m_convert_sample_rate_algo,
             vector{m_filter_2_to_3_buffer->size().x_size, 3u, 2u, 0u, 0u,
                    m_interpolated32_buffer->size().y_size, m_interpolated32_buffer->size().x_size,
-                   uint(1 - field_parity), 2u, 0u, 1u, 0u}, 0);
-
-    sq.enqueueComputeShader(m_fill_empty_lines_algo,
-                            vector{m_field_Y_buffer->size().y_size, m_field_Y_buffer->size().x_size, (unsigned)field_parity});
+                   0u, 1u, 0u, 1u, 0u}, 0);
 
     m_decode_c_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, m_field_r_buffer, m_field_b_buffer});
     sq.enqueueComputeShader(m_decode_c_single_field_algo, vector{frame_phase_c, field_parity}, 0);
@@ -333,7 +325,7 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
                           fields_parity, field_b_frame_phase_y, false);
 
     m_convert_sample_rate_algo->updateBufferDescriptorsInSet(convert_sample_rate_descriptor_set_index, {m_filter_4_to_3_buffer, m_interpolated32_buffer, m_inter_frame_Y_buffer});
-    m_convert_sample_rate_algo->updateWorkgroup(Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2));
+    m_convert_sample_rate_algo->updateWorkgroup(Size(m_inter_frame_Y_buffer->size().x_size, m_inter_frame_Y_buffer->size().y_size / 2));
     sq.enqueueComputeShader(
             m_convert_sample_rate_algo,
             vector{m_filter_4_to_3_buffer->size().x_size, 3u, 4u, 0u, 0u, m_interpolated32_buffer->size().y_size,

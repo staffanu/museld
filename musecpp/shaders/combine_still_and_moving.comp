@@ -14,7 +14,7 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(set = 0, binding = 0) buffer readonly restrict field_Y_buffer {
-    float16_t field_y[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH * 3];
+    float16_t field_y[MUSE_BUF_HEIGHT][MUSE_Y_BUF_WIDTH * 3];
 };
 
 layout(set = 0, binding = 1) buffer readonly restrict field_r_buffer {
@@ -37,7 +37,7 @@ layout(set = 0, binding = 5) buffer readonly restrict inter_frame_b_buffer {
     float16_t inter_frame_b[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 6) buffer readonly movement_buffer {
+layout(set = 0, binding = 6) buffer readonly restrict movement_buffer {
     float16_t movement_data[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH * 3];
 };
 
@@ -61,7 +61,7 @@ const float16_t fc0 = 0.083333hf;
 const float16_t fc1 = 0.25hf;
 const float16_t fc2 = 0.333333hf;
 
-// Unfortunately having two versions of the interpolation functions is necessary since we cannot pass the buffer itself
+// Unfortunately having two versions of the color interpolation functions is necessary since we cannot pass the buffer itself
 // to the function -- tried that and it seems that it is copied despite being read-only!
 float16_t resample_inter_frame_r(uint row, uint col) {
     int c = int(col) + 1; // the color sampling is shifted one high frequency pixel
@@ -107,7 +107,20 @@ float16_t resample_inter_frame_b(uint row, uint col) {
     return s * 3.hf;
 }
 
-// For the intra field color interpolation we just do  linear intepolation
+float16_t resample_field_y(uint row, uint col) {
+    if ((row & 1u) != field_parity) {
+        // for field 1, even rows have a corresponding row in the interpolated field;
+        // for field 0, odd rows are exactly represented.
+        return field_y[row / 2][col];
+    } else {
+        // for the other rows we do linear interpolation between the upper and lower rows -- probably a better filter would be better
+        uint field_row_above = row == 0 ? 0 : (row - 1) / 2;
+        uint field_row_below = row == MUSE_BUF_HEIGHT * 2 - 1 ? MUSE_BUF_HEIGHT - 1 : field_row_above + 1;
+        return 0.5hf * (field_y[field_row_above][col] + field_y[field_row_below][col]);
+    }
+}
+
+// For the intra field color interpolation we just do linear interpolation
 float16_t resample_field_r(uint row, uint col) {
     // position of the top left color sample on the full resolution grid
     int top_left_y = 1 - field_parity;
@@ -157,7 +170,7 @@ void main() {
     if (row >= MUSE_BUF_HEIGHT * 2 || col >= MUSE_Y_BUF_WIDTH * 3)
         return;
 
-    float16_t YM_field = field_y[row][col];
+    float16_t YM_field = resample_field_y(row, col);
     float16_t RmYM_field = resample_field_r(row, col) - 128.0hf;
     float16_t BmYM_field = resample_field_b(row, col) - 128.0hf;
     float16_t YM_inter_frame = inter_frame_y[row][col];

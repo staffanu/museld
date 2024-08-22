@@ -89,7 +89,6 @@ private:
     std::shared_ptr<musevk::ComputeShader> m_apply_deemphasis_and_gamma_algo;
     std::shared_ptr<musevk::ComputeShader> m_copy_y_for_interpolation_algo;
     std::shared_ptr<musevk::ComputeShader> m_diamond_algo;
-    std::shared_ptr<musevk::ComputeShader> m_fill_empty_lines_algo;
     std::shared_ptr<musevk::ComputeShader> m_convert_sample_rate_algo;
     std::shared_ptr<musevk::ComputeShader> m_decode_c_algo;
     std::shared_ptr<musevk::ComputeShader> m_filter_c_algo;
@@ -106,7 +105,7 @@ private:
     std::shared_ptr<musevk::VulkanBuffer> m_intermediate_b_buffer; // MUSE_BUF_HEIGHT * 2 * MUSE_BUF_Y_WIDTH
 
     // output from single field decoder -- when combining the two results
-    std::shared_ptr<musevk::VulkanBuffer> m_field_Y_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_field_Y_buffer; // MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 3
     std::shared_ptr<musevk::VulkanBuffer> m_field_r_buffer; // MUSE_BUF_HEIGHT / 2 * MUSE_BUF_Y_WIDTH / 2
     std::shared_ptr<musevk::VulkanBuffer> m_field_b_buffer; // MUSE_BUF_HEIGHT / 2 * MUSE_BUF_Y_WIDTH / 2
 
