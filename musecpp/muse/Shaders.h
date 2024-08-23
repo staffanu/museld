@@ -101,8 +101,6 @@ private:
 
     // temporary data used by the single field decoder and inter-frame interpolation
     std::shared_ptr<musevk::VulkanBuffer> m_interpolated32_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH * 2
-    std::shared_ptr<musevk::VulkanBuffer> m_intermediate_r_buffer; // MUSE_BUF_HEIGHT * 2 * MUSE_BUF_Y_WIDTH
-    std::shared_ptr<musevk::VulkanBuffer> m_intermediate_b_buffer; // MUSE_BUF_HEIGHT * 2 * MUSE_BUF_Y_WIDTH
 
     // output from single field decoder -- when combining the two results
     std::shared_ptr<musevk::VulkanBuffer> m_field_Y_buffer; // MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 3

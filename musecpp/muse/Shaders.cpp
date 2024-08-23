@@ -19,8 +19,6 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_command_pool(command_pool),
   m_non_linear_processed_buffer(createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)),
   m_interpolated32_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
-  m_intermediate_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH)),
-  m_intermediate_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH)),
   m_field_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 3)),
   m_field_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT / 2, MUSE_Y_BUF_WIDTH / 2)),
   m_field_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT / 2, MUSE_Y_BUF_WIDTH / 2)),
