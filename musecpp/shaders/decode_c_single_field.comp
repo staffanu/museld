@@ -5,27 +5,24 @@
 // Notice that the width of the output buffer, MUSE_Y_BUF_WiDTH / 2,
 // is smaller than MUSE_C_BUF_WIDTH * 2:
 // MUSE_C_BUF_WIDTH * 2 = 94 * 2 = 188, MUSE_Y_BUF_WiDTH / 2 = 374 / 2 = 187.
-//
-// The invocation for the nth row writes the nth red and blue data lines.
 
 #include "muse.h"
 
 layout(push_constant) uniform PushConstants {
     uint frame_phase_c;
     uint field_parity;
-    uint clear_output; // set to clear the output buffer before writing to it
 };
 
 layout(set = 0, binding = 0) buffer readonly input_frame_buffer {
-    float16_t input_frame[MUSE_TOTAL_HEIGHT][MUSE_TOTAL_WIDTH];
+    float16_t input_frame[][MUSE_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 1) buffer writeonly r_data_buffer {
-    float16_t r_data[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH];
+    float16_t r_data[][MUSE_Y_BUF_WIDTH / 2];
 };
 
 layout(set = 0, binding = 2) buffer writeonly b_data_buffer {
-    float16_t b_data[MUSE_BUF_HEIGHT * 2][MUSE_Y_BUF_WIDTH];
+    float16_t b_data[][MUSE_Y_BUF_WIDTH / 2];
 };
 
 void main() {
@@ -35,31 +32,26 @@ void main() {
     if (row >= MUSE_BUF_HEIGHT / 2 || col >= MUSE_C_BUF_WIDTH)
         return;
 
-    if (clear_output != 0) {
-        for (int i = 0; i < 4; i++) {
-            for (int j = 0; j < 4; j++) {
-                if (col * 4 + j < MUSE_Y_BUF_WIDTH) {
-                    r_data[row * 4 + i][col * 4 + j] = 0.hf;
-                    b_data[row * 4 + i][col * 4 + j] = 0.hf;
-                }
-            }
-        }
-    }
-
     uint line_r = row * 2 + 43 + field_parity * (605 - 43); // starts at 1
     uint line_b = line_r + 1;
 
     uint line_r_div_2_odd = (line_r >> 1) & 1u;
     uint line_b_div_2_odd = (line_b >> 1) & 1u;
 
-    uint offset_r = (line_r_div_2_odd == frame_phase_c ? 0 : 2) + field_parity;
-    uint offset_b = (line_b_div_2_odd == frame_phase_c ? 0 : 2) + field_parity;
+    uint offset_r = line_r_div_2_odd == frame_phase_c ? 0 : 1;
+    uint offset_b = line_b_div_2_odd == frame_phase_c ? 0 : 1;
 
     float16_t v_r = input_frame[(line_r - 1)][MUSE_C_OFFSET + col];
     float16_t v_b = input_frame[(line_b - 1)][MUSE_C_OFFSET + col];
 
-    if (col * 4 + offset_r < MUSE_Y_BUF_WIDTH) // conditional since we will otherwise write outside the buffer by one pixel
-        r_data[row * 4 + 1 - field_parity][col * 4 + offset_r] = v_r;
-    if (col * 4 + offset_b < MUSE_Y_BUF_WIDTH)
-        b_data[row * 4 + 1 - field_parity + 2][col * 4 + offset_b] = v_b;
+    if (col * 2 + offset_r < MUSE_Y_BUF_WIDTH / 2) // conditional since we could otherwise write outside the buffer by one pixel
+        r_data[row][col * 2 + offset_r] = v_r;
+    if (col * 2 + offset_b < MUSE_Y_BUF_WIDTH / 2)
+        b_data[row][col * 2 + offset_b] = v_b;
+
+    // we could remove this since the diamond filter overwrites the non-decoded pixels, but it helps debugging!
+    if (col * 2 + 1 - offset_r < MUSE_Y_BUF_WIDTH / 2)
+        r_data[row][col * 2 + 1 - offset_r] = 0.hf;
+    if (col * 2 + 1 - offset_b < MUSE_Y_BUF_WIDTH / 2)
+        b_data[row][col * 2 + 1 - offset_b] = 0.hf;
 }

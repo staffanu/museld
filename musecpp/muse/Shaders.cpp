@@ -18,14 +18,12 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_vulkan_manager(manager),
   m_non_linear_processed_buffer(createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)),
   m_interpolated32_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
-  m_intermediate_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
-  m_intermediate_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
-  m_field_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3)),
-  m_field_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
-  m_field_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
+  m_field_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 3)),
+  m_field_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT / 2, MUSE_Y_BUF_WIDTH / 2)),
+  m_field_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT / 2, MUSE_Y_BUF_WIDTH / 2)),
   m_inter_frame_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3)),
-  m_inter_frame_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
-  m_inter_frame_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
+  m_inter_frame_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH)),
+  m_inter_frame_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH)),
   m_current_movement_buffer_index(0),
   m_movement_buffers({ createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3),
                        createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3) }),
@@ -42,46 +40,29 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_image_V_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(MUSE_Y_BUF_WIDTH * 3 / 2, MUSE_BUF_HEIGHT * 2 / 2), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
-          Size(9, 7), // Notice the total size should not be larger than the workgroup size!
-          { // Notice we really only use half of the coefficients, so this could be made smaller!
-                  -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
-                  0.000205, 0.000474, -0.005036, -0.012591, 0.010491, -0.012591, -0.005036, 0.000474, 0.000205,
-                  -0.000724, -0.002093, -0.022435, 0.024072, 0.164560, 0.024072, -0.022435, -0.002093, -0.000724,
-                  0.001410, 0.006845, 0.006383, 0.146909, 0.398459, 0.146909, 0.006383, 0.006845, 0.001410,
-                  -0.000724, -0.002093, -0.022435, 0.024072, 0.164560, 0.024072, -0.022435, -0.002093, -0.000724,
-                  0.000205, 0.000474, -0.005036, -0.012591, 0.010491, -0.012591, -0.005036, 0.000474, 0.000205,
-                  -0.000096, 0.000300, 0.001529, -0.001499, -0.000041, -0.001499, 0.001529, 0.000300, -0.000096,
+          Size(7, 7), // Notice the total size should not be larger than the workgroup size!
+          { // Filter taken from "Perfect reconstruction filter banks for HDTV representation and coding",
+            // Martin VETTERLI, Jelena KOVAČEVIĆ, Didier J. LEGALL, Signal Processing: Image Communication 2 (1990) 349-363.
+            // Notice we really only use half of the coefficients -- if we were to compute the filter response
+            // for a point on the sampling grid, we would get the center coefficient (0.5) and then only zeros.
+            0.000000, 0.000000, 0.000000, 0.001953, 0.000000, 0.000000, 0.000000,
+            0.000000, 0.000000, -0.017578, 0.000000, -0.017578, 0.000000, 0.000000,
+            0.000000, -0.017578, 0.000000, 0.158203, 0.000000, -0.017578, 0.000000,
+            0.001953, 0.000000, 0.158203, 0.500000, 0.158203, 0.000000, 0.001953,
+            0.000000, -0.017578, 0.000000, 0.158203, 0.000000, -0.017578, 0.000000,
+            0.000000, 0.000000, -0.017578, 0.000000, -0.017578, 0.000000, 0.000000,
+            0.000000, 0.000000, 0.000000, 0.001953, 0.000000, 0.000000, 0.000000,
           })),
-  m_color_filter_single_field_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
-          Size(9, 5), // Notice the total size should not be larger than the workgroup size!
-          {
-                  0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
-                  0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
-                  0.008117, 0.021787, 0.054789, 0.087791, 0.101461, 0.087791, 0.054789, 0.021787, 0.008117,
-                  0.004383, 0.011765, 0.029586, 0.047407, 0.054789, 0.047407, 0.029586, 0.011765, 0.004383,
-                  0.000649, 0.001743, 0.004383, 0.007023, 0.008117, 0.007023, 0.004383, 0.001743, 0.000649,
-          })),
-  m_color_filter_inter_frame_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
-          Size(5, 7), // Notice the total size should not be larger than the workgroup size!
-          {
-                 -0.000343, -0.002317, -0.004290, -0.002317, -0.000343,
-                 0.000920, 0.006212, 0.011504, 0.006212, 0.000920,
-                 0.009256, 0.062476, 0.115696, 0.062476, 0.009256,
-                 0.016049, 0.108329, 0.200609, 0.108329, 0.016049,
-                 0.009256, 0.062476, 0.115696, 0.062476, 0.009256,
-                 0.000920, 0.006212, 0.011504, 0.006212, 0.000920,
-                 -0.000343, -0.002317, -0.004290, -0.002317, -0.000343,
-         })),
   m_filter_2_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
-          Size(19),
+          Size(23),
           {
-                  // cutoff 0.25, transition 0.05, sampling freq 1, Rectangular: 19 coeffs (25 non-zero).  Looks +/- 9 samples in each direction
-                  0.034286805542972851, -0.000000000000000019, -0.044083035698107946, 0.000000000000000019,
-                  0.061716249977351118, -0.000000000000000019, -0.102860416628918538,
-                  0.000000000000000019, 0.308581249886755615, 0.484718293839893788, 0.308581249886755615,
-                  0.000000000000000019, -0.102860416628918538, -0.000000000000000019,
-                  0.061716249977351118, 0.000000000000000019, -0.044083035698107946, -0.000000000000000019,
-                  0.034286805542972851
+                  // cutoff 0.13, transition 0.04, sampling freq 1, Rectangular: 23 coeffs.
+                  0.011535573644165619, 0.028343512638849419, 0.029017564543303277, 0.009264361317176931,
+                  -0.022812544748930134, -0.048790425225316521, -0.048220863875547020, -0.009337994190492636,
+                  0.063321981397163357, 0.148716625702280530, 0.217248198720414731, 0.243428020153864499,
+                  0.217248198720414731, 0.148716625702280530, 0.063321981397163357, -0.009337994190492636,
+                  -0.048220863875547020, -0.048790425225316521, -0.022812544748930134, 0.009264361317176931,
+                  0.029017564543303277, 0.028343512638849419, 0.011535573644165619
           })),
   m_filter_4_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
           Size(31),
@@ -117,33 +98,27 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
     m_diamond_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "diamond",
             {eBuffer, eBuffer}, sizeof(uint32_t) * 5,
-            VulkanUtil::loadSpirv(executable_dir, "filter_diamond.comp"), Size(0), 2));
-    m_filter_image_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "filter_image",
-            {eBuffer, eBuffer, eBuffer}, sizeof(float) * 5,
-            VulkanUtil::loadSpirv(executable_dir, "filter_image.comp"), Size(0), 4));
-    m_fill_empty_lines_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "fill_empty_lines",
-            {m_field_Y_buffer}, sizeof(uint32_t) * 3,
-            VulkanUtil::loadSpirv(executable_dir, "fill_empty_lines.comp"),
-            Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2)));
-    m_convert_sample_rate_4_to_3_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "convert_sample_rate_4_to_3",
-            {m_filter_4_to_3_buffer, m_interpolated32_buffer,
-             m_inter_frame_Y_buffer}, sizeof(uint32_t) * 12,
+            VulkanUtil::loadSpirv(executable_dir, "filter_diamond.comp"), Size(0), 4));
+    m_convert_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+            "convert_sample_rate",
+            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 12,
              VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
-            Size(m_inter_frame_Y_buffer->size().x_size, m_inter_frame_Y_buffer->size().y_size / 2)));
-    m_convert_sample_rate_2_to_3_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "convert_sample_rate_2_to_3",
-            {m_filter_2_to_3_buffer, m_interpolated32_buffer, m_field_Y_buffer},
-            sizeof(uint32_t) * 12,
-            VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
-            Size(m_field_Y_buffer->size().x_size, m_field_Y_buffer->size().y_size / 2)));
+            Size(0), 5));
     m_decode_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "decode_c",
-            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
-            VulkanUtil::loadSpirv(executable_dir, "decode_c.comp"),
-            Size(m_intermediate_r_buffer->size().x_size, m_intermediate_r_buffer->size().y_size), 5));
+                                                                  "decode_c",
+                                                                  {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
+                                                                  VulkanUtil::loadSpirv(executable_dir, "decode_c.comp"),
+                                                                  Size(MUSE_C_BUF_WIDTH, MUSE_BUF_HEIGHT * 2), 4));
+    m_filter_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+                                                                  "filter_c",
+                                                                  vector<MemoryObjectType>{eBuffer}, sizeof(uint32_t) * 2,
+                                                                  VulkanUtil::loadSpirv(executable_dir, "filter_c.comp"),
+                                                                  Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT), 2));
+    m_decode_c_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+                                                                               "decode_c_single_field",
+                                                                               {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 2,
+                                                                               VulkanUtil::loadSpirv(executable_dir, "decode_c_single_field.comp"),
+                                                                               Size(MUSE_C_BUF_WIDTH, MUSE_BUF_HEIGHT / 2), 5));
     m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "detect_motion",
             {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
@@ -151,14 +126,9 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
     m_combine_still_and_moving_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "combine_still_and_moving",
             {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eImage, eBuffer, eBuffer, eBuffer},
-            sizeof(uint32_t) * 3,
+            sizeof(uint32_t) * 4,
             VulkanUtil::loadSpirv(executable_dir, "combine_still_and_moving.comp"),
             Size(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2)));
-    m_convert_audio_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "convert_audio_sample_rate",
-            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 13,
-            VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
-            Size(MUSE_TOTAL_WIDTH, 44), 2));
 }
 
 std::shared_ptr<musevk::VulkanBuffer> Shaders::createMuseBuffer(unsigned int height, unsigned int width, HostAccess host_access) {
@@ -199,18 +169,19 @@ void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
     copyYForInterpolation(sq, 0, field.m_data, m_interpolated32_buffer, field_parity, frame_phase_y, true);
     filterImageDiamond(sq, 0, frame_phase_y, m_interpolated32_buffer);
 
+    m_convert_sample_rate_algo->updateBufferDescriptorsInSet(0, {m_filter_2_to_3_buffer, m_interpolated32_buffer, m_field_Y_buffer});
+    m_convert_sample_rate_algo->updateWorkgroup(Size(m_inter_frame_Y_buffer->size().x_size, m_inter_frame_Y_buffer->size().y_size / 2));
     sq.enqueueComputeShader(
-            m_convert_sample_rate_2_to_3_algo,
+            m_convert_sample_rate_algo,
             vector{m_filter_2_to_3_buffer->size().x_size, 3u, 2u, 0u, 0u,
                    m_interpolated32_buffer->size().y_size, m_interpolated32_buffer->size().x_size,
-                   uint(1 - field_parity), 2u, 0u, 1u, 0u});
+                   0u, 1u, 0u, 1u, 0u}, 0);
 
-    sq.enqueueComputeShader(m_fill_empty_lines_algo,
-                            vector{m_field_Y_buffer->size().y_size, m_field_Y_buffer->size().x_size, (unsigned)field_parity});
+    m_decode_c_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, m_field_r_buffer, m_field_b_buffer});
+    sq.enqueueComputeShader(m_decode_c_single_field_algo, vector{frame_phase_c, field_parity}, 0);
 
-    decodeC(sq, 0, field.m_data, frame_phase_c, field_parity, true);
-    filterImage(sq, 0, m_color_filter_single_field_buffer, m_intermediate_r_buffer, m_field_r_buffer, 8);
-    filterImage(sq, 1, m_color_filter_single_field_buffer, m_intermediate_b_buffer, m_field_b_buffer, 8);
+    filterImageDiamond(sq, 2, frame_phase_c ^ field_parity, m_field_r_buffer);
+    filterImageDiamond(sq, 3, 1 - frame_phase_c ^ field_parity, m_field_b_buffer);
 }
 
 void Shaders::copyYForInterpolation(CommandBuffer &sq, int descriptor_set_index,
@@ -224,6 +195,29 @@ void Shaders::copyYForInterpolation(CommandBuffer &sq, int descriptor_set_index,
             descriptor_set_index);
 }
 
+void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only,
+                                         unsigned int field_parity, bool output_yuv) {
+    m_image_out->enqueueTransitionLayout(sq, vk::ImageLayout::eGeneral,
+                                         vk::PipelineStageFlagBits::eTopOfPipe,
+                                         vk::PipelineStageFlagBits::eComputeShader,
+                                         vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
+    m_combine_still_and_moving_algo->updateBufferDescriptorsInSet(
+            0,
+            {m_field_Y_buffer, m_field_r_buffer,
+             m_field_b_buffer, m_inter_frame_Y_buffer,
+             m_inter_frame_r_buffer, m_inter_frame_b_buffer,
+             m_movement_buffers[m_current_movement_buffer_index], m_image_out,
+             m_image_Y_out, m_image_U_out, m_image_V_out});
+    sq.enqueueComputeShader(m_combine_still_and_moving_algo,
+                            vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u, field_parity, output_yuv ? 1u : 0u});
+
+    if (output_yuv) {
+        m_image_Y_out->synchronizeForHostRead(sq);
+        m_image_U_out->synchronizeForHostRead(sq);
+        m_image_V_out->synchronizeForHostRead(sq);
+    }
+}
+
 void Shaders::filterImageDiamond(CommandBuffer &sq, int descriptor_set_index,
                                  int phase, shared_ptr<VulkanBuffer> const &buffer) {
     m_diamond_algo->updateBufferDescriptorsInSet(descriptor_set_index, {m_diamond_filter_buffer, buffer});
@@ -232,35 +226,6 @@ void Shaders::filterImageDiamond(CommandBuffer &sq, int descriptor_set_index,
             m_diamond_algo,
             vector{m_diamond_filter_buffer->size().y_size, m_diamond_filter_buffer->size().x_size,
                    buffer->size().y_size, buffer->size().x_size, (unsigned)phase},
-            descriptor_set_index);
-}
-
-void Shaders::filterImage(CommandBuffer &sq, int descriptor_set_index,
-                          shared_ptr<musevk::VulkanBuffer> const &filter,
-                          shared_ptr<musevk::VulkanBuffer> const &source,
-                          shared_ptr<musevk::VulkanBuffer> const &dest,
-                          float multiplier) {
-    assert(source->size() == dest->size());
-
-    m_filter_image_algo->updateBufferDescriptorsInSet(
-            descriptor_set_index,
-            {filter, source, dest});
-    m_filter_image_algo->updateWorkgroup(source->size());
-    sq.enqueueComputeShader(
-            m_filter_image_algo,
-            vector{(float)filter->size().y_size, (float)filter->size().x_size, (float)source->size().y_size,
-                        (float)source->size().x_size, multiplier},
-            descriptor_set_index);
-}
-
-void Shaders::decodeC(CommandBuffer &sq, int descriptor_set_index,
-                      shared_ptr<VulkanBuffer> const &input_frame,
-                      int frame_phase_c, int field_parity, bool zero_non_sample_points) {
-    m_decode_c_algo->updateBufferDescriptorsInSet(descriptor_set_index,
-            {input_frame, m_intermediate_r_buffer, m_intermediate_b_buffer});
-    sq.enqueueComputeShader(
-            m_decode_c_algo,
-            vector{frame_phase_c, field_parity, zero_non_sample_points ? 1 : 0},
             descriptor_set_index);
 }
 
@@ -308,16 +273,23 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
         return false;
     }
 
-    makeFieldFromConsecutiveFrames(sq, 1, fields[0], frame_phases_y[0], fields[2], frame_phases_y[2], field_parities[0],
+    makeFieldFromConsecutiveFrames(sq, 1, 1, fields[0], frame_phases_y[0], fields[2], frame_phases_y[2], field_parities[0],
                                    field_phases_y[0]);
-    makeFieldFromConsecutiveFrames(sq, 3, fields[1], frame_phases_y[1], fields[3], frame_phases_y[3], field_parities[1],
+    makeFieldFromConsecutiveFrames(sq, 3, 2, fields[1], frame_phases_y[1], fields[3], frame_phases_y[3], field_parities[1],
                                    field_phases_y[1]);
     filterImageDiamond(sq, 1, field_parities[0] ^ field_phases_y[0], m_inter_frame_Y_buffer);
 
-    for (int i = 0; i < 4; i++)
-        decodeC(sq, 1 + i, fields[i].get().m_data, frame_phases_c[i], field_parities[i], i == 0);
-    filterImage(sq, 2, m_color_filter_inter_frame_buffer, m_intermediate_r_buffer, m_inter_frame_r_buffer, 2);
-    filterImage(sq, 3, m_color_filter_inter_frame_buffer, m_intermediate_b_buffer, m_inter_frame_b_buffer, 2);
+    for (int i = 0; i < 4; i++) {
+            m_decode_c_algo->updateBufferDescriptorsInSet(i, {fields[i].get().m_data, m_inter_frame_r_buffer, m_inter_frame_b_buffer});
+            sq.enqueueComputeShader(m_decode_c_algo, vector{frame_phases_c[i], field_parities[i], i == 0 ? 1 : 0}, i);
+    }
+
+    m_filter_c_algo->updateBufferDescriptorsInSet(0, {m_inter_frame_r_buffer});
+    sq.enqueueComputeShader(m_filter_c_algo, vector{1u /* is_red */, 0u /* algo stage */}, 0);
+    sq.enqueueComputeShader(m_filter_c_algo, vector{1u /* is_red */, 1u /* algo stage */}, 0);
+    m_filter_c_algo->updateBufferDescriptorsInSet(1, {m_inter_frame_b_buffer});
+    sq.enqueueComputeShader(m_filter_c_algo, vector{0u /* is_red */, 0u /* algo stage */}, 1);
+    sq.enqueueComputeShader(m_filter_c_algo, vector{0u /* is_red */, 1u /* algo stage */}, 1);
 
     m_current_movement_buffer_index = 1 - m_current_movement_buffer_index;
     m_detect_motion_algo->updateBufferDescriptorsInSet(0, {
@@ -340,6 +312,7 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
 
 void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
                                              int copy_y_descriptor_set_first_index,
+                                             int convert_sample_rate_descriptor_set_index,
                                              FieldBufferView &field_a, unsigned int field_a_frame_phase_y,
                                              FieldBufferView &field_b, unsigned int field_b_frame_phase_y,
                                              unsigned int fields_parity, unsigned int fields_phases) {
@@ -348,32 +321,12 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
     copyYForInterpolation(sq, copy_y_descriptor_set_first_index + 1, field_b.m_data, m_interpolated32_buffer,
                           fields_parity, field_b_frame_phase_y, false);
 
+    m_convert_sample_rate_algo->updateBufferDescriptorsInSet(convert_sample_rate_descriptor_set_index, {m_filter_4_to_3_buffer, m_interpolated32_buffer, m_inter_frame_Y_buffer});
+    m_convert_sample_rate_algo->updateWorkgroup(Size(m_inter_frame_Y_buffer->size().x_size, m_inter_frame_Y_buffer->size().y_size / 2));
     sq.enqueueComputeShader(
-            m_convert_sample_rate_4_to_3_algo,
+            m_convert_sample_rate_algo,
             vector{m_filter_4_to_3_buffer->size().x_size, 3u, 4u, 0u, 0u, m_interpolated32_buffer->size().y_size,
-                        m_interpolated32_buffer->size().x_size, uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases});
-}
-
-void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only, bool output_yuv) {
-    m_image_out->enqueueTransitionLayout(sq, vk::ImageLayout::eGeneral,
-                                         vk::PipelineStageFlagBits::eTopOfPipe,
-                                         vk::PipelineStageFlagBits::eComputeShader,
-                                         vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
-    m_combine_still_and_moving_algo->updateBufferDescriptorsInSet(
-            0,
-            {m_field_Y_buffer, m_field_r_buffer,
-             m_field_b_buffer, m_inter_frame_Y_buffer,
-             m_inter_frame_r_buffer, m_inter_frame_b_buffer,
-             m_movement_buffers[m_current_movement_buffer_index], m_image_out,
-             m_image_Y_out, m_image_U_out, m_image_V_out});
-    sq.enqueueComputeShader(m_combine_still_and_moving_algo,
-                            vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u, output_yuv ? 1u : 0u});
-
-    if (output_yuv) {
-        m_image_Y_out->synchronizeForHostRead(sq);
-        m_image_U_out->synchronizeForHostRead(sq);
-        m_image_V_out->synchronizeForHostRead(sq);
-    }
+                        m_interpolated32_buffer->size().x_size, uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases}, convert_sample_rate_descriptor_set_index);
 }
 
 ResultImages Shaders::getResultImages() {
@@ -382,15 +335,14 @@ ResultImages Shaders::getResultImages() {
 
 void Shaders::convertAudioSampleRate(musevk::CommandBuffer &sq, shared_ptr<VulkanBuffer> const &frame) {
     for (int i = 0; i < 2; i++) {
-        m_convert_audio_sample_rate_algo->updateBufferDescriptorsInSet(
-                i,
-                {m_filter_4_to_3_buffer, frame, m_audio_data});
+        m_convert_sample_rate_algo->updateBufferDescriptorsInSet(3 + i, {m_filter_4_to_3_buffer, frame, m_audio_data});
+        m_convert_sample_rate_algo->updateWorkgroup(Size(MUSE_TOTAL_WIDTH, 44));
         sq.enqueueComputeShader(
-                m_convert_audio_sample_rate_algo,
+                m_convert_sample_rate_algo,
                 vector{m_filter_4_to_3_buffer->size().x_size, 3u, 4u,
                        2u + 562u * i, 2u, 44u, (uint32_t)MUSE_TOTAL_WIDTH,
-                       44u * i, 1u, 0u, 1u, 0u, 1u},
-                i);
+                       44u * i, 1u, 0u, 1u, 0u},
+                3 + i);
     }
     m_audio_data->synchronizeForHostRead(sq);
 }

@@ -29,6 +29,19 @@ layout(set = 0, binding = 1) buffer framebuffer_inout {
 #define MAX_FILTER_SIZE 64 // same as workgroup size
 shared float16_t shared_filter[MAX_FILTER_SIZE];
 
+// reflect reading coordinates at the edges
+float16_t read_framebuffer(int y, int x) {
+    if (x < 0)
+        x = -x;
+    if (x >= frame_buffer_width)
+        x = 2 * frame_buffer_width - x - 2;
+    if (y < 0)
+        y = -y;
+    if (y >= frame_buffer_height)
+        y = 2 * frame_buffer_height - y - 2;
+    return frame_buffer[y * frame_buffer_width + x];
+}
+
 void main() {
     // This converts the local index to a one-dimensional index
     uint local_ix = gl_LocalInvocationID.x + gl_WorkGroupSize.x * gl_LocalInvocationID.y;
@@ -48,29 +61,26 @@ void main() {
     int H = filter_height / 2;
     int W = filter_width / 2;
 
-    int i_start_odd = -((min(H, row) + 1) / 2 * 2 - 1);
-    int i_start_even = -min(H, row) / 2 * 2;
-    int j_start_odd = -((min(W, col) + 1) / 2 * 2 - 1);
-    int j_start_even = -min(W, col) / 2 * 2;
-
-    int i_max = min(H, frame_buffer_height - row - 1);
-    int j_max = min(W, frame_buffer_width - col - 1);
+    int i_start_odd = -(H + 1) / 2 * 2 - 1;
+    int i_start_even = -H / 2 * 2;
+    int j_start_odd = -((W + 1) / 2 * 2 - 1);
+    int j_start_even = -W / 2 * 2;
 
     float16_t s = 0.hf;
 
     // First loop over odd values of i; splitting this into two loops makes the boundaries
     // of the inner loop simpler.
-    for (int i = i_start_odd; i <= i_max; i += 2) {
-        for (int j = j_start_even; j <= j_max; j += 2) {
-            s += frame_buffer[(row + i) * frame_buffer_width + col + j] *
+    for (int i = i_start_odd; i <= H; i += 2) {
+        for (int j = j_start_even; j <= W; j += 2) {
+            s += read_framebuffer(row + i, col + j) *
                 shared_filter[(i + H) * filter_width + j + W];
         }
     }
 
     // Then cover the even values of i
-    for (int i = i_start_even; i <= i_max; i += 2) {
-        for (int j = j_start_odd; j <= j_max; j += 2) {
-            s += frame_buffer[(row + i) * frame_buffer_width + col + j] *
+    for (int i = i_start_even; i <= H; i += 2) {
+        for (int j = j_start_odd; j <= W; j += 2) {
+            s += read_framebuffer(row + i, col + j) *
                 shared_filter[(i + H) * filter_width + j + W];
         }
     }

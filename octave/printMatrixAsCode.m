@@ -8,6 +8,8 @@ function unused=printMatrixAsCode(m)
     printf("),\n")
   endfor
 
+  printf("\n");
+
   for i = 1:size(m)(1)
     for j = 1:size(m)(2)
       printf("%f", m(i,j))

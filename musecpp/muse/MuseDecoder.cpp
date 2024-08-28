@@ -167,10 +167,12 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
                                                  field_interpolation_mode == FieldInterpolationMode::eForceIntraField,
                                                  field_interpolation_mode == FieldInterpolationMode::eForceInterFrame,
+                                                 decoded_field_index,
                                                  output_yuv);
         } else {
             m_log.warn(eVideo, std::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
-            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false, output_yuv);
+            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false,
+                                                 decoded_field_index, output_yuv);
         }
     }
     if (m_first_stage_command_buffer->isSubmitted())
