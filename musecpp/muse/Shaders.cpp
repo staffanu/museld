@@ -112,7 +112,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                                                                   Size(MUSE_C_BUF_WIDTH, MUSE_BUF_HEIGHT * 2), 4));
     m_filter_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
                                                                   "filter_c",
-                                                                  {eBuffer}, sizeof(uint32_t) * 2,
+                                                                  vector<MemoryObjectType>{eBuffer}, sizeof(uint32_t) * 2,
                                                                   VulkanUtil::loadSpirv(executable_dir, "filter_c.comp"),
                                                                   Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT), 2));
     m_decode_c_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
