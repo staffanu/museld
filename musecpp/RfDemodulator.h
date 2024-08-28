@@ -33,7 +33,7 @@ public:
               m_vulkan_manager(vulkan_manager),
               m_benchmark_shaders(benchmark_shaders),
               m_input_fd(-1),
-              m_input_is_fifo(std::filesystem::is_fifo(filename)),
+              m_input_is_fifo(std::filesystem::is_fifo(m_filename)),
               m_total_samples_read(0),
               m_demodulator_thread(nullptr),
               m_vacant_blocks(),
