@@ -33,7 +33,10 @@ wget --directory-prefix ../data/muse https://madeye.org/muse-demo/makeup-muse-rf
 ./build-release/musecpp --demodulate ../data/muse/makeup-muse-rf-62.5MHz-nofilter.raw
 ```
 
-![](test-picture.png)
+<img src="test-picture.png" width="800" height="450"/>
+If viewing at Bitbucket, notice that the image aspect ratio is incorrect since I haven't figured out how
+to set the size for their Markdown renderer.  The MUSE resolution is 1122x1032, which is resized by the
+player to the window size.  The screenshot is not resized from the original resolution.
 
 ### Command line options
 
