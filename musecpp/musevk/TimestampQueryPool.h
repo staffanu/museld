@@ -25,8 +25,6 @@ namespace musevk {
         void timestamp(CommandBuffer &command_buffer, std::string const &label, vk::PipelineStageFlagBits stage);
         std::vector<std::pair<std::string, int>> getTimestamps();
 
-        void resetAndSubmit(CommandBuffer &command_buffer);
-
     private:
         vk::PhysicalDevice &m_physical_device;
         vk::Device &m_device;
