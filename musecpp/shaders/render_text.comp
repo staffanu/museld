@@ -36,9 +36,6 @@ void main() {
     uint16_t line = font[y / scale + glyph_index * glyph_height];
     uint16_t pixel = line & (0x8000us >> (x_in_glyph / scale));
     if (pixel != 0) {
-        float r = pixel != 0 ? 1.0f : 0.0f;
-        float g = pixel != 0 ? 1.0f : 0.0f;
-        float b = pixel != 0 ? 1.0f : 0.0f;
-        imageStore(frame_out_image, ivec2(x + top_left_x, y + top_left_y), vec4(r, g, b, 1.f));
+        imageStore(frame_out_image, ivec2(x + top_left_x, y + top_left_y), vec4(1.f, 1.f, 1.f, 1.f));
     }
 }
