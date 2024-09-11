@@ -25,12 +25,12 @@ namespace musevk {
 
     private:
         struct SingleStatistic {
-            SingleStatistic() : m_min(INT32_MAX), m_max(0), m_sum(0), m_sum2(0), m_n(0) {}
-            long m_sum;
-            long m_sum2;
+            SingleStatistic() : m_sum(0), m_sum2(0), m_n(0), m_min(INT32_MAX), m_max(0) {}
+            double m_sum;
+            double m_sum2;
             int m_n;
-            int m_min;
-            int m_max;
+            double m_min;
+            double m_max;
 
             void merge(int v) {
                 m_n++;
@@ -39,15 +39,15 @@ namespace musevk {
                 if (v < m_min)
                     m_min = v;
                 m_sum += v;
-                m_sum2 += v * v;
+                m_sum2 += (double)v * v;
             }
 
-            std::string to_string() const {
+            [[nodiscard]] std::string to_string() const {
                 char s[100];
-                snprintf(s, sizeof(s), "n=%-4d mean %5d (stddev %4d) (%5d-%5d)",
+                snprintf(s, sizeof(s), "n=%-4d mean %6.0f (stddev %5.0f) (%6.0f-%6.0f)",
                          m_n,
-                         (int)(m_sum / m_n),
-                         (int)sqrt((double)m_sum2 / m_n - ((double)m_sum / m_n) * ((double)m_sum / m_n)),
+                         m_sum / m_n,
+                         sqrt(m_sum2 / m_n - (m_sum / m_n) * (m_sum / m_n)),
                          m_min,
                          m_max);
                 return {s};

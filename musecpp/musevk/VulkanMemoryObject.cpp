@@ -151,46 +151,17 @@ void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_re
 
     log.error(eVideo, "Available memory types:");
     for (uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
-        const VkMemoryType &memType = memory_properties.memoryTypes[i];
-        log.error(eVideo, std::format("Memory Type {}: heap index {}, property flags({}): {}",
-                                      i, memType.heapIndex, memType.propertyFlags, memoryPropertyFlagsToString(memType.propertyFlags)));
+        const vk::MemoryType &memType = memory_properties.memoryTypes[i];
+        log.error(eVideo, std::format("Memory Type {}: heap index {}, property flags: {}",
+                                      i, memType.heapIndex, vk::to_string(memType.propertyFlags)));
     }
 
     log.error(eVideo, "Available memory heaps:");
     for (uint32_t i = 0; i < memory_properties.memoryHeapCount; ++i) {
-        const VkMemoryHeap &memHeap = memory_properties.memoryHeaps[i];
-        log.error(eVideo, std::format("Memory Heap {}: size {}, flags({}): {}",
-                                      i, memHeap.size, memHeap.flags, memoryHeapFlagsToString(memHeap.flags)));
+        const vk::MemoryHeap &memHeap = memory_properties.memoryHeaps[i];
+        log.error(eVideo, std::format("Memory Heap {}: size {}, flags: {}",
+                                      i, memHeap.size, vk::to_string(memHeap.flags)));
     }
 
     throw std::runtime_error(std::format("No available memory for host access type {}", (int)host_access));
-}
-
-std::string musevk::VulkanMemoryObject::memoryPropertyFlagsToString(VkMemoryPropertyFlags flags) {
-    std::vector<std::string> result;
-    #define CHECK_FLAG(bit) if (flags & bit) result.emplace_back(#bit)
-    CHECK_FLAG(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    CHECK_FLAG(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-    CHECK_FLAG(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    CHECK_FLAG(VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-    CHECK_FLAG(VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT);
-    CHECK_FLAG(VK_MEMORY_PROPERTY_PROTECTED_BIT);
-    CHECK_FLAG(VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD);
-    CHECK_FLAG(VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD);
-    CHECK_FLAG(VK_MEMORY_PROPERTY_RDMA_CAPABLE_BIT_NV);
-    
-    std::ostringstream ss;
-    std::string delim;
-    for (auto &s : result) {
-        ss << delim << s;
-        delim = " | ";
-    }
-    return ss.str();
-}
-
-std::string musevk::VulkanMemoryObject::memoryHeapFlagsToString(VkMemoryHeapFlags flags) {
-    std::string result;
-    if (flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
-        result += "VK_MEMORY_HEAP_DEVICE_LOCAL_BIT";
-    return result;
 }

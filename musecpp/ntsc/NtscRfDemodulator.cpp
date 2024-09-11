@@ -31,8 +31,6 @@ void NtscRfDemodulator::demodulate() {
             m_benchmark_shaders ? new musevk::TimestampQueryPool(m_vulkan_manager.getPhysicalDevice(), m_vulkan_manager.getDevice(), 40) : nullptr;
     musevk::TimestampStatistics timestamp_statistics;
     auto command_buffer = command_pool.createCommandBuffer(timestamp_query_pool);
-    if (timestamp_query_pool != nullptr)
-        timestamp_query_pool->resetAndSubmit(*command_buffer);
 
     vk::BufferUsageFlags buffer_usage_flags =
             vk::BufferUsageFlagBits::eStorageBuffer
@@ -165,6 +163,8 @@ void NtscRfDemodulator::demodulate() {
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
     // will have undefined output otherwise.
     command_buffer->begin();
+    if (timestamp_query_pool != nullptr)
+        timestamp_query_pool->reset(*command_buffer);
     float zero = 0.f;
     float one = 1.f;
     command_buffer->enqueueFillBuffer(*input_buffer, 0); // int32_t interpreted as 2 x int16_t
@@ -200,9 +200,9 @@ void NtscRfDemodulator::demodulate() {
         m_total_samples_read += c_sample_block_size;
 
         // Begin Vulkan command buffer and reset the timestamp query pool if we use one
-        if (timestamp_query_pool != nullptr)
-            timestamp_query_pool->resetAndSubmit(*command_buffer);
         command_buffer->begin();
+        if (timestamp_query_pool != nullptr)
+            timestamp_query_pool->reset(*command_buffer);
 
         // Make the data available on the GPU; this is necessary in case we didn't find a memory type good for both host writes and shader reads
         input_buffer->synchronizeHostWrites(*command_buffer);

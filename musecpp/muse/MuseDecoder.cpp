@@ -34,7 +34,6 @@ MuseDecoder::MuseDecoder(
   m_timestamp_query_pool(timestamp_query_pool),
   m_eq{-1, -1},
   m_first_stage_complete_semaphore(manager.getDevice().createSemaphore(vk::SemaphoreCreateInfo())),
-  m_reset_timestamp_query_pool_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
   m_first_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
   m_second_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
   m_timestamp_statistics(),
@@ -90,16 +89,10 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
         m_field_index = (m_field_index + 1) % 2;
 
     auto t0 = chrono::high_resolution_clock::now();
-    if (m_timestamp_query_pool != nullptr)
-        m_timestamp_query_pool->resetAndSubmit(*m_reset_timestamp_query_pool_command_buffer);
 
     std::unique_ptr<MuseInputBlock> input_block = nullptr;
     InputStatus input_status = InputStatus::eNormal;
     if (m_field_index == 0 && !redo_last_field) {
-        auto frame_buffer = m_frame_buffers.back();
-        m_frame_buffers.pop_back();
-        m_frame_buffers.push_front(frame_buffer);
-
         tie(input_block, input_status) = m_reader.getNextInputBuffer();
         switch (input_status) {
             case InputStatus::eEof:
@@ -109,8 +102,18 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                 return true;
             default:
                 assert(input_block != nullptr);
-                break;
+            break;
         }
+    }
+
+    m_first_stage_command_buffer->begin();
+    if (m_timestamp_query_pool != nullptr)
+        m_timestamp_query_pool->reset(*m_first_stage_command_buffer);
+
+    if (input_block != nullptr) {
+        auto frame_buffer = m_frame_buffers.back();
+        m_frame_buffers.pop_back();
+        m_frame_buffers.push_front(frame_buffer);
         frame_buffer->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_muse_sample);
         shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
 
@@ -122,7 +125,6 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
         if (m_frame_no % 30 == 0)
             m_log.info(eDecoder, std::format("eq: {}, {}", m_eq.first, m_eq.second));
 
-        m_first_stage_command_buffer->begin();
 
         // The input block data was written by the host, so make sure it is visible on the GPU
         input_block->video_data->synchronizeHostWrites(*m_first_stage_command_buffer);
@@ -134,13 +136,13 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                                                m_eq, enable_non_linear, dropout_mode);
         frame_buffer->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
         m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame_buffer->data());
-        m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
         // The control signal is decoded from the input directly so that we do not have to wait for the completion
         // of applyEqAndDeemphasisAndGamma
         if (m_decode_video)
             frame_buffer->ProcessControlData(input_vulkan_buffer->data<float>(), m_eq);
     }
+    m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
     // if not decoding all fields, we only decode on field 0 (when we read the data), but
     // actually decode the second field.  For field 1, the same field will be shown again.
@@ -175,15 +177,11 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                                                  decoded_field_index, output_yuv);
         }
     }
-    if (m_first_stage_command_buffer->isSubmitted())
-        m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});
-    else
-        m_second_stage_command_buffer->submit({}, {}, {});
+    m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});
 
-    assert(input_block != nullptr == m_first_stage_command_buffer->isSubmitted());
-    if (m_first_stage_command_buffer->isSubmitted()) {
-        m_first_stage_command_buffer->wait();
+    m_first_stage_command_buffer->wait();
 
+    if (input_block != nullptr) {
         m_frame_buffers[0]->processDiscCode();
     }
 

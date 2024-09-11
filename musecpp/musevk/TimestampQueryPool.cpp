@@ -34,6 +34,7 @@ namespace musevk {
     void TimestampQueryPool::reset(CommandBuffer &command_buffer) {
         command_buffer.enqueueResetQueryPool(m_timestamp_query_pool, 0, m_allocated_timestamp_queries);
         m_timestamped_operations.clear();
+        timestamp(command_buffer, "begin", vk::PipelineStageFlagBits::eTopOfPipe);
     }
 
     void TimestampQueryPool::timestamp(CommandBuffer &command_buffer, std::string const &label, vk::PipelineStageFlagBits stage) {
@@ -68,12 +69,4 @@ namespace musevk {
 
         return labeled_timestamps;
     }
-}
-
-void musevk::TimestampQueryPool::resetAndSubmit(CommandBuffer &command_buffer) {
-    command_buffer.begin();
-    reset(command_buffer);
-    timestamp(command_buffer, "begin", vk::PipelineStageFlagBits::eTopOfPipe);
-    command_buffer.submit({}, {}, {});
-    command_buffer.wait();
 }

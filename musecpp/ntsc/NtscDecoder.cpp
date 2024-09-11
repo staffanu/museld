@@ -84,16 +84,10 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
         m_field_index = (m_field_index + 1) % 2;
 
     auto t0 = chrono::high_resolution_clock::now();
-    if (m_timestamp_query_pool != nullptr)
-        m_timestamp_query_pool->resetAndSubmit(*m_reset_timestamp_query_pool_command_buffer);
 
     std::unique_ptr<NtscInputBlock> input_block = nullptr;
     InputStatus input_status = InputStatus::eNormal;
     if (m_field_index == 0 && !redo_last_field) {
-        auto frame = m_frames.back();
-        m_frames.pop_back();
-        m_frames.push_front(frame);
-
         tie(input_block, input_status) = m_reader.getNextInputBuffer();
         switch (input_status) {
             case InputStatus::eEof:
@@ -105,6 +99,18 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
                 assert(input_block != nullptr);
                 break;
         }
+    }
+
+    m_first_stage_command_buffer->begin();
+
+    if (m_timestamp_query_pool != nullptr)
+        m_timestamp_query_pool->reset(*m_first_stage_command_buffer);
+
+    if (input_block != nullptr) {
+        auto frame = m_frames.back();
+        m_frames.pop_back();
+        m_frames.push_front(frame);
+
         frame->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_muse_sample);
         shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
 
@@ -116,8 +122,6 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
         if (m_frame_no % 30 == 0)
             m_log.info(eDecoder, std::format("eq: {}, {}", m_eq.first, m_eq.second));
 
-        m_first_stage_command_buffer->begin();
-
         // The input block data was written by the host, so make sure it is visible on the GPU
         input_block->video_data->synchronizeHostWrites(*m_first_stage_command_buffer);
         input_block->dropout_data->synchronizeHostWrites(*m_first_stage_command_buffer);
@@ -128,8 +132,8 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
 //                                               m_eq, enable_non_linear, dropout_mode);
 //        frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
 //        m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame->data());
-        m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
     }
+    m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
     // if not decoding all fields, we only decode on field 0 (when we read the data), but
     // actually decode the second field.  For field 1, the same field will be shown again.
@@ -162,10 +166,9 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
 //            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false, output_yuv);
 //        }
     }
-    if (m_first_stage_command_buffer->isSubmitted())
-        m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});
-    else
-        m_second_stage_command_buffer->submit({}, {}, {});
+
+    // PipelineStageFlagBits ??  Not in MUSE version!
+    m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});
 
     assert(input_block != nullptr == m_first_stage_command_buffer->isSubmitted());
     if (m_first_stage_command_buffer->isSubmitted()) {

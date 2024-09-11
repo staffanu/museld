@@ -239,7 +239,7 @@ using the arrow keys.
 
 There are still some features that are not implemented, and also some research on the MUSE format that remains:
 
-> Motion vector handling
+#### Motion vector handling
 
 In MUSE, still pictures have more detail than do moving parts of the video.  In all documents describing MUSE,
 it is mentioned that motion compensation is used in the case of linear motion, such as pans, so that the picture 
@@ -253,40 +253,40 @@ is if this feature was never actually used for MUSE laserdiscs, or if the specif
 encoded elsewhere.  I've looked quite extensively at the control signal and concluded that the other bits do not contain
 this information either, since they are mostly constant.
 
-> Audio channel mapping
+#### Audio channel mapping
 
 The Portaudio library is used for audio output.  For four-channel (mode A) MUSE audio, I've made the code right on my
 computer, but I don't understand if it is possible to query the library which channel is which, so probably the channels
 will be mixed up on other hardware/drivers.
 
-> Adjustable RF input sample rate
+#### Adjustable RF input sample rate
 
 When demodulating RF, the sample rate is currently fixed at 62.5 MHz.  The filters are hard coded in the application and
 need to be recalculated if the sample rate changes.  This is not very difficult but remains to be done.  The EFM input filter
 is a bit different, in that the current filter has been optimized overnight using octave.  One could still do some optimizations
 in runtime, but we would probably have to live with a slightly higher bit error rate for EFM.
 
-> Reading directly from USB
+#### Reading directly from USB
 
 Currently, all input is from file.  For real-time input, the program is dependent on an external program writing to a
 fifo (named pipe).  It would be nice to integrate code for reading from some specific devices.
 
-> Non-linear processing
+#### Non-linear processing
 
 As is mentioned in the description of the L key, I'm not sure if non-linear processing (part of de-emphasis) has already
 been applied to the signal when reading from the output of a MUSE player.
 
-> Picture filter improvements
+#### Picture filter improvements
 
 Most of the filters used were computed early in the project, and I was more interested in getting something reasonable
 working than spending too much time optimizing the filters used.  Picture quality could probably be improved by spending
 more time on these filters.
 
-> Motion detection
+#### Motion detection
 
 The motion detection algorithm is quite simplistic and could probably be improved.
 
-> Adaptive equalization
+#### Adaptive equalization
 
 The MUSE signal is very sensitive to the channel characteristics, and especially phase shifts are bad.  Initially, for RF
 captures, I tried to use a lowpass filter before sampling the signal to remove any noise over the Nyquist frequency, 

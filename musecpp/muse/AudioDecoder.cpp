@@ -128,8 +128,8 @@ void AudioDecoder::decodeFrame(int frame_no,
                 if (SQUARE(xin - c_default_symbol_locations[closest.first].first) +
                         SQUARE(yin - c_default_symbol_locations[closest.first].second) < 49 * 49 + 49 * 49) {
                     pair<float, float> prev_location = m_symbol_locations[closest.first];
-                    float new_x = (prev_location.first * 15 + xin) / 16;
-                    float new_y = (prev_location.second * 15 + yin) / 16;
+                    float new_x = (prev_location.first * 255 + xin) / 256;
+                    float new_y = (prev_location.second * 255 + yin) / 256;
                     m_symbol_locations[closest.first] = {new_x, new_y};
                 } else {
                     no_not_updated_symbol_locations++;

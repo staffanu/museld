@@ -71,5 +71,5 @@ void main() {
         s += v * shared_filter[upsample_factor_i * l - hiFreqIx + N];
     }
 
-    dest[dest_row * dest_width + dest_col] = clamp(s * upsample_factor, 0.hf, 255.hf);
+    dest[dest_row * dest_width + dest_col] = s * upsample_factor;
 }

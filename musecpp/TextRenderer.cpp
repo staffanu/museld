@@ -1,4 +1,3 @@
-#include <map>
 #include <array>
 #include "TextRenderer.h"
 #include "musevk/Size.h"
@@ -42,7 +41,8 @@ void TextRenderer::drawText(std::shared_ptr<VulkanImage> const &image, int x, in
 
     // Do not call updateDescriptorSet if calling several times for the same image.
     // This is not allowed in the same command buffer, and it is common to want to write
-    // more than one text on the same image.
+    // more than one text on the same image. (So, if we ever want to write to two different
+    // images using the same command buffer, we need to remove the hard coded descriptor set 0.)
     auto currentBuffers = m_render_text_shader->getBuffersForDescriptorSet(0);
     if (currentBuffers.size() != 2 || currentBuffers[1] != image)
         m_render_text_shader->updateBufferDescriptorsInSet(0, {m_font_buffer, image});

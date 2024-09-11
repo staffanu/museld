@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(picoscope)
+project(picostream)
 
 set(PICOSCOPE_INCLUDE_DIR /opt/picoscope/include)
 set(PICOSCOPE_LIBRARY_DIR /opt/picoscope/lib)
