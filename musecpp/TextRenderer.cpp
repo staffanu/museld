@@ -1,4 +1,3 @@
-#include <map>
 #include <array>
 #include "TextRenderer.h"
 #include "musevk/Size.h"
