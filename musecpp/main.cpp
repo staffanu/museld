@@ -428,7 +428,7 @@ int main(int argc, char *argv[]) {
     bool no_sync = false;
     bool demodulate = false;
     InputFormat input_format = eUnknown;
-    double input_sample_frequency = 40e6;
+    double input_sample_frequency = 62.5e6;
     bool input_is_fifo = false;
     double initial_seek_seconds = 0;
     bool start_paused = false;

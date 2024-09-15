@@ -7,8 +7,9 @@
 #include <vector>
 #include <iostream>
 #include <filesystem>
+#include <gnuradio/fft/window.h>
+#include <gnuradio/filter/firdes.h>
 #include "MuseRfDemodulator.h"
-#include "MuseConstants.h"
 #include "musevk/VulkanUtil.h"
 #include "musevk/TimestampQueryPool.h"
 #include "musevk/TimestampStatistics.h"
@@ -16,10 +17,11 @@
 using namespace std;
 using namespace musevk;
 
-MuseRfDemodulator::MuseRfDemodulator(Logger &log, std::string filename, std::string executable_dir,
+MuseRfDemodulator::MuseRfDemodulator(Logger &log, std::string executable_dir, std::string filename,
+                                     float sample_frequency,
                                      musevk::VulkanManager &vulkan_manager, bool benchmark_shaders)
-: RfDemodulator<MuseDemodulatedBlock>(log, std::move(filename), std::move(executable_dir), vulkan_manager, benchmark_shaders,
-                                      MuseRfDemodulatorConstants::c_sample_frequency) {
+: RfDemodulator<MuseDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency,
+                                      vulkan_manager, benchmark_shaders) {
 }
 
 void MuseRfDemodulator::demodulate() {

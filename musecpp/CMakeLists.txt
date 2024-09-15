@@ -12,6 +12,11 @@ SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake-modules" ${CMAKE_MODULE_PATH})
 find_package(PORTAUDIO REQUIRED)
 include_directories("${PORTAUDIO_INCLUDE_DIRS}")
 
+find_package(PkgConfig REQUIRED)
+
+pkg_check_modules(GNURADIO REQUIRED gnuradio-filter)
+include_directories("${GNURADIO_INCLUDE_DIRS}")
+
 find_package(LIBAV)
 if (HAVE_LIBAV)
     add_compile_definitions(HAVE_LIBAV)
@@ -81,6 +86,7 @@ target_link_libraries(musecpp
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
+        PRIVATE ${GNURADIO_LIBRARIES}
         PRIVATE ${LIBAV_LIBRARIES}
 )
 

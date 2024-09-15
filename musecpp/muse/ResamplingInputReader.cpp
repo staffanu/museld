@@ -48,8 +48,8 @@ ResamplingInputReader::ResamplingInputReader(
           m_error_sum(0) {
     if (demodulate) {
         m_input_format = eFloat;
-        m_demodulator = new MuseRfDemodulator(log, executable_dir, m_filename, vulkan_manager, benchmark_shaders);
-        m_sample_rate = 31.25e6;
+        m_demodulator = new MuseRfDemodulator(log, executable_dir, m_filename, sample_rate, vulkan_manager, benchmark_shaders);
+        m_sample_rate = sample_rate / MuseRfDemodulatorConstants::c_video_decimation_rate;
     }
 
     switch (m_input_format) {
