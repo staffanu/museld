@@ -24,14 +24,14 @@
 template<class B>
 class RfDemodulator {
 public:
-    RfDemodulator(Logger &log, std::string executable_dir, std::string filename,
-                  musevk::VulkanManager &vulkan_manager, bool benchmark_shaders, float sample_frequency)
-            : c_sample_frequency(sample_frequency),
-              m_log(log),
-              m_executable_dir(std::move(executable_dir)),
+    RfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
+                  musevk::VulkanManager &vulkan_manager, bool benchmark_shaders)
+            : m_executable_dir(std::move(executable_dir)),
               m_filename(std::move(filename)),
+              m_sample_frequency(sample_frequency),
               m_vulkan_manager(vulkan_manager),
               m_benchmark_shaders(benchmark_shaders),
+              m_log(log),
               m_input_fd(-1),
               m_input_is_fifo(std::filesystem::is_fifo(m_filename)),
               m_total_samples_read(0),
@@ -96,7 +96,7 @@ public:
         if (!m_input_is_fifo) {
             std::unique_lock<std::mutex> lock(m_input_file_mutex);
 
-            long samples_to_seek = (long)(seconds * c_sample_frequency);
+            long samples_to_seek = (long)(seconds * m_sample_frequency);
             off_t bytes_to_seek = 2 * samples_to_seek;
             m_log.info(eInput, std::format("Seeking relative time {} s, {} samples, {} bytes.",
                                            seconds, samples_to_seek, bytes_to_seek));
@@ -157,12 +157,12 @@ protected:
         return true;
     }
 
-    const float c_sample_frequency;
-    Logger &m_log;
     const std::string m_executable_dir;
     const std::string m_filename;
+    const float m_sample_frequency;
     musevk::VulkanManager &m_vulkan_manager;
     bool m_benchmark_shaders;
+    Logger &m_log;
     int m_input_fd;
     bool m_input_is_fifo;
     long m_total_samples_read;
