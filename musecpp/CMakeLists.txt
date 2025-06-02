@@ -82,6 +82,7 @@ if (HAVE_LIBAV)
     )
 endif()
 
+target_link_options(musecpp PRIVATE "-L/usr/local/lib")
 target_link_libraries(musecpp
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
