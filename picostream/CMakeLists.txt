@@ -15,3 +15,11 @@ add_executable(picostream
 target_link_libraries(picostream
         PRIVATE ${PICOSCOPE_LIBRARIES}
 )
+
+add_executable(picostream-digital
+        picostream-digital.c
+)
+
+target_link_libraries(picostream-digital
+        PRIVATE ${PICOSCOPE_LIBRARIES}
+)

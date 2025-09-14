@@ -5,17 +5,6 @@
 
 #include <libps5000a/ps5000aApi.h>
 
-/*
- * Reads data into a file with signed little-endian 16 bit values.  To
- * convert into unsigned byte values (sacrificing precision) this works:
- *
- * od -w2 -t d1 -v <filename> | LC_ALL=C awk '{ printf("%c", $3+128) }' > output.bin
- *
- * To show as decimal, do this:
- *
- * od -w2 -t d2 -v <filename>
- */
-
 #define CHECK_CALL(call, message) \
   { \
     PICO_STATUS status = (call); \
@@ -33,7 +22,9 @@ int32_t g_sampleCount;
 uint32_t g_startIndex;
 int16_t g_overflow;
 
-int16_t *driverBuffer;
+int digital_channels_used = 1; // 1 / 2 for 8 / 16 bits -- Only 8 bits currently supported!
+
+int16_t *driverBuffers[2];
 int16_t *appBuffer;
 	
 void PREF4 callBackStreaming(int16_t handle, int32_t n_samples, uint32_t startIndex,
@@ -45,7 +36,14 @@ void PREF4 callBackStreaming(int16_t handle, int32_t n_samples, uint32_t startIn
     g_startIndex  = startIndex;
     g_ready = TRUE;
     g_overflow = overflow;
-    memcpy(appBuffer + startIndex, driverBuffer + startIndex, n_samples * sizeof(int16_t));
+
+    for (int i = 0; i < n_samples; i++) {
+      if (digital_channels_used == 2)
+        appBuffer[startIndex + i] = // little endian
+                (driverBuffers[0][startIndex + i] & 0xff) | ((driverBuffers[1][startIndex + i] & 0xff) << 8);
+      else
+        ((uint8_t *)appBuffer)[startIndex + i] = driverBuffers[0][startIndex + i] & 0xff;
+    }
   }
 }
 
@@ -58,12 +56,15 @@ void collectStreamingImmediate(int16_t handle, char *filename, uint32_t sampleIn
   CHECK_CALL(ps5000aSetSimpleTrigger(handle, 0, PS5000A_CHANNEL_A, 0, PS5000A_RISING, 0, 0),
 	     "ps5000aSetSimpleTrigger failed");
 
-  driverBuffer = (int16_t*)calloc(bufferSize, sizeof(int16_t));
+  for (int i = 0; i < 2; i++) {
+    driverBuffers[i] = (int16_t *) calloc(bufferSize, sizeof(int16_t));
+    CHECK_CALL(ps5000aSetDataBuffer(handle, (PS5000A_CHANNEL) (i + PS5000A_DIGITAL_PORT0),
+                                    driverBuffers[i], bufferSize, 0, PS5000A_RATIO_MODE_NONE),
+               "ps5000aSetDataBuffer");
+  }
+
   appBuffer = (int16_t*)calloc(bufferSize, sizeof(int16_t));
 
-  CHECK_CALL(ps5000aSetDataBuffer(handle, PS5000A_CHANNEL_A, driverBuffer, bufferSize, 0, PS5000A_RATIO_MODE_NONE),
-	     "ps5000aSetDataBuffer");
-  
   printf("Streaming Data for %lu samples to %s\n", n_total_samples, filename);
   FILE *fp = fopen(filename, "w");
   if (!fp) {
@@ -91,7 +92,10 @@ void collectStreamingImmediate(int16_t handle, char *filename, uint32_t sampleIn
       printf("Collected %7u samples, index = %7u, Total: %11ld samples %s         \r",
 	     g_sampleCount, g_startIndex, totalSamples, g_overflow ? " OVERFLOW" : "");
       hasOverflow |= g_overflow;
-      fwrite(appBuffer + g_startIndex, sizeof(*appBuffer), g_sampleCount, fp);
+      if (digital_channels_used == 2)
+        fwrite(appBuffer + g_startIndex, sizeof(*appBuffer), g_sampleCount, fp);
+      else
+        fwrite(((uint8_t *)appBuffer) + g_startIndex, 1, g_sampleCount, fp);
     }
   }
   
@@ -102,7 +106,8 @@ void collectStreamingImmediate(int16_t handle, char *filename, uint32_t sampleIn
   ps5000aStop(handle);
   fclose(fp);
 
-  free(driverBuffer);
+  for (int i = 0; i < 2; i++)
+    free(driverBuffers[i]);
   free(appBuffer);
   
   CHECK_CALL(ps5000aSetDataBuffers(handle, PS5000A_CHANNEL_A, NULL, NULL, 0, 0, PS5000A_RATIO_MODE_NONE),
@@ -111,16 +116,16 @@ void collectStreamingImmediate(int16_t handle, char *filename, uint32_t sampleIn
 
 int32_t main(int argc, char *argv[])
 {
-  PS5000A_RANGE range = PS5000A_100MV; // PS5000A_500MV;
-  PS5000A_COUPLING coupling = PS5000A_AC;
-  PS5000A_DEVICE_RESOLUTION resolution = PS5000A_DR_12BIT;
-  long n_total_samples = 0L; // 100000000L;
+  PS5000A_DEVICE_RESOLUTION resolution = PS5000A_DR_8BIT; // required for fastest sampling rates
+  long n_total_samples = 0L; // 1000000L;
   uint32_t sample_interval = 16; // ns
   
   char *filename = "stream.bin";
   if (argc == 2)
     filename = argv[1];
-  
+
+  int16_t logic_level = 10922; // -32767 to 32767 corresponding to -5 to 5 V. 10922 is 1.65 V.
+
   int maxChannels = 100;
   int16_t handle;
   
@@ -145,39 +150,28 @@ int32_t main(int argc, char *argv[])
   int16_t requiredSize = 0;
   CHECK_CALL(ps5000aGetUnitInfo(handle, line, sizeof(line), &requiredSize, PICO_VARIANT_INFO), "ps5000aGetUnitInfo");
 
+  if (!strstr(line, "MSO")) {
+    printf("Not MSO model, digital channels not supported.\n");
+    exit(1);
+  }
+
   int16_t channelCount = min((int16_t)line[1] - '0', maxChannels);
-  printf("Unit has %d channels.\n", channelCount);
-
-  int16_t value;
-  ps5000aMaximumValue(handle, &value);
-  printf("Max ADC value=%d\n", value);
-
-  float maximumVoltage;
-  float minimumVoltage;
-  CHECK_CALL(ps5000aGetAnalogueOffset(handle, range, coupling, &maximumVoltage, &minimumVoltage), "ps5000aGetAnalogueOffset");
-
-  printf("Permitted analog offset range: %f-%f\n", minimumVoltage, maximumVoltage);
-  
-  if (strstr(line, "MSO"))
-    for (int i = 0; i < 2; i++)
-      CHECK_CALL(ps5000aSetDigitalPort(handle, (PS5000A_CHANNEL)(i + PS5000A_DIGITAL_PORT0), 0, 0), "ps5000aSetDigitalPort");
-
-  CHECK_CALL(ps5000aSetEts(handle, PS5000A_ETS_OFF, 0, 0, NULL), "ps5000aSetEts"); // Turn off hasHardwareETS
-  
+  printf("Unit has %d analog channels -- disabling all.\n", channelCount);
   for (int i = 0; i < channelCount; i++)
     CHECK_CALL(ps5000aSetChannel(handle, (PS5000A_CHANNEL)(PS5000A_CHANNEL_A + i),
-				 i == 0, // enable only channel A
-				 coupling,
-				 range,
-				 0.0), // Analogue offset
-	       "ps5000aSetChannel");
+                               0, // disable
+                               PS5000A_DC,
+                               PS5000A_1V,
+                               0.0), // Analogue offset
+             "ps5000aSetChannel");
 
-  if (coupling == PS5000A_AC) {
-    long samples_to_discard = 1000000000L / sample_interval; // 1s
-    printf("Capturing %ld samples to /dev/null to let AC coupling capacitor settle\n", samples_to_discard);
-    collectStreamingImmediate(handle, "/dev/null", sample_interval, samples_to_discard);
-  }
-  
+  CHECK_CALL(ps5000aSetEts(handle, PS5000A_ETS_OFF, 0, 0, NULL), "ps5000aSetEts"); // Turn off hasHardwareETS
+
+  for (int i = 0; i < 2; i++)
+    CHECK_CALL(
+          ps5000aSetDigitalPort(handle, (PS5000A_CHANNEL) (i + PS5000A_DIGITAL_PORT0), i < digital_channels_used, logic_level),
+          "ps5000aSetDigitalPort");
+
   collectStreamingImmediate(handle, filename, sample_interval, n_total_samples);
   
   ps5000aCloseUnit(handle);
