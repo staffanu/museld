@@ -150,7 +150,7 @@ void EfmDecoder::decode(int frame_no,
             m_byte_index = 0;
             m_bits_since_sync = 0;
             m_consecutive_sync_failures = 0;
-            m_consecutive_syncs += 1;
+            m_consecutive_syncs += 1; // this is not right -- we increment consecutive_syncs even if not in an expected position
             if (m_consecutive_syncs >= 3 && !m_locked) {
                 m_locked = true;
                 m_log.debug(eAudio, std::format("efm locked index {}", m_total_bits));
@@ -191,7 +191,7 @@ void EfmDecoder::decode(int frame_no,
         m_log.info(eAudio | ePerformance,
                    std::format("Time spent decoding last second: {:.1f} ms; efm frame count: {}, "
                                "input erasure rate: {:.0f} ppm, past c1 erasure rate: {:.0f} ppm, output erasure rate: {:.0f} ppm",
-                               (double)m_total_time_us_last_second / 1000.0 / 30,
+                               (double)m_total_time_us_last_second / 1000.0,
                                m_efm_frame_count_last_second,
                                1000000.0 * m_total_erasures_in_last_second / m_efm_frame_count_last_second / 33,
                                1000000.0 * m_total_erasures_past_c1_last_second / m_efm_frame_count_last_second / 28,

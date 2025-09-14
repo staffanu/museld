@@ -319,7 +319,7 @@ private:
         auto y = s;
         for (int i = 0; i < m - 1; i++) { // for each row, clear column i under it
             auto leadingInverse = mat[i][i].inverse();
-            for (int j = i; j < m; j++) // makeMyType first element unit
+            for (int j = i; j < m; j++) // make first element unit
                 mat[i][j] = mat[i][j] * leadingInverse;
             y[i] *= leadingInverse;
 

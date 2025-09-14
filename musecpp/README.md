@@ -1,22 +1,52 @@
 ## CPU/GPU Real-time MUSE Decoder
 
-This C++ project contains a complete MUSE decoder that decodes MUSE video in real-time.  I've developed the
-software on a Lenovo Carbon X1 Gen 9 (Intel Core i7-1185G7, 3.0 GHz, 4 cores, integrated graphics), and
-tested that it works and on a MacBook Pro with an M2 processor, and also on an older Intel iMac.
+This C++ project contains a complete [MUSE](https://en.wikipedia.org/wiki/Multiple_sub-Nyquist_sampling_encoding)
+decoder that decodes MUSE video in real-time.  The input used
+is a digitized raw stream of data from a MUSE player, or optionally, the digitized output directly from the
+optical pickup of a modified player.
 
-I tried running it on an NVIDIA Jetson Nano and also on the Raspberry Pi 5, but performance was much worse
-than I hoped for in both cases.
-For both these targets some code changes are needed due to some unsupported Vulkan features, and those changes
-have not been merged to the main branch.
+The code is mostly written in C++, with video filtering done by the GPU using Vulkan and GLSL.
 
-The code is mostly written in C++, with video filtering done by the GPU, using Vulkan and GLSL.
+#### Hardware compatibility
+
+During development, I switched between a few computers and worked out most of the problems
+discovered; using more than one platform helps since it is easy to make some incorrect assumptions, especially
+about the way Vulkan works.  Maybe this list can give some guidance about the hardware required to successfully run
+the decoder:
+* Lenovo Carbon X1 Gen 9 (Intel Core i7-1185G7, 3.0 GHz, 4 cores, integrated graphics): 70+ fps when cold, 
+  drops to just barely over 30 fps after a while due to thermal throttling and playback is not completely stable then;
+* Apple 13" MacBook Pro with 8/10 core M2 processor: 40+ fps, works fine;
+* Asus PN51 Mini PC with a Ryzen 3 5300U: ?? fps, too much fan noise, so I got a fan-less enclosure; this
+  is the machine permanently connected to my Pioneer HD-X9 and main tv;
+* Apple iMac "Core i7" 27" from 2017 (Radeon Pro 580 GPU): 80+ fps.
+
+The performance numbers are obtained by running the software using the --demodulate, --no-sync, and --log P4
+switches. The frames per second number counts the number of MUSE frames played back every second, so 30 is
+the minimum required.  Notice that, the output picture is updated after each MUSE field, i.e., 60 times per second,
+unless the --full-frames-only option is used.
+There are two performance bottlenecks: GPU performance, but also CPU performance since
+the resampling to 16.2 MHz (using a software DPLL) is done in a single CPU thread.
+
+I also tried a few machines that I deemed hopeless to get fast enough:
+* NVIDIA Jetson Nano,
+* Raspberry Pi 5.
+
+I don't have performance numbers, but from memory between 1 and 5 fps.  For both these targets some code
+changes are needed due to unsupported Vulkan features, and those changes have not been merged, and could even
+be lost.
+I have later realized that, especially on the NVIDIA machine, poor performance could be due to incorrect handling
+of Vulkan memory types at the time I tried this, so at some point I might try again.
+
+#### Building
 
 The project uses cmake, and the following commands should build the project on Ubuntu.  This also installs most
-of the dependencies, but you also require a C++ compiler, and I didn't want to pick one for you.  g++ or clang should
-both work.  You also need a graphics driver that supports Vulkan.  I'm using Ubuntu 23.10.
+of the dependencies, but you also need a C++ compiler, and I didn't want to pick one for you.  Recent versions of
+g++ and clang should both work (the project uses C++23).  You also need a graphics driver that supports Vulkan.
+I'm using Ubuntu 24.04.  For macOS, modify as needed (I used [Homebrew](https://brew.sh/) for the dependencies; they
+mostly have similar names.)
 
 ```console
-sudo apt install cmake glslc libglfw3-dev portaudio19-dev libavformat-dev libavcodec-dev libswscale-dev catch2 vulkan-tools vulkan-validationlayers-dev
+sudo apt install cmake glslc libglfw3-dev portaudio19-dev libavformat-dev libavcodec-dev libswscale-dev catch2 vulkan-tools vulkan-validationlayers-dev gnuradio-dev
 git clone https://bitbucket.org/staffanulfberg/ldaudio.git
 cd ldaudio/musecpp
 cmake -DCMAKE_BUILD_TYPE=Release -B build-release .
@@ -26,6 +56,8 @@ cmake --build build-release
 For earlier Ubuntu distributions the glslc package isn't available. Another way to install the tool
 is to follow the instuctions at https://vulkan.lunarg.com/sdk/home and install their vulcan-sdk which includes
 shaderc (that includes the glslc command).
+
+#### Running
 
 To run the program, see command line options below, but for a quick start download an example RF capture and play it:
 ```console
@@ -68,15 +100,21 @@ Files in little endian 16.2 MHz format are of course smaller than raw captures.
 
 > --sample-freq
 
-Sets the sample frequency for the oversampled input formats.
+Sets the input sample frequency for the RF demodulated input and for the oversampled input formats.
 
 > --demodulate
 
 Use this for RF input, i.e., if the signal comes directly from the optical pickup of a modified MUSE player.
-The sampling frequency is fixed at 62.5 MHz, and changing this requires re-computation of the filters
-used for demodulation.  At some point this could be done dynamically in code but support for demodulation of RF signals is
-relatively new.  This now works well if reading from a digital USB oscilloscope.  The input is assumed to consist of
-16 bit unsigned ints.
+
+The sampling frequency can be specified from the command line, but the EFM input filters are unfortunately fixed
+at 62.5 MHz since they were computed offline using a time-consuming method; hopefully I can find a more efficient
+way to compute them, if not I might tabulate filters for a few popular input sampling frequencies.
+
+This now works well if reading from a digital USB oscilloscope.  The input is assumed to consist of
+16 bit unsigned ints.  (See the sibling directory "picostream" for a simple C program that reads from a Picoscope
+and writes data to a file; this file can be a FIFO on Linux systems, in order to do real-time playback.  The code
+is for the 5000 series and needs to be changed slightly if used on a different model.  Notice not all models are
+capable of fast enough sampling and streaming.)
 
 > --no-dropout
 > --highlight-dropout
@@ -98,7 +136,7 @@ EFM data is lost.
 > --write <filename>
 
 Writes the decoded video into a media file.  This uses the Ffmpeg libraries and is currently very experimental:
-for one, video and audio is not properly synchronized.
+for one, video and audio is not properly synchronized.  Forget about real-time playback when using this option!
 
 > --fifo
 
@@ -167,7 +205,7 @@ Toggles between full screen mode and windowed mode.
 
 > GLFW_KEY_SPACE, GLFW_KEY_N
 
-Space toggles between paused and normal play, N steps one frame forward when paused.
+Space toggles between paused and normal play, N steps one field forward when paused.
 
 > GLFW_KEY_LEFT, GLFW_KEY_RIGHT
 
@@ -179,6 +217,8 @@ Switches how frame interpolation is done:
 * 1: Normal, i.e., motion detection is performed to decide what portions of video are in motion and stationary, respectively.
 * 2: Force intra-field interpolation, i.e., forces decoding as if everything is in motion.
 * 3: Force inter-frame interpolation, i.e., forces decoding as if there is a still picture.
+
+The two forced modes are used during development and also demonstrate some aspects of MUSE decoding.
 
 > GLFW_KEY_D
 
@@ -281,10 +321,15 @@ distorted the phase of the signal too much.  Adaptive equalization could be used
 the book by Yuichi Ninomiya (see the list below) describes how to do this in Chapter 4.12.  I've not spent any serious
 time trying to understand this in detail, however.
 
+#### Difference between LD MUSE and BS MUSE
+
+Most or all of the information I've found describes the satellite broadcasting standard.  MUSE decoders have separate 
+inputs for the two signals, so, supposedly, there is some difference between the two, but I do not know what it would be.
+
 ### Information on MUSE
 
 The information on MUSE that is available is quite sparse, and some of it is out of date.  Of course, it is all out of date
-in some sense of the word, but apparently some details were changed after some of these articles and books were published.
+in the usual sense of the word, but what I mean is, that apparently, some details were changed after some of these articles and books were published.
 
 * MUSE－ハイビジョン伝送方式 (MUSE-High-Vision Transmission System), Yuichi Ninomiya, 1990. 
   In Japanese; I managed to get a used copy from amazon.co.jp.
@@ -294,3 +339,5 @@ in some sense of the word, but apparently some details were changed after some o
   In this article the mapping table from audio ternary symbols to bits is incorrect -- I assume they changed it after publication.
 * MUSE system for HDTV broadcasting-satellite services, ITU-R BO.786, 1992.
 * A method of moving area-detection technique in a muse decoder, Yoshinori Izumi, Seiichi Gohshi, Yuichi Ninomiya, 1993.
+* European patent EP0532277A2 "Method of recording information on video disk." 
+  Describes the Disc Code for TOC and Chapter information.

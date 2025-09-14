@@ -21,7 +21,7 @@ EfmPll::EfmPll(Logger &log, double sample_frequency)
           c_g2(c_G2 / c_GpdGvcoG2),
           m_log(log),
           m_clk_counter(0),
-          m_prev_in(false),
+          m_prev_in(0),
           m_error_sum(0),
           m_filter_out(0),
           m_toggle_count(0),

@@ -447,6 +447,16 @@ namespace musevk {
             vk::DebugUtilsMessageSeverityFlagBitsEXT message_severity,
             vk::Flags<vk::DebugUtilsMessageTypeFlagBitsEXT> message_type,
             const vk::DebugUtilsMessengerCallbackDataEXT* callback_data) {
+
+        auto format_vector = [](const std::vector<std::string>& v) {
+            std::string out;
+            for (size_t i = 0; i < v.size(); i++) {
+                if (i) out += ", ";
+                out += v[i];
+            }
+            return out;
+        };
+
         if (message_severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning) {
             LogPriority severity;
             switch (message_severity) {
@@ -475,7 +485,7 @@ namespace musevk {
             if (message_type & vk::DebugUtilsMessageTypeFlagBitsEXT::eDeviceAddressBinding)
                 type_strings.push_back("device address binding");
 
-            m_log.log(severity, eVideo, std::format("Vulkan validation: ({}) {}", type_strings, callback_data->pMessage));
+            m_log.log(severity, eVideo, std::format("Vulkan validation: ({}) {}", format_vector(type_strings), callback_data->pMessage));
         }
 
         return VK_FALSE;
