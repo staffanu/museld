@@ -9,13 +9,13 @@
 #include "musevk/VulkanBuffer.h"
 #include "InputBlockBase.h"
 
-// A block contains a full frame of data, sampled at 16.2 MHz
+// A block contains a full frame of data, sampled at 13.5 MHz
 class NtscInputBlock : public InputBlockBase {
 public:
     NtscInputBlock(std::shared_ptr<musevk::VulkanBuffer> v, std::shared_ptr<musevk::VulkanBuffer> d)
             : InputBlockBase(),
               input_offset(0),
-              input_samples_per_muse_sample(0),
+              input_samples_per_video_sample(0),
               video_data(std::move(v)),
               dropout_data(std::move(d)) {
     };
@@ -29,7 +29,7 @@ public:
 
 
     long input_offset;
-    double input_samples_per_muse_sample;
+    double input_samples_per_video_sample;
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropout_data;
 

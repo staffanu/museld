@@ -17,10 +17,9 @@ using namespace std;
 using namespace musevk;
 using namespace NtscRfDemodulatorConstants;
 
-NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string filename, std::string executable_dir,
+NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string executable_dir, std::string filename,  float sample_frequency,
                                      musevk::VulkanManager &vulkan_manager, bool benchmark_shaders)
-: RfDemodulator<NtscDemodulatedBlock>(log, std::move(filename), std::move(executable_dir), vulkan_manager, benchmark_shaders,
-                                      NtscRfDemodulatorConstants::c_sample_frequency) {
+: RfDemodulator<NtscDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency, vulkan_manager, benchmark_shaders) {
 }
 
 void NtscRfDemodulator::demodulate() {

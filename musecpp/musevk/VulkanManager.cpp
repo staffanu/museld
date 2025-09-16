@@ -38,7 +38,7 @@ namespace musevk {
         m_logical_device.destroy();
         m_instance.destroy(m_surface);
         if (enableValidationLayers) {
-            vk::DispatchLoaderDynamic dynamic_loader(m_instance, vkGetInstanceProcAddr);
+            vk::detail::DispatchLoaderDynamic dynamic_loader(m_instance, vkGetInstanceProcAddr);
             m_instance.destroyDebugUtilsMessengerEXT(m_debug_messenger, nullptr, dynamic_loader);
         }
         m_instance.destroy();
@@ -137,7 +137,7 @@ namespace musevk {
         m_instance = vk::createInstance(createInfo);
 
         if (enableValidationLayers) {
-            vk::DispatchLoaderDynamic dynamic_loader(m_instance, vkGetInstanceProcAddr);
+            vk::detail::DispatchLoaderDynamic dynamic_loader(m_instance, vkGetInstanceProcAddr);
             m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(
                     debugUtilsMessengerCreateInfo, nullptr, dynamic_loader);
         }
@@ -154,7 +154,7 @@ namespace musevk {
                 vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
                 vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
                 vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance;;
-        createInfo.pfnUserCallback = (PFN_vkDebugUtilsMessengerCallbackEXT)debugCallback;
+        createInfo.pfnUserCallback = &debugCallback;
         createInfo.pUserData = this;
         return createInfo;
     }
@@ -437,7 +437,7 @@ namespace musevk {
 
     VKAPI_ATTR VkBool32 VKAPI_CALL VulkanManager::debugCallback(
             vk::DebugUtilsMessageSeverityFlagBitsEXT message_severity,
-            vk::DebugUtilsMessageTypeFlagBitsEXT message_type,
+            vk::Flags<vk::DebugUtilsMessageTypeFlagBitsEXT> message_type,
             const vk::DebugUtilsMessengerCallbackDataEXT *callback_data,
             void *user_data) {
         return ((VulkanManager *)user_data)->debugCallbackMember(message_severity, message_type, callback_data);
@@ -445,8 +445,18 @@ namespace musevk {
 
     VKAPI_ATTR VkBool32 VKAPI_CALL VulkanManager::debugCallbackMember(
             vk::DebugUtilsMessageSeverityFlagBitsEXT message_severity,
-            vk::DebugUtilsMessageTypeFlagBitsEXT message_type,
+            vk::Flags<vk::DebugUtilsMessageTypeFlagBitsEXT> message_type,
             const vk::DebugUtilsMessengerCallbackDataEXT* callback_data) {
+
+        auto format_vector = [](const std::vector<std::string>& v) {
+            std::string out;
+            for (size_t i = 0; i < v.size(); i++) {
+                if (i) out += ", ";
+                out += v[i];
+            }
+            return out;
+        };
+
         if (message_severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning) {
             LogPriority severity;
             switch (message_severity) {
@@ -465,26 +475,17 @@ namespace musevk {
                 default:
                     throw runtime_error(std::format("Unknown message_severity {}", (int)message_severity));
             }
-            string type_string;
-            switch (message_type) {
-                case vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance:
-                    type_string = "performance";
-                    break;
-                case vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation:
-                    type_string = "validation";
-                    break;
-                case vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral:
-                    type_string = "general";
-                    break;
-                case vk::DebugUtilsMessageTypeFlagBitsEXT::eDeviceAddressBinding:
-                    type_string = "device address binding";
-                    break;
-                default:
-                    type_string = "???";
-                    break;
-            }
+            vector<string> type_strings;
+            if (message_type & vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance)
+                type_strings.push_back("performance");
+            if (message_type & vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation)
+                type_strings.push_back("validation");
+            if (message_type & vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral)
+                type_strings.push_back("general");
+            if (message_type & vk::DebugUtilsMessageTypeFlagBitsEXT::eDeviceAddressBinding)
+                type_strings.push_back("device address binding");
 
-            m_log.log(severity, eVideo, std::format("Vulkan validation: ({}) {}", type_string, callback_data->pMessage));
+            m_log.log(severity, eVideo, std::format("Vulkan validation: ({}) {}", format_vector(type_strings), callback_data->pMessage));
         }
 
         return VK_FALSE;

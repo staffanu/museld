@@ -58,7 +58,7 @@ private:
     // (The same is used if reading from file for simplicity.)
     // The total buffer size needs to be a power of two.
     static constexpr int c_number_of_input_sub_buffers = 2;
-    static constexpr size_t c_input_sub_buffer_size = MuseRfDemodulatorConstants::c_video_block_size;
+    static constexpr size_t c_input_sub_buffer_size = MuseDemodulatedBlock::c_video_block_size;
     static constexpr size_t c_input_buffer_size = c_input_sub_buffer_size * c_number_of_input_sub_buffers;
     static_assert((c_input_sub_buffer_size & (c_input_sub_buffer_size - 1)) == 0); // ensure power of two
     static_assert((c_number_of_input_sub_buffers & (c_number_of_input_sub_buffers - 1)) == 0);

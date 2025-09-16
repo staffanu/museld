@@ -43,8 +43,8 @@ NtscInputReader::NtscInputReader(
           m_sample_history_ix(0),
           m_error_sum(0) {
 
-    m_demodulator = new NtscRfDemodulator(log, executable_dir, m_filename, vulkan_manager, benchmark_shaders);
-    m_sample_rate = 31.25e6;
+    m_demodulator = new NtscRfDemodulator(log, executable_dir, m_filename, sample_rate, vulkan_manager, benchmark_shaders);
+    // m_sample_rate = 31.25e6;
 
     m_bytes_per_sample = 4;
 }
@@ -158,7 +158,7 @@ void NtscInputReader::threadFunc() {
         }
 
         output_block->input_offset = m_frame_start_offset;
-        output_block->input_samples_per_muse_sample = m_input_samples_per_sample * m_input_samples_decimation_rate;
+        output_block->input_samples_per_video_sample = m_input_samples_per_sample * m_input_samples_decimation_rate;
         std::unique_lock<std::mutex> lock(m_mutex);
         m_cv_filled.notify_one();
         m_filled_input_buffers.push_back(std::move(output_block));
@@ -366,9 +366,9 @@ int NtscInputReader::expectedPulseSamplesForHalfLine(int line, int halfLine) {
         case 268:
             return broadPulseSamples;
         case 266:
-            return line == 0 ? equalizationPulseSamples : broadPulseSamples;
+            return halfLine == 0 ? equalizationPulseSamples : broadPulseSamples;
         case 269:
-            return line == 0 ? broadPulseSamples : equalizationPulseSamples;
+            return halfLine == 0 ? broadPulseSamples : equalizationPulseSamples;
         default:
             throw std::runtime_error("Impossible case");
     }

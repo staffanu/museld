@@ -64,7 +64,7 @@ struct NtscDemodulatedBlock {
 
 class NtscRfDemodulator : public RfDemodulator<NtscDemodulatedBlock> {
 public:
-    NtscRfDemodulator(Logger &log, std::string filename, std::string executable_dir,
+    NtscRfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
                       musevk::VulkanManager &vulkan_manager, bool benchmark_shaders);
     NtscRfDemodulator(const NtscRfDemodulator&) = delete;
     void operator=(const NtscRfDemodulator&) = delete;

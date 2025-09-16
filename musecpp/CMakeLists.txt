@@ -4,8 +4,6 @@ project(musecpp)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake-modules" ${CMAKE_MODULE_PATH})
-
 find_package(glfw3 3.3 REQUIRED)
 find_package(Vulkan REQUIRED)
 
@@ -16,7 +14,9 @@ find_package(PORTAUDIO REQUIRED)
 include_directories("${PORTAUDIO_INCLUDE_DIRS}")
 
 find_package(PkgConfig REQUIRED)
+
 pkg_check_modules(GNURADIO REQUIRED gnuradio-filter)
+include_directories("${GNURADIO_INCLUDE_DIRS}")
 
 find_package(LIBAV)
 if (HAVE_LIBAV)
@@ -96,12 +96,13 @@ if (HAVE_LIBAV)
     )
 endif()
 
+target_link_options(musecpp PRIVATE "-L/usr/local/lib")
 target_link_libraries(musecpp
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
-        PRIVATE ${LIBAV_LIBRARIES}
         PRIVATE ${GNURADIO_LIBRARIES}
+        PRIVATE ${LIBAV_LIBRARIES}
 )
 
 set(GLSLC "glslc")

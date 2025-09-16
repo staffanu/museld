@@ -191,23 +191,49 @@ void VideoFileWriter::initAudio(AVDictionary *opt_arg) {
     initStream(&m_audio_stream, m_format_context->oformat->audio_codec);
 
     AVCodecContext *c = m_audio_stream.codec_context;
-    c->sample_fmt = m_audio_stream.codec->sample_fmts ? m_audio_stream.codec->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
+
+    AVSampleFormat *sample_formats;
+    int no_sample_formats;
+    int ret = avcodec_get_supported_config(
+        c, m_audio_stream.codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, (const void **)&sample_formats, &no_sample_formats);
+    if (ret < 0)
+        throw std::runtime_error("Could not get sample formats");
+    c->sample_fmt = no_sample_formats > 0 ? sample_formats[0] : AV_SAMPLE_FMT_FLTP;
+    // ERROR on zero formats?
+    // WAS: c->sample_fmt = m_audio_stream.codec->sample_fmts ? m_audio_stream.codec->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
+
+    int *samplerates;
+    int no_samplerates;
+    ret = avcodec_get_supported_config(
+        c, m_audio_stream.codec, AV_CODEC_CONFIG_SAMPLE_RATE, 0, (const void **)&samplerates, &no_samplerates);
+    if (ret < 0)
+        throw std::runtime_error("Could not get sample rates");
+
     c->bit_rate = 64000;
     c->sample_rate = 44100;
-    if (m_audio_stream.codec->supported_samplerates) {
-        c->sample_rate = m_audio_stream.codec->supported_samplerates[0];
-        for (int i = 0; m_audio_stream.codec->supported_samplerates[i]; i++) {
-            if (m_audio_stream.codec->supported_samplerates[i] == 44100)
-                c->sample_rate = 44100;
-        }
+    if (no_samplerates > 0) // ERROR on zero?
+        c->sample_rate = samplerates[0];
+    for (int i = 0; i < no_samplerates; i++) {
+        if (samplerates[i] == 44100)
+            c->sample_rate = 44100;
     }
+
+    // WAS:
+    // if (m_audio_stream.codec->supported_samplerates) {
+    //     c->sample_rate = m_audio_stream.codec->supported_samplerates[0];
+    //     for (int i = 0; m_audio_stream.codec->supported_samplerates[i]; i++) {
+    //         if (m_audio_stream.codec->supported_samplerates[i] == 44100)
+    //             c->sample_rate = 44100;
+    //     }
+    // }
+
     auto layout = (AVChannelLayout) AV_CHANNEL_LAYOUT_STEREO;
     av_channel_layout_copy(&c->ch_layout, &layout);
     m_audio_stream.stream->time_base = (AVRational) {1, c->sample_rate};
 
     AVDictionary *opt = nullptr;
     av_dict_copy(&opt, opt_arg, 0);
-    int ret = avcodec_open2(c, m_audio_stream.codec, &opt);
+    ret = avcodec_open2(c, m_audio_stream.codec, &opt);
     av_dict_free(&opt);
     if (ret < 0)
         throw std::runtime_error(std::format("Could not open audio codec: {}", av_err2string(ret)));
