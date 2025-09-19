@@ -18,8 +18,10 @@ public:
 
     Decoder(const Decoder&) = delete;
     Decoder& operator=(const Decoder&) = delete;
+    virtual ~Decoder() = default;
 
     virtual bool initialize() = 0;
+
 
     virtual bool next(bool efm_audio, AudioMode *audio_mode,
                       int *sample_count,

@@ -15,8 +15,6 @@
 
 using namespace std;
 
-
-
 NtscDecoder::NtscDecoder(
         Logger &log, InputReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
         musevk::CommandPool &command_pool, std::string const &executable_dir,
@@ -55,10 +53,10 @@ NtscDecoder::~NtscDecoder() {
 bool NtscDecoder::initialize() {
     // Always keep the two latest frames (required for motion detection) -- pretend we have two already
     // The newest frame is always at index 0
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < 3; i++)
         m_frames.push_back(new NtscFrame(m_log, -i, m_manager));
 
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < 3; i++)
         for (int parity = 0; parity <= 1; parity++) {
             m_frames[i]->get_field(parity).set_prev_field(
                     &m_frames[parity == 1 ? i : (i + 1) % 2]->get_field(1 - parity));
@@ -71,10 +69,11 @@ bool NtscDecoder::initialize() {
     return true;
 }
 
+// For NTSC, enable_non_linear is not implemented
 bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
                        int *sample_count,
                        AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES],
-                       int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
+                       int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_ntsc_sample,
                        shared_ptr<DiscInfo> *disc_info,
                        FieldInterpolationMode field_interpolation_mode,
                        bool redo_last_field, bool enable_non_linear, DropoutMode dropout_mode, bool output_yuv) {
@@ -111,27 +110,15 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
         m_frames.pop_back();
         m_frames.push_front(frame);
 
-        frame->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_muse_sample);
-        shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
-
-        // auto eq_estimate = FrameBuffer::EstimateEq(input_vulkan_buffer->data<float>());
-//        if (m_eq.first == -1 && m_eq.second == -1)
-//            m_eq = eq_estimate;
-//        else
-//            m_eq = {m_eq.first * 0.9 + eq_estimate.first * 0.1, m_eq.second * 0.9 + eq_estimate.second * 0.1};
-        if (m_frame_no % 30 == 0)
-            m_log.info(eDecoder, std::format("eq: {}, {}", m_eq.first, m_eq.second));
+        frame->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_video_sample);
 
         // The input block data was written by the host, so make sure it is visible on the GPU
         input_block->video_data->synchronizeHostWrites(*m_first_stage_command_buffer);
         input_block->dropout_data->synchronizeHostWrites(*m_first_stage_command_buffer);
 
-//        m_shaders.applyEqAndDeemphasisAndGamma(*m_first_stage_command_buffer,
-//                                               input_vulkan_buffer, input_block->dropout_data,
-//                                               frame->data(),
-//                                               m_eq, enable_non_linear, dropout_mode);
-//        frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
-//        m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame->data());
+        m_shaders.copyToFrame(*m_first_stage_command_buffer, input_block->video_data, input_block->dropout_data,
+            frame->data(), dropout_mode);
+        frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
     }
     m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
@@ -143,37 +130,37 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
     if (m_decode_video && (m_decode_all_fields || m_field_index == 0)) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
-//        *last_frame_buffer_input_offset = m_frames[0]->getInputOffset();
-//        *input_samples_per_muse_sample = m_frame_buffers[0]->getInputSamplesPerNtscSample();
+        *last_frame_buffer_input_offset = m_frames[0]->getInputOffset();
+        *input_samples_per_ntsc_sample = m_frames[0]->getInputSamplesPerNtscSample();
         *field_parity = decoded_field_index;
 
-//        m_shaders.decodeIntraField(*m_second_stage_command_buffer, m_frame_buffers[0]->get_field(decoded_field_index));
-//        auto fields = vector<reference_wrapper<FieldBufferView>>{
-//                m_frame_buffers[0]->get_field(decoded_field_index),
-//                m_frame_buffers[1 - decoded_field_index]->get_field(1 - decoded_field_index),
-//                m_frame_buffers[1]->get_field(decoded_field_index),
-//                m_frame_buffers[2 - decoded_field_index]->get_field(1 - decoded_field_index),
-//                m_frame_buffers[2]->get_field(decoded_field_index)};
-//
-//        if (m_shaders.decodeInterFrameAndDetectMotion(*m_second_stage_command_buffer, fields, true)) {
-//            m_log.debug(eVideo, std::format("Field {} inter-frame interpolation success", decoded_field_index));
-//            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
-//                                                 field_interpolation_mode == FieldInterpolationMode::eForceIntraField,
-//                                                 field_interpolation_mode == FieldInterpolationMode::eForceInterFrame,
-//                                                 output_yuv);
-//        } else {
-//            m_log.warn(eVideo, std::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
-//            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false, output_yuv);
-//        }
+        m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[0]->get_field(decoded_field_index));
+        auto fields = vector<reference_wrapper<NtscFieldView>>{
+                m_frames[0]->get_field(decoded_field_index),
+                m_frames[1 - decoded_field_index]->get_field(1 - decoded_field_index),
+                m_frames[1]->get_field(decoded_field_index),
+                m_frames[2 - decoded_field_index]->get_field(1 - decoded_field_index)};
+
+        if (m_shaders.decodeTwoFieldsAndDetectMotion(*m_second_stage_command_buffer, fields, true)) {
+            m_log.debug(eVideo, std::format("Field {} inter-frame interpolation success", decoded_field_index));
+            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
+                                                 field_interpolation_mode == FieldInterpolationMode::eForceIntraField,
+                                                 field_interpolation_mode == FieldInterpolationMode::eForceInterFrame,
+                                                 decoded_field_index,
+                                                 output_yuv);
+        } else {
+            m_log.warn(eVideo, std::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
+            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false,
+                decoded_field_index, output_yuv);
+        }
     }
 
-    // PipelineStageFlagBits ??  Not in MUSE version!
     m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});
 
-    assert(input_block != nullptr == m_first_stage_command_buffer->isSubmitted());
-    if (m_first_stage_command_buffer->isSubmitted()) {
-        m_first_stage_command_buffer->wait();
+    m_first_stage_command_buffer->wait();
 
+//    assert(input_block != nullptr == m_first_stage_command_buffer->isSubmitted());
+    if (input_block != nullptr) {
         //m_frame_buffers[0]->processDiscCode();
     }
 

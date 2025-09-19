@@ -67,7 +67,7 @@ void NtscRfDemodulator::demodulate() {
     // FIR de-emphasis filter (applied to the decimated lowpass filtered signal)
     // For NTSC, the two frequencies are 3.125 MHz and 8.33 MHz
     std::vector<float> deemphasis_filter_def =
-            gr::filter::firdes::low_pass(1.0, 20e6, 1e6, 5e6, gr::fft::window::WIN_RECTANGULAR);
+            gr::filter::firdes::low_pass(1.0, 20e6, 5e6, 5e6, gr::fft::window::WIN_RECTANGULAR);
     std::reverse(deemphasis_filter_def.begin(), deemphasis_filter_def.end());
 
     shared_ptr<VulkanBuffer> deemphasis_filter =
@@ -188,7 +188,7 @@ void NtscRfDemodulator::demodulate() {
             }
             m_cv_vacant.wait(lock, [this] { return m_stop_request || !m_vacant_blocks.empty(); });
             if (m_stop_request) {
-                m_log.info(eInput, "MuseRfDemodulator: stop requested");
+                m_log.info(eInput, "NtscRfDemodulator: stop requested");
                 break;
             }
             block = std::move(m_vacant_blocks.front());
@@ -215,9 +215,7 @@ void NtscRfDemodulator::demodulate() {
                 input_fir_filter_shader,
                 {(uint32_t)bandpass_filter_def.size(), c_sample_block_size, /* out offset */ 1, /* decimation */ 1}, 1);
 
-        // Demodulate the analytic signal, and scale to the standard MUSE range
-        // +/- 1 corresponds to the white/sync level, which we scale to [0, 1].
-        // With 40 MHz sample rate, 8.5 MHz center, 0.85 MHz deviation, the possible output swing is between ???.
+        // Demodulate the analytic signal, and scale to [0, 1].
         command_buffer->enqueueComputeShader<float>(fm_quadrature_shader,
                                                     {c_sample_block_size, (float)lowpass_filter_def.size() - 1,
                                                      c_sample_frequency, c_frequency_deviation, c_center_frequency, /* scale */ 0.5f, /* add */ 0.5f});
@@ -278,6 +276,13 @@ void NtscRfDemodulator::demodulate() {
 
         if (timestamp_query_pool != nullptr)
             timestamp_statistics.add_timestamps(timestamp_query_pool->getTimestamps());
+
+        // {
+        //     float *p = block->video_data->data<float>();
+        //     for (int i = 0; i < 100; i++)
+        //         printf("%f ", p[i]);
+        //     printf("\n");
+        // }
 
         // Send away result
         std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);

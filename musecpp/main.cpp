@@ -14,6 +14,7 @@
 #include "muse/PhaseCorrect16MHzInputReader.h"
 #include "muse/MuseDecoder.h"
 #include "muse/MuseConstants.h"
+#include "ntsc/NtscConstants.h"
 #include "ntsc/NtscInputReader.h"
 #include "ntsc/NtscDecoder.h"
 
@@ -246,11 +247,13 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                                                           vk::AccessFlagBits::eTransferWrite);
 
             auto extent = manager.getSwapChainExtent();
+            int source_width = false ? MUSE_Y_BUF_WIDTH * 3 : NTSC_Y_BUF_WIDTH;
+            int source_height = false ? MUSE_BUF_HEIGHT * 2 : NTSC_FIELD_HEIGHT * 2;
             vk::ImageBlit region;
-            region.srcOffsets[0] = vk::Offset3D((int32_t)((zoom_center.first - 0.5 / zoom_factor) * MUSE_Y_BUF_WIDTH * 3),
-                                                (int32_t)((zoom_center.second - 0.5 / zoom_factor) * MUSE_BUF_HEIGHT * 2), 0);
-            region.srcOffsets[1] = vk::Offset3D((int32_t)((zoom_center.first + 0.5 / zoom_factor) * MUSE_Y_BUF_WIDTH * 3),
-                                                (int32_t)((zoom_center.second + 0.5 / zoom_factor) * MUSE_BUF_HEIGHT * 2), 1);
+            region.srcOffsets[0] = vk::Offset3D((int32_t)((zoom_center.first - 0.5 / zoom_factor) * source_width),
+                                                (int32_t)((zoom_center.second - 0.5 / zoom_factor) * source_height), 0);
+            region.srcOffsets[1] = vk::Offset3D((int32_t)((zoom_center.first + 0.5 / zoom_factor) * source_width),
+                                                (int32_t)((zoom_center.second + 0.5 / zoom_factor) * source_height), 1);
             region.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
             region.dstOffsets[0] = vk::Offset3D(0, 0, 0);
             region.dstOffsets[1] = vk::Offset3D((int) extent.width, (int) extent.height, 1);

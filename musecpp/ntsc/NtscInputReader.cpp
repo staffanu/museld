@@ -22,9 +22,9 @@ NtscInputReader::NtscInputReader(
         : InputReader(log, filename,
                       filesystem::is_fifo(filename),
                       initial_seek_seconds, output_filename),
-          m_sample_rate(sample_rate),
           m_efm_pll(log, 40e6 / NtscRfDemodulatorConstants::c_efm_decimation_rate),
           m_file_fd(-1),
+          m_sample_rate(sample_rate / NtscRfDemodulatorConstants::c_video_decimation_rate),
           m_input_samples_decimation_rate(1),
           m_demodulator(nullptr),
           m_input_buffer(nullptr),
@@ -34,12 +34,14 @@ NtscInputReader::NtscInputReader(
           m_t(0.0),
           m_state(eSearching),
           m_half_line_pulse_error_sum(0.f),
+          m_half_line_pulse_error_sum_search_first(0.f),
           m_line(1),
           m_sample_ix(1),
           m_lower_percentile_filter(NtscInputBlock::c_samples_per_video_line * NtscInputBlock::c_total_video_lines, 0.005f, 0.f),
           m_consecutive_good_syncs(0),
+          m_missed_line_pulses(0),
           m_frame_start_offset(0L),
-          m_sample_history{0, 0, 0, 0},
+          m_sample_history{},
           m_sample_history_ix(0),
           m_error_sum(0) {
 
@@ -47,6 +49,8 @@ NtscInputReader::NtscInputReader(
     // m_sample_rate = 31.25e6;
 
     m_bytes_per_sample = 4;
+    m_output_multiplier = 1.0;
+    m_output_add = 0.0;
 }
 
 bool NtscInputReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) {
@@ -68,12 +72,12 @@ bool NtscInputReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &b
     m_input_samples_per_sample_ref = m_sample_rate / NtscInputBlock::c_video_sampling_frequency;
     m_input_samples_per_sample = m_input_samples_per_sample_ref;
     m_omega = 2 * M_PI * 3000 / m_sample_rate;
-    m_zeta = 0.75;
+    m_zeta = 0.85;
     m_Ts = m_input_samples_per_sample_ref * NtscInputBlock::c_samples_per_video_line;
     m_G1 = 1 - exp(-2 * m_zeta * m_omega * m_Ts);
     m_G2 = 1 + exp(-2 * m_omega * m_zeta * m_Ts) -
            2 * exp(-m_omega * m_zeta * m_Ts) * cos(m_omega * m_Ts * sqrt(1 - m_zeta * m_zeta));
-    m_GpdGvco = 64 * (1 / m_input_samples_per_sample_ref) * 480;
+    m_GpdGvco = m_input_samples_per_sample_ref * NtscInputBlock::c_samples_per_video_line;
     m_g1 = m_G1 / m_GpdGvco;
     m_g2 = m_G2 / m_GpdGvco;
 
@@ -198,11 +202,11 @@ bool NtscInputReader::readInput(std::unique_ptr<NtscInputBlock> const &output_bl
 
     m_demodulator->returnBlock(block);
 
-    int fd = open("videodata.floats",
-                  O_WRONLY | O_TRUNC | O_CREAT,
-                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    write(fd, read_ptr, NtscRfDemodulatorConstants::c_video_block_size * sizeof(float));
-    close(fd);
+    // int fd = open("videodata.floats",
+    //               O_WRONLY | O_TRUNC | O_CREAT,
+    //               S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    // write(fd, read_ptr, NtscRfDemodulatorConstants::c_video_block_size * sizeof(float));
+    // close(fd);
 
     return true;
 }
@@ -263,36 +267,76 @@ bool NtscInputReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
         output[output_index] = sample;
         dropout_output[output_index] = dropout;
         m_sample_history[m_sample_history_ix++] = sample;
-        if (m_sample_history_ix == 4)
+        if (m_sample_history_ix == c_sample_history_size)
             m_sample_history_ix = 0;
 
-        if (m_state == eLockedHoriz || m_state == eLocked && (m_line <= 9 || m_line >= 264 && m_line <= 271)) {
+        if (m_state == eLocked && (m_line <= 9 || m_line >= 264 && m_line <= 271)) {
             int expectedPulseSamples = expectedPulseSamplesForHalfLine(m_line, m_sample_ix >= NtscInputBlock::c_samples_per_video_line / 2);
             int halfLineSampleIx = m_sample_ix % (NtscInputBlock::c_samples_per_video_line / 2);
             float expectedVoltage = halfLineSampleIx <= expectedPulseSamples ? 0.f : 0.3f;
             m_half_line_pulse_error_sum += pow(sample - expectedVoltage, 2.f);
 
             if (m_sample_ix == NtscInputBlock::c_samples_per_video_line) {
-                if (m_state == eLockedHoriz) {
-                    // check if syncs are correct or drop lock
+                if (m_half_line_pulse_error_sum < 0.07 * NtscInputBlock::c_samples_per_video_line) {
+                    m_missed_line_pulses = 0;
+                } else {
+                    if (m_missed_line_pulses < 3)
+                        m_missed_line_pulses += 1;
+                    else {
+                        m_log.warn(eInput, std::format("Missed line pulses: New state eSearching at line {}", m_line));
+                        m_state = eSearching;
+                    }
                 }
-                m_half_line_pulse_error_sum = 0;
             }
         }
+        if (m_state == eLockedHoriz) {
+            // Looking for line 4
+            int expectedPulseSamples = expectedPulseSamplesForHalfLine(4, m_sample_ix >= NtscInputBlock::c_samples_per_video_line / 2);
+            int halfLineSampleIx = m_sample_ix % (NtscInputBlock::c_samples_per_video_line / 2);
+            float expectedVoltage = halfLineSampleIx <= expectedPulseSamples ? 0.f : 0.3f;
+            m_half_line_pulse_error_sum_search_first += pow(sample - expectedVoltage, 2.f);
+            if (m_sample_ix == NtscInputBlock::c_samples_per_video_line) {
+                if (m_half_line_pulse_error_sum_search_first < 0.05 * NtscInputBlock::c_samples_per_video_line) {
+                    m_log.info(eInput, std::format("New state eLocked at line {}", m_line));
+                    m_state = eLocked;
+                    m_line = 4;
+                    // FIXME: in the MUSE version, we copy the first four lines to to make the frame complete
+                }
+            }
+        }
+        if (m_sample_ix == NtscInputBlock::c_samples_per_video_line) {
+            m_half_line_pulse_error_sum = 0;
+            m_half_line_pulse_error_sum_search_first = 0;
+        }
 
-        if (m_sample_ix == 1) { // The sync defines the start of a line
-            float sample0 = m_sample_history[(m_sample_history_ix + 4 - 2) % 4];
-            float sample1 = m_sample_history[(m_sample_history_ix + 4 - 1) % 4];
-            float sample2 = m_sample_history[m_sample_history_ix];
+        if (m_sample_ix == 10) { // The sync defines the start of a line at sample 1, but we wait so we can read the value it settled at
+            float sample0 = m_sample_history[(m_sample_history_ix + c_sample_history_size - 12) % c_sample_history_size];
+            float sample1 = m_sample_history[(m_sample_history_ix + c_sample_history_size - 11) % c_sample_history_size];
+            float sample2 = m_sample_history[(m_sample_history_ix + c_sample_history_size - 10) % c_sample_history_size];
+            float sample3 = m_sample_history[(m_sample_history_ix + c_sample_history_size - 9) % c_sample_history_size];
+            float sample_late = m_sample_history[(m_sample_history_ix + c_sample_history_size - 1) % c_sample_history_size];
 
-            bool m_sync_is_good = sample0 > 0.15f && sample2 < 0.15f && sample1 < 0.3f;
+            bool m_sync_is_good = sample0 > 0.15f && sample3 < 0.15f && sample_late < 0.15f;
 
             if (m_sync_is_good) {
-                double avgLevel = (sample0 + sample2) / 2;
-                double new_error = std::clamp(avgLevel - sample1, -10.0, 10.0); // negative means we sampled too early
-                m_error_sum = std::clamp(m_error_sum + new_error, -15.0, 15.0);
+                // positive means we sampled too late (sync is early)
+                // negative means we sampled too early (sync is late)
+                // We expect the sync between sample1 and sample2
+                double new_error;
+                if (sample1 < 0.15)
+                    new_error = 1.0;
+                else if (sample2 > 0.15)
+                    new_error = -1.0;
+                else {
+                    // sync is between sample1 and sample2 -- try to determine where
+                    float mid_level = 0.5f * (sample0 + sample_late); // determined by sample before sync and late during sync
+                    float mid_s12 = 0.5f * (sample1 + sample2);
+                    new_error = clamp(10.f * (mid_level - mid_s12), -1.f, 1.f);
+                }
+                m_error_sum = std::clamp(m_error_sum + new_error, -10.0, 10.0);
                 m_input_samples_per_sample =
                         m_input_samples_per_sample_ref - new_error * m_g1 - m_error_sum * m_g2;
+                // printf("%.2f %.2f %.2f %.2f  %.2f: %.2f\n", sample0, sample1, sample2, sample3, sample_late, new_error);
             }
             if (m_state == eSearching) {
                 m_consecutive_good_syncs = m_sync_is_good ? m_consecutive_good_syncs + 1 :
@@ -340,7 +384,7 @@ void NtscInputReader::setUnlocked() {
 }
 
 int NtscInputReader::expectedPulseSamplesForHalfLine(int line, int halfLine) {
-    const double normalPulseTime = 4.7e-9;
+    const double normalPulseTime = 4.7e-6;
     const double equalizationPulseTime = normalPulseTime / 2;
     const double broadPulseTime =  NtscInputBlock::c_samples_per_video_line / NtscInputBlock::c_video_sampling_frequency - normalPulseTime;
 

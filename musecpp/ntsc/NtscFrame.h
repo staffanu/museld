@@ -16,7 +16,7 @@ public:
 
     void set_frame_no(int frame_no, long input_offset, double input_samples_per_sample);
     [[nodiscard]] long getInputOffset() const;
-    [[nodiscard]] double getInputSamplesPerMuseSample() const;
+    [[nodiscard]] double getInputSamplesPerNtscSample() const;
     std::shared_ptr<musevk::VulkanBuffer> &data();
     NtscFieldView &get_field(int parity);
 

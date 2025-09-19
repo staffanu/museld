@@ -30,7 +30,7 @@ long NtscFrame::getInputOffset() const {
     return m_input_offset;
 }
 
-double NtscFrame::getInputSamplesPerMuseSample() const {
+double NtscFrame::getInputSamplesPerNtscSample() const {
     return m_input_samples_per_sample;
 }
 

@@ -6,6 +6,9 @@
 #define MUSECPP_NTSCSHADERS_H
 
 #include <string>
+
+#include "DropoutMode.h"
+#include "NtscFieldView.h"
 #include "musevk/VulkanManager.h"
 #include "musevk/CommandPool.h"
 #include "util/Logger.h"
@@ -13,22 +16,59 @@
 
 class NtscShaders {
 public:
-    NtscShaders(Logger &log, std::string const &executable_dir, musevk::VulkanManager &manager, musevk::CommandPool &command_pool);
+  NtscShaders(Logger &log, std::string const &executable_dir, musevk::VulkanManager &manager,
+              musevk::CommandPool &command_pool);
 
-    NtscShaders(NtscShaders &other) = delete;
-    void operator=(const NtscShaders &) = delete;
+  NtscShaders(NtscShaders &other) = delete;
 
-    ResultImages getResultImages();
+  void operator=(const NtscShaders &) = delete;
+
+  void copyToFrame(musevk::CommandBuffer &sq,
+                   std::shared_ptr<musevk::VulkanBuffer> const &video_input,
+                   std::shared_ptr<musevk::VulkanBuffer> const &dropout_input,
+                   std::shared_ptr<musevk::VulkanBuffer> const &buffer,
+                   DropoutMode dropout_mode);
+
+  void decodeSingleField(musevk::CommandBuffer &sq, NtscFieldView &field);
+
+  bool decodeTwoFieldsAndDetectMotion(musevk::CommandBuffer &sq,
+                                     const std::vector<std::reference_wrapper<NtscFieldView>> &fields,
+                                     bool use_prev_motion_info);
+
+  void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only,
+                                  unsigned int field_parity, bool output_yuv);
+
+  ResultImages getResultImages();
 
 private:
-    Logger &m_log;
-    musevk::VulkanManager &m_vulkan_manager;
+  std::shared_ptr<musevk::VulkanBuffer> createVulkanBuffer(unsigned int height, unsigned int width, musevk::HostAccess host_access = musevk::eHostNone);
 
-    // used for final result
-    std::shared_ptr<musevk::VulkanImage> m_image_out;
-    std::shared_ptr<musevk::VulkanBuffer> m_image_Y_out; // only used if writing to file using ffmpeg
-    std::shared_ptr<musevk::VulkanBuffer> m_image_U_out; // ..
-    std::shared_ptr<musevk::VulkanBuffer> m_image_V_out; // ..
+  Logger &m_log;
+  musevk::VulkanManager &m_vulkan_manager;
+
+  std::shared_ptr<musevk::ComputeShader> m_copy_to_frame_algo;
+  std::shared_ptr<musevk::ComputeShader> m_decode_single_field_algo;
+  std::shared_ptr<musevk::ComputeShader> m_decode_two_fields_algo;
+  std::shared_ptr<musevk::ComputeShader> m_combine_still_and_moving_algo;
+
+  // output from single field decoder
+  std::shared_ptr<musevk::VulkanBuffer> m_field_Y_buffer; // NTSC_FIELD_HEIGHT * NTSC_Y_BUF_WIDTH
+  std::shared_ptr<musevk::VulkanBuffer> m_field_r_buffer; // NTSC_FIELD_HEIGHT * NTSC_Y_BUF_WIDTH / 2
+  std::shared_ptr<musevk::VulkanBuffer> m_field_b_buffer; // NTSC_FIELD_HEIGHT * NTSC_Y_BUF_WIDTH / 2
+
+  // output from inter-frame interpolation
+  std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_Y_buffer; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
+  std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_r_buffer; // MUSE_BUF_HEIGHT * 2 * MUSE_BUF_Y_WIDTH
+  std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_b_buffer; // MUSE_BUF_HEIGHT * 2 * MUSE_BUF_Y_WIDTH
+
+  int m_current_movement_buffer_index;
+  std::vector<std::shared_ptr<musevk::VulkanBuffer>> m_movement_buffers; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
+
+  // used for final result
+  std::shared_ptr<musevk::VulkanImage> m_image_out;
+  std::shared_ptr<musevk::VulkanBuffer> m_image_Y_out; // only used if writing to file using ffmpeg
+  std::shared_ptr<musevk::VulkanBuffer> m_image_U_out; // ..
+  std::shared_ptr<musevk::VulkanBuffer> m_image_V_out; // ..
 };
 
 

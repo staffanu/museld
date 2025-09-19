@@ -95,10 +95,13 @@ private:
     int m_line;
     PllState m_state;
     float m_half_line_pulse_error_sum;
+    float m_half_line_pulse_error_sum_search_first;
     PercentileFilter m_lower_percentile_filter;
     int m_consecutive_good_syncs;
+    int m_missed_line_pulses;
     long m_frame_start_offset;
-    float m_sample_history[4];
+    static constexpr int c_sample_history_size = 16;
+    float m_sample_history[c_sample_history_size];
     int m_sample_history_ix;
 
     double m_error_sum;

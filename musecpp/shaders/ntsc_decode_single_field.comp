@@ -1,0 +1,42 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// from (0, 0) until (NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT).
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint field_parity;
+};
+
+layout(set = 0, binding = 0) buffer readonly input_frame_buffer {
+    float16_t input_frame[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 1) buffer writeonly Y_data_buffer {
+    float16_t Y_data[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 2) buffer writeonly r_data_buffer {
+    float16_t r_data[][NTSC_Y_BUF_WIDTH / 2];
+};
+
+layout(set = 0, binding = 3) buffer writeonly b_data_buffer {
+    float16_t b_data[][NTSC_Y_BUF_WIDTH / 2];
+};
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= NTSC_FIELD_HEIGHT || col >= NTSC_Y_BUF_WIDTH)
+        return;
+
+    uint frame_line = 21 + row + 263 * field_parity;
+
+    // FIXME: offsets, and currently no color decoding
+
+    float16_t v = input_frame[frame_line][col + 122];
+
+    Y_data[row][col] = v;
+}

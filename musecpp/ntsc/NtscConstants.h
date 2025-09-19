@@ -1,0 +1,15 @@
+//
+// Created by staffanu on 4/17/23.
+//
+
+#ifndef MUSECPP_NTSCCONSTANTS_H
+#define MUSECPP_NTSCCONSTANTS_H
+
+
+#define NTSC_TOTAL_HEIGHT 525
+#define NTSC_TOTAL_WIDTH 858
+
+#define NTSC_FIELD_HEIGHT 241
+#define NTSC_Y_BUF_WIDTH 720
+
+#endif //MUSECPP_NTSCCONSTANTS_H
