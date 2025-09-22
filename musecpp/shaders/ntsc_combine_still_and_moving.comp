@@ -64,11 +64,26 @@ void main() {
 
     float16_t v;
     if (force_field_only != 0) {
-        v = field_y[(row + 1 - field_parity) / 2][col];
+        if ((row & 1) == 0) {
+            if (field_parity == 0) {
+                v = field_y[row / 2][col];
+            } else {
+                v = 0.5hf * field_y[row / 2][col] + 0.5hf * field_y[clamp(row / 2 - 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+            }
+        } else {
+            if (field_parity == 0) {
+                v = 0.5hf * field_y[row / 2][col] + 0.5hf * field_y[clamp(row / 2 + 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+            } else {
+                v = field_y[row / 2][col];
+            }
+        }
+
+        //v = field_y[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
     } else if (force_inter_frame_only != 0) {
         v = inter_frame_y[row][col];
     } else {
-        v = field_y[(row + 1 - field_parity) / 2][col]; // FIXME: combine!
+        // FIXME: combine!
+        v = field_y[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
     }
     v = clamp(v, 0.hf, 1.hf);
 

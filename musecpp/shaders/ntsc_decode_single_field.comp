@@ -32,7 +32,7 @@ void main() {
     if (row >= NTSC_FIELD_HEIGHT || col >= NTSC_Y_BUF_WIDTH)
         return;
 
-    uint frame_line = 21 + row + 263 * field_parity;
+    uint frame_line = 22 + row + 263 * field_parity;
 
     // FIXME: offsets, and currently no color decoding
 

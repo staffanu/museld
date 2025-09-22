@@ -41,10 +41,10 @@ void main() {
     float16_t v;
     if ((row & 1) == 0) {
         // top field
-        uint frame_line = 21 + row / 2;
+        uint frame_line = 22 + row / 2;
         v = input_frame0[frame_line][col + 122];
     } else {
-        uint frame_line = 21 + row / 2 + 263;
+        uint frame_line = 22 + row / 2 + 263;
         v = input_frame0[frame_line][col + 122];
     }
 

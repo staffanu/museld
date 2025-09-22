@@ -9,6 +9,7 @@
 #include <filesystem>
 #include "musevk/VulkanBuffer.h"
 #include "NtscInputReader.h"
+
 #include "NtscRfDemodulator.h"
 #include "util/Logger.h"
 
@@ -32,14 +33,16 @@ NtscInputReader::NtscInputReader(
           m_input_sub_buffer_input_offsets{},
           m_last_input_sub_buffer_ix_read(0),
           m_t(0.0),
-          m_state(eSearching),
-          m_half_line_pulse_error_sum(0.f),
-          m_half_line_pulse_error_sum_search_first(0.f),
-          m_line(1),
+          m_half_line_sync_pattern_error_sum(0.0),
+          m_half_line_sync_pattern_eq_error_sum(0.0),
+          m_half_line_sync_pattern_br_error_sum(0.0),
+          m_vert_sync_half_line_pattern(0L),
           m_sample_ix(1),
+          m_line(1),
+          m_state(eSearching),
           m_lower_percentile_filter(NtscInputBlock::c_samples_per_video_line * NtscInputBlock::c_total_video_lines, 0.005f, 0.f),
           m_consecutive_good_syncs(0),
-          m_missed_line_pulses(0),
+          m_missed_half_line_vert_sync_patterns(0),
           m_frame_start_offset(0L),
           m_sample_history{},
           m_sample_history_ix(0),
@@ -270,43 +273,56 @@ bool NtscInputReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
         if (m_sample_history_ix == c_sample_history_size)
             m_sample_history_ix = 0;
 
-        if (m_state == eLocked && (m_line <= 9 || m_line >= 264 && m_line <= 271)) {
-            int expectedPulseSamples = expectedPulseSamplesForHalfLine(m_line, m_sample_ix >= NtscInputBlock::c_samples_per_video_line / 2);
-            int halfLineSampleIx = m_sample_ix % (NtscInputBlock::c_samples_per_video_line / 2);
-            float expectedVoltage = halfLineSampleIx <= expectedPulseSamples ? 0.f : 0.3f;
-            m_half_line_pulse_error_sum += pow(sample - expectedVoltage, 2.f);
+        // notice sample_ix is 1 based
+        int half_line_sample_ix = m_sample_ix <= NtscInputBlock::c_samples_per_video_line / 2 ?
+            m_sample_ix : m_sample_ix - NtscInputBlock::c_samples_per_video_line / 2;
+        bool right_half = m_sample_ix >= NtscInputBlock::c_samples_per_video_line / 2 + 1;
+        if (half_line_sample_ix == 1) {
+            m_half_line_sync_pattern_error_sum = 0;
+            m_half_line_sync_pattern_eq_error_sum = 0;
+            m_half_line_sync_pattern_br_error_sum = 0;
+        }
 
-            if (m_sample_ix == NtscInputBlock::c_samples_per_video_line) {
-                if (m_half_line_pulse_error_sum < 0.07 * NtscInputBlock::c_samples_per_video_line) {
-                    m_missed_line_pulses = 0;
+        if (m_state == eLocked && (m_line <= 9 || m_line >= 264 && m_line <= 271 || m_line == 263 && right_half || m_line == 272 && !right_half)) {
+            int expected_pulse_samples = expectedPulseSamplesForHalfLine(m_line, right_half);
+            float expected_voltage = half_line_sample_ix <= expected_pulse_samples ? 0.f : 0.3f;
+            m_half_line_sync_pattern_error_sum += pow(sample - expected_voltage, 2.f);
+
+            if (half_line_sample_ix == NtscInputBlock::c_samples_per_video_line / 2) {
+                if (m_half_line_sync_pattern_error_sum < 0.03 * NtscInputBlock::c_samples_per_video_line / 2) {
+                    //printf("line %d %d, sum %f\n", m_line, right_half, m_half_line_sync_pattern_error_sum);
+                    m_missed_half_line_vert_sync_patterns = 0;
                 } else {
-                    if (m_missed_line_pulses < 3)
-                        m_missed_line_pulses += 1;
+                    if (m_missed_half_line_vert_sync_patterns < 3)
+                        m_missed_half_line_vert_sync_patterns += 1;
                     else {
                         m_log.warn(eInput, std::format("Missed line pulses: New state eSearching at line {}", m_line));
                         m_state = eSearching;
                     }
                 }
             }
-        }
-        if (m_state == eLockedHoriz) {
-            // Looking for line 4
-            int expectedPulseSamples = expectedPulseSamplesForHalfLine(4, m_sample_ix >= NtscInputBlock::c_samples_per_video_line / 2);
-            int halfLineSampleIx = m_sample_ix % (NtscInputBlock::c_samples_per_video_line / 2);
-            float expectedVoltage = halfLineSampleIx <= expectedPulseSamples ? 0.f : 0.3f;
-            m_half_line_pulse_error_sum_search_first += pow(sample - expectedVoltage, 2.f);
-            if (m_sample_ix == NtscInputBlock::c_samples_per_video_line) {
-                if (m_half_line_pulse_error_sum_search_first < 0.05 * NtscInputBlock::c_samples_per_video_line) {
+        } else if (m_state == eLockedHoriz) {
+            float expected_voltage_eq = half_line_sample_ix <= c_equalizationPulseSamples ? 0.f : 0.3f;
+            float expected_voltage_br = half_line_sample_ix <= c_broadPulseSamples ? 0.f : 0.3f;
+
+            m_half_line_sync_pattern_eq_error_sum += pow(sample - expected_voltage_eq, 2.f);
+            m_half_line_sync_pattern_br_error_sum += pow(sample - expected_voltage_br, 2.f);
+
+            if (half_line_sample_ix == NtscInputBlock::c_samples_per_video_line / 2) {
+                if (m_half_line_sync_pattern_eq_error_sum <= 0.02 * NtscInputBlock::c_samples_per_video_line / 2)
+                    m_vert_sync_half_line_pattern = (m_vert_sync_half_line_pattern << 2) | 0b01;
+                else if (m_half_line_sync_pattern_br_error_sum <= 0.02 * NtscInputBlock::c_samples_per_video_line / 2)
+                    m_vert_sync_half_line_pattern = (m_vert_sync_half_line_pattern << 2) | 0b11;
+                else
+                    m_vert_sync_half_line_pattern = (m_vert_sync_half_line_pattern << 2) | 0b00;
+
+                if ((m_vert_sync_half_line_pattern & 0xfffffffff) == 0b010101010101111111111111010101010101L) {
                     m_log.info(eInput, std::format("New state eLocked at line {}", m_line));
                     m_state = eLocked;
-                    m_line = 4;
-                    // FIXME: in the MUSE version, we copy the first four lines to to make the frame complete
+                    m_line = 9;
+                    // TODO: in the MUSE version, we copy the first four lines to to make the frame complete -- any point doing this here?
                 }
             }
-        }
-        if (m_sample_ix == NtscInputBlock::c_samples_per_video_line) {
-            m_half_line_pulse_error_sum = 0;
-            m_half_line_pulse_error_sum_search_first = 0;
         }
 
         if (m_sample_ix == 10) { // The sync defines the start of a line at sample 1, but we wait so we can read the value it settled at
@@ -384,13 +400,6 @@ void NtscInputReader::setUnlocked() {
 }
 
 int NtscInputReader::expectedPulseSamplesForHalfLine(int line, int halfLine) {
-    const double normalPulseTime = 4.7e-6;
-    const double equalizationPulseTime = normalPulseTime / 2;
-    const double broadPulseTime =  NtscInputBlock::c_samples_per_video_line / NtscInputBlock::c_video_sampling_frequency - normalPulseTime;
-
-    const int equalizationPulseSamples = equalizationPulseTime * NtscInputBlock::c_video_sampling_frequency;
-    const int broadPulseSamples = broadPulseTime * NtscInputBlock::c_video_sampling_frequency;
-
     switch (line) {
         case 1:
         case 2:
@@ -402,18 +411,22 @@ int NtscInputReader::expectedPulseSamplesForHalfLine(int line, int halfLine) {
         case 265:
         case 270:
         case 271:
-            return equalizationPulseSamples;
+            return c_equalizationPulseSamples;
         case 4:
         case 5:
         case 6:
         case 267:
         case 268:
-            return broadPulseSamples;
+            return c_broadPulseSamples;
+        case 263:
+            return halfLine == 0 ? c_normalPulseSamples : c_equalizationPulseSamples;
         case 266:
-            return halfLine == 0 ? equalizationPulseSamples : broadPulseSamples;
+            return halfLine == 0 ? c_equalizationPulseSamples : c_broadPulseSamples;
         case 269:
-            return halfLine == 0 ? broadPulseSamples : equalizationPulseSamples;
+            return halfLine == 0 ? c_broadPulseSamples : c_equalizationPulseSamples;
+        case 272:
+            return halfLine == 0 ? c_equalizationPulseSamples : c_normalPulseSamples;
         default:
-            throw std::runtime_error("Impossible case");
+            throw std::runtime_error("Table only for lines in vertical blanking");
     }
 }

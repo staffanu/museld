@@ -91,15 +91,28 @@ private:
         eSearching, eLocked, eLockedHoriz
     };
 
+    static constexpr double c_normalPulseTime = 4.7e-6;
+    static constexpr double c_equalizationPulseTime = c_normalPulseTime / 2;
+    static constexpr double c_broadPulseTime =  NtscInputBlock::c_samples_per_video_line / NtscInputBlock::c_video_sampling_frequency - c_normalPulseTime;
+
+    const int c_normalPulseSamples = c_normalPulseTime * NtscInputBlock::c_video_sampling_frequency;
+    const int c_equalizationPulseSamples = c_equalizationPulseTime * NtscInputBlock::c_video_sampling_frequency;
+    const int c_broadPulseSamples = c_broadPulseTime * NtscInputBlock::c_video_sampling_frequency;
+
+    float m_half_line_sync_pattern_error_sum; // used when locked
+    float m_half_line_sync_pattern_eq_error_sum; // used when scanning for horiz sync
+    float m_half_line_sync_pattern_br_error_sum; // used when scanning for horiz sync
+    // two bits per half line: 01: EQ, 11: BR, 00 -- other. Last half line shifted in at LSB
+    long m_vert_sync_half_line_pattern; // using 36 bits
+
     int m_sample_ix;
     int m_line;
     PllState m_state;
-    float m_half_line_pulse_error_sum;
-    float m_half_line_pulse_error_sum_search_first;
     PercentileFilter m_lower_percentile_filter;
     int m_consecutive_good_syncs;
-    int m_missed_line_pulses;
+    int m_missed_half_line_vert_sync_patterns;
     long m_frame_start_offset;
+
     static constexpr int c_sample_history_size = 16;
     float m_sample_history[c_sample_history_size];
     int m_sample_history_ix;
