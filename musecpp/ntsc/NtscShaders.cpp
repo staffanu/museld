@@ -34,15 +34,37 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
   m_image_U_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_Y_BUF_WIDTH / 2, NTSC_FIELD_HEIGHT), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_image_V_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_Y_BUF_WIDTH / 2, NTSC_FIELD_HEIGHT), 2,
-                                          vk::BufferUsageFlagBits::eStorageBuffer, eHostRead))
+                                          vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
+
+  // Filters created in Octave:
+  // notch = fir1(30, [2.5e6/(4*fsc/2) 4.2e6/(4*fsc/2)], 'stop')
+  // bandpass = fir1(15, [2.5e6/(4*fsc/2) 4.2e6/(4*fsc/2)], 'pass')
+  m_y_c_notch_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
+          Size(31),
+          {
+              -2.1600e-03, -4.1055e-04, 5.6777e-03, 2.7503e-03, -1.0037e-02, -5.5494e-03, 4.8389e-03, -4.1513e-03,
+              1.8039e-02, 4.6213e-02, -4.6678e-02, -1.2320e-01, 5.3514e-02, 2.0323e-01, -2.3867e-02, 7.6359e-01,
+              -2.3867e-02, 2.0323e-01, 5.3514e-02, -1.2320e-01, -4.6678e-02, 4.6213e-02, 1.8039e-02, -4.1513e-03,
+              4.8389e-03, -5.5494e-03, -1.0037e-02, 2.7503e-03, 5.6777e-03, -4.1055e-04, -2.1600e-03
+          })),
+  m_y_c_bandpass_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
+          Size(16),
+          {
+            1.5815e-05, -9.7156e-03, -6.3999e-03, 6.7384e-02, 5.3522e-02, -1.7266e-01, -1.5330e-01, 2.2005e-01,
+            2.2005e-01, -1.5330e-01, -1.7266e-01, 5.3522e-02, 6.7384e-02, -6.3999e-03, -9.7156e-03, 1.5815e-05
+          }))
 {
   m_copy_to_frame_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_copy_to_frame",
           {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 1,
           VulkanUtil::loadSpirv(executable_dir, "ntsc_copy_to_frame.comp"), Size(NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT)));
+   m_filter_color_for_frame_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+          "filter_color_for_frame_algo",
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 2,
+          VulkanUtil::loadSpirv(executable_dir, "ntsc_filter_color_for_frame.comp"), Size(NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT)));
   m_decode_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_decode_single_field",
-          {eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 1,
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 1,
           VulkanUtil::loadSpirv(executable_dir, "ntsc_decode_single_field.comp"), Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT)));
   m_decode_two_fields_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_decode_two_fields",
@@ -67,10 +89,18 @@ void NtscShaders::copyToFrame(musevk::CommandBuffer &sq, std::shared_ptr<musevk:
   sq.enqueueComputeShader<int32_t>(m_copy_to_frame_algo,{ dropout_mode == DropoutMode::eNormal ? 0 : dropout_mode == DropoutMode::eDisabled ? 1 : 2 });
 }
 
+void NtscShaders::filterColorForFrame(musevk::CommandBuffer &sq, std::shared_ptr<musevk::VulkanBuffer> const &frame_data,
+  std::shared_ptr<musevk::VulkanBuffer> const &frame_y_data, std::shared_ptr<musevk::VulkanBuffer> const &frame_c_data) {
+
+  m_filter_color_for_frame_algo->updateBufferDescriptorsInSet(0, {m_y_c_notch_filter_buffer, m_y_c_bandpass_filter_buffer,
+                                                                  frame_data, frame_y_data, frame_c_data});
+  sq.enqueueComputeShader<uint32_t>(m_filter_color_for_frame_algo, { m_y_c_notch_filter_buffer->size().x_size, m_y_c_bandpass_filter_buffer->size().x_size });
+}
+
 void NtscShaders::decodeSingleField(CommandBuffer &sq, NtscFieldView &field) {
   int field_parity = field.m_field_parity;
 
-  m_decode_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, m_field_Y_buffer, m_field_U_buffer, m_field_V_buffer});
+  m_decode_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, field.m_y_data, field.m_c_data, m_field_Y_buffer, m_field_U_buffer, m_field_V_buffer});
   sq.enqueueComputeShader<int32_t>(m_decode_single_field_algo,{ field_parity });
 }
 

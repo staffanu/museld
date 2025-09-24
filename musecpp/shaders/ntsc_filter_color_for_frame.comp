@@ -1,0 +1,54 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// ranging from (0, 0) to (NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT).
+// The input are floats, but outputs are float16_t, since all
+// further processing is performed on half floats.
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint notch_filter_size;
+    uint bandpass_filter_size;
+};
+
+layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
+    float16_t notch_filter[];
+};
+
+layout(set = 0, binding = 1) buffer readonly bandpass_filter_buffer {
+    float16_t bandpass_filter[];
+};
+
+layout(set = 0, binding = 2) buffer readonly in_data_buffer {
+    float16_t in_data[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 3) buffer writeonly y_data_buffer {
+    float16_t y_data[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 4) buffer writeonly c_data_buffer {
+    float16_t c_data[][NTSC_TOTAL_WIDTH];
+};
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= NTSC_TOTAL_HEIGHT || col < NTSC_FIELD_START_POS || col >= NTSC_FIELD_START_POS + NTSC_Y_BUF_WIDTH)
+        return;
+
+    float16_t y = 0.hf;
+    for (uint i = 0; i < notch_filter_size; i++) {
+        y += notch_filter[i] * in_data[row][col - notch_filter_size / 2 + i];
+    }
+
+    float16_t c = 0.hf;
+    for (uint i = 0; i < bandpass_filter_size; i++) {
+        c += bandpass_filter[i] * in_data[row][col - bandpass_filter_size / 2 + i];
+    }
+
+    y_data[row][col] = y;
+    c_data[row][col] = c;
+}

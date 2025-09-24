@@ -15,7 +15,14 @@ NtscFrame::NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager)
         m_data(std::make_unique<musevk::VulkanBuffer>(
                 manager, musevk::Size(NtscInputBlock::c_samples_per_video_line, NtscInputBlock::c_total_video_lines), 2 /* sizeof(float16) */,
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostRead)),
-        m_fields({NtscFieldView(log, frame_no, m_data, 0), NtscFieldView(log, frame_no, m_data, 1) }) {
+        m_y_data(std::make_unique<musevk::VulkanBuffer>(
+                manager, musevk::Size(NtscInputBlock::c_samples_per_video_line, NtscInputBlock::c_total_video_lines), 2 /* sizeof(float16) */,
+                vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostNone)),
+        m_c_data(std::make_unique<musevk::VulkanBuffer>(
+                manager, musevk::Size(NtscInputBlock::c_samples_per_video_line, NtscInputBlock::c_total_video_lines), 2 /* sizeof(float16) */,
+                vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostNone)),
+        m_fields({NtscFieldView(log, frame_no, m_data, m_y_data, m_c_data, 0),
+                  NtscFieldView(log, frame_no, m_data, m_y_data, m_c_data, 1) }) {
 }
 
 void NtscFrame::set_frame_no(int frame_no, long input_offset, double input_samples_per_sample) {
@@ -36,6 +43,14 @@ double NtscFrame::getInputSamplesPerNtscSample() const {
 
 std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::data() {
     return m_data;
+}
+
+std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::y_data() {
+    return m_y_data;
+}
+
+std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::c_data() {
+    return m_c_data;
 }
 
 NtscFieldView &NtscFrame::get_field(int parity) {

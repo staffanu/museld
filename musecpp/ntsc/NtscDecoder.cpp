@@ -119,6 +119,8 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
         m_shaders.copyToFrame(*m_first_stage_command_buffer, input_block->video_data, input_block->dropout_data,
             frame->data(), dropout_mode);
         frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
+
+        m_shaders.filterColorForFrame(*m_first_stage_command_buffer, frame->data(), frame->y_data(), frame->c_data());
     }
     m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 

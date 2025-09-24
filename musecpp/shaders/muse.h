@@ -24,3 +24,4 @@ layout (local_size_z_id = 3) in;
 #define NTSC_TOTAL_WIDTH 910
 #define NTSC_Y_BUF_WIDTH 764
 #define NTSC_FIELD_HEIGHT 241
+#define NTSC_FIELD_START_POS 129
