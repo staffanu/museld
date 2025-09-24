@@ -18,12 +18,23 @@ layout(set = 0, binding = 1) buffer writeonly Y_data_buffer {
 };
 
 layout(set = 0, binding = 2) buffer writeonly r_data_buffer {
-    float16_t r_data[][NTSC_Y_BUF_WIDTH / 2];
+    float16_t U_data[][NTSC_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 3) buffer writeonly b_data_buffer {
-    float16_t b_data[][NTSC_Y_BUF_WIDTH / 2];
+    float16_t V_data[][NTSC_Y_BUF_WIDTH];
 };
+
+float16_t cosine_lut[] = { 1.hf, 0.hf, -1.hf, 0.hf };
+float16_t sine_lut[] = { 0.hf, 1.hf, 0.hf, -1.hf };
+
+float16_t color_cosine(uint col) {
+    return cosine_lut[col % 4];
+}
+
+float16_t color_sine(uint col) {
+    return sine_lut[col % 4];
+}
 
 void main() {
     uint row = gl_GlobalInvocationID.y;
@@ -33,10 +44,46 @@ void main() {
         return;
 
     uint frame_line = 22 + row + 263 * field_parity;
+    uint frame_col = col + 129;
 
-    // FIXME: offsets, and currently no color decoding
+    float16_t Y = 0.25hf * input_frame[frame_line - 1][frame_col] + 0.5hf * input_frame[frame_line][frame_col] + 0.25hf * input_frame[frame_line][frame_col];
+    float16_t c = -0.25hf * input_frame[frame_line - 1][frame_col] + 0.5hf * input_frame[frame_line][frame_col] - 0.25hf * input_frame[frame_line][frame_col];
 
-    float16_t v = input_frame[frame_line][col + 122];
+    // compute the sum of the color burst times cos(i) / sin(i)
+    float16_t b_re = 0.hf;
+    float16_t b_im = 0.hf;
+    for (uint i = 0; i < 32; i++) {
+        uint burst_col = 70 + i;
+        b_re += input_frame[frame_line][burst_col] * color_cosine(burst_col);
+        b_im += input_frame[frame_line][burst_col] * color_sine(burst_col);
+    }
+    float16_t b_abs = sqrt(b_re * b_re + b_im * b_im);
+    b_re /= b_abs;
+    b_im /= b_abs;
 
-    Y_data[row][col] = v;
+    if (row < 100)
+        b_im = -b_im;
+
+    float16_t c_re = c * color_cosine(frame_col);
+    float16_t c_im = c * color_sine(frame_col);
+    if (row % 100 < 50)
+        c_im = -c_im;
+
+    // rotate the c vector by the conjugate of the burst
+    // (a + ib)(c + id) = ac-bd + i(bc+ad)
+
+    float16_t I = c_re * b_re - c_im * b_im;
+    float16_t Q = c_im * b_re + c_re * b_im;
+
+    float16_t rot_re = 0.8387hf;
+    float16_t rot_im = -0.5446hf;
+    if (row % 50 < 25)
+        rot_im = -rot_im;
+
+    float16_t U = I * rot_re - Q * rot_im;
+    float16_t V = Q * rot_re + I * rot_im;
+
+    Y_data[row][col] = Y;
+    U_data[row][col] = U;
+    V_data[row][col] = V;
 }

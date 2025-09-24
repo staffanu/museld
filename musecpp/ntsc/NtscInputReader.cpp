@@ -156,7 +156,7 @@ void NtscInputReader::threadFunc() {
             }
             output_block = std::move(m_vacant_input_buffers.front());
             m_vacant_input_buffers.pop_front();
-            output_block->efm_data_size = 0;;
+            output_block->efm_data_size = 0;
         }
 
         if (!process(output_block)) {

@@ -24,11 +24,11 @@ layout(set = 0, binding = 2) buffer writeonly Y_data_buffer {
 };
 
 layout(set = 0, binding = 3) buffer writeonly r_data_buffer {
-    float16_t r_data[][NTSC_Y_BUF_WIDTH / 2];
+    float16_t U_data[][NTSC_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 4) buffer writeonly b_data_buffer {
-    float16_t b_data[][NTSC_Y_BUF_WIDTH / 2];
+    float16_t V_data[][NTSC_Y_BUF_WIDTH];
 };
 
 void main() {
@@ -42,10 +42,10 @@ void main() {
     if ((row & 1) == 0) {
         // top field
         uint frame_line = 22 + row / 2;
-        v = input_frame0[frame_line][col + 122];
+        v = input_frame0[frame_line][col + 129];
     } else {
         uint frame_line = 22 + row / 2 + 263;
-        v = input_frame0[frame_line][col + 122];
+        v = input_frame0[frame_line][col + 129];
     }
 
     Y_data[row][col] = v;

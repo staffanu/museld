@@ -21,6 +21,6 @@ layout (local_size_z_id = 3) in;
 #define MUSE_C_OFFSET 11
 
 #define NTSC_TOTAL_HEIGHT 525
-#define NTSC_TOTAL_WIDTH 858
-#define NTSC_Y_BUF_WIDTH 720
+#define NTSC_TOTAL_WIDTH 910
+#define NTSC_Y_BUF_WIDTH 764
 #define NTSC_FIELD_HEIGHT 241

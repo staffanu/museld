@@ -16,11 +16,11 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
 : m_log(log),
   m_vulkan_manager(manager),
   m_field_Y_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH)),
-  m_field_r_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH / 2)),
-  m_field_b_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH / 2)),
+  m_field_U_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH)),
+  m_field_V_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH)),
   m_inter_frame_Y_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH)),
-  m_inter_frame_r_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH / 2)),
-  m_inter_frame_b_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH / 2)),
+  m_inter_frame_U_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH)),
+  m_inter_frame_V_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH)),
   m_current_movement_buffer_index(0),
   m_movement_buffers({ createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH),
                      createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH) }),
@@ -70,7 +70,7 @@ void NtscShaders::copyToFrame(musevk::CommandBuffer &sq, std::shared_ptr<musevk:
 void NtscShaders::decodeSingleField(CommandBuffer &sq, NtscFieldView &field) {
   int field_parity = field.m_field_parity;
 
-  m_decode_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, m_field_Y_buffer, m_field_r_buffer, m_field_b_buffer});
+  m_decode_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, m_field_Y_buffer, m_field_U_buffer, m_field_V_buffer});
   sq.enqueueComputeShader<int32_t>(m_decode_single_field_algo,{ field_parity });
 }
 
@@ -80,7 +80,7 @@ bool NtscShaders::decodeTwoFieldsAndDetectMotion(CommandBuffer &sq,
                                               bool use_prev_motion_info) {
     assert(fields.size() >= 4);
 
-    m_decode_two_fields_algo->updateBufferDescriptorsInSet(0, {fields[0].get().m_data, fields[1].get().m_data, m_inter_frame_Y_buffer, m_inter_frame_r_buffer, m_inter_frame_b_buffer});
+    m_decode_two_fields_algo->updateBufferDescriptorsInSet(0, {fields[0].get().m_data, fields[1].get().m_data, m_inter_frame_Y_buffer, m_inter_frame_U_buffer, m_inter_frame_V_buffer});
     sq.enqueueComputeShader<int32_t>(m_decode_two_fields_algo,{ fields[0].get().m_field_parity });
 
     return true;
@@ -94,9 +94,9 @@ void NtscShaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field
                                        vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
   m_combine_still_and_moving_algo->updateBufferDescriptorsInSet(
           0,
-          {m_field_Y_buffer, m_field_r_buffer,
-           m_field_b_buffer, m_inter_frame_Y_buffer,
-           m_inter_frame_r_buffer, m_inter_frame_b_buffer,
+          {m_field_Y_buffer, m_field_U_buffer,
+           m_field_V_buffer, m_inter_frame_Y_buffer,
+           m_inter_frame_U_buffer, m_inter_frame_V_buffer,
            m_movement_buffers[m_current_movement_buffer_index], m_image_out,
            m_image_Y_out, m_image_U_out, m_image_V_out});
   sq.enqueueComputeShader(m_combine_still_and_moving_algo,

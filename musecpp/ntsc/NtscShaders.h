@@ -53,13 +53,13 @@ private:
 
   // output from single field decoder
   std::shared_ptr<musevk::VulkanBuffer> m_field_Y_buffer; // NTSC_FIELD_HEIGHT * NTSC_Y_BUF_WIDTH
-  std::shared_ptr<musevk::VulkanBuffer> m_field_r_buffer; // NTSC_FIELD_HEIGHT * NTSC_Y_BUF_WIDTH / 2
-  std::shared_ptr<musevk::VulkanBuffer> m_field_b_buffer; // NTSC_FIELD_HEIGHT * NTSC_Y_BUF_WIDTH / 2
+  std::shared_ptr<musevk::VulkanBuffer> m_field_U_buffer; // NTSC_FIELD_HEIGHT * NTSC_Y_BUF_WIDTH
+  std::shared_ptr<musevk::VulkanBuffer> m_field_V_buffer; // NTSC_FIELD_HEIGHT * NTSC_Y_BUF_WIDTH
 
   // output from inter-frame interpolation
-  std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_Y_buffer; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
-  std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_r_buffer; // MUSE_BUF_HEIGHT * 2 * MUSE_BUF_Y_WIDTH
-  std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_b_buffer; // MUSE_BUF_HEIGHT * 2 * MUSE_BUF_Y_WIDTH
+  std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_Y_buffer; // NTSC_FIELD_HEIGHT * 2 * NTSC_Y_BUF_WIDTH
+  std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_U_buffer; // NTSC_FIELD_HEIGHT * 2 * NTSC_Y_BUF_WIDTH
+  std::shared_ptr<musevk::VulkanBuffer> m_inter_frame_V_buffer; // NTSC_FIELD_HEIGHT * 2 * NTSC_Y_BUF_WIDTH
 
   int m_current_movement_buffer_index;
   std::vector<std::shared_ptr<musevk::VulkanBuffer>> m_movement_buffers; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3

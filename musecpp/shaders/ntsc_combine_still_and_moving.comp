@@ -14,27 +14,27 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(set = 0, binding = 0) buffer readonly restrict field_Y_buffer {
-    float16_t field_y[][NTSC_Y_BUF_WIDTH];
+    float16_t field_Y[][NTSC_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 1) buffer readonly restrict field_r_buffer {
-    float16_t field_r[][NTSC_Y_BUF_WIDTH / 2];
+    float16_t field_U[][NTSC_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 2) buffer readonly restrict field_b_buffer {
-    float16_t field_b[][NTSC_Y_BUF_WIDTH / 2];
+    float16_t field_V[][NTSC_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 3) buffer readonly restrict inter_frame_Y_buffer {
-    float16_t inter_frame_y[][NTSC_Y_BUF_WIDTH];
+    float16_t inter_frame_Y[][NTSC_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 4) buffer readonly restrict inter_frame_r_buffer {
-    float16_t inter_frame_r[][NTSC_Y_BUF_WIDTH / 2];
+    float16_t inter_frame_U[][NTSC_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 5) buffer readonly restrict inter_frame_b_buffer {
-    float16_t inter_frame_b[][NTSC_Y_BUF_WIDTH / 2];
+    float16_t inter_frame_V[][NTSC_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 6) buffer readonly restrict movement_buffer {
@@ -44,15 +44,15 @@ layout(set = 0, binding = 6) buffer readonly restrict movement_buffer {
 layout(set = 0, binding = 7, rgba32f) uniform writeonly image2D frame_out_image;
 
 layout(set = 0, binding = 8) buffer writeonly frame_out_y_buffer {
-    uint16_t frame_out_y[][NTSC_Y_BUF_WIDTH];
+    uint16_t frame_out_Y[][NTSC_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 9) buffer writeonly frame_out_u_buffer {
-    uint16_t frame_out_u[][NTSC_Y_BUF_WIDTH / 2];
+    uint16_t frame_out_U[][NTSC_Y_BUF_WIDTH / 2];
 };
 
 layout(set = 0, binding = 10) buffer writeonly frame_out_v_buffer {
-    uint16_t frame_out_v[][NTSC_Y_BUF_WIDTH / 2];
+    uint16_t frame_out_V[][NTSC_Y_BUF_WIDTH / 2];
 };
 
 void main() {
@@ -62,32 +62,48 @@ void main() {
     if (row >= NTSC_FIELD_HEIGHT * 2 || col >= NTSC_Y_BUF_WIDTH)
         return;
 
-    float16_t v;
+    float16_t Y, U, V;
     if (force_field_only != 0) {
         if ((row & 1) == 0) {
             if (field_parity == 0) {
-                v = field_y[row / 2][col];
+                Y = field_Y[row / 2][col];
+                U = field_U[row / 2][col];
+                V = field_V[row / 2][col];
             } else {
-                v = 0.5hf * field_y[row / 2][col] + 0.5hf * field_y[clamp(row / 2 - 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+                Y = 0.5hf * field_Y[row / 2][col] + 0.5hf * field_Y[clamp(row / 2 - 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+                U = 0.5hf * field_U[row / 2][col] + 0.5hf * field_U[clamp(row / 2 - 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+                V = 0.5hf * field_V[row / 2][col] + 0.5hf * field_V[clamp(row / 2 - 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
             }
         } else {
             if (field_parity == 0) {
-                v = 0.5hf * field_y[row / 2][col] + 0.5hf * field_y[clamp(row / 2 + 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+                Y = 0.5hf * field_Y[row / 2][col] + 0.5hf * field_Y[clamp(row / 2 + 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+                U = 0.5hf * field_U[row / 2][col] + 0.5hf * field_U[clamp(row / 2 + 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+                V = 0.5hf * field_V[row / 2][col] + 0.5hf * field_V[clamp(row / 2 + 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
             } else {
-                v = field_y[row / 2][col];
+                Y = field_Y[row / 2][col];
+                U = field_U[row / 2][col];
+                V = field_V[row / 2][col];
             }
         }
-
-        //v = field_y[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
     } else if (force_inter_frame_only != 0) {
-        v = inter_frame_y[row][col];
+        Y = inter_frame_Y[row][col];
+        U = 0.hf;
+        V = 0.hf;
     } else {
         // FIXME: combine!
-        v = field_y[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
+        Y = field_Y[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
+        U = field_U[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
+        V = field_V[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
     }
-    v = clamp(v, 0.hf, 1.hf);
+    Y = clamp(Y, 0.hf, 1.hf);
+    U = clamp(U, -1.hf, 1.hf);
+    V = clamp(V, -1.hf, 1.hf);
 
-    imageStore(frame_out_image, ivec2(col, row), vec4(float(v), float(v), float(v), 1.f));
+    float16_t r = Y + V * 1.139883hf;
+    float16_t g = Y - U * 0.394642hf - V * 0.580622hf;
+    float16_t b = Y + U * 2.032062hf;
+
+    imageStore(frame_out_image, ivec2(col, row), vec4(float(r), float(g), float(b), 1.f));
 
     if (output_yuv != 0) {
     }
