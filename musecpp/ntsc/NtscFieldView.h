@@ -11,6 +11,7 @@
 class NtscFieldView {
 public:
     NtscFieldView(Logger &log, int frame_no, std::shared_ptr<musevk::VulkanBuffer> const &data,
+    std::shared_ptr<musevk::VulkanBuffer> const &burst_phase_data,
     std::shared_ptr<musevk::VulkanBuffer> const &y_data, std::shared_ptr<musevk::VulkanBuffer> const &c_data,
     int field_parity);
 
@@ -23,6 +24,7 @@ public:
     int m_field_parity;
 
     std::shared_ptr<musevk::VulkanBuffer> m_data;
+    std::shared_ptr<musevk::VulkanBuffer> m_burst_phase_data;
     std::shared_ptr<musevk::VulkanBuffer> m_y_data;
     std::shared_ptr<musevk::VulkanBuffer> m_c_data;
 

@@ -32,21 +32,36 @@ layout(set = 0, binding = 4) buffer writeonly c_data_buffer {
     float16_t c_data[][NTSC_TOTAL_WIDTH];
 };
 
+#define MAX_FILTER_SIZE 64 // same as workgroup size
+shared float16_t shared_notch_filter[MAX_FILTER_SIZE];
+shared float16_t shared_bandpass_filter[MAX_FILTER_SIZE];
+
 void main() {
+    // This converts the local index to a one-dimensional index
+    uint local_ix = gl_LocalInvocationID.x + gl_WorkGroupSize.x * gl_LocalInvocationID.y;
+    if (local_ix < notch_filter_size) {
+        shared_notch_filter[local_ix] = notch_filter[local_ix];
+    }
+    if (local_ix < bandpass_filter_size) {
+        shared_bandpass_filter[local_ix] = bandpass_filter[local_ix];
+    }
+
+    barrier();
+
     uint row = gl_GlobalInvocationID.y;
     uint col = gl_GlobalInvocationID.x;
 
-    if (row >= NTSC_TOTAL_HEIGHT || col < NTSC_FIELD_START_POS || col >= NTSC_FIELD_START_POS + NTSC_Y_BUF_WIDTH)
+    if (row >= NTSC_TOTAL_HEIGHT || col < NTSC_FIELD_START_X || col >= NTSC_FIELD_START_X + NTSC_Y_BUF_WIDTH)
         return;
 
     float16_t y = 0.hf;
     for (uint i = 0; i < notch_filter_size; i++) {
-        y += notch_filter[i] * in_data[row][col - notch_filter_size / 2 + i];
+        y += shared_notch_filter[i] * in_data[row][col - notch_filter_size / 2 + i];
     }
 
     float16_t c = 0.hf;
     for (uint i = 0; i < bandpass_filter_size; i++) {
-        c += bandpass_filter[i] * in_data[row][col - bandpass_filter_size / 2 + i];
+        c += shared_bandpass_filter[i] * in_data[row][col - bandpass_filter_size / 2 + i];
     }
 
     y_data[row][col] = y;

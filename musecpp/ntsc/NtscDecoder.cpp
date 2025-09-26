@@ -120,7 +120,7 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
             frame->data(), dropout_mode);
         frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
 
-        m_shaders.filterColorForFrame(*m_first_stage_command_buffer, frame->data(), frame->y_data(), frame->c_data());
+        m_shaders.filterColorForFrame(*m_first_stage_command_buffer, frame);
     }
     m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
@@ -161,9 +161,8 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
 
     m_first_stage_command_buffer->wait();
 
-//    assert(input_block != nullptr == m_first_stage_command_buffer->isSubmitted());
     if (input_block != nullptr) {
-        //m_frame_buffers[0]->processDiscCode();
+        m_frames[0]->processVbi();
     }
 
     if (m_decode_audio && m_field_index == 0) {
@@ -197,7 +196,7 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
     else
         m_field_index = (m_field_index + 1) % 2;
 
-    //*disc_code = m_frame_buffers[0]->getDiscCode();
+    *disc_info = m_frames[0]->getVbiData();
 
     return true;
 }

@@ -21,15 +21,19 @@ layout(set = 0, binding = 2) buffer readonly input_frame_c_buffer {
     float16_t input_frame_c[][NTSC_TOTAL_WIDTH];
 };
 
-layout(set = 0, binding = 3) buffer writeonly Y_data_buffer {
+layout(set = 0, binding = 3) buffer readonly color_burst_phase_data_buffer {
+    f16vec2 phase_data[];
+};
+
+layout(set = 0, binding = 4) buffer writeonly Y_data_buffer {
     float16_t Y_data[][NTSC_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 4) buffer writeonly r_data_buffer {
+layout(set = 0, binding = 5) buffer writeonly r_data_buffer {
     float16_t U_data[][NTSC_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 5) buffer writeonly b_data_buffer {
+layout(set = 0, binding = 6) buffer writeonly b_data_buffer {
     float16_t V_data[][NTSC_Y_BUF_WIDTH];
 };
 
@@ -52,7 +56,7 @@ void main() {
         return;
 
     uint frame_line = 22 + row + 263 * field_parity;
-    uint frame_col = col + NTSC_FIELD_START_POS;
+    uint frame_col = col + NTSC_FIELD_START_X;
 
     float16_t Y;
     float16_t c;
@@ -64,17 +68,8 @@ void main() {
         c = input_frame_c[frame_line][frame_col];
     }
 
-    // compute the sum of the color burst times cos(i) / sin(i)
-    float16_t b_re = 0.hf;
-    float16_t b_im = 0.hf;
-    for (uint i = 0; i < 32; i++) {
-        uint burst_col = 70 + i;
-        b_re += input_frame[frame_line][burst_col] * color_cosine(burst_col);
-        b_im += input_frame[frame_line][burst_col] * color_sine(burst_col);
-    }
-    float16_t b_abs = sqrt(b_re * b_re + b_im * b_im);
-    b_re /= b_abs;
-    b_im /= b_abs;
+    float16_t b_re = phase_data[frame_line].x;
+    float16_t b_im = phase_data[frame_line].y;
 
     float16_t c_re = 2.hf * c * color_cosine(frame_col);
     float16_t c_im = 2.hf * c * color_sine(frame_col);

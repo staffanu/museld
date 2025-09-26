@@ -7,10 +7,11 @@
 
 #include <string>
 
-#include "DropoutMode.h"
-#include "NtscFieldView.h"
 #include "musevk/VulkanManager.h"
 #include "musevk/CommandPool.h"
+#include "DropoutMode.h"
+#include "NtscFieldView.h"
+#include "NtscFrame.h"
 #include "util/Logger.h"
 #include "ResultImages.h"
 
@@ -30,10 +31,8 @@ public:
                    DropoutMode dropout_mode);
 
   // Filter the raw frame data for luma and color using notch and bandpass filters respectively
-  void filterColorForFrame(musevk::CommandBuffer &sq,
-    std::shared_ptr<musevk::VulkanBuffer> const &frame_data,
-    std::shared_ptr<musevk::VulkanBuffer> const &frame_y_data,
-    std::shared_ptr<musevk::VulkanBuffer> const &frame_c_data);
+  // Also fills in the color burst phase information
+  void filterColorForFrame(musevk::CommandBuffer &sq, NtscFrame *frame);
 
   void decodeSingleField(musevk::CommandBuffer &sq, NtscFieldView &field);
 
@@ -53,6 +52,7 @@ private:
   musevk::VulkanManager &m_vulkan_manager;
 
   std::shared_ptr<musevk::ComputeShader> m_copy_to_frame_algo;
+  std::shared_ptr<musevk::ComputeShader> m_detect_color_burst_phase_algo;
   std::shared_ptr<musevk::ComputeShader> m_filter_color_for_frame_algo;
   std::shared_ptr<musevk::ComputeShader> m_decode_single_field_algo;
   std::shared_ptr<musevk::ComputeShader> m_decode_two_fields_algo;

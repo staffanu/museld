@@ -42,10 +42,10 @@ void main() {
     if ((row & 1) == 0) {
         // top field
         uint frame_line = 22 + row / 2;
-        v = input_frame0[frame_line][col + NTSC_FIELD_START_POS];
+        v = input_frame0[frame_line][col + NTSC_FIELD_START_X];
     } else {
         uint frame_line = 22 + row / 2 + 263;
-        v = input_frame0[frame_line][col + NTSC_FIELD_START_POS];
+        v = input_frame0[frame_line][col + NTSC_FIELD_START_X];
     }
 
     Y_data[row][col] = v;

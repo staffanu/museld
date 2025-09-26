@@ -65,6 +65,7 @@ add_executable(musecpp
         ntsc/NtscShaders.h ntsc/NtscShaders.cpp
         ntsc/NtscFrame.h ntsc/NtscFrame.cpp
         ntsc/NtscFieldView.h ntsc/NtscFieldView.cpp
+        ntsc/VbiData.h ntsc/VbiData.cpp
         util/PercentileFilter.cpp util/PercentileFilter.h
         util/Logger.cpp util/Logger.h
         util/ConstExprHelpers.h

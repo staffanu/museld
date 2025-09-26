@@ -1,0 +1,47 @@
+//
+// Created by staffanu on 9/25/25.
+//
+#include "VbiData.h"
+#include <format>
+
+VbiData::VbiData(bool is_lead_in, bool is_lead_out, bool is_clv, bool is_stop_code,
+    std::optional<int> chapter,
+    std::optional<int> clv_time_seconds,
+    std::optional<int> clv_picture_number,
+    std::optional<int> cav_picture_number,
+    std::optional<bool> cx_enabled)
+: DiscInfo(),
+  m_is_lead_in(is_lead_in),
+  m_is_lead_out(is_lead_out),
+  m_is_clv(is_clv),
+  m_is_stop_code(is_stop_code),
+  m_chapter(chapter),
+  m_clv_time_seconds(clv_time_seconds),
+  m_clv_picture_number(clv_picture_number),
+  m_cav_picture_number(cav_picture_number),
+  m_cx_enabled(cx_enabled) {
+}
+
+std::vector<std::string> VbiData::asStrings() const {
+  std::string string1 = m_is_clv ? "CLV " : "CAV ";
+  if (m_is_lead_in)
+    string1 += "Lead in ";
+  if (m_is_lead_out)
+    string1 += "Lead out ";
+  if (m_is_stop_code)
+    string1 += "Stop ";
+
+  std::string string2 = m_chapter.has_value() ? std::format("Chapter {} ", m_chapter.value()) : "";
+
+  if (m_is_clv) {
+    if (m_clv_time_seconds.has_value())
+      string2 += std::format("Time {}:{:02}:{:02} ", m_clv_time_seconds.value() / 3600, m_clv_time_seconds.value() % 3600 / 60, m_clv_time_seconds.value() % 60);
+    if (m_clv_picture_number.has_value())
+      string2 += std::format("Frame {:02} ", m_clv_picture_number.value());
+  } else {
+    if (m_cav_picture_number.has_value())
+      string2 += std::format("Frame {:05} ", m_cav_picture_number.value());
+  }
+
+  return {string1, string2};
+}
