@@ -29,6 +29,12 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ffast-math -fsanitize=address")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -ffast-math -UNDEBUG")
 
+#get_cmake_property(_variableNames VARIABLES)
+#list (SORT _variableNames)
+#foreach (_variableName ${_variableNames})
+#    message(STATUS "${_variableName}=${${_variableName}}")
+#endforeach()
+
 include_directories(.)
 
 add_executable(musecpp
@@ -87,7 +93,7 @@ target_link_libraries(musecpp
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
-        PRIVATE ${GNURADIO_LIBRARIES}
+        PRIVATE ${GNURADIO_LINK_LIBRARIES}
         PRIVATE ${LIBAV_LIBRARIES}
 )
 

@@ -206,7 +206,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
     m_total_elapsed_time_us += time_us;
     m_log.info(ePerformance, std::format("Field {} elapsed time {} ms; {} ms/frame",
                                          m_field_index, time_us / 1000,
-                                         m_total_elapsed_time_us / 1000 / m_frame_no));
+                                         m_frame_no != 0 ? m_total_elapsed_time_us / 1000 / m_frame_no : -1));
 
     if (input_status == InputStatus::eBuffersFilled)
         m_field_index = 0; // skip second field -- next field will be from the next frame

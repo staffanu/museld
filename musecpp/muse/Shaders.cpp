@@ -345,7 +345,7 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
     sq.enqueueComputeShader(
             m_convert_sample_rate_algo,
             vector{m_filter_4_to_3_buffer->size().x_size, 3u, 4u, 0u, 0u, m_interpolated32_buffer->size().y_size,
-                        m_interpolated32_buffer->size().x_size, uint(1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases}, convert_sample_rate_descriptor_set_index);
+                        m_interpolated32_buffer->size().x_size, (1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases}, convert_sample_rate_descriptor_set_index);
 }
 
 Shaders::ResultImages Shaders::getResultImages() {
