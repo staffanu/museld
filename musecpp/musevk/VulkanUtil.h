@@ -49,10 +49,10 @@ namespace musevk {
         static std::unique_ptr<VulkanBuffer> createDeviceBufferFloatsAsHalfFloats(VulkanManager &vulkan_manager, CommandPool &command_pool,
                                                                                   Size const &size, const std::vector<float> &data) {
             assert(size.numberOfElements() == data.size());
-            std::vector<ushort> half_floats(data.size());
+            std::vector<uint16_t> half_floats(data.size());
             for (int i = 0; i < data.size(); i++)
                 half_floats[i] = HalfFloatUtil::float_to_half(data[i]);
-            return createDeviceBuffer<ushort>(vulkan_manager, command_pool, size, half_floats);
+            return createDeviceBuffer<uint16_t>(vulkan_manager, command_pool, size, half_floats);
         }
     };
 }

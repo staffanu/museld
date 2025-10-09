@@ -20,8 +20,7 @@ namespace musevk {
               m_view(),
               m_descriptor_image_info(),
               m_layout(vk::ImageLayout::eUndefined) {
-        auto format = vk::Format::eB8G8R8A8Unorm;
-        //auto format = vk::Format::eR16G16B16A16Unorm;
+        auto format = vk::Format::eR16G16B16A16Sfloat;
 
         vk::ImageCreateInfo image_info(vk::ImageCreateFlags(),
                                        vk::ImageType::e2D,
