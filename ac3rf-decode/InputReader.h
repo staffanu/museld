@@ -5,6 +5,7 @@
 #ifndef AC3RF_DECODE_INPUTREADER_H
 #define AC3RF_DECODE_INPUTREADER_H
 
+#include <string.h>
 #include <fcntl.h>
 #include <string>
 #include <format>

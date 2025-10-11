@@ -121,7 +121,8 @@ int main(int argc, char *argv[]) {
                 float input_buffer[block_size];
                 while (reader->readFloats(input_buffer) == block_size) {
                     for (auto output: demodulator.demodulate(input_buffer))
-                        write(out_fd, output.data(), output.size());
+                        if (write(out_fd, output.data(), output.size()) == -1)
+                            throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
                 }
                 log.info(demodulator.reedSolomonStatistics());
 

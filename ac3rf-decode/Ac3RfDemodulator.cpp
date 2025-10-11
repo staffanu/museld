@@ -80,8 +80,6 @@ std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(float *input
             m_filter_stages[i].filter.size(), m_filter_stages[i].output_buffer->data() + m_filter_stages[i].output_offset, m_filter_stages[i].decimation_factor);
     }
 
-    write(m_output_fd, m_lp_iq_buffer.data(), m_input_block_size / m_decimation_factor * sizeof(std::complex<float>));
-
     // Create a "raw" symbol stream from the phase difference of the baseband data 1/288e3 seconds apart
     decodeSymbols(m_lp_iq_buffer, m_symbol_distance, m_symbol_buffer, m_input_block_size / m_decimation_factor);
 
