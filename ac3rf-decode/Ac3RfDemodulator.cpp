@@ -138,7 +138,6 @@ void Ac3RfDemodulator::firFilter(
     const int output_size = input_length / decimation_factor;
     assert(output_size % 2 == 0); // even output length!
     assert(c_AVX_floats_per_chunk * sizeof(float) == 32);
-    assert(((long)filter) % 32 == 0);
 
     alignas(__m256) std::array<float, c_AVX_floats_per_chunk> tmp_store0{};
     alignas(__m256) std::array<float, c_AVX_floats_per_chunk> tmp_store1{};
