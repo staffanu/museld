@@ -29,13 +29,14 @@ public:
     std::string reedSolomonStatistics() const;
 
 private:
-    static void firFilter(const std::complex<float> *input, size_t input_length,
-        const float *filter, size_t filter_length,
-        std::complex<float> *output, int decimation_factor);
+    static void firFilter(const float *input, size_t input_length,
+        const float *filter, size_t filter_length, float *output, int decimation_factor);
 
     // For each sample, compare it to a sample symbol_distance back to determine the current symbol
-    static void decodeSymbols(const std::vector<std::complex<float>> &lp_iq_buffer, int symbol_distance,
-        std::vector<uint8_t> &symbol_buffer, int buffer_size);
+    static void decodeSymbols(const std::vector<float> &lp_iq_re_buffer, const std::vector<float> &lp_iq_im_buffer,
+        int symbol_distance, std::vector<uint8_t> &symbol_buffer, int buffer_size);
+
+    constexpr static int c_AVX_floats_per_chunk = 8;
 
     Logger &m_log;
     double m_input_sample_frequency;
@@ -56,17 +57,21 @@ private:
             this->filter = filter;
             this->input_buffer_size_without_overlap = input_buffer_size_without_overlap;
             this->output_offset = output_offset;
-            input_buffer.resize(input_buffer_size_without_overlap + filter.size());
+            input_re_buffer.resize(input_buffer_size_without_overlap + filter.size());
+            input_im_buffer.resize(input_buffer_size_without_overlap + filter.size());
         }
         int decimation_factor;
         int input_buffer_size_without_overlap;
         int output_offset;
         std::vector<float> filter;
-        std::vector<std::complex<float>> input_buffer;
-        std::vector<std::complex<float>> *output_buffer; // pointer to next
+        std::vector<float> input_re_buffer;
+        std::vector<float> *output_re_buffer; // pointer to next
+        std::vector<float> input_im_buffer;
+        std::vector<float> *output_im_buffer; // pointer to next
     };
     std::vector<FilterStage> m_filter_stages;
-    std::vector<std::complex<float>> m_lp_iq_buffer; // Buffer after low-pass filtering the IQ signal -- overlap to be able to look back
+    std::vector<float> m_lp_iq_re_buffer; // Buffer after low-pass filtering the IQ signal -- overlap to be able to look back
+    std::vector<float> m_lp_iq_im_buffer;
 
     int m_symbol_distance; // This is the number of samples apart that two subsequent symbols appear in the decimated input.
 

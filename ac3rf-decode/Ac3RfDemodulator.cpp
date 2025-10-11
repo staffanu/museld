@@ -52,10 +52,13 @@ Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, i
         decimate_by_4_filter.size(), final_lowpass_filter.size(), m_filter_stages.size(), m_decimation_factor));
 
     // Buffer after low-pass filtering the IQ signal -- overlap to be able to look back
-    m_lp_iq_buffer.resize(m_input_block_size / m_decimation_factor + m_symbol_distance);
+    m_lp_iq_re_buffer.resize(m_input_block_size / m_decimation_factor + m_symbol_distance);
+    m_lp_iq_im_buffer.resize(m_input_block_size / m_decimation_factor + m_symbol_distance);
 
-    for (int i = 0; i < m_filter_stages.size(); i++)
-        m_filter_stages[i].output_buffer = i != m_filter_stages.size() - 1 ? &m_filter_stages[i + 1].input_buffer : &m_lp_iq_buffer;
+    for (int i = 0; i < m_filter_stages.size(); i++) {
+        m_filter_stages[i].output_re_buffer = i != m_filter_stages.size() - 1 ? &m_filter_stages[i + 1].input_re_buffer : &m_lp_iq_re_buffer;
+        m_filter_stages[i].output_im_buffer = i != m_filter_stages.size() - 1 ? &m_filter_stages[i + 1].input_im_buffer : &m_lp_iq_im_buffer;
+    }
 
     for (int i = 0; i < 1 << c_phase_accum_bits; i++)
         m_exp_lut[i] = std::polar(1.0, 2.0 * M_PI * i / (1 << c_phase_accum_bits));
@@ -72,18 +75,21 @@ Ac3RfDemodulator::~Ac3RfDemodulator() {
 std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(float *input_buffer) {
     // Mix the input signal with exp(i * 2 * pi * 288e6 * t)
     for (int i = 0; i < m_input_block_size; i++) {
-        m_filter_stages[0].input_buffer[i + m_filter_stages[0].filter.size()] = input_buffer[i] * m_exp_lut[m_phase_accumulator];
+        m_filter_stages[0].input_re_buffer[i + m_filter_stages[0].filter.size()] = input_buffer[i] * m_exp_lut[m_phase_accumulator].real();
+        m_filter_stages[0].input_im_buffer[i + m_filter_stages[0].filter.size()] = input_buffer[i] * m_exp_lut[m_phase_accumulator].imag();
         m_phase_accumulator = (m_phase_accumulator + m_phase_step) & ((1 << c_phase_accum_bits) - 1);
     }
 
     // Decimate the I/Q signal in stages and finally lowpass the I/Q signal
     for (int i = 0; i < m_filter_stages.size(); i++) {
-        firFilter(m_filter_stages[i].input_buffer.data(), m_filter_stages[i].input_buffer_size_without_overlap, m_filter_stages[i].filter.data(),
-            m_filter_stages[i].filter.size(), m_filter_stages[i].output_buffer->data() + m_filter_stages[i].output_offset, m_filter_stages[i].decimation_factor);
+        firFilter(m_filter_stages[i].input_re_buffer.data(), m_filter_stages[i].input_buffer_size_without_overlap, m_filter_stages[i].filter.data(),
+            m_filter_stages[i].filter.size(), m_filter_stages[i].output_re_buffer->data() + m_filter_stages[i].output_offset, m_filter_stages[i].decimation_factor);
+        firFilter(m_filter_stages[i].input_im_buffer.data(), m_filter_stages[i].input_buffer_size_without_overlap, m_filter_stages[i].filter.data(),
+        m_filter_stages[i].filter.size(), m_filter_stages[i].output_im_buffer->data() + m_filter_stages[i].output_offset, m_filter_stages[i].decimation_factor);
     }
 
     // Create a "raw" symbol stream from the phase difference of the baseband data 1/288e3 seconds apart
-    decodeSymbols(m_lp_iq_buffer, m_symbol_distance, m_symbol_buffer, m_input_block_size / m_decimation_factor);
+    decodeSymbols(m_lp_iq_re_buffer, m_lp_iq_im_buffer, m_symbol_distance, m_symbol_buffer, m_input_block_size / m_decimation_factor);
 
     // Reclock the symbol changes using a DPLL -- the actual number of symbols can vary slightly
     int symbol_count = m_dpll.reclockSymbols(m_input_sample_frequency / m_decimation_factor, m_symbol_buffer, m_input_block_size / m_decimation_factor, m_reclocked_symbol_buffer, m_max_number_of_reclocked_symbols);
@@ -101,9 +107,12 @@ std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(float *input
 
     // Move the last part of the mixed signal and the low-pass filtered signals back to the beginning of the buffers:
     // we need the overlap since the FIR filter, and the symbol decoding, both span a number of samples.
-    for (int i = 0; i < m_filter_stages.size(); i++)
-        memmove(m_filter_stages[i].input_buffer.data(), m_filter_stages[i].input_buffer.data() + m_filter_stages[i].input_buffer_size_without_overlap, m_filter_stages[i].filter.size() * sizeof(std::complex<float>));
-    memmove(m_lp_iq_buffer.data(), m_lp_iq_buffer.data() + m_lp_iq_buffer.size() - m_symbol_distance, m_symbol_distance * sizeof(std::complex<float>));
+    for (int i = 0; i < m_filter_stages.size(); i++) {
+        memmove(m_filter_stages[i].input_re_buffer.data(), m_filter_stages[i].input_re_buffer.data() + m_filter_stages[i].input_buffer_size_without_overlap, m_filter_stages[i].filter.size() * sizeof(std::complex<float>));
+        memmove(m_filter_stages[i].input_im_buffer.data(), m_filter_stages[i].input_im_buffer.data() + m_filter_stages[i].input_buffer_size_without_overlap, m_filter_stages[i].filter.size() * sizeof(std::complex<float>));
+    }
+    memmove(m_lp_iq_re_buffer.data(), m_lp_iq_re_buffer.data() + m_lp_iq_re_buffer.size() - m_symbol_distance, m_symbol_distance * sizeof(std::complex<float>));
+    memmove(m_lp_iq_im_buffer.data(), m_lp_iq_im_buffer.data() + m_lp_iq_im_buffer.size() - m_symbol_distance, m_symbol_distance * sizeof(std::complex<float>));
 
     return result;
 }
@@ -112,24 +121,71 @@ std::string Ac3RfDemodulator::reedSolomonStatistics() const {
     return m_block_handler.reedSolomonStatistics();
 }
 
+#ifdef __AVX__
+#include <immintrin.h>
+#include <numeric>
+
+// Filters the real or imaginary part, so uses every other float of the input/output
 void Ac3RfDemodulator::firFilter(
-        const std::complex<float> *input,   // input signal of length output_length + filter_length - 1
+    const float *input,   // input signal of length output_length + filter_length - 1 -- stored in every other float
+    size_t input_length,  // usable input (not including the filter_length-1 extra values)
+    const float *filter,  // reversed filter coefficients
+    size_t filter_length,
+    float *output,        // the output size is input_length / decimation_factor, again stored in every other float
+    int decimation_factor) {
+
+    assert(input_length % decimation_factor == 0);
+    const int output_size = input_length / decimation_factor;
+    assert(output_size % 2 == 0); // even output length!
+    assert(c_AVX_floats_per_chunk * sizeof(float) == 32);
+    assert(((long)filter) % 32 == 0);
+
+    alignas(__m256) std::array<float, c_AVX_floats_per_chunk> tmp_store0{};
+    alignas(__m256) std::array<float, c_AVX_floats_per_chunk> tmp_store1{};
+
+    for (int oi = 0, ii = 0; oi < output_size; oi += 2, ii += 2 * decimation_factor) {
+        __m256 out_chunk0 = _mm256_setzero_ps();
+        __m256 out_chunk1 = _mm256_setzero_ps();
+
+        for (int j = 0; j < filter_length; j += c_AVX_floats_per_chunk) {
+            __m256 filter_chunk = _mm256_loadu_ps(filter + j); // TODO: change to load_ps and require filter to be aligned
+
+            __m256 input_chunk0 = _mm256_loadu_ps(input + ii + j);
+            out_chunk0 = _mm256_add_ps(out_chunk0, _mm256_mul_ps(input_chunk0, filter_chunk));
+
+            __m256 input_chunk1 = _mm256_loadu_ps(input + ii + decimation_factor + j);
+            out_chunk1 = _mm256_add_ps(out_chunk1, _mm256_mul_ps(input_chunk1, filter_chunk));
+        }
+        _mm256_store_ps(tmp_store0.data(), out_chunk0); // aligned store
+        output[oi] = std::accumulate(tmp_store0.begin(), tmp_store0.end(), 0.f);
+
+        _mm256_store_ps(tmp_store1.data(), out_chunk1); // aligned store
+        output[oi + 1] = std::accumulate(tmp_store1.begin(), tmp_store1.end(), 0.f);
+    }
+}
+
+#else
+#warning "AVX not detected"
+
+void Ac3RfDemodulator::firFilter(
+        const float *input,   // input signal of length output_length + filter_length - 1
         size_t input_length, // usable input (not including the filter_length-1 extra values)
         const float *filter,  // reversed filter coefficients
         size_t filter_length,
-        std::complex<float> *output,
+        float *output,
         int decimation_factor) {
-    for (auto i = 0; i < input_length / decimation_factor; i ++) {
-        std::complex<double> s = 0;
+    for (auto i = 0; i < input_length / decimation_factor; i++) {
+        float s = 0;
         for (auto j = 0; j < filter_length; j++) {
             s += input[i * decimation_factor + j] * filter[j];
         }
         output[i] = s;
     }
 }
+#endif
 
-void Ac3RfDemodulator::decodeSymbols(const std::vector<std::complex<float>> &lp_iq_buffer, int symbol_distance,
-    std::vector<uint8_t> &symbol_buffer, int buffer_size) {
+void Ac3RfDemodulator::decodeSymbols(const std::vector<float> &lp_iq_re_buffer, const std::vector<float> &lp_iq_im_buffer,
+    int symbol_distance, std::vector<uint8_t> &symbol_buffer, int buffer_size) {
 
     auto symbol_decoder = [](std::complex<float> prev, std::complex<float> current) -> uint8_t {
         auto quad = current * conj(prev);
@@ -148,6 +204,7 @@ void Ac3RfDemodulator::decodeSymbols(const std::vector<std::complex<float>> &lp_
 
     symbol_buffer.resize(buffer_size);
     for (int i = 0; i < buffer_size; i++) {
-        symbol_buffer[i] = symbol_decoder(lp_iq_buffer[i], lp_iq_buffer[i + symbol_distance]);
+        symbol_buffer[i] = symbol_decoder(std::complex<float>(lp_iq_re_buffer[i], lp_iq_im_buffer[i]),
+            std::complex(lp_iq_re_buffer[i + symbol_distance], lp_iq_im_buffer[i + symbol_distance]));
     }
 }
