@@ -69,8 +69,11 @@ private:
     std::vector<std::complex<float>> m_lp_iq_buffer; // Buffer after low-pass filtering the IQ signal -- overlap to be able to look back
 
     int m_symbol_distance; // This is the number of samples apart that two subsequent symbols appear in the decimated input.
-    float m_phase_step = 2.88e6 * 2 * M_PI / m_input_sample_frequency;
-    float m_phase_accumulator = 0;
+
+    constexpr static int c_phase_accum_bits = 10;
+    std::array<std::complex<float>, 1 << c_phase_accum_bits> m_exp_lut;
+    int m_phase_step;
+    int m_phase_accumulator;
 
     // For each sample, we compare it to a sample symbol_distance back to determine the current symbol
     std::vector<uint8_t> m_symbol_buffer; // Raw symbols at sample_frequency / decimation Hz

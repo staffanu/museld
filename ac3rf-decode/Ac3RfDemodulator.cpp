@@ -57,7 +57,9 @@ Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, i
     for (int i = 0; i < m_filter_stages.size(); i++)
         m_filter_stages[i].output_buffer = i != m_filter_stages.size() - 1 ? &m_filter_stages[i + 1].input_buffer : &m_lp_iq_buffer;
 
-    m_phase_step = 2.88e6 * 2 * M_PI / m_input_sample_frequency;
+    for (int i = 0; i < 1 << c_phase_accum_bits; i++)
+        m_exp_lut[i] = std::polar(1.0, 2.0 * M_PI * i / (1 << c_phase_accum_bits));
+    m_phase_step = (1 << c_phase_accum_bits) * 2.88e6 / m_input_sample_frequency;
     m_phase_accumulator = 0;
 
     m_max_number_of_reclocked_symbols = m_input_block_size / m_decimation_factor / m_symbol_distance * 17 / 16;
@@ -70,8 +72,8 @@ Ac3RfDemodulator::~Ac3RfDemodulator() {
 std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(float *input_buffer) {
     // Mix the input signal with exp(i * 2 * pi * 288e6 * t)
     for (int i = 0; i < m_input_block_size; i++) {
-        m_filter_stages[0].input_buffer[i + m_filter_stages[0].filter.size()] = input_buffer[i] * std::polar(1.0f, m_phase_accumulator);
-        m_phase_accumulator = m_phase_accumulator + m_phase_step >= 2 * M_PI ? m_phase_accumulator + m_phase_step - 2 * M_PI : m_phase_accumulator + m_phase_step;
+        m_filter_stages[0].input_buffer[i + m_filter_stages[0].filter.size()] = input_buffer[i] * m_exp_lut[m_phase_accumulator];
+        m_phase_accumulator = (m_phase_accumulator + m_phase_step) & ((1 << c_phase_accum_bits) - 1);
     }
 
     // Decimate the I/Q signal in stages and finally lowpass the I/Q signal
