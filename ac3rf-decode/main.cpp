@@ -19,7 +19,7 @@ int main(int argc, char *argv[]) {
       };
     InputFormat input_format = eSint16;
     double input_sample_frequency = 40e6;
-    std::optional<std::string> output_filename;
+    int out_fd = 1;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -50,7 +50,14 @@ int main(int argc, char *argv[]) {
         input_sample_frequency = stod(*(it++));
     });
     options.emplace_back("--output-filename", [&] () mutable  -> void {
-        output_filename = std::make_optional(*it++);
+        auto output_filename = *it++;
+        if (out_fd != 1)
+            close(out_fd);
+        out_fd = open(output_filename.c_str(),
+            O_WRONLY | O_TRUNC | O_CREAT,
+            S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        if (out_fd == -1)
+            throw std::runtime_error(std::format("Unable to open output file {}: {}", output_filename, strerror(errno)));
     });
     options.emplace_back("--log", [&] () mutable -> void {
         int level_number = stod(*it++);
@@ -99,11 +106,6 @@ int main(int argc, char *argv[]) {
                     std::cerr << "File not found: " << *it << std::endl;
                     exit(EXIT_FAILURE);
                 }
-                int out_fd = 1;
-                if (output_filename.has_value())
-                    out_fd = open(output_filename.value().c_str(),
-                        O_WRONLY | O_TRUNC | O_CREAT,
-                        S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
                 InputReader *reader;
                 int block_size = 512 * 1024;
@@ -128,12 +130,11 @@ int main(int argc, char *argv[]) {
 
                 delete reader;
 
-                if (out_fd != 1)
-                    close(out_fd);
-
                 it++;
             }
         }
+        if (out_fd != 1)
+            close(out_fd);
     } catch (const std::exception &x) {
         Logger log(eDebug);
         log.error(x.what());

@@ -39,9 +39,15 @@ The the sample frequency in Hz.  Default is 40 MHz.
 
 Sets the log level.  Default is warn (2).  Supported levels are: 0 (off), 1 (error), 2 (warn), 3 (info), 4 (debug). 
  
-> --output-filename
+> --output-filename [filename]
 
 Sets the output filename.  Default is to print the output to stdout.
+
+> [filename]
+
+Any other filenames are read and processes.  Multiple files can be read and are processed in order.
+The most recent setting for input format, sample frequency, and output file is used.  If the
+same output file is used for consecutive input files, the output is appended.
 
 ### Example
 
