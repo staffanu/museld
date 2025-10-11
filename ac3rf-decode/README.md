@@ -2,7 +2,7 @@
 
 ### C++ AC3RF demodulator / decoder ###
 
-This directory contains a C++ implementation of an AC3RF demodulator.  It hasn't been heavily optimized but it can be
+This directory contains a C++ implementation of an AC3RF demodulator.  It can be
 run on large files and the code is probably considerably easier to understand than the original Scala code.
 
 #### Building
@@ -45,9 +45,11 @@ Sets the output filename.  Default is to print the output to stdout.
 
 > [filename]
 
-Any other filenames are read and processes.  Multiple files can be read and are processed in order.
+Any other filenames are read and processed.  Multiple files can be read and are processed in order.
 The most recent setting for input format, sample frequency, and output file is used.  If the
 same output file is used for consecutive input files, the output is appended.
+
+If no filename is given input is read from stdin.
 
 ### Example
 

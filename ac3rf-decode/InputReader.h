@@ -22,14 +22,13 @@ template <typename T>
 class InputReaderImpl : public InputReader {
     public:
 
-    InputReaderImpl(std::string filename, int block_size)
-    : m_block_size(block_size) {
-        m_fd = open(filename.c_str(), O_RDONLY);
+    InputReaderImpl(int fd, int block_size)
+    : m_block_size(block_size),
+      m_fd(fd) {
         m_buffer = new T[block_size];
     }
 
     ~InputReaderImpl() override {
-        close(m_fd);
         delete[] m_buffer;
     }
 

@@ -9,17 +9,44 @@
 #include "InputReader.h"
 #include "Logger.h"
 
+enum InputFormat {
+    eUint8,
+    eSint8,
+    eUint16,
+    eSint16
+  };
+
+void demodulateFile(Logger &log, InputFormat input_format, double input_sample_frequency,
+    int in_fd, int block_size, int out_fd) {
+
+    InputReader *reader;
+    switch (input_format) {
+        case eUint8: reader = new InputReaderImpl<uint8_t>(in_fd, block_size); break;
+        case eUint16: reader = new InputReaderImpl<uint16_t>(in_fd, block_size); break;
+        case eSint8: reader = new InputReaderImpl<int8_t>(in_fd, block_size); break;
+        case eSint16: reader = new InputReaderImpl<int16_t>(in_fd, block_size); break;
+        default: throw std::runtime_error("Unsupported input format");
+    }
+
+    Ac3RfDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd);
+
+    float input_buffer[reader->block_size()];
+    while (reader->readFloats(input_buffer) == reader->block_size()) {
+        for (auto output: demodulator.demodulate(input_buffer))
+            if (write(out_fd, output.data(), output.size()) == -1)
+                throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
+    }
+    log.info(demodulator.reedSolomonStatistics());
+
+    delete reader;
+}
+
 int main(int argc, char *argv[]) {
     auto log_selection = eWarn;
-    enum InputFormat {
-        eUint8,
-        eSint8,
-        eUint16,
-        eSint16
-      };
     InputFormat input_format = eSint16;
     double input_sample_frequency = 40e6;
     int out_fd = 1;
+    int block_size = 512 * 1024;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -87,6 +114,7 @@ int main(int argc, char *argv[]) {
     });
 
     try {
+        bool filename_found = false; // If no filename given, we read from stdin
         while (it != args.cend()) {
             auto option = std::find_if(options.cbegin(), options.cend(),
                                     [it](const std::pair<std::string, std::function<void()>> &pair) -> bool {
@@ -100,38 +128,23 @@ int main(int argc, char *argv[]) {
             } else if (it->find("-", 0) == 0) {
                 usage();
             } else {
+                filename_found = true;
+                int fd = open((*it).c_str(), O_RDONLY);
+                if (fd == -1)
+                    throw std::runtime_error(std::format("Error opening input file {}: {}", *it, strerror(errno)));
+
                 Logger log(log_selection);
-
-                if (!std::filesystem::exists(*it)) {
-                    std::cerr << "File not found: " << *it << std::endl;
-                    exit(EXIT_FAILURE);
-                }
-
-                InputReader *reader;
-                int block_size = 512 * 1024;
-                switch (input_format) {
-                    case eUint8: reader = new InputReaderImpl<uint8_t>(*it, block_size); break;
-                    case eUint16: reader = new InputReaderImpl<uint16_t>(*it, block_size); break;
-                    case eSint8: reader = new InputReaderImpl<int8_t>(*it, block_size); break;
-                    case eSint16: reader = new InputReaderImpl<int16_t>(*it, block_size); break;
-                    default: throw std::runtime_error("Unsupported input format");
-                }
                 log.info(std::format("Processing input file {}", *it));
+                demodulateFile(log, input_format, input_sample_frequency, fd, block_size, out_fd);
 
-                Ac3RfDemodulator demodulator(log, input_sample_frequency, block_size, out_fd);
-
-                float input_buffer[block_size];
-                while (reader->readFloats(input_buffer) == block_size) {
-                    for (auto output: demodulator.demodulate(input_buffer))
-                        if (write(out_fd, output.data(), output.size()) == -1)
-                            throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
-                }
-                log.info(demodulator.reedSolomonStatistics());
-
-                delete reader;
-
+                close(fd);
                 it++;
             }
+        }
+        if (!filename_found) {
+            Logger log(log_selection);
+            log.info(std::format("Processing stdin"));
+            demodulateFile(log, input_format, input_sample_frequency, 0, block_size, out_fd);
         }
         if (out_fd != 1)
             close(out_fd);
