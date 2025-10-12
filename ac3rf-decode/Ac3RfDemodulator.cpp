@@ -108,11 +108,11 @@ std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(float *input
     // Move the last part of the mixed signal and the low-pass filtered signals back to the beginning of the buffers:
     // we need the overlap since the FIR filter, and the symbol decoding, both span a number of samples.
     for (int i = 0; i < m_filter_stages.size(); i++) {
-        memmove(m_filter_stages[i].input_re_buffer.data(), m_filter_stages[i].input_re_buffer.data() + m_filter_stages[i].input_buffer_size_without_overlap, m_filter_stages[i].filter.size() * sizeof(std::complex<float>));
-        memmove(m_filter_stages[i].input_im_buffer.data(), m_filter_stages[i].input_im_buffer.data() + m_filter_stages[i].input_buffer_size_without_overlap, m_filter_stages[i].filter.size() * sizeof(std::complex<float>));
+        memmove(m_filter_stages[i].input_re_buffer.data(), m_filter_stages[i].input_re_buffer.data() + m_filter_stages[i].input_buffer_size_without_overlap, m_filter_stages[i].filter.size() * sizeof(float));
+        memmove(m_filter_stages[i].input_im_buffer.data(), m_filter_stages[i].input_im_buffer.data() + m_filter_stages[i].input_buffer_size_without_overlap, m_filter_stages[i].filter.size() * sizeof(float));
     }
-    memmove(m_lp_iq_re_buffer.data(), m_lp_iq_re_buffer.data() + m_lp_iq_re_buffer.size() - m_symbol_distance, m_symbol_distance * sizeof(std::complex<float>));
-    memmove(m_lp_iq_im_buffer.data(), m_lp_iq_im_buffer.data() + m_lp_iq_im_buffer.size() - m_symbol_distance, m_symbol_distance * sizeof(std::complex<float>));
+    memmove(m_lp_iq_re_buffer.data(), m_lp_iq_re_buffer.data() + m_lp_iq_re_buffer.size() - m_symbol_distance, m_symbol_distance * sizeof(float));
+    memmove(m_lp_iq_im_buffer.data(), m_lp_iq_im_buffer.data() + m_lp_iq_im_buffer.size() - m_symbol_distance, m_symbol_distance * sizeof(float));
 
     return result;
 }
