@@ -8,6 +8,9 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GNURADIO REQUIRED gnuradio-filter)
 include_directories("${GNURADIO_INCLUDE_DIRS}")
 
+pkg_check_modules(FLAC REQUIRED flac++)
+include_directories("${FLAC_INCLUDE_DIRS}")
+
 # -mavx is hopefully implied by -march=native
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math -march=native")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ffast-math -fsanitize=address -march=native")
@@ -31,9 +34,12 @@ add_executable(ac3rf-decode
         Ac3InputFraming.h
         Ac3BlockHandler.cpp
         Ac3BlockHandler.h
+        LdfInputReader.cpp
+        LdfInputReader.h
 )
 
 target_link_options(ac3rf-decode PRIVATE "-L/usr/local/lib")
 target_link_libraries(ac3rf-decode
         PRIVATE ${GNURADIO_LINK_LIBRARIES}
+        PRIVATE ${FLAC_LINK_LIBRARIES}
 )

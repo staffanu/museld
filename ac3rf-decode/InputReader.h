@@ -12,29 +12,41 @@
 
 class InputReader {
 public:
+    InputReader(int fd, int block_size)
+    : m_fd(fd), m_block_size(block_size) {}
+
     virtual ~InputReader() = default;
 
+    virtual void initialize() = 0;
     virtual int readFloats(float *f) = 0;
-    virtual int block_size() const = 0;
+
+    int block_size() const {
+        return m_block_size;
+    }
+
+protected:
+    int m_fd;
+    int m_block_size;
 };
 
 template <typename T>
 class InputReaderImpl : public InputReader {
-    public:
-
+public:
     InputReaderImpl(int fd, int block_size)
-    : m_block_size(block_size),
-      m_fd(fd) {
+    : InputReader(fd, block_size) {
         m_buffer = new T[block_size];
     }
+
+    InputReaderImpl(const InputReaderImpl &) = delete;
+    InputReaderImpl &operator=(const InputReaderImpl &) = delete;
+    InputReaderImpl(InputReaderImpl &&) = delete;
+    InputReaderImpl &operator=(InputReaderImpl &&) = delete;
 
     ~InputReaderImpl() override {
         delete[] m_buffer;
     }
 
-    int block_size() const override {
-        return m_block_size;
-    }
+    void initialize() override {};
 
     // reads block_size values and stores them at f.  Returns the number of values actually read.
     int readFloats(float *f) override {
@@ -54,8 +66,6 @@ class InputReaderImpl : public InputReader {
     }
 
 protected:
-    int m_fd;
-    int m_block_size;
     T *m_buffer;
 };
 

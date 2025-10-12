@@ -28,8 +28,10 @@ The following command line options are supported:
 > --sint8
 > --uint16
 > --sint16
+> --ldf
 
-The input format.  Default is signed shorts (sint16).
+The input format.  Default is signed shorts (sint16). --ldf is for the LDF format used by the
+[ld-decode](https://github.com/happycube/ld-decode) toolchain (FLAC compressed 16 bit samples).
 
 > --sample-freq [frequency]
 

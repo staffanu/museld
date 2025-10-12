@@ -7,13 +7,15 @@
 
 #include "Ac3RfDemodulator.h"
 #include "InputReader.h"
+#include "LdfInputReader.h"
 #include "Logger.h"
 
 enum InputFormat {
     eUint8,
     eSint8,
     eUint16,
-    eSint16
+    eSint16,
+    eLdf
   };
 
 void demodulateFile(Logger &log, InputFormat input_format, double input_sample_frequency,
@@ -25,8 +27,10 @@ void demodulateFile(Logger &log, InputFormat input_format, double input_sample_f
         case eUint16: reader = new InputReaderImpl<uint16_t>(in_fd, block_size); break;
         case eSint8: reader = new InputReaderImpl<int8_t>(in_fd, block_size); break;
         case eSint16: reader = new InputReaderImpl<int16_t>(in_fd, block_size); break;
+        case eLdf: reader = new LdfInputReader(in_fd, block_size); break;
         default: throw std::runtime_error("Unsupported input format");
     }
+    reader->initialize();
 
     Ac3RfDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd);
 
@@ -72,6 +76,9 @@ int main(int argc, char *argv[]) {
     });
     options.emplace_back("--sint16", [&] () mutable  -> void {
         input_format = eSint16;
+    });
+    options.emplace_back("--ldf", [&] () mutable  -> void {
+        input_format = eLdf;
     });
     options.emplace_back("--sample-freq", [&] () mutable  -> void {
         input_sample_frequency = stod(*(it++));

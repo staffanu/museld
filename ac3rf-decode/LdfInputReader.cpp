@@ -1,0 +1,82 @@
+//
+// Created by Staffan Ulfberg on 10/12/25.
+//
+
+#include "LdfInputReader.h"
+
+#include <unistd.h>
+
+#include "FLAC++/decoder.h"
+
+LdfInputReader::LdfInputReader(int fd, int block_size)
+  : InputReader(fd, block_size),
+    FLAC::Decoder::Stream() {
+}
+
+LdfInputReader::~LdfInputReader() {
+    delete[] m_decoded_samples;
+}
+
+void LdfInputReader::initialize() {
+    auto status = init_ogg();
+    if (status != FLAC__STREAM_DECODER_INIT_STATUS_OK)
+        throw std::runtime_error(std::format("Error initializing decoder: {}", FLAC__StreamDecoderInitStatusString[status]));
+}
+
+int LdfInputReader::readFloats(float *f) {
+    int filled_floats = 0;
+    while (filled_floats < m_block_size) {
+        if (m_flac_block_read_count == m_flac_block_size) {
+            // notice this triggers also the first time, when both are zero
+            if (!process_single()) {
+                if (get_state() == FLAC__STREAM_DECODER_END_OF_STREAM)
+                    return 0;
+                throw std::runtime_error(std::format("libFLAC++ process_single: {}",
+                    FLAC__StreamDecoderErrorStatusString[get_state()]));
+            }
+        }
+        int n = std::min(m_block_size - filled_floats, m_flac_block_size - m_flac_block_read_count);
+        for (int i = 0; i < n; i++)
+            f[filled_floats++] = m_decoded_samples[m_flac_block_read_count++];
+    }
+    return m_block_size;
+}
+
+FLAC__StreamDecoderReadStatus LdfInputReader::read_callback(FLAC__byte buffer[], size_t *bytes) {
+    const auto r = read(m_fd, buffer, *bytes);
+    if (r == -1)
+        throw std::runtime_error(std::format("Error reading from file: {}", strerror(errno)));
+    *bytes = r;
+    if (r == 0)
+        return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
+    else
+        return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
+}
+
+FLAC__StreamDecoderWriteStatus LdfInputReader::write_callback(const FLAC__Frame *frame, const FLAC__int32 *const buffer[]) {
+    if (m_decoded_samples == nullptr) {
+        m_flac_block_size = frame->header.blocksize;
+        m_decoded_samples = new uint16_t[frame->header.blocksize];
+    } else if (m_flac_block_size != frame->header.blocksize) {
+        throw std::runtime_error("LDF block size changed within file");
+    }
+
+    for (int i = 0; i < frame->header.blocksize; i++)
+        m_decoded_samples[i] = buffer[0][i];
+    m_flac_block_read_count = 0;
+
+    return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
+}
+
+void LdfInputReader::metadata_callback(const ::FLAC__StreamMetadata *metadata) {
+    if (metadata->type == FLAC__METADATA_TYPE_STREAMINFO) {
+        if (metadata->data.stream_info.channels != 1)
+            throw std::runtime_error("LDF files should have only one channel");
+        if (metadata->data.stream_info.bits_per_sample != 16)
+            throw std::runtime_error("LDF files should have 16 bits per sample");
+    }
+}
+
+void LdfInputReader::error_callback(::FLAC__StreamDecoderErrorStatus status) {
+    throw std::runtime_error(std::format("libFLAC++ error_callback: {}", FLAC__StreamDecoderErrorStatusString[status]));
+}
