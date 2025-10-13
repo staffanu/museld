@@ -6,7 +6,7 @@
 #define AC3RF_DECODE_INPUTREADER_H
 
 #include <string.h>
-#include <fcntl.h>
+#include <unistd.h>
 #include <string>
 #include <format>
 
@@ -59,7 +59,7 @@ public:
             filled_bytes += (int)read_count;
         } while (filled_bytes < sizeof(*m_buffer) * m_block_size && read_count > 0);
 
-        for (int i = 0; i < filled_bytes; i++)
+        for (int i = 0; i < m_block_size; i++)
             f[i] = m_buffer[i];
 
         return filled_bytes;
