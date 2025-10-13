@@ -10,10 +10,10 @@ run on large files and the code is probably considerably easier to understand th
 The project uses cmake, and the following commands should build the project on Ubuntu.  This also installs most
 of the dependencies, but you also need a C++ compiler, and I didn't want to pick one for you.  Recent versions of
 g++ and clang should both work (the project uses C++23).  I'm using Ubuntu 25.04.  For macOS, modify as needed
-(I used [Homebrew](https://brew.sh/) for the dependencies; they mostly have similar names.)
+(I used [Homebrew](https://brew.sh/) for the dependencies; they mostly have similar names, currently "gnuradio-dev" and "flac".)
 
 ```console
-sudo apt install cmake gnuradio-dev
+sudo apt install cmake gnuradio-dev libflac++-dev
 git clone https://bitbucket.org/staffanulfberg/ldaudio.git
 cd ldaudio/ac3rf-decode
 cmake -DCMAKE_BUILD_TYPE=Release -B build-release .
