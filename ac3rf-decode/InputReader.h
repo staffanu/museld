@@ -62,7 +62,7 @@ public:
         for (int i = 0; i < m_block_size; i++)
             f[i] = m_buffer[i];
 
-        return filled_bytes;
+        return m_block_size;
     }
 
 protected:
