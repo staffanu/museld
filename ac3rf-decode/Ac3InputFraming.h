@@ -11,7 +11,7 @@ class Logger;
 
 class Ac3InputFraming {
 public:
-    Ac3InputFraming(Logger &log);
+    explicit Ac3InputFraming(Logger &log);
     ~Ac3InputFraming() = default;
     Ac3InputFraming(const Ac3InputFraming &) = delete;
     Ac3InputFraming(Ac3InputFraming &&) = delete;
@@ -23,15 +23,16 @@ public:
 private:
     Logger &m_log;
 
-    int frame_number;
-    int previous_frame_number = 0;
+    long m_total_symbols_seen = 0;
+    int m_frame_number = -1;
+    int m_previous_frame_number = 0;
 
-    int syncFrameSymbolsSeen = 0;
-    uint8_t syncFrameNo[4];
-    int symbolInFrameCounter = 0;
-    uint8_t symbolsInFrame[37 * 4];
-    int consecutiveSynched = 0;
-    int autoSyncAt = -1;
+    int m_sync_frame_symbols_seen = 0;
+    uint8_t m_sync_frame_no[4];
+    int m_symbol_in_frame_counter = 0;
+    uint8_t m_symbols_in_frame[37 * 4];
+    int m_consecutive_synched = 0;
+    int m_auto_sync_at = -1;
 };
 
 

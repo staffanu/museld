@@ -15,11 +15,12 @@ Ac3InputFraming::Ac3InputFraming(Logger &log)
 std::vector<std::pair<int, std::array<uint8_t, 37>>> Ac3InputFraming::arrangeInFrames(const std::vector<uint8_t> &symbols, int number_of_symbols) {
     std::vector<std::pair<int, std::array<uint8_t, 37>>> frames;
 
-    for (int i = 0; i < number_of_symbols; i++) {
+    for (int i = 0; i < number_of_symbols; i++, m_total_symbols_seen++) {
         uint8_t s = symbols[i];
-        if (syncFrameSymbolsSeen < 12 && autoSyncAt < i) {
+
+        if (m_sync_frame_symbols_seen < 12 && m_auto_sync_at < m_total_symbols_seen) {
             bool is_next_sync_symbol;
-            switch (syncFrameSymbolsSeen) {
+            switch (m_sync_frame_symbols_seen) {
                 case 0:
                     is_next_sync_symbol = s == 0;
                     break;
@@ -36,7 +37,7 @@ std::vector<std::pair<int, std::array<uint8_t, 37>>> Ac3InputFraming::arrangeInF
                 case 5:
                 case 6:
                 case 7:
-                    syncFrameNo[syncFrameSymbolsSeen - 4] = s;
+                    m_sync_frame_no[m_sync_frame_symbols_seen - 4] = s;
                     is_next_sync_symbol = true;
                     break;
                 case 8:
@@ -48,39 +49,39 @@ std::vector<std::pair<int, std::array<uint8_t, 37>>> Ac3InputFraming::arrangeInF
                 default: throw std::runtime_error("cannot happen");
             }
             if (is_next_sync_symbol) {
-                syncFrameSymbolsSeen += 1;
-                if (syncFrameSymbolsSeen == 12)
-                    frame_number = (syncFrameNo[0] << 6) | (syncFrameNo[1] << 4) | (syncFrameNo[2] << 2) | syncFrameNo[3];
+                m_sync_frame_symbols_seen += 1;
+                if (m_sync_frame_symbols_seen == 12)
+                    m_frame_number = (m_sync_frame_no[0] << 6) | (m_sync_frame_no[1] << 4) | (m_sync_frame_no[2] << 2) | m_sync_frame_no[3];
             } else {
-                if (consecutiveSynched > 0) {
-                    m_log.debug(std::format("Missing sync index {} (consecutiveSynched={})!", i, consecutiveSynched));
-                    consecutiveSynched -= 1;
-                    frame_number = (previous_frame_number + 1) % 72;
-                    autoSyncAt = i + 12 - syncFrameSymbolsSeen;
+                if (m_consecutive_synched > 0) {
+                    m_log.debug(std::format("Missing sync symbol index {} (consecutiveSynched={})!", m_total_symbols_seen, m_consecutive_synched));
+                    m_consecutive_synched -= 1;
+                    m_frame_number = (m_previous_frame_number + 1) % 72;
+                    m_auto_sync_at = m_total_symbols_seen + 12 - m_sync_frame_symbols_seen;
                 } else {
-                    syncFrameSymbolsSeen = 0;
+                    m_sync_frame_symbols_seen = 0;
                 }
             }
-        } else if (i >= autoSyncAt) {
-            if (syncFrameSymbolsSeen == 12 && symbolInFrameCounter == 0)
-                consecutiveSynched = std::min(consecutiveSynched + 1, 7);
-            else if (i == autoSyncAt) {
-                syncFrameSymbolsSeen = 12;
-                autoSyncAt = -1; // FIXME: better logic this is broken!
+        } else if (m_total_symbols_seen >= m_auto_sync_at) {
+            if (m_sync_frame_symbols_seen == 12 && m_symbol_in_frame_counter == 0)
+                m_consecutive_synched = std::min(m_consecutive_synched + 1, 7);
+            else if (m_total_symbols_seen == m_auto_sync_at) {
+                m_sync_frame_symbols_seen = 12;
+                m_auto_sync_at = -1; // FIXME: better logic this is broken!
             }
 
-            symbolsInFrame[symbolInFrameCounter] = s;
-            symbolInFrameCounter += 1;
-            if (symbolInFrameCounter == 37 * 4) {
+            m_symbols_in_frame[m_symbol_in_frame_counter] = s;
+            m_symbol_in_frame_counter += 1;
+            if (m_symbol_in_frame_counter == 37 * 4) {
                 std::array<uint8_t, 37> frame;
                 for (int j = 0; j < 37; j++)
-                    frame[j] = symbolsInFrame[j * 4] << 6 | symbolsInFrame[j * 4 + 1] << 4 | symbolsInFrame[j * 4 + 2] << 2 | symbolsInFrame[j * 4 + 3];
+                    frame[j] = m_symbols_in_frame[j * 4] << 6 | m_symbols_in_frame[j * 4 + 1] << 4 | m_symbols_in_frame[j * 4 + 2] << 2 | m_symbols_in_frame[j * 4 + 3];
 
-                frames.push_back(std::make_pair(frame_number, frame));
+                frames.push_back(std::make_pair(m_frame_number, frame));
 
-                previous_frame_number = frame_number;
-                symbolInFrameCounter = 0;
-                syncFrameSymbolsSeen = 0;
+                m_previous_frame_number = m_frame_number;
+                m_symbol_in_frame_counter = 0;
+                m_sync_frame_symbols_seen = 0;
             }
         }
     }
