@@ -26,11 +26,11 @@ int Ac3DPLL::reclockSymbols(double sampling_frequency, const std::vector<uint8_t
         int newCounter = (clkCounter + nominalAdd + filterOut) & ((1 << counterBits) - 1);
         filterOut = 0;
         if (newCounter < clkCounter) {
-            output_symbols[output_size++] = lastIn;
             if (output_size == max_output_size) {
                 m_log.warn("Symbol output buffer overflow");
                 return output_size;
             }
+            output_symbols[output_size++] = lastIn;
 
             int error = number_of_toggles == 1 ? -(togglePosition - (1 << (counterBits - 1))) : 0;
 
