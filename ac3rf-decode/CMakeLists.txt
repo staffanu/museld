@@ -36,6 +36,8 @@ add_executable(ac3rf-decode
         Ac3BlockHandler.h
         LdfInputReader.cpp
         LdfInputReader.h
+        FirFilterStage.cpp
+        FirFilterStage.h
 )
 
 target_link_options(ac3rf-decode PRIVATE "-L/usr/local/lib")

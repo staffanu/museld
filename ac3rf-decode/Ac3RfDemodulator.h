@@ -7,13 +7,13 @@
 
 #include <complex>
 #include <string>
-
+#include "Logger.h"
+#include "rs/ReedSolomon.h"
 #include "Ac3BlockHandler.h"
 #include "Ac3DPLL.h"
 #include "Ac3InputFraming.h"
+#include "FirFilterStage.h"
 #include "InputReader.h"
-#include "Logger.h"
-#include "rs/ReedSolomon.h"
 
 class Ac3RfDemodulator {
 public:
@@ -29,9 +29,6 @@ public:
     std::string reedSolomonStatistics() const;
 
 private:
-    static void firFilter(const float *input, size_t input_length,
-        const float *filter, size_t filter_length, float *output, int decimation_factor);
-
     // For each sample, compare it to a sample symbol_distance back to determine the current symbol
     static void decodeSymbols(const std::vector<float> &lp_iq_re_buffer, const std::vector<float> &lp_iq_im_buffer,
         int symbol_distance, std::vector<uint8_t> &symbol_buffer, int buffer_size);
@@ -51,31 +48,14 @@ private:
     // At that time, the final lowpass filter is applied.
     constexpr static int max_filter_stages = 4;
     int m_decimation_factor;
-    struct FilterStage {
-        FilterStage(int factor, std::vector<float> filter, int input_buffer_size_without_overlap, int output_offset) {
-            decimation_factor = factor;
-            this->filter = filter;
-            this->input_buffer_size_without_overlap = input_buffer_size_without_overlap;
-            this->output_offset = output_offset;
-            input_re_buffer.resize(input_buffer_size_without_overlap + filter.size());
-            input_im_buffer.resize(input_buffer_size_without_overlap + filter.size());
-        }
-        int decimation_factor;
-        int input_buffer_size_without_overlap;
-        int output_offset;
-        std::vector<float> filter;
-        std::vector<float> input_re_buffer;
-        std::vector<float> *output_re_buffer; // pointer to next
-        std::vector<float> input_im_buffer;
-        std::vector<float> *output_im_buffer; // pointer to next
-    };
-    std::vector<FilterStage> m_filter_stages;
+
+    std::vector<FirFilterStage *> m_filter_stages;
     std::vector<float> m_lp_iq_re_buffer; // Buffer after low-pass filtering the IQ signal -- overlap to be able to look back
     std::vector<float> m_lp_iq_im_buffer;
 
     int m_symbol_distance; // This is the number of samples apart that two subsequent symbols appear in the decimated input.
 
-    constexpr static int c_phase_accum_bits = 10;
+    constexpr static int c_phase_accum_bits = 14;
     std::array<std::complex<float>, 1 << c_phase_accum_bits> m_exp_lut;
     int m_phase_step;
     int m_phase_accumulator;
