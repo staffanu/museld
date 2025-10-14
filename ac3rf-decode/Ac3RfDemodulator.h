@@ -17,7 +17,7 @@
 
 class Ac3RfDemodulator {
 public:
-    Ac3RfDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd);
+    Ac3RfDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd, bool use_simd);
     ~Ac3RfDemodulator();
 
     Ac3RfDemodulator(const Ac3RfDemodulator &) = delete;
@@ -32,8 +32,6 @@ private:
     // For each sample, compare it to a sample symbol_distance back to determine the current symbol
     static void decodeSymbols(const std::vector<float> &lp_iq_re_buffer, const std::vector<float> &lp_iq_im_buffer,
         int symbol_distance, std::vector<uint8_t> &symbol_buffer, int buffer_size);
-
-    constexpr static int c_AVX_floats_per_chunk = 8;
 
     Logger &m_log;
     double m_input_sample_frequency;

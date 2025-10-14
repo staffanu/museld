@@ -19,7 +19,8 @@ FirFilterStage::FirFilterStage(
     int input_buffer_size_without_overlap,
     int output_offset,
     std::vector<float> *output_re_buffer,
-    std::vector<float> *output_im_buffer)
+    std::vector<float> *output_im_buffer,
+    bool use_simd)
   : m_name(name),
     m_sample_frequency(sample_frequency),
     m_cutoff_frequency(cutoff_frequency),
@@ -31,13 +32,14 @@ FirFilterStage::FirFilterStage(
     m_input_re_buffer(new std::vector<float>(input_buffer_size_without_overlap + m_filter.size() - 1)),
     m_input_im_buffer(new std::vector<float>(input_buffer_size_without_overlap + m_filter.size() - 1)),
     m_output_re_buffer(output_re_buffer),
-    m_output_im_buffer(output_im_buffer) {
+    m_output_im_buffer(output_im_buffer),
+    m_use_simd(use_simd) {
 
     std::reverse(m_filter.begin(), m_filter.end());
-
-    for (int i = 0; i < m_filter.size(); i++)
-        printf("%f ", m_filter[i]);
-    printf("\n");
+    if (m_use_simd) {
+        // resize filter so length is multiple of chunk size
+        m_filter.resize((m_filter.size() * c_AVX_floats_per_chunk + c_AVX_floats_per_chunk) / c_AVX_floats_per_chunk);
+    }
 }
 
 FirFilterStage::~FirFilterStage() {
@@ -86,23 +88,63 @@ void FirFilterStage::moveDataToFront() {
     memmove(m_input_im_buffer->data(), m_input_im_buffer->data() + m_input_buffer_size_without_overlap, (m_filter.size() - 1) * sizeof(float));
 }
 
+void FirFilterStage::firFilter(
+        const float *input,  // input signal of length output_length + filter_length - 1
+        size_t input_length, // input signal size, excluding filter_length-1 extra values at end
+        const float *filter, // reversed filter coefficients
+        size_t filter_length,
+        float *output,
+        int decimation_factor) {
+    if (m_use_simd) {
+#if defined __AVX__
+        firFilterAvx(input, input_length, filter, filter_length, output, decimation_factor);
+#elif __ARM_NEON == 1
+        firFilterNeon(input, input_length, filter, filter_length, output, decimation_factor);
+#else
+        throw new std::runtime_error("SIMD not implemented");
+#endif
+    } else {
+        firFilterNormal(input, input_length, filter, filter_length, output, decimation_factor);
+    }
+}
+
+void FirFilterStage::firFilterNormal(
+        const float *input,  // input signal of length output_length + filter_length - 1
+        size_t input_length, // input signal size, excluding filter_length-1 extra values at end
+        const float *filter, // reversed filter coefficients
+        size_t filter_length,
+        float *output,
+        int decimation_factor) {
+    for (auto i = 0; i < input_length / decimation_factor; i++) {
+        float s = 0;
+        for (auto j = 0; j < filter_length; j++) {
+            s += input[i * decimation_factor + j] * filter[j];
+        }
+        output[i] = s;
+    }
+}
+
+
 #ifdef __AVX__
 #include <immintrin.h>
 #include <numeric>
+#endif
 
 // Filters the real or imaginary part, so uses every other float of the input/output
-void FirFilterStage::firFilter(
+void FirFilterStage::firFilterAvx(
     const float *input,   // input signal of length output_length + filter_length - 1 -- stored in every other float
     size_t input_length,  // usable input (not including the filter_length-1 extra values)
     const float *filter,  // reversed filter coefficients
     size_t filter_length,
     float *output,        // the output size is input_length / decimation_factor, again stored in every other float
     int decimation_factor) {
-
+#ifdef __AVX__
     assert(input_length % decimation_factor == 0);
     const int output_size = input_length / decimation_factor;
     assert(output_size % 2 == 0); // even output length!
     assert(c_AVX_floats_per_chunk * sizeof(float) == 32);
+    assert(input_length % c_AVX_floats_per_chunk == 0);
+    assert(filter_length % c_AVX_floats_per_chunk == 0);
 
     alignas(__m256) std::array<float, c_AVX_floats_per_chunk> tmp_store0{};
     alignas(__m256) std::array<float, c_AVX_floats_per_chunk> tmp_store1{};
@@ -126,24 +168,45 @@ void FirFilterStage::firFilter(
         _mm256_store_ps(tmp_store1.data(), out_chunk1); // aligned store
         output[oi + 1] = std::accumulate(tmp_store1.begin(), tmp_store1.end(), 0.f);
     }
-}
-
-#else
-#warning "AVX not detected"
-
-void FirFilterStage::firFilter(
-        const float *input,  // input signal of length output_length + filter_length - 1
-        size_t input_length, // input signal size, excluding filter_length-1 extra values at end
-        const float *filter, // reversed filter coefficients
-        size_t filter_length,
-        float *output,
-        int decimation_factor) {
-    for (auto i = 0; i < input_length / decimation_factor; i++) {
-        float s = 0;
-        for (auto j = 0; j < filter_length; j++) {
-            s += input[i * decimation_factor + j] * filter[j];
-        }
-        output[i] = s;
-    }
-}
 #endif
+}
+
+#if __ARM_NEON == 1
+#include <arm_neon.h>
+#endif
+
+void FirFilterStage::firFilterNeon(
+        const float *input,   // input signal of length at least output_size + filter_length - 1
+        size_t input_length,
+        const float *filter,  // reversed filter coefficients
+        size_t filter_length,
+        float *output,        // the output size is input_length / decimation_factor, again stored in every other float
+        int decimation_factor) {
+#if __ARM_NEON == 1
+    const int output_size = input_length / decimation_factor;
+    assert(output_size % 2 == 0);
+    assert(input_length % c_NEON_floats_per_chunk == 0);
+    assert(filter_length % c_NEON_floats_per_chunk == 0);
+
+    alignas(float32x4_t) float tmp_store0[c_NEON_floats_per_chunk];
+    alignas(float32x4_t) float tmp_store1[c_NEON_floats_per_chunk];
+
+    for (int oi = 0, ii = 0; oi < output_size; oi += 2, ii += 2 * decimation_factor) {
+        float32x4_t out_chunk0 = vdupq_n_f32(0);
+        float32x4_t out_chunk1 = vdupq_n_f32(0);
+
+        for (int j = 0; j < filter_length; j += c_NEON_floats_per_chunk) {
+            float32x4_t filter_chunk = vld1q_f32(filter + j);
+
+            float32x4_t input_chunk0 = vld1q_f32(input + ii + j);
+            out_chunk0 = vmlaq_f32(out_chunk0, input_chunk0, filter_chunk);
+
+            float32x4_t input_chunk1 = vld1q_f32(input + ii + decimation_factor + j);
+            out_chunk1 = vmlaq_f32(out_chunk1, input_chunk1, filter_chunk);
+        }
+
+        output[oi] = vaddvq_f32(out_chunk0);
+        output[oi + 1] = vaddvq_f32(out_chunk1);
+    }
+#endif
+}

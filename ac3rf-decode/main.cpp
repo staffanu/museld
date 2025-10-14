@@ -19,7 +19,7 @@ enum InputFormat {
   };
 
 void demodulateFile(Logger &log, InputFormat input_format, double input_sample_frequency,
-    int in_fd, int block_size, int out_fd) {
+    int in_fd, int block_size, int out_fd, bool use_simd) {
 
     InputReader *reader;
     switch (input_format) {
@@ -32,7 +32,7 @@ void demodulateFile(Logger &log, InputFormat input_format, double input_sample_f
     }
     reader->initialize();
 
-    Ac3RfDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd);
+    Ac3RfDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd, use_simd);
 
     float input_buffer[reader->block_size()];
     while (reader->readFloats(input_buffer) == reader->block_size()) {
@@ -51,6 +51,7 @@ int main(int argc, char *argv[]) {
     double input_sample_frequency = 40e6;
     int out_fd = 1;
     int block_size = 512 * 1024;
+    bool use_simd = false;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -82,6 +83,9 @@ int main(int argc, char *argv[]) {
     });
     options.emplace_back("--sample-freq", [&] () mutable  -> void {
         input_sample_frequency = stod(*(it++));
+    });
+    options.emplace_back("--simd", [&] () mutable  -> void {
+        use_simd = true;
     });
     options.emplace_back("--output-filename", [&] () mutable  -> void {
         auto output_filename = *it++;
@@ -142,7 +146,7 @@ int main(int argc, char *argv[]) {
 
                 Logger log(log_selection);
                 log.info(std::format("Processing input file {}", *it));
-                demodulateFile(log, input_format, input_sample_frequency, fd, block_size, out_fd);
+                demodulateFile(log, input_format, input_sample_frequency, fd, block_size, out_fd, use_simd);
 
                 close(fd);
                 it++;
@@ -151,7 +155,7 @@ int main(int argc, char *argv[]) {
         if (!filename_found) {
             Logger log(log_selection);
             log.info(std::format("Processing stdin"));
-            demodulateFile(log, input_format, input_sample_frequency, 0, block_size, out_fd);
+            demodulateFile(log, input_format, input_sample_frequency, 0, block_size, out_fd, use_simd);
         }
         if (out_fd != 1)
             close(out_fd);

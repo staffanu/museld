@@ -11,7 +11,7 @@
 
 #include <format>
 
-Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd)
+Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd, bool use_simd)
 : m_log(log),
   m_input_sample_frequency(input_sample_frequency),
   m_input_block_size(input_block_size),
@@ -46,21 +46,25 @@ Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, i
 
     m_filter_stages[decimations_by_4] = new FirFilterStage(
         "Final lowpass filter",
-        final_input_frequency, 200e3, 120e3,
+        final_input_frequency, 230e3, 160e3,
         m_decimation_factor >> (2 * decimations_by_4),
         m_input_block_size >> (2 * decimations_by_4),
         m_symbol_distance,
         &m_lp_iq_re_buffer,
-        &m_lp_iq_im_buffer);
+        &m_lp_iq_im_buffer,
+        use_simd);
 
-    for (int i = decimations_by_4 - 1; i >= 0; i--)
+    for (int i = decimations_by_4 - 1; i >= 0; i--) {
+        double stage_sample_freq = input_sample_frequency / (1 << (i * 2));
         m_filter_stages[i] = new FirFilterStage(
             std::format("Decimate by 4 stage {}", i + 1),
-            1.0, 1.0/8, 1.0/8,
+            stage_sample_freq, stage_sample_freq / 8, stage_sample_freq / 4 - 2 * 300e3,
             4, m_input_block_size >> (2 * i),
             m_filter_stages[i + 1]->filterSize() - 1,
             m_filter_stages[i + 1]->inputReBuffer(),
-            m_filter_stages[i + 1]->inputImBuffer());
+            m_filter_stages[i + 1]->inputImBuffer(),
+            use_simd);
+    }
 
     for (const auto &stage: m_filter_stages)
         m_log.debug(std::format("Filter stage: {}", stage->toString()));

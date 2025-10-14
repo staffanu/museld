@@ -40,7 +40,11 @@ The the sample frequency in Hz.  Default is 40 MHz.
 > --log [level]
 
 Sets the log level.  Default is warn (2).  Supported levels are: 0 (off), 1 (error), 2 (warn), 3 (info), 4 (debug). 
- 
+
+> --simd
+
+Uses SIMD for the FIR filters.  Not available for all platforms/compilers.
+
 > --output-filename [filename]
 
 Sets the output filename.  Default is to print the output to stdout.
