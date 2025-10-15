@@ -36,7 +36,7 @@ FirFilterStage::FirFilterStage(
     std::reverse(m_filter.begin(), m_filter.end());
     if (m_use_simd) {
         // resize filter so length is multiple of chunk size
-        m_filter.resize((m_filter.size() * c_AVX_floats_per_chunk + c_AVX_floats_per_chunk) / c_AVX_floats_per_chunk);
+        m_filter.resize((m_filter.size() + c_AVX_floats_per_chunk - 1) / c_AVX_floats_per_chunk * c_AVX_floats_per_chunk);
     }
     m_input_re_buffer = new std::vector<float>(input_buffer_size_without_overlap + m_filter.size() - 1);
     m_input_im_buffer = new std::vector<float>(input_buffer_size_without_overlap + m_filter.size() - 1);
@@ -96,7 +96,7 @@ void FirFilterStage::firFilter(
 #elif __ARM_NEON == 1
         firFilterNeon(input, input_length, filter, filter_length, output, decimation_factor);
 #else
-        throw new std::runtime_error("SIMD not implemented");
+        throw std::runtime_error("SIMD not implemented");
 #endif
     } else {
         firFilterNormal(input, input_length, filter, filter_length, output, decimation_factor);

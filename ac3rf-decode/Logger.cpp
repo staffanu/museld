@@ -22,7 +22,7 @@ void Logger::log(LogPriority priority, const std::string &message) {
         auto ms = tp.time_since_epoch().count() % std::milli::den;
         std::unique_lock<std::mutex> lock(m_mutex);
         std::cerr <<
-            std::format("{:%Y-%m-%d %H:%M:%S}.{:03d} [{}]",
+            std::format("{:%Y-%m-%d %H:%M:%S}.{:03d} [{}] ",
                 tp, ms, c_priority_names.at(priority)) <<
                     message << std::endl;
     }
