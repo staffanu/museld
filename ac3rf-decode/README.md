@@ -30,7 +30,11 @@ The following command line options are supported:
 > --sint16
 > --ldf
 
-The input format.  Default is signed shorts (sint16). --ldf is for the LDF format used by the
+The input format.  This option can be omitted if the input file ends with ".u8",
+".s8", ".u16", ".s16", or ".ldf" respectively.  For reading from stdin the format
+always has to be specified.
+
+--ldf is for the LDF format used by the
 [ld-decode](https://github.com/happycube/ld-decode) toolchain (FLAC compressed 16 bit samples).
 
 > --sample-freq [frequency]

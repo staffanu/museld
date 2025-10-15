@@ -40,7 +40,7 @@ public:
     void applyFilter();
     void moveDataToFront();
 
-//private:
+private:
     void firFilter(const float *input, size_t input_length,
         const float *filter, size_t filter_size, float *output, int decimation_factor);
 

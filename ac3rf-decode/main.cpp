@@ -47,7 +47,7 @@ void demodulateFile(Logger &log, InputFormat input_format, double input_sample_f
 
 int main(int argc, char *argv[]) {
     auto log_selection = eWarn;
-    InputFormat input_format = eSint16;
+    std::optional<InputFormat> input_format_option = std::nullopt;
     double input_sample_frequency = 40e6;
     int out_fd = 1;
     uint32_t block_size = 16 * 1024;
@@ -67,19 +67,19 @@ int main(int argc, char *argv[]) {
     };
 
     options.emplace_back("--uint8", [&] () mutable  -> void {
-        input_format = eUint8;
+        input_format_option = std::make_optional(eUint8);
     });
     options.emplace_back("--sint8", [&] () mutable  -> void {
-        input_format = eSint8;
+        input_format_option = std::make_optional(eSint8);
     });
     options.emplace_back("--uint16", [&] () mutable  -> void {
-        input_format = eUint16;
+        input_format_option = std::make_optional(eUint16);
     });
     options.emplace_back("--sint16", [&] () mutable  -> void {
-        input_format = eSint16;
+        input_format_option = std::make_optional(eSint16);
     });
     options.emplace_back("--ldf", [&] () mutable  -> void {
-        input_format = eLdf;
+        input_format_option = std::make_optional(eLdf);
     });
     options.emplace_back("--sample-freq", [&] () mutable  -> void {
         input_sample_frequency = stod(*(it++));
@@ -140,12 +140,24 @@ int main(int argc, char *argv[]) {
                 usage();
             } else {
                 filename_found = true;
-                int fd = open((*it).c_str(), O_RDONLY);
+                auto filename = *it;
+                InputFormat input_format;
+                if (!input_format_option.has_value()) {
+                    if (filename.ends_with(".u8")) input_format = eUint8;
+                    else if (filename.ends_with(".s8")) input_format = eSint8;
+                    else if (filename.ends_with(".u16")) input_format = eUint16;
+                    else if (filename.ends_with(".s16")) input_format = eSint16;
+                    else if (filename.ends_with(".ldf")) input_format = eLdf;
+                    else throw std::runtime_error("Input format not given and unknown input file suffix");
+                } else
+                    input_format = input_format_option.value();
+
+                int fd = open(filename.c_str(), O_RDONLY);
                 if (fd == -1)
-                    throw std::runtime_error(std::format("Error opening input file {}: {}", *it, strerror(errno)));
+                    throw std::runtime_error(std::format("Error opening input file {}: {}", filename, strerror(errno)));
 
                 Logger log(log_selection);
-                log.info(std::format("Processing input file {}", *it));
+                log.info(std::format("Processing input file {}", filename));
                 demodulateFile(log, input_format, input_sample_frequency, fd, block_size, out_fd, use_simd);
 
                 close(fd);
@@ -154,8 +166,11 @@ int main(int argc, char *argv[]) {
         }
         if (!filename_found) {
             Logger log(log_selection);
+            if (!input_format_option.has_value())
+                throw std::runtime_error("Input format must be given for stdin");
+
             log.info(std::format("Processing stdin"));
-            demodulateFile(log, input_format, input_sample_frequency, 0, block_size, out_fd, use_simd);
+            demodulateFile(log, input_format_option.value(), input_sample_frequency, 0, block_size, out_fd, use_simd);
         }
         if (out_fd != 1)
             close(out_fd);
