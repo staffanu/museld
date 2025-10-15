@@ -29,8 +29,6 @@ FirFilterStage::FirFilterStage(
     m_decimation_factor(decimation_factor),
     m_input_buffer_size_without_overlap(input_buffer_size_without_overlap),
     m_output_offset(output_offset),
-    m_input_re_buffer(new std::vector<float>(input_buffer_size_without_overlap + m_filter.size() - 1)),
-    m_input_im_buffer(new std::vector<float>(input_buffer_size_without_overlap + m_filter.size() - 1)),
     m_output_re_buffer(output_re_buffer),
     m_output_im_buffer(output_im_buffer),
     m_use_simd(use_simd) {
@@ -40,6 +38,8 @@ FirFilterStage::FirFilterStage(
         // resize filter so length is multiple of chunk size
         m_filter.resize((m_filter.size() * c_AVX_floats_per_chunk + c_AVX_floats_per_chunk) / c_AVX_floats_per_chunk);
     }
+    m_input_re_buffer = new std::vector<float>(input_buffer_size_without_overlap + m_filter.size() - 1);
+    m_input_im_buffer = new std::vector<float>(input_buffer_size_without_overlap + m_filter.size() - 1);
 }
 
 FirFilterStage::~FirFilterStage() {
