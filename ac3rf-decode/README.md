@@ -28,14 +28,17 @@ The following command line options are supported:
 > --sint8
 > --uint16
 > --sint16
+> --lds
 > --ldf
 
 The input format.  This option can be omitted if the input file ends with ".u8",
-".s8", ".u16", ".s16", or ".ldf" respectively.  For reading from stdin the format
+".s8", ".u16", ".s16", ".lds", or ".ldf" respectively.  For reading from stdin the format
 always has to be specified.
 
---ldf is for the LDF format used by the
-[ld-decode](https://github.com/happycube/ld-decode) toolchain (FLAC compressed 16 bit samples).
+"lds" and "ldf" are file formats used by the
+[ld-decode](https://github.com/happycube/ld-decode) toolchain. "lds" files are
+10 bits packed so that 4 10-bit samples occupies 5 bytes.
+"ldf" files have 16-bit samples compressed using FLAC.
 
 > --sample-freq [frequency]
 

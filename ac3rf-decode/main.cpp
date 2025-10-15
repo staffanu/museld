@@ -8,6 +8,7 @@
 #include "Ac3RfDemodulator.h"
 #include "InputReader.h"
 #include "LdfInputReader.h"
+#include "LdsInputReader.h"
 #include "Logger.h"
 
 enum InputFormat {
@@ -15,6 +16,7 @@ enum InputFormat {
     eSint8,
     eUint16,
     eSint16,
+    eLds,
     eLdf
   };
 
@@ -27,6 +29,7 @@ void demodulateFile(Logger &log, InputFormat input_format, double input_sample_f
         case eUint16: reader = new InputReaderImpl<uint16_t>(in_fd, block_size); break;
         case eSint8: reader = new InputReaderImpl<int8_t>(in_fd, block_size); break;
         case eSint16: reader = new InputReaderImpl<int16_t>(in_fd, block_size); break;
+        case eLds: reader = new LdsInputReader(in_fd, block_size); break;
         case eLdf: reader = new LdfInputReader(in_fd, block_size); break;
         default: throw std::runtime_error("Unsupported input format");
     }
@@ -77,6 +80,9 @@ int main(int argc, char *argv[]) {
     });
     options.emplace_back("--sint16", [&] () mutable  -> void {
         input_format_option = std::make_optional(eSint16);
+    });
+    options.emplace_back("--lds", [&] () mutable  -> void {
+        input_format_option = std::make_optional(eLds);
     });
     options.emplace_back("--ldf", [&] () mutable  -> void {
         input_format_option = std::make_optional(eLdf);
@@ -147,6 +153,7 @@ int main(int argc, char *argv[]) {
                     else if (filename.ends_with(".s8")) input_format = eSint8;
                     else if (filename.ends_with(".u16")) input_format = eUint16;
                     else if (filename.ends_with(".s16")) input_format = eSint16;
+                    else if (filename.ends_with(".lds")) input_format = eLds;
                     else if (filename.ends_with(".ldf")) input_format = eLdf;
                     else throw std::runtime_error("Input format not given and unknown input file suffix");
                 } else
