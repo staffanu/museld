@@ -28,14 +28,12 @@ public:
 
     ~FirFilterStage();
 
-    std::string name() const;
+    [[nodiscard]] std::string name() const;
     [[nodiscard]] int filterSize() const;
-    int decimationFactor() const;
+    [[nodiscard]] int decimationFactor() const;
     [[nodiscard]] std::vector<float> *inputReBuffer();
     [[nodiscard]] std::vector<float> *inputImBuffer();
-    std::string toString() const;
-
-    void setInput(int index, std::complex<float> v);
+    [[nodiscard]] std::string toString() const;
 
     void applyFilter();
     void moveDataToFront();

@@ -91,8 +91,11 @@ Ac3RfDemodulator::~Ac3RfDemodulator() {
 
 std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(float *input_buffer) {
     // Mix the input signal with exp(i * 2 * pi * 2.88e6 * t)
+    float *first_stage_input_re = m_filter_stages[0]->inputReBuffer()->data() + m_filter_stages[0]->filterSize() - 1;
+    float *first_stage_input_im = m_filter_stages[0]->inputImBuffer()->data() + m_filter_stages[0]->filterSize() - 1;
     for (int i = 0; i < m_input_block_size; i++) {
-        m_filter_stages[0]->setInput(i + m_filter_stages[0]->filterSize() - 1,  input_buffer[i] * m_exp_lut[m_phase_accumulator]);
+        first_stage_input_re[i] = input_buffer[i] * m_exp_lut[m_phase_accumulator].real();
+        first_stage_input_im[i] = input_buffer[i] * m_exp_lut[m_phase_accumulator].imag();
         m_phase_accumulator = (m_phase_accumulator + m_phase_step) & ((1 << c_phase_accum_bits) - 1);
     }
 

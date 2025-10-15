@@ -71,11 +71,6 @@ std::string FirFilterStage::toString() const {
         m_name, m_sample_frequency, m_cutoff_frequency, m_transition_width, m_filter.size(), m_decimation_factor);
 }
 
-void FirFilterStage::setInput(int index, std::complex<float> v) {
-    (*m_input_re_buffer)[index] = v.real();
-    (*m_input_im_buffer)[index] = v.imag();
-}
-
 void FirFilterStage::applyFilter() {
     firFilter(m_input_re_buffer->data(), m_input_buffer_size_without_overlap, m_filter.data(),
     m_filter.size(), m_output_re_buffer->data() + m_output_offset, m_decimation_factor);
