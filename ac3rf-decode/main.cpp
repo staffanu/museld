@@ -19,7 +19,7 @@ enum InputFormat {
   };
 
 void demodulateFile(Logger &log, InputFormat input_format, double input_sample_frequency,
-    int in_fd, int block_size, int out_fd, bool use_simd) {
+    int in_fd, uint32_t block_size, int out_fd, bool use_simd) {
 
     InputReader *reader;
     switch (input_format) {
@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
     InputFormat input_format = eSint16;
     double input_sample_frequency = 40e6;
     int out_fd = 1;
-    int block_size = 512 * 1024;
+    uint32_t block_size = 16 * 1024;
     bool use_simd = false;
 
     const std::vector<std::string> args(argv + 1, argv + argc);

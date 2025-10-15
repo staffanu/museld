@@ -12,7 +12,7 @@
 
 class InputReader {
 public:
-    InputReader(int fd, int block_size)
+    InputReader(int fd, uint32_t block_size)
     : m_fd(fd), m_block_size(block_size) {}
 
     virtual ~InputReader() = default;
@@ -20,19 +20,19 @@ public:
     virtual void initialize() = 0;
     virtual int readFloats(float *f) = 0;
 
-    int block_size() const {
+    uint32_t block_size() const {
         return m_block_size;
     }
 
 protected:
     int m_fd;
-    int m_block_size;
+    uint32_t m_block_size;
 };
 
 template <typename T>
 class InputReaderImpl : public InputReader {
 public:
-    InputReaderImpl(int fd, int block_size)
+    InputReaderImpl(int fd, uint32_t block_size)
     : InputReader(fd, block_size) {
         m_buffer = new T[block_size];
     }

@@ -8,7 +8,7 @@
 
 #include "FLAC++/decoder.h"
 
-LdfInputReader::LdfInputReader(int fd, int block_size)
+LdfInputReader::LdfInputReader(int fd, uint32_t block_size)
   : InputReader(fd, block_size),
     FLAC::Decoder::Stream() {
 }
@@ -26,18 +26,18 @@ void LdfInputReader::initialize() {
 int LdfInputReader::readFloats(float *f) {
     int filled_floats = 0;
     while (filled_floats < m_block_size) {
-        if (m_flac_block_read_count == m_flac_block_size) {
+        if (m_flac_block_read_count == m_flac_used_size) {
             // notice this triggers also the first time, when both are zero
             if (!process_single()) {
-                if (get_state() == FLAC__STREAM_DECODER_END_OF_STREAM)
-                    return 0;
                 throw std::runtime_error(std::format("libFLAC++ process_single: {}",
                     FLAC__StreamDecoderErrorStatusString[get_state()]));
+            } else if (get_state() == FLAC__STREAM_DECODER_END_OF_STREAM) {
+                return 0;
             }
         }
-        int n = std::min(m_block_size - filled_floats, m_flac_block_size - m_flac_block_read_count);
+        int n = std::min(m_block_size - filled_floats, m_flac_used_size - m_flac_block_read_count);
         for (int i = 0; i < n; i++)
-            f[filled_floats++] = m_decoded_samples[m_flac_block_read_count++];
+            f[filled_floats++] = (int16_t)m_decoded_samples[m_flac_block_read_count++];
     }
     return m_block_size;
 }
@@ -55,14 +55,15 @@ FLAC__StreamDecoderReadStatus LdfInputReader::read_callback(FLAC__byte buffer[],
 
 FLAC__StreamDecoderWriteStatus LdfInputReader::write_callback(const FLAC__Frame *frame, const FLAC__int32 *const buffer[]) {
     if (m_decoded_samples == nullptr) {
-        m_flac_block_size = frame->header.blocksize;
         m_decoded_samples = new uint16_t[frame->header.blocksize];
-    } else if (m_flac_block_size != frame->header.blocksize) {
-        throw std::runtime_error("LDF block size changed within file");
+        m_flac_allocated_size = frame->header.blocksize;
+    } else if ( frame->header.blocksize > m_flac_allocated_size) {
+        throw std::runtime_error("LDF block size increased within file");
     }
 
     for (int i = 0; i < frame->header.blocksize; i++)
         m_decoded_samples[i] = buffer[0][i];
+    m_flac_used_size = frame->header.blocksize;
     m_flac_block_read_count = 0;
 
     return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;

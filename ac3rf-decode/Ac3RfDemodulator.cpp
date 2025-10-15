@@ -99,7 +99,6 @@ std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(float *input
     // Decimate the I/Q signal in stages and finally lowpass
     for (auto stage: m_filter_stages)
         stage->applyFilter();
-    }
 
     // Create a "raw" symbol stream from the phase difference of the baseband data 1/288e3 seconds apart
     decodeSymbols(m_lp_iq_re_buffer, m_lp_iq_im_buffer, m_symbol_distance, m_symbol_buffer, m_input_block_size / m_decimation_factor);

@@ -10,7 +10,7 @@
 
 class LdfInputReader : public InputReader, private FLAC::Decoder::Stream  {
 public:
-    LdfInputReader(int fd, int block_size);
+    LdfInputReader(int fd, uint32_t block_size);
 
     LdfInputReader(const LdfInputReader &) = delete;
     LdfInputReader &operator=(const LdfInputReader &) = delete;
@@ -28,8 +28,9 @@ private:
     void metadata_callback(const ::FLAC__StreamMetadata *metadata) override;
     void error_callback(::FLAC__StreamDecoderErrorStatus status) override;
 
-    int m_flac_block_size = 0;
-    int m_flac_block_read_count = 0;
+    uint32_t m_flac_allocated_size = 0;
+    uint32_t m_flac_used_size = 0;
+    uint32_t m_flac_block_read_count = 0;
     uint16_t *m_decoded_samples = nullptr;
 };
 
