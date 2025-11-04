@@ -6,22 +6,14 @@
 #include <filesystem>
 #include <format>
 
-#include "Ac3RfDemodulator.h"
+#include "Logger.h"
 #include "InputReader.h"
 #include "LdfInputReader.h"
 #include "LdsInputReader.h"
-#include "Logger.h"
+#include "ac3/Ac3RfDemodulator.h"
+#include "efm/EfmDemodulator.h"
 
-enum InputFormat {
-    eUint8,
-    eSint8,
-    eUint16,
-    eSint16,
-    eLds,
-    eLdf
-  };
-
-void demodulateFile(Logger &log, InputFormat input_format, double input_sample_frequency,
+void demodulateFile(Logger &log, bool efm, InputFormat input_format, double input_sample_frequency,
     int in_fd, uint32_t block_size, int out_fd, bool use_simd) {
 
     InputReader *reader;
@@ -35,27 +27,39 @@ void demodulateFile(Logger &log, InputFormat input_format, double input_sample_f
         default: throw std::runtime_error("Unsupported input format");
     }
     reader->initialize();
-
-    Ac3RfDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd, use_simd);
-
     float input_buffer[reader->block_size()];
-    while (reader->readFloats(input_buffer) == reader->block_size()) {
-        for (auto output: demodulator.demodulate(input_buffer))
-            if (write(out_fd, output.data(), output.size()) == -1)
+
+    if (efm) {
+        EfmDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd, use_simd);
+
+        while (reader->readFloats(input_buffer) == reader->block_size()) {
+            auto output = demodulator.demodulate(input_buffer);
+            if (write(out_fd, (const uint8_t *)output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
                 throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
+        }
+        log.info(eAudio, demodulator.reedSolomonStatistics());
+    } else {
+        Ac3RfDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd, use_simd);
+
+        while (reader->readFloats(input_buffer) == reader->block_size()) {
+            for (auto output: demodulator.demodulate(input_buffer))
+                if (write(out_fd, output.data(), output.size()) == -1)
+                    throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
+        }
+        log.info(eAudio, demodulator.reedSolomonStatistics());
     }
-    log.info(demodulator.reedSolomonStatistics());
 
     delete reader;
 }
 
 int main(int argc, char *argv[]) {
-    auto log_selection = eWarn;
+    auto log_selection = Logger::c_log_warn;
     std::optional<InputFormat> input_format_option = std::nullopt;
     double input_sample_frequency = 40e6;
     int out_fd = 1;
     uint32_t block_size = 16 * 1024;
     bool use_simd = false;
+    bool demodulate_efm = false;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -94,6 +98,9 @@ int main(int argc, char *argv[]) {
     options.emplace_back("--simd", [&] () mutable  -> void {
         use_simd = true;
     });
+    options.emplace_back("--efm", [&] () mutable  -> void {
+        demodulate_efm = true;
+    });
     options.emplace_back("--output-filename", [&] () mutable  -> void {
         auto output_filename = *it++;
         if (out_fd != 1)
@@ -106,22 +113,22 @@ int main(int argc, char *argv[]) {
     });
     options.emplace_back("--log", [&] () mutable -> void {
         int level_number = stod(*it++);
-        LogPriority level;
+        std::map<LogCategoryFlags, LogPriority> level;
         switch (level_number) {
             case 0:
-                level = eOff;
+                level = Logger::c_log_off;
                 break;
             case 1:
-                level = eError;
+                level = Logger::c_log_error;
                 break;
             case 2:
-                level = eWarn;
+                level = Logger::c_log_warn;
                 break;
             case 3:
-                level = eInfo;
+                level = Logger::c_log_info;
                 break;
             case 4:
-                level = eDebug;
+                level = Logger::c_log_all;
                 break;
             default: throw std::runtime_error("Invalid log level");
         }
@@ -165,8 +172,8 @@ int main(int argc, char *argv[]) {
                     throw std::runtime_error(std::format("Error opening input file {}: {}", filename, strerror(errno)));
 
                 Logger log(log_selection);
-                log.info(std::format("Processing input file {}", filename));
-                demodulateFile(log, input_format, input_sample_frequency, fd, block_size, out_fd, use_simd);
+                log.info(eApplication, std::format("Processing input file {}", filename));
+                demodulateFile(log, demodulate_efm, input_format, input_sample_frequency, fd, block_size, out_fd, use_simd);
 
                 close(fd);
                 it++;
@@ -177,14 +184,14 @@ int main(int argc, char *argv[]) {
             if (!input_format_option.has_value())
                 throw std::runtime_error("Input format must be given for stdin");
 
-            log.info(std::format("Processing stdin"));
-            demodulateFile(log, input_format_option.value(), input_sample_frequency, 0, block_size, out_fd, use_simd);
+            log.info(eApplication, std::format("Processing stdin"));
+            demodulateFile(log, demodulate_efm, input_format_option.value(), input_sample_frequency, 0, block_size, out_fd, use_simd);
         }
         if (out_fd != 1)
             close(out_fd);
     } catch (const std::exception &x) {
-        Logger log(eDebug);
-        log.error(x.what());
+        Logger log(Logger::c_log_all);
+        log.error(eApplication, x.what());
         return EXIT_FAILURE;
     }
 

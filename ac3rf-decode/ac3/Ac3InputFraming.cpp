@@ -3,7 +3,7 @@
 //
 
 #include <format>
-#include "Logger.h"
+#include "../Logger.h"
 #include "Ac3InputFraming.h"
 
 Ac3InputFraming::Ac3InputFraming(Logger &log)
@@ -54,7 +54,7 @@ std::vector<std::pair<int, std::array<uint8_t, 37>>> Ac3InputFraming::arrangeInF
                     m_frame_number = (m_sync_frame_no[0] << 6) | (m_sync_frame_no[1] << 4) | (m_sync_frame_no[2] << 2) | m_sync_frame_no[3];
             } else {
                 if (m_consecutive_synched > 0) {
-                    m_log.debug(std::format("Missing sync symbol index {} (consecutiveSynched={})!", m_total_symbols_seen, m_consecutive_synched));
+                    m_log.debug(eAudio, std::format("Missing sync symbol index {} (consecutiveSynched={})!", m_total_symbols_seen, m_consecutive_synched));
                     m_consecutive_synched -= 1;
                     m_frame_number = (m_previous_frame_number + 1) % 72;
                     m_auto_sync_at = m_total_symbols_seen + 12 - m_sync_frame_symbols_seen;

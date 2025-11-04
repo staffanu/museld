@@ -8,7 +8,7 @@
 #include <ranges>
 #include <gnuradio/filter/firdes.h>
 
-#include "Ac3RfDemodulator.h"
+#include "ac3/Ac3RfDemodulator.h"
 
 FirFilterStage::FirFilterStage(
     std::string name,

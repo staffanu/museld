@@ -5,9 +5,9 @@
 #include <cassert>
 #include <complex>
 #include <unistd.h>
+#include "../rs/ByteWithErasureFlag.h"
+#include "../rs/ReedSolomon.h"
 #include "Ac3RfDemodulator.h"
-#include "rs/ByteWithErasureFlag.h"
-#include "rs/ReedSolomon.h"
 
 #include <format>
 
@@ -67,14 +67,14 @@ Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, i
     }
 
     for (const auto &stage: m_filter_stages)
-        m_log.debug(std::format("Filter stage: {}", stage->toString()));
+        m_log.debug(eAudio, std::format("Filter stage: {}", stage->toString()));
 
     // Create a lookup table for exp(i * 2 * pi * 2.88e6)
     for (int i = 0; i < 1 << c_phase_accum_bits; i++)
         m_exp_lut[i] = std::polar(1.0, 2.0 * M_PI * i / (1 << c_phase_accum_bits));
     double exact_phase_step = (1 << c_phase_accum_bits) * 2.88e6 / m_input_sample_frequency;
     m_phase_step = (int)exact_phase_step;
-    log.debug(std::format("Relative 2.88 MHz frequency error due to integer phase accumulator: {:.2f} %",
+    log.debug(eAudio, std::format("Relative 2.88 MHz frequency error due to integer phase accumulator: {:.2f} %",
         100 * (exact_phase_step - m_phase_step) / exact_phase_step));
     m_phase_accumulator = 0;
 

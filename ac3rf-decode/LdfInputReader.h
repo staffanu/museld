@@ -8,6 +8,15 @@
 #include "InputReader.h"
 #include <FLAC++/decoder.h>
 
+enum InputFormat {
+    eUint8,
+    eSint8,
+    eUint16,
+    eSint16,
+    eLds,
+    eLdf
+};
+
 class LdfInputReader : public InputReader, private FLAC::Decoder::Stream  {
 public:
     LdfInputReader(int fd, uint32_t block_size);

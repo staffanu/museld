@@ -7,13 +7,12 @@
 
 #include <complex>
 #include <string>
-#include "Logger.h"
-#include "rs/ReedSolomon.h"
+#include "../Logger.h"
+#include "../rs/ReedSolomon.h"
+#include "../FirFilterStage.h"
 #include "Ac3BlockHandler.h"
 #include "Ac3DPLL.h"
 #include "Ac3InputFraming.h"
-#include "FirFilterStage.h"
-#include "InputReader.h"
 
 class Ac3RfDemodulator {
 public:

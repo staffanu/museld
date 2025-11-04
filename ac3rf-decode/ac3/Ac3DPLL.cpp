@@ -27,7 +27,7 @@ int Ac3DPLL::reclockSymbols(double sampling_frequency, const std::vector<uint8_t
         filterOut = 0;
         if (newCounter < clkCounter) {
             if (output_size == max_output_size) {
-                m_log.warn("Symbol output buffer overflow");
+                m_log.warn(eAudio, "Symbol output buffer overflow");
                 return output_size;
             }
             output_symbols[output_size++] = lastIn;

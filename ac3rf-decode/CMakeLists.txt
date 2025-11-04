@@ -24,22 +24,21 @@ endif()
 add_executable(ac3rf-decode
         main.cpp
         Logger.h Logger.cpp
-        Ac3RfDemodulator.h Ac3RfDemodulator.cpp
         InputReader.h
+        LdsInputReader.cpp LdsInputReader.h
+        LdfInputReader.cpp LdfInputReader.h
+        FirFilterStage.cpp FirFilterStage.h
         rs/ReedSolomon.h
         rs/GFValue.h
         rs/ByteWithErasureFlag.h
-        Ac3DPLL.cpp Ac3DPLL.h
-        Ac3InputFraming.cpp
-        Ac3InputFraming.h
-        Ac3BlockHandler.cpp
-        Ac3BlockHandler.h
-        LdfInputReader.cpp
-        LdfInputReader.h
-        FirFilterStage.cpp
-        FirFilterStage.h
-        LdsInputReader.cpp
-        LdsInputReader.h
+        ac3/Ac3RfDemodulator.h ac3/Ac3RfDemodulator.cpp
+        ac3/Ac3DPLL.cpp ac3/Ac3DPLL.h
+        ac3/Ac3InputFraming.cpp ac3/Ac3InputFraming.h
+        ac3/Ac3BlockHandler.cpp ac3/Ac3BlockHandler.h
+        efm/EfmDemodulator.cpp efm/EfmDemodulator.h
+        efm/EfmDecoder.cpp efm/EfmDecoder.h
+        efm/EfmPll.cpp efm/EfmPll.h
+        efm/TwoChannelSample.h
 )
 
 target_link_options(ac3rf-decode PRIVATE "-L/usr/local/lib")

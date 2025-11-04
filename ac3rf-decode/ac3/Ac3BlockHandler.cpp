@@ -3,8 +3,8 @@
 //
 
 #include "Ac3BlockHandler.h"
-#include "rs/ByteWithErasureFlag.h"
-#include "rs/ReedSolomon.h"
+#include "../rs/ByteWithErasureFlag.h"
+#include "../rs/ReedSolomon.h"
 
 Ac3BlockHandler::Ac3BlockHandler(Logger &log)
 : m_log(log),
@@ -80,7 +80,7 @@ std::optional<std::array<std::array<uint8_t, 32>, 66>> Ac3BlockHandler::errorCor
     }
 
     if (c2CorrectedBlock[0][0] != 0x10 || c2CorrectedBlock[0][1] != 0x00) {
-        m_log.warn("Block does not start with 0x10 0x00");
+        m_log.warn(eAudio, "Block does not start with 0x10 0x00");
         return std::nullopt;
     }
 
@@ -101,20 +101,20 @@ std::vector<std::array<uint8_t, 1536>> Ac3BlockHandler::handleCorrectedBlock(con
                     continue;
                 } else if (byte != 0x0b) {
                     if (seen_first_good_block)
-                        m_log.warn("Block does not start with 0x0b");
+                        m_log.warn(eAudio, "Block does not start with 0x0b");
                     continue;
                 }
             } else if (ac3_output_block_index == 1) {
                 if (byte != 0x77) {
                     if (seen_first_good_block)
-                        m_log.warn("Block does not start with 0x0b 0x77");
+                        m_log.warn(eAudio, "Block does not start with 0x0b 0x77");
                     ac3_output_block_index = 0;
                     continue;
                 }
             } else if (ac3_output_block_index == 4) {
                 if (byte != 0x1c) {
                     if (seen_first_good_block)
-                        m_log.warn("Block does not start with 0x0b 0x77 ? ? 0x1c");
+                        m_log.warn(eAudio, "Block does not start with 0x0b 0x77 ? ? 0x1c");
                     ac3_output_block_index = 0;
                     continue;
                 }

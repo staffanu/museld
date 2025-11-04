@@ -9,7 +9,7 @@
 #include <optional>
 #include <vector>
 
-#include "rs/ReedSolomon.h"
+#include "../rs/ReedSolomon.h"
 
 
 class Logger;
