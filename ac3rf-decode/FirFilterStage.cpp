@@ -4,6 +4,7 @@
 
 #include "FirFilterStage.h"
 
+#include <cstring>
 #include <numeric>
 #include <ranges>
 #include <gnuradio/filter/firdes.h>

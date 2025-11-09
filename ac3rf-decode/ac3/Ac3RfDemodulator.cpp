@@ -5,11 +5,11 @@
 #include <cassert>
 #include <complex>
 #include <unistd.h>
+#include <cstring>
+#include <format>
 #include "../rs/ByteWithErasureFlag.h"
 #include "../rs/ReedSolomon.h"
 #include "Ac3RfDemodulator.h"
-
-#include <format>
 
 Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd, bool use_simd)
 : m_log(log),
