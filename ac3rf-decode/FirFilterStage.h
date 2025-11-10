@@ -38,10 +38,10 @@ public:
     void applyFilter();
     void moveDataToFront();
 
-private:
-    void firFilter(const float *input, size_t input_length,
-        const float *filter, size_t filter_size, float *output, int decimation_factor);
+    static void firFilter(const float *input, size_t input_length,
+        const float *filter, size_t filter_size, float *output, int decimation_factor, bool use_simd);
 
+private:
     static void firFilterNormal(const float *input, size_t input_length,
         const float *filter, size_t filter_size, float *output, int decimation_factor);
 

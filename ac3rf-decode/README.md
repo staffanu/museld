@@ -64,7 +64,10 @@ same output file is used for consecutive input files, the output is appended.
 
 If no filename is given input is read from stdin.
 
-### Example
+### Examples
 
-> ./cmake-build-release/ac3rf-decode --log 4 --sample-freq 24.583e6 --uint8 rf-ac3.24.583MHz.u8 | ffplay -codec:a:0 ac3 -i pipe: 
+AC3RF:
+> ./cmake-build-release/ac3rf-decode --log 4 --sample-freq 24.583e6 --uint8 rf-ac3.24.583MHz.u8 |` ffplay -codec:a:0 ac3 -i pipe: `
 
+EFM:
+> play -t raw -c 2 -r 44100 -b 16 -e signed-integer <filename>>

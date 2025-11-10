@@ -131,7 +131,7 @@ void EfmDecoder::decode(const bool data[], int input_data_size,
     auto t0 = chrono::high_resolution_clock::now();
 
     if (log_now && m_log.isEnabled(eDebug, eAudio)) {
-        m_log.info(eAudio, "C1 statistics: " + m_c1.statistics() + "C2 statistics: " + m_c2.statistics());
+        m_log.info(eAudio, reedSolomonStatistics());
     }
 
     *sample_count = 0;
@@ -199,6 +199,10 @@ void EfmDecoder::decode(const bool data[], int input_data_size,
         m_total_erasures_past_c1_last_second = 0;
         m_total_erasures_out_last_second = 0;
     }
+}
+
+std::string EfmDecoder::reedSolomonStatistics() const {
+    return "C1 statistics: " + m_c1.statistics() + "C2 statistics: " + m_c2.statistics();
 }
 
 void EfmDecoder::handleFrame(int max_output_samples, int &sample_count, TwoChannelSample output_samples[2048]) {

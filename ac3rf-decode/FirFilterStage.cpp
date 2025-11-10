@@ -74,9 +74,9 @@ std::string FirFilterStage::toString() const {
 
 void FirFilterStage::applyFilter() {
     firFilter(m_input_re_buffer->data(), m_input_buffer_size_without_overlap, m_filter.data(),
-    m_filter.size(), m_output_re_buffer->data() + m_output_offset, m_decimation_factor);
+    m_filter.size(), m_output_re_buffer->data() + m_output_offset, m_decimation_factor, m_use_simd);
     firFilter(m_input_im_buffer->data(), m_input_buffer_size_without_overlap, m_filter.data(),
-    m_filter.size(), m_output_im_buffer->data() + m_output_offset, m_decimation_factor);
+    m_filter.size(), m_output_im_buffer->data() + m_output_offset, m_decimation_factor, m_use_simd);
 }
 
 void FirFilterStage::moveDataToFront() {
@@ -90,8 +90,9 @@ void FirFilterStage::firFilter(
         const float *filter, // reversed filter coefficients
         size_t filter_length,
         float *output,
-        int decimation_factor) {
-    if (m_use_simd) {
+        int decimation_factor,
+        bool use_simd) {
+    if (use_simd) {
 #if defined __AVX__
         firFilterAvx(input, input_length, filter, filter_length, output, decimation_factor);
 #elif __ARM_NEON == 1

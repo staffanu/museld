@@ -5,8 +5,11 @@ set(CMAKE_CXX_STANDARD 23)
 
 find_package(PkgConfig REQUIRED)
 
-pkg_check_modules(GNURADIO REQUIRED gnuradio-filter)
-include_directories("${GNURADIO_INCLUDE_DIRS}")
+pkg_check_modules(GNURADIO_FILTER REQUIRED gnuradio-filter)
+include_directories("${GNURADIO_FILTER_INCLUDE_DIRS}")
+
+pkg_check_modules(GNURADIO_FFT REQUIRED gnuradio-fft)
+include_directories("${GNURADIO_FFT_INCLUDE_DIRS}")
 
 pkg_check_modules(FLAC REQUIRED flac++)
 include_directories("${FLAC_INCLUDE_DIRS}")
@@ -43,6 +46,8 @@ add_executable(ac3rf-decode
 
 target_link_options(ac3rf-decode PRIVATE "-L/usr/local/lib")
 target_link_libraries(ac3rf-decode
-        PRIVATE ${GNURADIO_LINK_LIBRARIES}
+        PRIVATE fmt # It seems that gnuradio depends on this without adding it to LINK_LIBRARIES?
+        PRIVATE ${GNURADIO_FILTER_LINK_LIBRARIES}
+        PRIVATE ${GNURADIO_FFT_LINK_LIBRARIES}
         PRIVATE ${FLAC_LINK_LIBRARIES}
 )

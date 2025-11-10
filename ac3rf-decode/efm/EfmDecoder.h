@@ -28,6 +28,8 @@ public:
         int max_output_samples, int *sample_count, TwoChannelSample *output_samples,
         bool log_now);
 
+    std::string reedSolomonStatistics() const;
+
 private:
     static const std::array<ByteWithErasureFlag, 1 << 14> c_efm_to_byte_table;
     static std::array<ByteWithErasureFlag, 1 << 14> makeEfmInversionTable();
