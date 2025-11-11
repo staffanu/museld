@@ -42,6 +42,8 @@ add_executable(ac3rf-decode
         efm/EfmDecoder.cpp efm/EfmDecoder.h
         efm/EfmPll.cpp efm/EfmPll.h
         efm/TwoChannelSample.h
+        efm/GardnerTimingRecovery.cpp
+        efm/GardnerTimingRecovery.h
 )
 
 target_link_options(ac3rf-decode PRIVATE "-L/usr/local/lib")

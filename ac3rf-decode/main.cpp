@@ -14,7 +14,7 @@
 #include "efm/EfmDemodulator.h"
 
 void demodulateFile(Logger &log, bool efm, InputFormat input_format, double input_sample_frequency,
-    int in_fd, uint32_t block_size, int out_fd, bool use_simd) {
+    int in_fd, uint32_t block_size, int out_fd, bool efm_rf, bool use_simd) {
 
     InputReader *reader;
     switch (input_format) {
@@ -30,7 +30,7 @@ void demodulateFile(Logger &log, bool efm, InputFormat input_format, double inpu
     float input_buffer[reader->block_size()];
 
     if (efm) {
-        EfmDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd, use_simd);
+        EfmDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd, efm_rf, use_simd);
 
         while (reader->readFloats(input_buffer) == reader->block_size()) {
             auto output = demodulator.demodulate(input_buffer);
@@ -60,6 +60,7 @@ int main(int argc, char *argv[]) {
     uint32_t block_size = 16 * 1024;
     bool use_simd = false;
     bool demodulate_efm = false;
+    bool efm_rf = false;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -100,6 +101,11 @@ int main(int argc, char *argv[]) {
     });
     options.emplace_back("--efm", [&] () mutable  -> void {
         demodulate_efm = true;
+        efm_rf = false;
+    });
+    options.emplace_back("--efm-rf", [&] () mutable  -> void {
+        demodulate_efm = true;
+        efm_rf = true;
     });
     options.emplace_back("--output-filename", [&] () mutable  -> void {
         auto output_filename = *it++;
@@ -173,7 +179,7 @@ int main(int argc, char *argv[]) {
 
                 Logger log(log_selection);
                 log.info(eApplication, std::format("Processing input file {}", filename));
-                demodulateFile(log, demodulate_efm, input_format, input_sample_frequency, fd, block_size, out_fd, use_simd);
+                demodulateFile(log, demodulate_efm, input_format, input_sample_frequency, fd, block_size, out_fd, efm_rf, use_simd);
 
                 close(fd);
                 it++;
@@ -185,7 +191,7 @@ int main(int argc, char *argv[]) {
                 throw std::runtime_error("Input format must be given for stdin");
 
             log.info(eApplication, std::format("Processing stdin"));
-            demodulateFile(log, demodulate_efm, input_format_option.value(), input_sample_frequency, 0, block_size, out_fd, use_simd);
+            demodulateFile(log, demodulate_efm, input_format_option.value(), input_sample_frequency, 0, block_size, out_fd, efm_rf, use_simd);
         }
         if (out_fd != 1)
             close(out_fd);
