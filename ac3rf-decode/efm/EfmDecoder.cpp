@@ -93,6 +93,7 @@ EfmDecoder::EfmDecoder(Logger &log)
           m_consecutive_syncs(0),
           m_locked(false),
           m_consecutive_sync_failures(0), // if not at the exact expected place
+          m_efm_frames_since_lock(0),
           m_frame{},
           m_c1(32, 28, 0, true, false),
           m_c2(28, 24, 0, true, false),
@@ -150,6 +151,7 @@ void EfmDecoder::decode(const bool data[], int input_data_size,
             m_consecutive_syncs += 1; // this is not right -- we increment consecutive_syncs even if not in an expected position
             if (m_consecutive_syncs >= 3 && !m_locked) {
                 m_locked = true;
+                m_efm_frames_since_lock = 0;
                 m_log.debug(eAudio, std::format("efm locked index {}", m_total_bits));
             }
         } else if (m_bits_since_sync == 588 && m_locked) {
@@ -161,6 +163,8 @@ void EfmDecoder::decode(const bool data[], int input_data_size,
             if (m_consecutive_sync_failures >= 7 && m_locked) {
                 m_locked = false;
                 m_log.debug(eAudio, std::format("efm lock lost index {}", m_total_bits));
+                if (m_efm_frames_since_lock > c_minimum_frames_before_c1_c2_valid)
+                    m_log.debug(eAudio, reedSolomonStatistics());
             }
         } else if (m_byte_index < 33) {
             if (m_bit_index == 16) {
@@ -259,5 +263,10 @@ void EfmDecoder::handleFrame(int max_output_samples, int &sample_count, TwoChann
 
         sample_count++;
         assert(sample_count <= max_output_samples);
+    }
+    m_efm_frames_since_lock++;
+    if (m_efm_frames_since_lock < c_minimum_frames_before_c1_c2_valid) {
+        m_c1.resetStatistics();
+        m_c2.resetStatistics();
     }
 }

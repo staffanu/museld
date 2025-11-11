@@ -31,6 +31,8 @@ public:
     std::string reedSolomonStatistics() const;
 
 private:
+    static constexpr int c_minimum_frames_before_c1_c2_valid = 97;
+
     static const std::array<ByteWithErasureFlag, 1 << 14> c_efm_to_byte_table;
     static std::array<ByteWithErasureFlag, 1 << 14> makeEfmInversionTable();
     static const std::array<std::pair<int, bool>, 32> c_initial_delays;
@@ -54,6 +56,7 @@ private:
     int m_consecutive_syncs;
     bool m_locked;
     int m_consecutive_sync_failures; // if not at the exact expected place
+    int m_efm_frames_since_lock;
 
     std::array<ByteWithErasureFlag, 33> m_frame; // first byte is the control data
 
