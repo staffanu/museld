@@ -68,8 +68,8 @@ int GardnerTimingRecovery::reclock(const float *input, bool *output, int max_out
             symbol = true;
 
             // error positive: we're sampling too early, so increase sample spacing
-            double max_error = 40.f * 80.f;
-            double error = sample * (sample_before - sample_after) / max_error;
+            // notice error is normalized dividing by (before - after)^2.
+            double error = sample / (sample_before - sample_after);
             //printf("%f %f %f  error=%f\n", sample_before, sample, sample_after, error);
             error = std::max(std::min(error, m_nominal_step_size / m_g1 * 0.02), -m_nominal_step_size / m_g1 * 0.02);
             m_error_sum += error;
