@@ -27,7 +27,7 @@ void demodulateFile(Logger &log, bool efm, InputFormat input_format, double inpu
         default: throw std::runtime_error("Unsupported input format");
     }
     reader->initialize();
-    float input_buffer[reader->block_size()];
+    auto *input_buffer = new float[block_size];
 
     if (efm) {
         EfmDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd, efm_rf, use_simd);
@@ -49,6 +49,7 @@ void demodulateFile(Logger &log, bool efm, InputFormat input_format, double inpu
         log.info(eAudio, demodulator.reedSolomonStatistics());
     }
 
+    delete[] input_buffer;
     delete reader;
 }
 
