@@ -2,7 +2,7 @@
 // Created by Staffan Ulfberg on 11/4/25.
 //
 
-#include <cstring>
+#include <iostream>
 #include <gnuradio/gr_complex.h>
 #include <gnuradio/fft/fft.h>
 #include <gnuradio/fft/window.h>
@@ -53,10 +53,10 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
       m_efm_decoder(log) {
 
     if (m_rf_input) {
-        const int response_table_size = 5;
-        const double frequencies[response_table_size] = {0.0e6, 0.5e6, 1.0e6, 1.6e6, 2.0e6};
-        const double amplitude_response[response_table_size] = {0.0, 0.7, 1.0, 1.0, 0.0};
-        const double phase_response[response_table_size] = {0.0, -1.0, -1.5, -0.8, -0.8};
+        const int response_table_size = 9;
+        const double frequencies[response_table_size] = {0.0e6, 0.25e6, 0.5e6, 0.75e6, 1.0e6, 1.25e6, 1.5e6, 1.75e6, 2.0e6};
+        const double amplitude_response[response_table_size] = {0.0, 0.9705, 0.6962, 0.9912, 0.4231, 0.9197, 0.8901, 0.2975, 0.0};
+        const double phase_response[response_table_size] = {0.0, -1.9174, -1.1931, -1.4658, -1.6696, -0.7053, -0.9591, -1.2714, -1.0 };
         assert(frequencies[response_table_size - 1] != 0);
 
         const int fft_size = 256;
@@ -66,14 +66,14 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
         if (fft_size % 2 == 0)
             fft.get_inbuf()[fft_size / 2] = 0;
 
-        printf("Desired input filter frequency response:\n");
+        log.debug(eAudio, "Desired input filter frequency response:");
         for (int i = 1; i < (fft_size + 1) / 2; i++) {
             float f = (float)input_sample_frequency * i / fft_size;
             gr_complex h = f < frequencies[response_table_size - 1] ? std::polar<float>(
                 interpolate(response_table_size, frequencies, amplitude_response, f),
                 interpolate(response_table_size, frequencies, phase_response, f)) : std::complex<float>(0.f);
 
-            if (f < 2.2e6) printf("%.0f: %f %f\n", f, abs(h), arg(h));
+            if (f < 2.2e6) log.debug(eAudio, std::format("{:.0}: {} {}", f, abs(h), arg(h)));
 
             fft.get_inbuf()[i] = h;
             fft.get_inbuf()[fft_size - i] = conj(h);
@@ -95,10 +95,11 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
         m_input_filter = gr::filter::firdes::low_pass_2(1.0, m_input_sample_frequency, 1.7e6, 0.7e6, 40, gr::fft::window::WIN_HAMMING);
     }
 
-    printf("Input filter size %ld:\n", m_input_filter.size());
-    for (float f : m_input_filter)
-        printf("%f ", f);
-    printf("\n");
+    std::ostringstream ss;
+    ss << std::format("Input filter size {}: ", m_input_filter.size());
+    for (int i = 0; i < m_input_filter.size(); i++)
+        ss << " " << m_input_filter[i];;
+    m_log.debug(eAudio, ss.str());
 
     // TODO: maybe pad filter for SIMD
 
@@ -108,9 +109,7 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
     m_reclocked_data = new bool[m_max_reclocked_size];
     m_max_output_samples = (m_max_reclocked_size / 588 + 1) * 6;
 
-    fd = open("debug.bin",
-        O_WRONLY | O_TRUNC | O_CREAT,
-        S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    fd = open("debug.bin", O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 }
 
 EfmDemodulator::~EfmDemodulator() {
