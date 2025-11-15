@@ -5,6 +5,7 @@
 #ifndef MUSECPP_BYTEWITHERASUREFLAG_H
 #define MUSECPP_BYTEWITHERASUREFLAG_H
 
+#include <cinttypes>
 #include "GFValue.h"
 
 class ByteWithErasureFlag {
