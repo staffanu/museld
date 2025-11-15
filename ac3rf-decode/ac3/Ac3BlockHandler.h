@@ -48,18 +48,19 @@ public:
 
 private:
     Logger &m_log;
-    ReedSolomon<0x187, 2> m_rsC1;
-    ReedSolomon<0x187, 2> m_rsC2;
+    ReedSolomon<0x187, 2> m_c1;
+    ReedSolomon<0x187, 2> m_c2;
 
     // handleFrame state
-    UncorrectedBlock currentBlock;
-    int expectedSeq = 0;
-    int consecutiveInSequence = 0;
+    UncorrectedBlock m_current_block;
+    int m_expected_seq = 0;
+    int m_consecutive_in_sequence = 0;
 
     // handleCorrectedBlock state
     size_t m_last_burst_symbol_index = -1;
-    int ac3_output_block_index = 0;
-    std::array<uint8_t, 1536> ac3_output_block;
+    size_t m_first_symbol_in_burst = -1;
+    int m_ac3_output_block_index = 0;
+    std::array<uint8_t, 1536> m_ac3_output_block;
 };
 
 

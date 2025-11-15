@@ -9,36 +9,36 @@
 
 Ac3BlockHandler::Ac3BlockHandler(Logger &log)
 : m_log(log),
-  m_rsC1(37, 33, 120, true, true),
-  m_rsC2(36, 32, 120, true, true)
+  m_c1(37, 33, 120, true, true),
+  m_c2(36, 32, 120, true, true)
 {
 }
 
 std::optional<Ac3BlockHandler::UncorrectedBlock>
 Ac3BlockHandler::handleFrame(const Ac3InputFraming::NumberedFrame &frame) {
     int usedFrameNo;
-    if (frame.frame_number != expectedSeq) {
-        if (consecutiveInSequence < 3) {
-            expectedSeq = 0;
-            consecutiveInSequence = 0;
+    if (frame.frame_number != m_expected_seq) {
+        if (m_consecutive_in_sequence < 3) {
+            m_expected_seq = 0;
+            m_consecutive_in_sequence = 0;
             return std::nullopt; // discard
         } else {
-            consecutiveInSequence = 0;
-            usedFrameNo = expectedSeq;
+            m_consecutive_in_sequence = 0;
+            usedFrameNo = m_expected_seq;
         }
     } else {
         usedFrameNo = frame.frame_number;
-        consecutiveInSequence++;
+        m_consecutive_in_sequence++;
     }
 
-    currentBlock.block_data[usedFrameNo] = frame.frame_data;
+    m_current_block.block_data[usedFrameNo] = frame.frame_data;
 
     if (usedFrameNo == 71) { // block completed
-        expectedSeq = 0;
-        currentBlock.global_symbol_index = frame.global_symbol_index - 71 * 37 * 4;
-        return std::make_optional(currentBlock);
+        m_expected_seq = 0;
+        m_current_block.global_symbol_index = frame.global_symbol_index - 71 * 37 * 4;
+        return std::make_optional(m_current_block);
     } else {
-        expectedSeq = usedFrameNo + 1;
+        m_expected_seq = usedFrameNo + 1;
         return std::nullopt;
     }
 }
@@ -60,8 +60,8 @@ std::optional<Ac3BlockHandler::CorrectedBlock> Ac3BlockHandler::errorCorrectBloc
             c1Data1[i] = ByteWithErasureFlag(block.block_data[k * 2 + i1 / 37][i1 % 37]);
             c1Data2[i] = ByteWithErasureFlag(block.block_data[k * 2 + i2 / 37][i2 % 37]);
         }
-        m_rsC1.decode(c1Data1);
-        m_rsC1.decode(c1Data2);
+        m_c1.decode(c1Data1);
+        m_c1.decode(c1Data2);
         for (int i = 0; i < 33; i++) {
             c1CorrectedBlock[k * 66 + i * 2] = c1Data1[i];
             c1CorrectedBlock[k * 66 + i * 2 + 1] = c1Data2[i];
@@ -77,7 +77,7 @@ std::optional<Ac3BlockHandler::CorrectedBlock> Ac3BlockHandler::errorCorrectBloc
     for (int k = 0; k < 66; k++) {
         for (int i = 0; i < 36; i++)
             c2Data[i] = c1CorrectedBlock[k + i * 66];
-        m_rsC2.decode(c2Data);
+        m_c2.decode(c2Data);
         for (int i = 0; i < 32; i++)
             c2CorrectedBlock.block_data[k][i] = c2Data[i].byteValue();
     }
@@ -95,12 +95,13 @@ std::vector<std::array<uint8_t, 1536>> Ac3BlockHandler::handleCorrectedBlock(con
 
     std::vector<std::array<uint8_t, 1536>> output;
 
+    int symbol_in_block = 8;
     for (int i = 0; i < 66; i++) {
         // notice we skip the two first bytes in each block
         for (int j = i == 0 ? 2 : 0; j < 32; j++) {
             uint8_t byte = block.block_data[i][j];
 
-            if (ac3_output_block_index == 0) {
+            if (m_ac3_output_block_index == 0) {
                 if (byte == 0x00) {
                     // just skip
                     continue;
@@ -109,39 +110,46 @@ std::vector<std::array<uint8_t, 1536>> Ac3BlockHandler::handleCorrectedBlock(con
                         m_log.warn(eAudio, "Block does not start with 0x0b");
                     continue;
                 }
-            } else if (ac3_output_block_index == 1) {
+            } else if (m_ac3_output_block_index == 1) {
                 if (byte != 0x77) {
                     if (m_last_burst_symbol_index != -1)
                         m_log.warn(eAudio, "Block does not start with 0x0b 0x77");
-                    ac3_output_block_index = 0;
+                    m_ac3_output_block_index = 0;
                     continue;
                 }
-            } else if (ac3_output_block_index == 4) {
+            } else if (m_ac3_output_block_index == 4) {
                 if (byte != 0x1c) {
                     if (m_last_burst_symbol_index != -1)
                         m_log.warn(eAudio, "Block does not start with 0x0b 0x77 ? ? 0x1c");
-                    ac3_output_block_index = 0;
+                    m_ac3_output_block_index = 0;
                     continue;
                 }
-                if (m_last_burst_symbol_index != -1 && block.global_symbol_index  - m_last_burst_symbol_index != 2880 * 4) {
+                m_first_symbol_in_burst = block.global_symbol_index + symbol_in_block - m_ac3_output_block_index * 4;
+
+                // Data doesn't arrive equally spaced.  Output blocks appear 31.25 times per second and contain
+                // 2880 bytes.  4 output blocks are made from 5 input blocks that are on average starting every 11520
+                // input symbol (2304 bytes).  We warn if the space between input blocks is more than 3000.
+                if (m_last_burst_symbol_index != -1 && m_first_symbol_in_burst - m_last_burst_symbol_index > 3000 * 4) {
                     m_log.warn(eAudio, std::format("Some input was not recognized as AC3 data and was discarded: {} symbols / {} bytes / {} bursts",
-                        block.global_symbol_index - m_last_burst_symbol_index, (block.global_symbol_index - m_last_burst_symbol_index) / 4,
-                        (block.global_symbol_index - m_last_burst_symbol_index) / (2880 * 4)));
+                        m_first_symbol_in_burst - m_last_burst_symbol_index,
+                        (m_first_symbol_in_burst - m_last_burst_symbol_index) / 4,
+                        (m_first_symbol_in_burst - m_last_burst_symbol_index) / (2880 * 4)));
                 }
-                m_last_burst_symbol_index = block.global_symbol_index;
+                m_last_burst_symbol_index = m_first_symbol_in_burst;
             }
 
-            ac3_output_block[ac3_output_block_index++] = byte;
+            m_ac3_output_block[m_ac3_output_block_index++] = byte;
 
-            if (ac3_output_block_index == 1536) {
-                output.push_back(ac3_output_block);
-                ac3_output_block_index = 0;
+            if (m_ac3_output_block_index == 1536) {
+                output.push_back(m_ac3_output_block);
+                m_ac3_output_block_index = 0;
             }
+            symbol_in_block += 4;
         }
     }
     return output;
 }
 
 std::string Ac3BlockHandler::reedSolomonStatistics() const {
-    return "C1 statistics: " + m_rsC1.statistics() + "C2 statistics: " + m_rsC2.statistics();
+    return "C1 statistics: " + m_c1.statistics() + "C2 statistics: " + m_c2.statistics();
 }
