@@ -49,8 +49,13 @@ add_executable(ac3rf-decode
 
 target_link_options(ac3rf-decode PRIVATE "-L/usr/local/lib")
 target_link_libraries(ac3rf-decode
-        PRIVATE fmt # It seems that gnuradio depends on this without adding it to LINK_LIBRARIES?
         PRIVATE ${GNURADIO_FILTER_LINK_LIBRARIES}
         PRIVATE ${GNURADIO_FFT_LINK_LIBRARIES}
         PRIVATE ${FLAC_LINK_LIBRARIES}
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(ac3rf-decode
+            PRIVATE fmt # It seems that gnuradio depends on this without adding it to LINK_LIBRARIES?
+    )
+endif()
