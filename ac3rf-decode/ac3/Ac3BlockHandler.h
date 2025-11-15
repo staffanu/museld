@@ -5,12 +5,11 @@
 #ifndef AC3RF_DECODE_AC3BLOCKHANDLER_H
 #define AC3RF_DECODE_AC3BLOCKHANDLER_H
 
-#include <cstdint>
 #include <optional>
 #include <vector>
 
 #include "../rs/ReedSolomon.h"
-
+#include "Ac3InputFraming.h"
 
 class Logger;
 
@@ -23,30 +22,42 @@ public:
     Ac3BlockHandler &operator=(const Ac3BlockHandler &) = delete;
     Ac3BlockHandler &operator=(Ac3BlockHandler &&) = delete;
 
-    // Keeps track of received frames and returns a block of 72 frames when they have been collcted
-    std::optional<std::array<std::array<uint8_t, 37>, 72>> handleFrame(int frame_number, const std::array<uint8_t, 37> &frame);
+    // A block of 72 consecutive frames starting with sequence number 0.
+    struct UncorrectedBlock {
+        size_t global_symbol_index;
+        std::array<std::array<uint8_t, 37>, 72> block_data;
+    };
+
+    // After error correction we have 66 words of length 32
+    struct CorrectedBlock {
+        size_t global_symbol_index;
+        std::array<std::array<uint8_t, 32>, 66> block_data;
+    };
+
+    // Keeps track of received frames and returns a block of 72 frames when they have been collected
+    std::optional<UncorrectedBlock> handleFrame(const Ac3InputFraming::NumberedFrame &frame);
 
     // Runs Reed Solomon error correction on a single block, including de-interleaving
     // This method has no state, but cannot be static since it uses the RS decoders and also the logger.
-    std::optional<std::array<std::array<uint8_t, 32>, 66>> errorCorrectBlock(const std::array<std::array<uint8_t, 37>, 72> &block);
+    std::optional<CorrectedBlock> errorCorrectBlock(const UncorrectedBlock &block);
 
     // Parses corrected blocks to find the AC3 preample and returns data bursts.
-    std::vector<std::array<uint8_t, 1536>> handleCorrectedBlock(const std::array<std::array<uint8_t, 32>, 66> &block);
+    std::vector<std::array<uint8_t, 1536>> handleCorrectedBlock(const CorrectedBlock &block);
 
-    std::string reedSolomonStatistics() const;
+    [[nodiscard]] std::string reedSolomonStatistics() const;
 
 private:
     Logger &m_log;
-    ReedSolomon<0x187, 2> rsC1;
-    ReedSolomon<0x187, 2> rsC2;
+    ReedSolomon<0x187, 2> m_rsC1;
+    ReedSolomon<0x187, 2> m_rsC2;
 
     // handleFrame state
-    std::array<std::array<uint8_t, 37>, 72> currentBlock;
+    UncorrectedBlock currentBlock;
     int expectedSeq = 0;
     int consecutiveInSequence = 0;
 
     // handleCorrectedBlock state
-    bool seen_first_good_block = false;
+    size_t m_last_burst_symbol_index = -1;
     int ac3_output_block_index = 0;
     std::array<uint8_t, 1536> ac3_output_block;
 };

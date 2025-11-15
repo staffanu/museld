@@ -118,7 +118,7 @@ std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(float *input
     // For each set of frames 0-71, create a block, error correct it, and parse it for output data
     std::vector<std::array<uint8_t, 1536>> result;
     for (auto frame: frames)
-        if (auto block = m_block_handler.handleFrame(frame.first, frame.second); block.has_value())
+        if (auto block = m_block_handler.handleFrame(frame); block.has_value())
             if (auto correctedBlock = m_block_handler.errorCorrectBlock(block.value()); correctedBlock.has_value()) {
                 auto output = m_block_handler.handleCorrectedBlock(correctedBlock.value());
                 result.insert(result.end(), output.cbegin(), output.cend());

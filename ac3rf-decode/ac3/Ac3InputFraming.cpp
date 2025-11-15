@@ -12,8 +12,10 @@ Ac3InputFraming::Ac3InputFraming(Logger &log)
 }
 
 // Finds the sync pattens and breaks the sequence up into frames
-std::vector<std::pair<int, std::array<uint8_t, 37>>> Ac3InputFraming::arrangeInFrames(const std::vector<uint8_t> &symbols, int number_of_symbols) {
-    std::vector<std::pair<int, std::array<uint8_t, 37>>> frames;
+std::vector<Ac3InputFraming::NumberedFrame>
+Ac3InputFraming::arrangeInFrames(const std::vector<uint8_t> &symbols, int number_of_symbols) {
+
+    std::vector<NumberedFrame> frames;
 
     for (int i = 0; i < number_of_symbols; i++, m_total_symbols_seen++) {
         uint8_t s = symbols[i];
@@ -77,7 +79,7 @@ std::vector<std::pair<int, std::array<uint8_t, 37>>> Ac3InputFraming::arrangeInF
                 for (int j = 0; j < 37; j++)
                     frame[j] = m_symbols_in_frame[j * 4] << 6 | m_symbols_in_frame[j * 4 + 1] << 4 | m_symbols_in_frame[j * 4 + 2] << 2 | m_symbols_in_frame[j * 4 + 3];
 
-                frames.push_back(std::make_pair(m_frame_number, frame));
+                frames.emplace_back(m_total_symbols_seen - 34 * 4 + 1, m_frame_number, frame);
 
                 m_previous_frame_number = m_frame_number;
                 m_symbol_in_frame_counter = 0;

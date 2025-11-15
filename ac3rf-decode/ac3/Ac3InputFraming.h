@@ -18,7 +18,12 @@ public:
     Ac3InputFraming &operator=(const Ac3InputFraming &) = delete;
     Ac3InputFraming &operator=(Ac3InputFraming &&) = delete;
 
-    std::vector<std::pair<int, std::array<uint8_t, 37>>> arrangeInFrames(const std::vector<uint8_t> &symbols, int number_of_symbols);
+    struct NumberedFrame {
+        size_t global_symbol_index;
+        int frame_number;
+        std::array<uint8_t, 37> frame_data;
+    };
+    std::vector<NumberedFrame> arrangeInFrames(const std::vector<uint8_t> &symbols, int number_of_symbols);
 
 private:
     Logger &m_log;
