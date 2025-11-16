@@ -2,50 +2,40 @@
 // Created by Staffan Ulfberg on 10/14/25.
 //
 
-#include "FirFilterStage.h"
-
 #include <cstring>
 #include <numeric>
-#include <ranges>
+#include <cassert>
+#include <format>
 #include <gnuradio/filter/firdes.h>
-
-#include "ac3/Ac3RfDemodulator.h"
+#include "FirFilterStage.h"
 
 FirFilterStage::FirFilterStage(
     std::string name,
-    double sample_frequency,
-    double cutoff_frequency,
-    double transition_width,
+    std::string description,
+    std::vector<float> filter,
     int decimation_factor,
     int input_buffer_size_without_overlap,
     int output_offset,
-    std::vector<float> *output_re_buffer,
-    std::vector<float> *output_im_buffer,
+    std::vector<float> *output_buffer,
     bool use_simd)
   : m_name(name),
-    m_sample_frequency(sample_frequency),
-    m_cutoff_frequency(cutoff_frequency),
-    m_transition_width(transition_width),
-    m_filter(gr::filter::firdes::low_pass(1.0, sample_frequency, cutoff_frequency, transition_width, gr::fft::window::WIN_HAMMING)),
+    m_description(description),
+    m_filter(filter),
     m_decimation_factor(decimation_factor),
     m_input_buffer_size_without_overlap(input_buffer_size_without_overlap),
     m_output_offset(output_offset),
-    m_output_re_buffer(output_re_buffer),
-    m_output_im_buffer(output_im_buffer),
+    m_output_buffer(output_buffer),
     m_use_simd(use_simd) {
 
-    std::reverse(m_filter.begin(), m_filter.end());
     if (m_use_simd) {
         // resize filter so length is multiple of chunk size
         m_filter.resize((m_filter.size() + c_AVX_floats_per_chunk - 1) / c_AVX_floats_per_chunk * c_AVX_floats_per_chunk);
     }
-    m_input_re_buffer = new std::vector<float>(input_buffer_size_without_overlap + m_filter.size() - 1);
-    m_input_im_buffer = new std::vector<float>(input_buffer_size_without_overlap + m_filter.size() - 1);
+    m_input_buffer = new std::vector<float>(input_buffer_size_without_overlap + m_filter.size() - 1);
 }
 
 FirFilterStage::~FirFilterStage() {
-    delete m_input_re_buffer;
-    delete m_input_im_buffer;
+    delete m_input_buffer;
 }
 
 std::string FirFilterStage::name() const {
@@ -60,28 +50,22 @@ int FirFilterStage::decimationFactor() const {
     return m_decimation_factor;
 }
 
-std::vector<float> *FirFilterStage::inputReBuffer() {
-    return m_input_re_buffer;
-}
-std::vector<float> *FirFilterStage::inputImBuffer() {
-    return m_input_im_buffer;
+std::vector<float> *FirFilterStage::inputBuffer() {
+    return m_input_buffer;
 }
 
 std::string FirFilterStage::toString() const {
-    return std::format("{}, sample_freq: {}, cutoff: {}, trans w: {}, taps: {}, decimation: {}",
-        m_name, m_sample_frequency, m_cutoff_frequency, m_transition_width, m_filter.size(), m_decimation_factor);
+    return std::format("{}: {}, taps: {}, decimation: {}",
+        m_name, m_description, m_filter.size(), m_decimation_factor);
 }
 
 void FirFilterStage::applyFilter() {
-    firFilter(m_input_re_buffer->data(), m_input_buffer_size_without_overlap, m_filter.data(),
-    m_filter.size(), m_output_re_buffer->data() + m_output_offset, m_decimation_factor, m_use_simd);
-    firFilter(m_input_im_buffer->data(), m_input_buffer_size_without_overlap, m_filter.data(),
-    m_filter.size(), m_output_im_buffer->data() + m_output_offset, m_decimation_factor, m_use_simd);
+    firFilter(m_input_buffer->data(), m_input_buffer_size_without_overlap, m_filter.data(),
+    m_filter.size(), m_output_buffer->data() + m_output_offset, m_decimation_factor);
 }
 
 void FirFilterStage::moveDataToFront() {
-    memmove(m_input_re_buffer->data(), m_input_re_buffer->data() + m_input_buffer_size_without_overlap, (m_filter.size() - 1) * sizeof(float));
-    memmove(m_input_im_buffer->data(), m_input_im_buffer->data() + m_input_buffer_size_without_overlap, (m_filter.size() - 1) * sizeof(float));
+    memmove(m_input_buffer->data(), m_input_buffer->data() + m_input_buffer_size_without_overlap, (m_filter.size() - 1) * sizeof(float));
 }
 
 void FirFilterStage::firFilter(
@@ -90,9 +74,8 @@ void FirFilterStage::firFilter(
         const float *filter, // reversed filter coefficients
         size_t filter_length,
         float *output,
-        int decimation_factor,
-        bool use_simd) {
-    if (use_simd) {
+        int decimation_factor) {
+    if (m_use_simd) {
 #if defined __AVX__
         firFilterAvx(input, input_length, filter, filter_length, output, decimation_factor);
 #elif __ARM_NEON == 1

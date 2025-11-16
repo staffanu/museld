@@ -9,7 +9,7 @@
 #include <string>
 #include "../Logger.h"
 #include "../rs/ReedSolomon.h"
-#include "../FirFilterStage.h"
+#include "../ComplexFirFilterStage.h"
 #include "Ac3BlockHandler.h"
 #include "Ac3DPLL.h"
 #include "Ac3InputFraming.h"
@@ -46,7 +46,7 @@ private:
     constexpr static int max_filter_stages = 4;
     int m_decimation_factor;
 
-    std::vector<FirFilterStage *> m_filter_stages;
+    std::vector<ComplexFirFilterStage *> m_filter_stages;
     std::vector<float> m_lp_iq_re_buffer; // Buffer after low-pass filtering the IQ signal -- overlap to be able to look back
     std::vector<float> m_lp_iq_im_buffer;
 

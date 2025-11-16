@@ -10,15 +10,14 @@
 
 class FirFilterStage {
 public:
-    FirFilterStage(std::string name,
-        double sample_frequency,
-        double cutoff_frequency,
-        double transition_width,
+    FirFilterStage(
+        std::string name,
+        std::string description,
+        std::vector<float> filter,
         int decimation_factor,
         int input_buffer_size_without_overlap,
         int output_offset,
-        std::vector<float> *output_re_buffer,
-        std::vector<float> *output_im_buffer,
+        std::vector<float> *output_buffer,
         bool use_simd);
 
     FirFilterStage(const FirFilterStage &) = delete;
@@ -31,17 +30,16 @@ public:
     [[nodiscard]] std::string name() const;
     [[nodiscard]] int filterSize() const;
     [[nodiscard]] int decimationFactor() const;
-    [[nodiscard]] std::vector<float> *inputReBuffer();
-    [[nodiscard]] std::vector<float> *inputImBuffer();
+    [[nodiscard]] std::vector<float> *inputBuffer();
     [[nodiscard]] std::string toString() const;
 
     void applyFilter();
     void moveDataToFront();
 
-    static void firFilter(const float *input, size_t input_length,
-        const float *filter, size_t filter_size, float *output, int decimation_factor, bool use_simd);
-
 private:
+    void firFilter(const float *input, size_t input_length,
+        const float *filter, size_t filter_size, float *output, int decimation_factor);
+
     static void firFilterNormal(const float *input, size_t input_length,
         const float *filter, size_t filter_size, float *output, int decimation_factor);
 
@@ -54,9 +52,7 @@ private:
         const float *filter, size_t filter_size, float *output, int decimation_factor);
 
     std::string m_name;
-    double m_sample_frequency;
-    double m_cutoff_frequency;
-    double m_transition_width;
+    std::string m_description;
     std::vector<float> m_filter;
     int m_decimation_factor;
     int m_input_buffer_size_without_overlap;
@@ -64,11 +60,9 @@ private:
     bool m_use_simd;
 
     // The input buffer is owned by the object and deallocated in the destructor
-    std::vector<float> *m_input_re_buffer;
-    std::vector<float> *m_input_im_buffer;
+    std::vector<float> *m_input_buffer;
 
-    std::vector<float> *m_output_re_buffer;
-    std::vector<float> *m_output_im_buffer;
+    std::vector<float> *m_output_buffer;
 };
 
 #endif //AC3RF_DECODE_FIRFILTERSTAGE_H

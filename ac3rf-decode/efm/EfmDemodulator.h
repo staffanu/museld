@@ -28,19 +28,23 @@ public:
     [[nodiscard]] std::string reedSolomonStatistics() const;
 
 private:
+    std::vector<float> makeRfInputFilter(double input_sample_frequency) const;
+    static double interpolate(int n, const double x[], const double y[], double p);
+
     Logger &m_log;
     double m_input_sample_frequency;
     int m_input_block_size;
     int m_output_fd;
     bool m_rf_input;
-    bool m_use_simd;
-    std::vector<float> m_input_filter;
+    FirFilterStage *m_input_filter;
+    std::vector<float> m_filtered_input;
     EfmPll m_efm_pll;
-    TimingRecovery m_gardner_timing_recovery;
+    TimingRecovery m_timing_recovery;
     EfmDecoder m_efm_decoder;
 
-    float *m_input_filter_buffer; // size is input block size + input filter size - 1
-    float *m_filtered_input;
+    float m_prev_x; // for minimal IIR filter to kill DC
+    float m_prev_y;
+
     int m_max_reclocked_size;
     bool *m_reclocked_data;
     int m_max_output_samples;

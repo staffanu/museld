@@ -79,7 +79,7 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
         assert(output_size < max_output_size);
         output[output_size++] = zero_cross;
     }
-    m_filter.printFilter();
+    //m_filter.printFilter();
 
     return output_size;
 }

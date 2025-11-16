@@ -54,7 +54,6 @@ public:
     }
 
     void adaptError(float e) {
-        assert(samples_back <= m_extra_saved_values);
         for (int i = 0; i < m_filter_size; i++)
             filter[i] += window[i] * e * m_mu;
     }

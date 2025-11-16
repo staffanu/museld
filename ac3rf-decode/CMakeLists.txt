@@ -31,6 +31,7 @@ add_executable(ac3rf-decode
         LdsInputReader.cpp LdsInputReader.h
         LdfInputReader.cpp LdfInputReader.h
         FirFilterStage.cpp FirFilterStage.h
+        ComplexFirFilterStage.cpp ComplexFirFilterStage.h
         rs/ReedSolomon.h
         rs/GFValue.h
         rs/ByteWithErasureFlag.h
