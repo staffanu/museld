@@ -5,6 +5,7 @@
 #ifndef AC3RF_DECODE_ADAPTIVEFILTER_H
 #define AC3RF_DECODE_ADAPTIVEFILTER_H
 
+#include <cassert>
 #include <cstdio>
 
 class AdaptiveFilter {
@@ -16,6 +17,7 @@ public:
       filter{},
       filtered{}
     {
+        assert(filter_size >= 3);
         window = new float[filter_size];
         filter = new float[filter_size];
         filtered = new float[filter_size];
@@ -47,17 +49,20 @@ public:
         for (int i = 0; i < m_filter_size; i++)
             s += filter[i] * window[i];
         filtered[m_filter_size - 1] = s;
+
+        // printf("Added %f, last filtered now %f\n", sample, s);
     }
 
     void adaptError(float e) {
+        assert(samples_back <= m_extra_saved_values);
         for (int i = 0; i < m_filter_size; i++)
             filter[i] += window[i] * e * m_mu;
     }
 
     void getLast3(float &f1, float&f2, float &f3) {
-        f1 = filtered[m_filter_size / 2 - 1];
-        f2 = filtered[m_filter_size / 2];
-        f3 = filtered[m_filter_size / 2 + 1];
+        f1 = filtered[m_filter_size - 3];
+        f2 = filtered[m_filter_size - 2];
+        f3 = filtered[m_filter_size - 1];
     }
 
     void printFilter() {

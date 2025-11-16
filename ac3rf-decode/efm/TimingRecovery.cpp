@@ -4,19 +4,19 @@
 
 #include <fcntl.h>
 #include <unistd.h>
-#include "GardnerTimingRecovery.h"
+#include "TimingRecovery.h"
 
 static int fd;
 
 static float power_estimate = 1;
 static long total_symbols = 0;
 
-GardnerTimingRecovery::GardnerTimingRecovery(Logger &log, double input_sample_frequency, int input_block_size)
+TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int input_block_size)
   : m_log(log),
     m_input_sample_frequency(input_sample_frequency),
     m_input_block_size(input_block_size),
     m_resampler(input_block_size),
-    m_filter(7, 0.000005f),
+    m_filter(13, 0.001f),
     m_nominal_step_size(input_sample_frequency / 4.3218e6),
     m_GpdGvco(0.5 / m_nominal_step_size),
     m_g1(c_G1 / m_GpdGvco),
@@ -27,7 +27,7 @@ GardnerTimingRecovery::GardnerTimingRecovery(Logger &log, double input_sample_fr
     fd = open("gardner.bin", O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 }
 
-int GardnerTimingRecovery::reclock(const float *input, bool *output, int max_output_size) {
+int TimingRecovery::reclock(const float *input, bool *output, int max_output_size) {
 
     m_resampler.updateInput(input);
 
@@ -55,12 +55,11 @@ int GardnerTimingRecovery::reclock(const float *input, bool *output, int max_out
         float debug_floats[4] = { sample, 1.f, sample_after, 0.f};
         int r = write(fd, debug_floats, 4 * sizeof(float));
 
-        bool symbol;
+        bool zero_cross;
         if (sample_before * sample_after < 0) {
-            symbol = true;
+            zero_cross = true;
 
             // error positive: we're sampling too early, so increase sample spacing
-            // notice error is normalized dividing by (before - after)^2.
             double error = sample / (sample_before - sample_after);
             //printf("%f %f %f  error=%f\n", sample_before, sample, sample_after, error);
             error = std::max(std::min(error, m_nominal_step_size / m_g1 * 0.02), -m_nominal_step_size / m_g1 * 0.02);
@@ -69,15 +68,16 @@ int GardnerTimingRecovery::reclock(const float *input, bool *output, int max_out
             m_step_size_adjustment = error * m_g1 + m_error_sum * m_g2;
             assert(abs(m_step_size_adjustment) <= m_nominal_step_size * 0.04);
         } else {
-            symbol = false;
+            zero_cross = false;
         }
 
-        float d = symbol ? 0 : sample > 0 ? 1.f : -1.f;
-        float e = std::max(std::min(d - sample, 1.f), -1.f);
+        // equalize on the sample_after symbol value
+        float d = sample_after > 0 ? 1.f : -1.f;
+        float e = std::max(std::min(d - sample_after, 1.f), -1.f);
         m_filter.adaptError(e);
 
         assert(output_size < max_output_size);
-        output[output_size++] = symbol;
+        output[output_size++] = zero_cross;
     }
     m_filter.printFilter();
 

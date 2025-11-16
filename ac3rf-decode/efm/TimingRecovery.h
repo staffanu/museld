@@ -12,14 +12,14 @@
 #include "FractionalResampler.h"
 #include "AdaptiveFilter.h"
 
-class GardnerTimingRecovery {
+class TimingRecovery {
 public:
-    GardnerTimingRecovery(Logger &log, double input_sample_frequency, int input_block_size);
+    TimingRecovery(Logger &log, double input_sample_frequency, int input_block_size);
 
-    GardnerTimingRecovery(const GardnerTimingRecovery &) = delete;
-    GardnerTimingRecovery &operator=(const GardnerTimingRecovery &) = delete;
-    GardnerTimingRecovery(GardnerTimingRecovery &&) = delete;
-    GardnerTimingRecovery &operator=(GardnerTimingRecovery &&) = delete;
+    TimingRecovery(const TimingRecovery &) = delete;
+    TimingRecovery &operator=(const TimingRecovery &) = delete;
+    TimingRecovery(TimingRecovery &&) = delete;
+    TimingRecovery &operator=(TimingRecovery &&) = delete;
 
     int reclock(const float *input, bool *output, int max_output_size);
 

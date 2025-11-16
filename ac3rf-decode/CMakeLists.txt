@@ -42,7 +42,7 @@ add_executable(ac3rf-decode
         efm/EfmDecoder.cpp efm/EfmDecoder.h
         efm/EfmPll.cpp efm/EfmPll.h
         efm/TwoChannelSample.h
-        efm/GardnerTimingRecovery.cpp efm/GardnerTimingRecovery.h
+        efm/TimingRecovery.cpp efm/TimingRecovery.h
         efm/FractionalResampler.cpp efm/FractionalResampler.h
         efm/AdaptiveFilter.cpp efm/AdaptiveFilter.h
 )

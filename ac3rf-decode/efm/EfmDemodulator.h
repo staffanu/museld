@@ -12,7 +12,7 @@
 #include "TwoChannelSample.h"
 #include "EfmPll.h"
 #include "EfmDecoder.h"
-#include "GardnerTimingRecovery.h"
+#include "TimingRecovery.h"
 
 class EfmDemodulator {
 public:
@@ -36,7 +36,7 @@ private:
     bool m_use_simd;
     std::vector<float> m_input_filter;
     EfmPll m_efm_pll;
-    GardnerTimingRecovery m_gardner_timing_recovery;
+    TimingRecovery m_gardner_timing_recovery;
     EfmDecoder m_efm_decoder;
 
     float *m_input_filter_buffer; // size is input block size + input filter size - 1
