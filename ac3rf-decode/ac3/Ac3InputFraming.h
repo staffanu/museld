@@ -37,7 +37,7 @@ private:
     int m_symbol_in_frame_counter = 0;
     uint8_t m_symbols_in_frame[37 * 4];
     int m_consecutive_synched = 0;
-    int m_auto_sync_at = -1;
+    long m_auto_sync_at = -1;
 };
 
 

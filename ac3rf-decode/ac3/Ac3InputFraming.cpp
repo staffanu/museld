@@ -75,11 +75,11 @@ Ac3InputFraming::arrangeInFrames(const std::vector<uint8_t> &symbols, int number
             m_symbols_in_frame[m_symbol_in_frame_counter] = s;
             m_symbol_in_frame_counter += 1;
             if (m_symbol_in_frame_counter == 37 * 4) {
-                std::array<uint8_t, 37> frame;
+                std::array<uint8_t, 37> frame{};
                 for (int j = 0; j < 37; j++)
                     frame[j] = m_symbols_in_frame[j * 4] << 6 | m_symbols_in_frame[j * 4 + 1] << 4 | m_symbols_in_frame[j * 4 + 2] << 2 | m_symbols_in_frame[j * 4 + 3];
 
-                frames.emplace_back(m_total_symbols_seen - 34 * 4 + 1, m_frame_number, frame);
+                frames.push_back(NumberedFrame {(size_t)m_total_symbols_seen - 34 * 4 + 1, m_frame_number, frame });
 
                 m_previous_frame_number = m_frame_number;
                 m_symbol_in_frame_counter = 0;
