@@ -21,11 +21,11 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
       m_input_block_size(input_block_size),
       m_output_fd(output_fd),
       m_rf_input(rf_input),
-      m_log2decimation(floor(::log(input_sample_frequency / 24e6) / ::log(2))),
+      m_log2decimation(floor(::log(input_sample_frequency / 12e6) / ::log(2))),
       m_decimation_factor(1 << m_log2decimation),
       m_efm_pll(log, input_sample_frequency / m_decimation_factor),
       m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
-          adaptive_filter_size, log_adaptive_filter, std::nullopt),
+          adaptive_filter_size, log_adaptive_filter, retiming_debug_filename),
       m_efm_decoder(log),
       m_prev_x(0),
       m_prev_y(0) {
@@ -127,9 +127,13 @@ std::vector<float> EfmDemodulator::makeRfInputFilter(double input_sample_frequen
     m_log.debug(eAudio, "Desired input filter frequency response:");
     for (int i = 1; i < (fft_size + 1) / 2; i++) {
         float f = (float)input_sample_frequency * i / fft_size;
-        gr_complex h = f < frequencies[response_table_size - 1] ? std::polar<float>(
-            interpolate(response_table_size, frequencies, amplitude_response, f),
-            interpolate(response_table_size, frequencies, phase_response, f)) : std::complex<float>(0.f);
+        gr_complex h;
+        if (f < frequencies[response_table_size - 1]) {
+            float rho = std::max(0.0, interpolate(response_table_size, frequencies, amplitude_response, f));
+            float theta = interpolate(response_table_size, frequencies, phase_response, f);
+            h = std::polar<float>(rho, theta);
+        } else
+            h = std::complex(0.f);
 
         if (f < 2.2e6) m_log.debug(eAudio, std::format("{:.0}: {} {}", f, abs(h), arg(h)));
 
