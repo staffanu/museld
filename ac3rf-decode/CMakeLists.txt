@@ -8,9 +8,6 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GNURADIO_FILTER REQUIRED gnuradio-filter)
 include_directories("${GNURADIO_FILTER_INCLUDE_DIRS}")
 
-pkg_check_modules(GNURADIO_FFT REQUIRED gnuradio-fft)
-include_directories("${GNURADIO_FFT_INCLUDE_DIRS}")
-
 pkg_check_modules(FLAC REQUIRED flac++)
 include_directories("${FLAC_INCLUDE_DIRS}")
 
@@ -32,6 +29,7 @@ add_executable(ac3rf-decode
         LdfInputReader.cpp LdfInputReader.h
         FirFilterStage.cpp FirFilterStage.h
         ComplexFirFilterStage.cpp ComplexFirFilterStage.h
+        FFT.h
         rs/ReedSolomon.h
         rs/GFValue.h
         rs/ByteWithErasureFlag.h
@@ -51,12 +49,5 @@ add_executable(ac3rf-decode
 target_link_options(ac3rf-decode PRIVATE "-L/usr/local/lib")
 target_link_libraries(ac3rf-decode
         PRIVATE ${GNURADIO_FILTER_LINK_LIBRARIES}
-        PRIVATE ${GNURADIO_FFT_LINK_LIBRARIES}
         PRIVATE ${FLAC_LINK_LIBRARIES}
 )
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_libraries(ac3rf-decode
-            PRIVATE fmt # It seems that gnuradio depends on this without adding it to LINK_LIBRARIES?
-    )
-endif()

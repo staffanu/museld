@@ -3,10 +3,12 @@
 //
 
 #include <iostream>
-#include <gnuradio/gr_complex.h>
-#include <gnuradio/fft/fft.h>
+#include <valarray>
+#include <unistd.h>
+#include <sys/fcntl.h>
 #include <gnuradio/fft/window.h>
 #include <gnuradio/filter/firdes.h>
+#include "../FFT.h"
 #include "EfmDemodulator.h"
 
 static int fd;
@@ -117,11 +119,10 @@ std::vector<float> EfmDemodulator::makeRfInputFilter(double input_sample_frequen
     assert(frequencies[response_table_size - 1] != 0);
 
     const int fft_size = 256;
-    gr::fft::fft<gr_complex, false> fft(fft_size);
-
-    fft.get_inbuf()[0] = 0.f;
+    std::valarray<std::complex<float>> fft_data(fft_size);
+    fft_data[0] = 0.f;
     if (fft_size % 2 == 0)
-        fft.get_inbuf()[fft_size / 2] = 0;
+        fft_data[fft_size / 2] = 0;
 
     m_log.debug(eAudio, "Desired input filter frequency response:");
     for (int i = 1; i < (fft_size + 1) / 2; i++) {
@@ -132,19 +133,20 @@ std::vector<float> EfmDemodulator::makeRfInputFilter(double input_sample_frequen
 
         if (f < 2.2e6) m_log.debug(eAudio, std::format("{:.0}: {} {}", f, abs(h), arg(h)));
 
-        fft.get_inbuf()[i] = h;
-        fft.get_inbuf()[fft_size - i] = conj(h);
+        fft_data[i] = h;
+        fft_data[fft_size - i] = conj(h);
     }
-    fft.execute();
+
+    FFT<float>::ifft(fft_data); // result in place
     for (int i = 0; i < fft_size; i++)
-        assert(abs(fft.get_outbuf()[i].imag()) < 1e-6);
+        assert(abs(fft_data[i].imag()) < 1e-6);
 
     int filter_size = 64;
     std::vector<float> input_filter;
     auto window = gr::fft::window::hamming(filter_size);
     for (int i = 0; i < filter_size; i++) {
         int ix = (i + fft_size - filter_size / 2) % fft_size; // ifftshift
-        float v = fft.get_outbuf()[ix].real() * window[i] / fft_size;
+        float v = fft_data[ix].real() * window[i];
         input_filter.push_back(v);
     }
     return input_filter;
