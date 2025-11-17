@@ -30,7 +30,7 @@ void demodulateFile(Logger &log, bool efm, InputFormat input_format, double inpu
     auto *input_buffer = new float[block_size];
 
     if (efm) {
-        EfmDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd, efm_rf, use_simd);
+        EfmDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd, efm_rf, use_simd, 11, false, std::nullopt);
 
         while (reader->readFloats(input_buffer) == reader->block_size()) {
             auto output = demodulator.demodulate(input_buffer);

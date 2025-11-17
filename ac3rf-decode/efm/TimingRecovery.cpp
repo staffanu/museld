@@ -4,19 +4,22 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <cstring>
+#include <format>
+#include <stdexcept>
 #include "TimingRecovery.h"
 
-static int fd;
-
-static float power_estimate = 1;
-static long total_symbols = 0;
-
-TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int input_block_size)
+TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int input_block_size,
+    int adaptive_filter_size, bool log_adaptive_filter,
+    std::optional<std::string> retiming_debug_filename)
   : m_log(log),
     m_input_sample_frequency(input_sample_frequency),
     m_input_block_size(input_block_size),
+    m_log_adaptive_filter(log_adaptive_filter),
     m_resampler(input_block_size),
-    m_filter(13, 0.001f),
+    m_filter(adaptive_filter_size, 0.001f),
+    m_power_estimate(1),
+    m_total_symbols(0),
     m_nominal_step_size(input_sample_frequency / 4.3218e6),
     m_GpdGvco(0.5 / m_nominal_step_size),
     m_g1(c_G1 / m_GpdGvco),
@@ -24,7 +27,11 @@ TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int i
     m_step_size_adjustment(0),
     m_error_sum(0) {
 
-    fd = open("gardner.bin", O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (retiming_debug_filename.has_value()) {
+        m_debug_fd = open("gardner.bin", O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        if (m_debug_fd == -1)
+            throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
+    }
 }
 
 int TimingRecovery::reclock(const float *input, bool *output, int max_output_size) {
@@ -33,27 +40,29 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
 
     int output_size = 0;
     while (m_resampler.advanceTime(m_nominal_step_size + m_step_size_adjustment, (m_nominal_step_size + m_step_size_adjustment) / 2)) {
-        total_symbols++;
-        float power_alpha = total_symbols < 5000 ? 0.1f : 0.0001f;
+        m_total_symbols++;
+        float power_alpha = m_total_symbols < 5000 ? 0.1f : 0.0001f;
 
         for (int i = 0; i < 2; i++) {
             float s = m_resampler.resample(i * (m_nominal_step_size + m_step_size_adjustment) / 2);
-            power_estimate = (1 - power_alpha) * power_estimate + power_alpha * s * s;
-            float gain = sqrt(1 / (power_estimate + 1.0));
+            m_power_estimate = (1 - power_alpha) * m_power_estimate + power_alpha * s * s;
+            float gain = sqrt(1 / (m_power_estimate + 1.0));
             m_filter.add_sample(s * gain);
         }
 
         // Initially gain is uncertain and also the signal is not DC
-        if (total_symbols < 5000)
+        if (m_total_symbols < 5000)
             continue;
 
         float sample_before, sample, sample_after;
         m_filter.getLast3(sample_before, sample, sample_after);
 
-        //printf("3 samples: %f %f %f\n", sample_before, sample, sample_after);
-
-        float debug_floats[4] = { sample, 1.f, sample_after, 0.f};
-        int r = write(fd, debug_floats, 4 * sizeof(float));
+        if (m_debug_fd.has_value()) {
+            float debug_floats[4] = { sample, 1.f, sample_after, 0.f};
+            int r = write(m_debug_fd.value(), debug_floats, 4 * sizeof(float));
+            if (r == -1)
+                throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
+        }
 
         bool zero_cross;
         if (sample_before * sample_after < 0) {
@@ -79,7 +88,9 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
         assert(output_size < max_output_size);
         output[output_size++] = zero_cross;
     }
-    //m_filter.printFilter();
+
+    if (m_log_adaptive_filter)
+        m_filter.printFilter();
 
     return output_size;
 }

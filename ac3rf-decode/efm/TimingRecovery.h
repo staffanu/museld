@@ -14,7 +14,9 @@
 
 class TimingRecovery {
 public:
-    TimingRecovery(Logger &log, double input_sample_frequency, int input_block_size);
+    TimingRecovery(Logger &log, double input_sample_frequency, int input_block_size,
+        int adaptive_filter_size, bool log_adaptive_filter,
+        std::optional<std::string> retiming_debug_filename);
 
     TimingRecovery(const TimingRecovery &) = delete;
     TimingRecovery &operator=(const TimingRecovery &) = delete;
@@ -27,9 +29,12 @@ private:
     Logger &m_log;
     const double m_input_sample_frequency;
     const int m_input_block_size;
-
+    const bool m_log_adaptive_filter;
     FractionalResampler m_resampler;
     AdaptiveFilter m_filter;
+
+    float m_power_estimate;
+    long m_total_symbols;
 
     static constexpr double c_omega = 2 * M_PI * 1200; // un-dampened frequency
     static constexpr double c_zeta = 0.6; // damping factor
@@ -44,6 +49,8 @@ private:
 
     double m_step_size_adjustment;
     double m_error_sum;
+
+    std::optional<int> m_debug_fd;
 };
 
 #endif //AC3RF_DECODE_GARDNERTIMINGRECOVERY_H

@@ -27,6 +27,8 @@ FirFilterStage::FirFilterStage(
     m_output_buffer(output_buffer),
     m_use_simd(use_simd) {
 
+    // Reverse the filter coefficients to simply loops for convolution
+    std::reverse(m_filter.begin(), m_filter.end());
     if (m_use_simd) {
         // resize filter so length is multiple of chunk size
         m_filter.resize((m_filter.size() + c_AVX_floats_per_chunk - 1) / c_AVX_floats_per_chunk * c_AVX_floats_per_chunk);
@@ -55,8 +57,11 @@ std::vector<float> *FirFilterStage::inputBuffer() {
 }
 
 std::string FirFilterStage::toString() const {
-    return std::format("{}: {}, taps: {}, decimation: {}",
-        m_name, m_description, m_filter.size(), m_decimation_factor);
+    std::ostringstream ss;
+    ss << std::format("{}: {}, size: {}, decimation: {}, coefficients:", m_name, m_description, m_filter.size(), m_decimation_factor);
+    for (int i = m_filter.size() - 1; i >= 0; i--) // we store the coefficients reversed
+        ss << " " << m_filter[i];;
+    return ss.str();
 }
 
 void FirFilterStage::applyFilter() {

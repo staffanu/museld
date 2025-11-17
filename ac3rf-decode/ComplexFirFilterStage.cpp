@@ -45,8 +45,7 @@ std::vector<float> *ComplexFirFilterStage::inputImBuffer() {
 }
 
 std::string ComplexFirFilterStage::toString() const {
-    return std::format("{}, {}, taps: {}, decimation: {}",
-        m_name, m_description, filterSize(), decimationFactor());
+    return m_re_filter.toString();
 }
 
 void ComplexFirFilterStage::applyFilter() {

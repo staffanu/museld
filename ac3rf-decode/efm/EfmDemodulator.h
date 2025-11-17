@@ -16,7 +16,8 @@
 
 class EfmDemodulator {
 public:
-    EfmDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd, bool rf_input, bool use_simd);
+    EfmDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd, bool rf_input, bool use_simd,
+        int adaptive_filter_size, bool log_adaptive_filter, std::optional<std::string> retiming_debug_filename);
     ~EfmDemodulator();
 
     EfmDemodulator(const EfmDemodulator &) = delete;
@@ -36,7 +37,9 @@ private:
     int m_input_block_size;
     int m_output_fd;
     bool m_rf_input;
-    FirFilterStage *m_input_filter;
+    int m_log2decimation;
+    int m_decimation_factor;
+    std::vector<FirFilterStage *> m_filter_stages;
     std::vector<float> m_filtered_input;
     EfmPll m_efm_pll;
     TimingRecovery m_timing_recovery;

@@ -12,32 +12,52 @@
 static int fd;
 
 EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd,
-                               bool rf_input, bool use_simd)
+                               bool rf_input, bool use_simd, int adaptive_filter_size, bool log_adaptive_filter,
+                               std::optional<std::string> retiming_debug_filename)
     : m_log(log),
       m_input_sample_frequency(input_sample_frequency),
       m_input_block_size(input_block_size),
       m_output_fd(output_fd),
       m_rf_input(rf_input),
-      m_efm_pll(log, input_sample_frequency),
-      m_timing_recovery(log, input_sample_frequency, input_block_size),
+      m_log2decimation(floor(::log(input_sample_frequency / 24e6) / ::log(2))),
+      m_decimation_factor(1 << m_log2decimation),
+      m_efm_pll(log, input_sample_frequency / m_decimation_factor),
+      m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
+          adaptive_filter_size, log_adaptive_filter, std::nullopt),
       m_efm_decoder(log),
       m_prev_x(0),
       m_prev_y(0) {
+    assert(m_input_block_size % m_decimation_factor == 0);
 
     std::vector<float> input_filter;
-    if (m_rf_input)
-        input_filter = makeRfInputFilter(input_sample_frequency);
-    else
-        input_filter = gr::filter::firdes::low_pass_2(1.0, m_input_sample_frequency, 1.7e6, 0.7e6, 40, gr::fft::window::WIN_HAMMING);
+    std::string description;
+    if (m_rf_input) {
+        input_filter = makeRfInputFilter(input_sample_frequency / m_decimation_factor);
+        description = std::format("EFM RF input samp_freq={}", m_input_sample_frequency / m_decimation_factor);
+    } else {
+        input_filter = gr::filter::firdes::low_pass_2(1.0, m_input_sample_frequency / m_decimation_factor, 1.7e6, 0.7e6, 40, gr::fft::window::WIN_HAMMING);
+        description = std::format("Low pass 2 samp_freq={}, cutoff={}, trans_width={}", m_input_sample_frequency / m_decimation_factor, 1.7e6, 0.7e6);
+    }
 
-    std::ostringstream ss;
-    ss << std::format("Input filter size {}: ", input_filter.size());
-    for (int i = 0; i < input_filter.size(); i++)
-        ss << " " << input_filter[i];;
-    m_log.debug(eAudio, ss.str());
+    m_filter_stages.resize(m_log2decimation + 1);
 
-    m_filtered_input.resize(m_input_block_size);
-    m_input_filter = new FirFilterStage("Input filter", "No desc", input_filter, 1, input_block_size, 0, &m_filtered_input, use_simd);
+    m_filtered_input.resize(m_input_block_size / m_decimation_factor);
+    m_filter_stages[m_log2decimation] = new FirFilterStage("Input filter", description, input_filter, 1, input_block_size / m_decimation_factor, 0, &m_filtered_input, use_simd);
+
+    for (int i = m_log2decimation - 1; i >= 0; i--) {
+        double stage_sample_freq = input_sample_frequency / (1 << i);
+        m_filter_stages[i] = new FirFilterStage(
+            std::format("Decimate by 2 stage {}", i + 1),
+            std::format("samp_freq: {}, cutoff: {}, trans_width: {}", stage_sample_freq, stage_sample_freq / 4, stage_sample_freq / 4 - 2 * 3e6),
+            gr::filter::firdes::low_pass(1.0, stage_sample_freq, stage_sample_freq / 4, stage_sample_freq / 4 - 2 * 3e6, gr::fft::window::WIN_HAMMING),
+            2, m_input_block_size >> i,
+            m_filter_stages[i + 1]->filterSize() - 1,
+            m_filter_stages[i + 1]->inputBuffer(),
+            use_simd);
+    }
+
+    for (const auto &stage: m_filter_stages)
+        m_log.debug(eAudio, std::format("Filter stage: {}", stage->toString()));
 
     m_max_reclocked_size = (int)(m_input_block_size / m_input_sample_frequency * 4321800 * 1.1);
     m_reclocked_data = new bool[m_max_reclocked_size];
@@ -48,12 +68,16 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
 
 EfmDemodulator::~EfmDemodulator() {
     close(fd);
-    delete m_input_filter;
+
+    for (const auto stage: m_filter_stages)
+        delete stage;
+    m_filter_stages.clear();
+
     delete[] m_reclocked_data;
 }
 
 std::vector<TwoChannelSample> EfmDemodulator::demodulate(float *input_buffer) {
-    float *filter_input_buffer = m_input_filter->inputBuffer()->data() + m_input_filter->filterSize() - 1;
+    float *filter_input_buffer = m_filter_stages[0]->inputBuffer()->data() + m_filter_stages[0]->filterSize() - 1;
     for (int i = 0; i < m_input_block_size; i++) {
         float y = m_prev_y * 0.999f + input_buffer[i] - m_prev_x;
         filter_input_buffer[i] = y;
@@ -61,12 +85,12 @@ std::vector<TwoChannelSample> EfmDemodulator::demodulate(float *input_buffer) {
         m_prev_y = y;
     }
 
-    m_input_filter->applyFilter();
-    m_input_filter->moveDataToFront();
+    for (auto stage: m_filter_stages)
+        stage->applyFilter();
 
-    int r = write(fd, m_filtered_input.data(), m_input_block_size * sizeof(float));
+    int r = write(fd, m_filtered_input.data(), m_filtered_input.size() * sizeof(float));
 
-//    const int reclocked_bytes = m_efm_pll.reclock(m_filtered_input, m_input_block_size, m_reclocked_data, m_max_reclocked_size);
+//    const int reclocked_bytes = m_efm_pll.reclock(m_filtered_input.data(), m_input_block_size / m_decimation_factor, m_reclocked_data, m_max_reclocked_size);
     const int reclocked_bytes = m_timing_recovery.reclock(m_filtered_input.data(), m_reclocked_data, m_max_reclocked_size);
 
     int actual_output_sample_count;
@@ -74,6 +98,9 @@ std::vector<TwoChannelSample> EfmDemodulator::demodulate(float *input_buffer) {
     m_efm_decoder.decode(m_reclocked_data, reclocked_bytes,
         m_max_output_samples, &actual_output_sample_count, m_output_samples.data(), false);
     m_output_samples.resize(actual_output_sample_count);
+
+    for (auto stage: m_filter_stages)
+        stage->moveDataToFront();
 
     return m_output_samples;
 }
@@ -120,8 +147,6 @@ std::vector<float> EfmDemodulator::makeRfInputFilter(double input_sample_frequen
         float v = fft.get_outbuf()[ix].real() * window[i] / fft_size;
         input_filter.push_back(v);
     }
-    // Our FIR filter implementation requires the filters to have their coefficients reversed
-    std::reverse(input_filter.begin(), input_filter.end());
     return input_filter;
 }
 
