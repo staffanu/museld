@@ -9,17 +9,18 @@
 #include <stdexcept>
 #include "TimingRecovery.h"
 
+#include "AdaptiveFilterImpl.h"
+
 TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int input_block_size,
-    int adaptive_filter_size, bool log_adaptive_filter,
-    std::optional<std::string> retiming_debug_filename)
+                               int adaptive_filter_size, std::optional<std::string> retiming_debug_filename)
   : m_log(log),
     m_input_sample_frequency(input_sample_frequency),
     m_input_block_size(input_block_size),
-    m_log_adaptive_filter(log_adaptive_filter),
     m_resampler(input_block_size),
-    m_filter(adaptive_filter_size, 0.001f),
+    m_filter(adaptive_filter_size != 0 ? (AdaptiveFilter *)new AdaptiveFilterImpl(adaptive_filter_size, 0.001f) : (AdaptiveFilter *)new NonAdaptiveFilter()),
     m_power_estimate(1),
     m_total_symbols(0),
+    m_last_adaptive_filter_log(0),
     m_nominal_step_size(input_sample_frequency / 4.3218e6),
     m_GpdGvco(0.5 / m_nominal_step_size),
     m_g1(c_G1 / m_GpdGvco),
@@ -32,6 +33,10 @@ TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int i
         if (m_debug_fd == -1)
             throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
     }
+}
+
+TimingRecovery::~TimingRecovery() {
+    delete m_filter;
 }
 
 int TimingRecovery::reclock(const float *input, bool *output, int max_output_size) {
@@ -47,7 +52,7 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
             float s = m_resampler.resample(i * (m_nominal_step_size + m_step_size_adjustment) / 2);
             m_power_estimate = (1 - power_alpha) * m_power_estimate + power_alpha * s * s;
             float gain = sqrt(1 / (m_power_estimate + 1.0));
-            m_filter.add_sample(s * gain);
+            m_filter->add_sample(s * gain);
         }
 
         // Initially gain is uncertain and also the signal is not DC
@@ -55,7 +60,7 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
             continue;
 
         float sample_before, sample, sample_after;
-        m_filter.getLast3(sample_before, sample, sample_after);
+        m_filter->getLast3(sample_before, sample, sample_after);
 
         if (m_debug_fd.has_value()) {
             float debug_floats[4] = { sample, 1.f, sample_after, 0.f};
@@ -83,14 +88,16 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
         // equalize on the sample_after symbol value
         float d = sample_after > 0 ? 1.f : -1.f;
         float e = std::max(std::min(d - sample_after, 1.f), -1.f);
-        m_filter.adaptError(e);
+        m_filter->adaptError(e);
 
         assert(output_size < max_output_size);
         output[output_size++] = zero_cross;
     }
 
-    if (m_log_adaptive_filter)
-        m_filter.printFilter();
+    if (m_total_symbols - m_last_adaptive_filter_log > 4321800) {
+        m_log.debug(eAudio, "Adaptive filter coefficients: " + m_filter->filterString());
+        m_last_adaptive_filter_log = m_total_symbols;
+    }
 
     return output_size;
 }

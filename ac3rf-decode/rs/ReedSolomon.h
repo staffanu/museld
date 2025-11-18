@@ -51,10 +51,8 @@ public:
 
     std::string statistics() const {
         std::ostringstream ss;
-        {
-            for (const auto &el: m_statistics)
-                ss << el.first << ": " << el.second << ", ";
-        }
+        for (const auto &el: m_statistics)
+            ss << el.first << ": " << el.second << ", ";
         if (m_create_diagnotics) {
             ss << "; diagnostics: ";
             for (const auto &el: m_diagnostics)

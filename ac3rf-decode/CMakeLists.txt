@@ -43,7 +43,8 @@ add_executable(ac3rf-decode
         efm/TwoChannelSample.h
         efm/TimingRecovery.cpp efm/TimingRecovery.h
         efm/FractionalResampler.cpp efm/FractionalResampler.h
-        efm/AdaptiveFilter.cpp efm/AdaptiveFilter.h
+        efm/AdaptiveFilter.h
+        efm/AdaptiveFilterImpl.cpp efm/AdaptiveFilterImpl.h
 )
 
 target_link_options(ac3rf-decode PRIVATE "-L/usr/local/lib")

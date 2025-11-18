@@ -13,22 +13,22 @@
 
 static int fd;
 
-EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd,
-                               bool rf_input, bool use_simd, int adaptive_filter_size, bool log_adaptive_filter,
-                               std::optional<std::string> retiming_debug_filename)
+EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd, bool use_simd,
+    bool rf_input, int adaptive_filter_size, std::optional<std::string> retiming_debug_filename)
     : m_log(log),
       m_input_sample_frequency(input_sample_frequency),
       m_input_block_size(input_block_size),
       m_output_fd(output_fd),
       m_rf_input(rf_input),
-      m_log2decimation(floor(::log(input_sample_frequency / 12e6) / ::log(2))),
+      m_log2decimation(floor(::log(input_sample_frequency / 22e6) / ::log(2))),
       m_decimation_factor(1 << m_log2decimation),
       m_efm_pll(log, input_sample_frequency / m_decimation_factor),
       m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
-          adaptive_filter_size, log_adaptive_filter, retiming_debug_filename),
+          adaptive_filter_size, retiming_debug_filename),
       m_efm_decoder(log),
       m_prev_x(0),
       m_prev_y(0) {
+    assert(m_log2decimation >= 0);
     assert(m_input_block_size % m_decimation_factor == 0);
 
     std::vector<float> input_filter;
@@ -159,17 +159,15 @@ std::vector<float> EfmDemodulator::makeRfInputFilter(double input_sample_frequen
 double EfmDemodulator::interpolate(int n, const double x[], const double y[], double p) {
     auto evalLagrange = [](const double x[4], int j, double p) -> double {
         double prod = 1;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 4; i++)
             if (i != j) prod *= (p - x[i]) / (x[j] - x[i]);
-        }
         return prod;
     };
 
     auto interpolate = [evalLagrange](const double x[4], const double y[4], double p) -> double {
         double s = 0;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 4; i++)
             s += evalLagrange(x, i, p) * y[i];
-        }
         return s;
     };
 
