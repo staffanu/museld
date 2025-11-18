@@ -25,7 +25,7 @@ public:
     Ac3RfDemodulator &operator=(Ac3RfDemodulator &&) = delete;
 
     std::vector<std::array<uint8_t, 1536>> demodulate(float *input_buffer);
-    std::string reedSolomonStatistics() const;
+    std::string reedSolomonStatistics();
 
 private:
     // For each sample, compare it to a sample symbol_distance back to determine the current symbol

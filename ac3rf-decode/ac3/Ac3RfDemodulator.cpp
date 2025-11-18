@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <format>
-#include <gnuradio/filter/firdes.h>
+#include "../filter/FirPM.h"
 #include "../rs/ByteWithErasureFlag.h"
 #include "../rs/ReedSolomon.h"
 #include "Ac3RfDemodulator.h"
@@ -45,23 +45,27 @@ Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, i
     // to the stage created previously.
     m_filter_stages.resize(decimations_by_4 + 1);
 
-    m_filter_stages[decimations_by_4] = new ComplexFirFilterStage(
-        "Final lowpass filter",
-        std::format("samp_freq: {}, cutoff: {}, trans_width: {}", final_input_frequency, 230e3, 160e3),
-        gr::filter::firdes::low_pass(1.0, final_input_frequency, 230e3, 160e3, gr::fft::window::WIN_HAMMING),
-        m_decimation_factor >> (2 * decimations_by_4),
-        m_input_block_size >> (2 * decimations_by_4),
-        m_symbol_distance,
-        &m_lp_iq_re_buffer,
-        &m_lp_iq_im_buffer,
-        use_simd);
+    {
+        auto [description, filter] = FirPM::low_pass<float>(31,  final_input_frequency, 150e3, 300e3);
+        m_filter_stages[decimations_by_4] = new ComplexFirFilterStage(
+            "Final lowpass filter",
+            description,
+            filter,
+            m_decimation_factor >> (2 * decimations_by_4),
+            m_input_block_size >> (2 * decimations_by_4),
+            m_symbol_distance,
+            &m_lp_iq_re_buffer,
+            &m_lp_iq_im_buffer,
+            use_simd);
+    }
 
     for (int i = decimations_by_4 - 1; i >= 0; i--) {
         double stage_sample_freq = input_sample_frequency / (1 << (i * 2));
+        auto [description, filter] = FirPM::low_pass<float>(23, stage_sample_freq, 150e3, stage_sample_freq / 4 - 150e3);
         m_filter_stages[i] = new ComplexFirFilterStage(
             std::format("Decimate by 4 stage {}", i + 1),
-            std::format("samp_freq: {}, cutoff: {}, trans_width: {}", stage_sample_freq, stage_sample_freq / 8, stage_sample_freq / 4 - 2 * 300e3),
-            gr::filter::firdes::low_pass(1.0, stage_sample_freq, stage_sample_freq / 8, stage_sample_freq / 4 - 2 * 300e3, gr::fft::window::WIN_HAMMING),
+            description,
+            filter,
             4, m_input_block_size >> (2 * i),
             m_filter_stages[i + 1]->filterSize() - 1,
             m_filter_stages[i + 1]->inputReBuffer(),
@@ -138,7 +142,7 @@ std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(float *input
     return result;
 }
 
-std::string Ac3RfDemodulator::reedSolomonStatistics() const {
+std::string Ac3RfDemodulator::reedSolomonStatistics() {
     return m_block_handler.reedSolomonStatistics();
 }
 

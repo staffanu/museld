@@ -26,7 +26,7 @@ public:
     EfmDemodulator &operator=(EfmDemodulator &&) = delete;
 
     std::vector<TwoChannelSample> demodulate(float *input_buffer);
-    [[nodiscard]] std::string reedSolomonStatistics() const;
+    [[nodiscard]] std::string reedSolomonStatistics();
 
 private:
     std::vector<float> makeRfInputFilter(double input_sample_frequency) const;

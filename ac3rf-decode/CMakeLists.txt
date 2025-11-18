@@ -5,8 +5,7 @@ set(CMAKE_CXX_STANDARD 23)
 
 find_package(PkgConfig REQUIRED)
 
-pkg_check_modules(GNURADIO_FILTER REQUIRED gnuradio-filter)
-include_directories("${GNURADIO_FILTER_INCLUDE_DIRS}")
+find_package(Eigen3 REQUIRED)  # Used by firpm
 
 pkg_check_modules(FLAC REQUIRED flac++)
 include_directories("${FLAC_INCLUDE_DIRS}")
@@ -21,6 +20,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -mmacosx-version-min=15.0")
 endif()
 
+
+add_library(firpm STATIC
+        external/firpm/src/pm.cpp
+        external/firpm/src/band.cpp
+        external/firpm/src/barycentric.cpp
+        external/firpm/src/cheby.cpp
+)
+
+target_include_directories(firpm
+        PUBLIC
+        external/firpm/include
+        Eigen3::Eigen
+)
+
+target_link_libraries(firpm
+        PUBLIC
+        Eigen3::Eigen
+)
+
 add_executable(ac3rf-decode
         main.cpp
         Logger.h Logger.cpp
@@ -29,7 +47,9 @@ add_executable(ac3rf-decode
         input/LdfInputReader.cpp input/LdfInputReader.h
         filter/FirFilterStage.cpp filter/FirFilterStage.h
         filter/ComplexFirFilterStage.cpp filter/ComplexFirFilterStage.h
+        filter/FirPM.h
         filter/FFT.h
+        filter/Window.h
         rs/ReedSolomon.h
         rs/GFValue.h
         rs/ByteWithErasureFlag.h
@@ -51,4 +71,5 @@ target_link_options(ac3rf-decode PRIVATE "-L/usr/local/lib")
 target_link_libraries(ac3rf-decode
         PRIVATE ${GNURADIO_FILTER_LINK_LIBRARIES}
         PRIVATE ${FLAC_LINK_LIBRARIES}
+        PRIVATE firpm
 )

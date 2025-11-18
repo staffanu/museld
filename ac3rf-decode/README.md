@@ -13,9 +13,10 @@ g++ and clang should both work (the project uses C++23).  I'm using Ubuntu 25.04
 (I used [Homebrew](https://brew.sh/) for the dependencies; they mostly have similar names, currently "gnuradio-dev" and "flac".)
 
 ```console
-sudo apt install cmake gnuradio-dev libflac++-dev
+sudo apt install cmake libeigen3-dev libflac++-dev
 git clone https://bitbucket.org/staffanulfberg/ldaudio.git
 cd ldaudio/ac3rf-decode
+git submodule update --init --recursive
 cmake -DCMAKE_BUILD_TYPE=Release -B build-release .
 cmake --build build-release
 ```
@@ -50,11 +51,34 @@ Sets the log level.  Default is warn (2).  Supported levels are: 0 (off), 1 (err
 
 > --simd
 
-Uses SIMD for the FIR filters.  Not available for all platforms/compilers.
+Use SIMD instructions to speed up FIR filtering.  Not available for all platforms/compilers.
+
+> --efm
+
+Tells the decoder that the input is EFM encoded.  Baseband EFM (as captured from the EFM
+output of some players) is assumed.
+
+> --efm-rf
+
+Tells the decoder that the input is EFM encoded.  RF input, containing video and EFM is assumed.
+
+> --adaptive-filter-size [size]
+
+Enables adaptive filtering of the EFM signal.  Default is 0 (off).  
+Reasonable values are 3 and up; over 20 is probably overkill.  This 
+is an experimental feature but seems to help on same inputs.
+
+> --reclock-debug-filename [filename]
+
+Outputs a file containing resampled data from the clock recovery stage.  This can be shown,
+e.g., using gnuplot with the following command:
+> s=80000000; l=200;
+> plot "reclock.bin" binary format="%float%float" every ::s::(s+l) using (\$1) with lines,
+>      "reclock.bin" binary format="%float%float" every ::s::(s+l) using (\$2*1-1) with lines
 
 > --output-filename [filename]
 
-Sets the output filename.  Default is to print the output to stdout.
+Sets the output filename.  Default is to print the output to stdout.`
 
 > [filename]
 
@@ -66,8 +90,11 @@ If no filename is given input is read from stdin.
 
 ### Examples
 
-AC3RF:
-> ./cmake-build-release/ac3rf-decode --log 4 --sample-freq 24.583e6 --uint8 rf-ac3.24.583MHz.u8 |` ffplay -codec:a:0 ac3 -i pipe: `
+Pipe the output of the AC3RF demodulator to [ffplay](https://ffmpeg.org/ffplay.html):
+> ./cmake-build-release/ac3rf-decode --sample-freq 24.583e6 --uint8 rf-ac3.24.583MHz.u8 | ffplay -f ac3 -i pipe:
 
-EFM:
-> play -t raw -c 2 -r 44100 -b 16 -e signed-integer <filename>>
+Pipe the output of the EFM decoder to play (from the SoX package):
+> ./cmake-build-release/ac3rf-decode --efm-rf --simd --sample-freq 40e6 --adaptive-filter-size 7 capture.lds | play -t raw -c 2 -r 44100 -b 16 -e signed-integer -
+
+Pipe the output of the EFM decoder to ffplay (for EFM encoded DTS):
+> ./cmake-build-release/ac3rf-decode --efm-rf --simd --sample-freq 40e6 --adaptive-filter-size 7 video.ldf | ffplay -f dts -i pipe:

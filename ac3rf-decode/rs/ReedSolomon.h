@@ -29,9 +29,7 @@ public:
               m_create_diagnotics(create_diagnotics),
               m_alpha_inverse(m_alpha.inverse()),
               m_alpha_squared(m_alpha * m_alpha),
-              H(),
-              m_statistics(),
-              m_diagnostics() {
+              H() {
         for (int row = 0; row < n - k; row++) {
             std::vector<GF> h_row;
             for (int col = 0; col < n; col++) {
@@ -49,13 +47,26 @@ public:
         m_diagnostics.clear();
     }
 
-    std::string statistics() const {
+    [[nodiscard]] std::string statistics() {
         std::ostringstream ss;
-        for (const auto &el: m_statistics)
+        if (!m_statistics.empty() || !m_diagnostics.empty()) {
+            ss << "Recent statistics: ";
+            for (const auto &el: m_statistics)
+                ss << el.first << ": " << el.second << ", ";
+            if (m_create_diagnotics) {
+                ss << "; diagnostics: ";
+                for (const auto &el: m_diagnostics)
+                    ss << el.first << ": " << el.second << ", ";
+            }
+        }
+        addStatisticsToTotal();
+        resetStatistics();
+        ss << "Total statistics: ";
+        for (const auto &el: m_total_statistics)
             ss << el.first << ": " << el.second << ", ";
         if (m_create_diagnotics) {
             ss << "; diagnostics: ";
-            for (const auto &el: m_diagnostics)
+            for (const auto &el: m_total_diagnostics)
                 ss << el.first << ": " << el.second << ", ";
         }
         return ss.str();
@@ -74,10 +85,19 @@ private:
     std::vector<std::vector<GF>> H;
     std::map<std::string, int> m_statistics;
     std::map<std::string, int> m_diagnostics;
+    std::map<std::string, int> m_total_statistics;
+    std::map<std::string, int> m_total_diagnostics;
 
-    inline void addDiagnosticCounter(std::string const &name) {
+    void addDiagnosticCounter(std::string const &name) {
         if (m_create_diagnotics)
             m_diagnostics[name]++;
+    }
+
+    void addStatisticsToTotal() {
+        for (const auto &el: m_statistics)
+            m_total_statistics[el.first] += el.second;
+        for (const auto &el: m_diagnostics)
+            m_total_diagnostics[el.first] += el.second;
     }
 
     void doDecode(std::vector<ByteWithErasureFlag> &data);

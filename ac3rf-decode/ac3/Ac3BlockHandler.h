@@ -44,7 +44,7 @@ public:
     // Parses corrected blocks to find the AC3 preample and returns data bursts.
     std::vector<std::array<uint8_t, 1536>> handleCorrectedBlock(const CorrectedBlock &block);
 
-    [[nodiscard]] std::string reedSolomonStatistics() const;
+    [[nodiscard]] std::string reedSolomonStatistics();
 
 private:
     Logger &m_log;

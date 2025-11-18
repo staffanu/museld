@@ -6,9 +6,9 @@
 #include <valarray>
 #include <unistd.h>
 #include <sys/fcntl.h>
-#include <gnuradio/fft/window.h>
-#include <gnuradio/filter/firdes.h>
+#include "../filter/FirPM.h"
 #include "../filter/FFT.h"
+#include "../filter/Window.h"
 #include "EfmDemodulator.h"
 
 static int fd;
@@ -20,7 +20,7 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
       m_input_block_size(input_block_size),
       m_output_fd(output_fd),
       m_rf_input(rf_input),
-      m_log2decimation(floor(::log(input_sample_frequency / 22e6) / ::log(2))),
+      m_log2decimation(floor(::log(input_sample_frequency / 12e6) / ::log(2))),
       m_decimation_factor(1 << m_log2decimation),
       m_efm_pll(log, input_sample_frequency / m_decimation_factor),
       m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
@@ -31,27 +31,28 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
     assert(m_log2decimation >= 0);
     assert(m_input_block_size % m_decimation_factor == 0);
 
-    std::vector<float> input_filter;
-    std::string description;
-    if (m_rf_input) {
-        input_filter = makeRfInputFilter(input_sample_frequency / m_decimation_factor);
-        description = std::format("EFM RF input samp_freq={}", m_input_sample_frequency / m_decimation_factor);
-    } else {
-        input_filter = gr::filter::firdes::low_pass_2(1.0, m_input_sample_frequency / m_decimation_factor, 1.7e6, 0.7e6, 40, gr::fft::window::WIN_HAMMING);
-        description = std::format("Low pass 2 samp_freq={}, cutoff={}, trans_width={}", m_input_sample_frequency / m_decimation_factor, 1.7e6, 0.7e6);
-    }
-
     m_filter_stages.resize(m_log2decimation + 1);
-
     m_filtered_input.resize(m_input_block_size / m_decimation_factor);
-    m_filter_stages[m_log2decimation] = new FirFilterStage("Input filter", description, input_filter, 1, input_block_size / m_decimation_factor, 0, &m_filtered_input, use_simd);
+
+    {
+        std::vector<float> input_filter;
+        std::string description;
+        if (m_rf_input) {
+            input_filter = makeRfInputFilter(input_sample_frequency / m_decimation_factor);
+            description = std::format("EFM RF input samp_freq={}", m_input_sample_frequency / m_decimation_factor);
+        } else {
+            tie(description, input_filter) = FirPM::low_pass<float>(15, input_sample_frequency / m_decimation_factor, 1.7e6, 2.3e6);
+        }
+        m_filter_stages[m_log2decimation] = new FirFilterStage("Input filter", description, input_filter, 1, input_block_size / m_decimation_factor, 0, &m_filtered_input, use_simd);
+    }
 
     for (int i = m_log2decimation - 1; i >= 0; i--) {
         double stage_sample_freq = input_sample_frequency / (1 << i);
+        auto [description, filter] = FirPM::low_pass<float>(15, stage_sample_freq, 3e6, stage_sample_freq / 2 - 3e6);
         m_filter_stages[i] = new FirFilterStage(
             std::format("Decimate by 2 stage {}", i + 1),
-            std::format("samp_freq: {}, cutoff: {}, trans_width: {}", stage_sample_freq, stage_sample_freq / 4, stage_sample_freq / 4 - 2 * 3e6),
-            gr::filter::firdes::low_pass(1.0, stage_sample_freq, stage_sample_freq / 4, stage_sample_freq / 4 - 2 * 3e6, gr::fft::window::WIN_HAMMING),
+            description,
+            filter,
             2, m_input_block_size >> i,
             m_filter_stages[i + 1]->filterSize() - 1,
             m_filter_stages[i + 1]->inputBuffer(),
@@ -107,7 +108,7 @@ std::vector<TwoChannelSample> EfmDemodulator::demodulate(float *input_buffer) {
     return m_output_samples;
 }
 
-std::string EfmDemodulator::reedSolomonStatistics() const {
+std::string EfmDemodulator::reedSolomonStatistics() {
     return m_efm_decoder.reedSolomonStatistics();
 }
 
@@ -115,7 +116,7 @@ std::vector<float> EfmDemodulator::makeRfInputFilter(double input_sample_frequen
     const int response_table_size = 9;
     const double frequencies[response_table_size] = {0.0e6, 0.25e6, 0.5e6, 0.75e6, 1.0e6, 1.25e6, 1.5e6, 1.75e6, 2.0e6};
     const double amplitude_response[response_table_size] = {0.0, 0.9705, 0.6962, 0.9912, 0.4231, 0.9197, 0.8901, 0.2975, 0.0};
-    const double phase_response[response_table_size] = {0.0, -1.9174, -1.1931, -1.4658, -1.6696, -0.7053, -0.9591, -1.2714, -1.0 };
+    const double phase_response[response_table_size] = {0.0, -1.9174, -1.1931, -1.4658, -1.6696, -0.7053, -0.9591, -1.2714, -1.0};
     assert(frequencies[response_table_size - 1] != 0);
 
     const int fft_size = 256;
@@ -127,7 +128,7 @@ std::vector<float> EfmDemodulator::makeRfInputFilter(double input_sample_frequen
     m_log.debug(eAudio, "Desired input filter frequency response:");
     for (int i = 1; i < (fft_size + 1) / 2; i++) {
         float f = (float)input_sample_frequency * i / fft_size;
-        gr_complex h;
+        std::complex<float> h;
         if (f < frequencies[response_table_size - 1]) {
             float rho = std::max(0.0, interpolate(response_table_size, frequencies, amplitude_response, f));
             float theta = interpolate(response_table_size, frequencies, phase_response, f);
@@ -147,7 +148,7 @@ std::vector<float> EfmDemodulator::makeRfInputFilter(double input_sample_frequen
 
     int filter_size = 64;
     std::vector<float> input_filter;
-    auto window = gr::fft::window::hamming(filter_size);
+    auto window = Window::hamming(filter_size);
     for (int i = 0; i < filter_size; i++) {
         int ix = (i + fft_size - filter_size / 2) % fft_size; // ifftshift
         float v = fft_data[ix].real() * window[i];
@@ -178,6 +179,7 @@ double EfmDemodulator::interpolate(int n, const double x[], const double y[], do
             break;
         }
     assert(first_larger_than_p_ix != -1);
+
     int start = std::min(n - 4, std::max(0, first_larger_than_p_ix - 2));
     return interpolate(x + start, y + start, p);
 }

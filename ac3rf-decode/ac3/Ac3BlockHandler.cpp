@@ -150,6 +150,6 @@ std::vector<std::array<uint8_t, 1536>> Ac3BlockHandler::handleCorrectedBlock(con
     return output;
 }
 
-std::string Ac3BlockHandler::reedSolomonStatistics() const {
+std::string Ac3BlockHandler::reedSolomonStatistics() {
     return "C1 statistics: " + m_c1.statistics() + "C2 statistics: " + m_c2.statistics();
 }

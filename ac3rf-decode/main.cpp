@@ -64,7 +64,7 @@ int main(int argc, char *argv[]) {
     bool use_simd = false;
     bool demodulate_efm = false;
     bool efm_rf = false;
-    int adaptive_filter_size = 11;
+    int adaptive_filter_size = 0; // default off
     std::optional<std::string> retiming_debug_filename = std::nullopt;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
@@ -114,6 +114,8 @@ int main(int argc, char *argv[]) {
     });
     options.emplace_back("--adaptive-filter-size", [&] () mutable  -> void {
         adaptive_filter_size = stoi(*(it++));
+        if (adaptive_filter_size < 0 || adaptive_filter_size == 1 || adaptive_filter_size == 2 || adaptive_filter_size > 50)
+            throw std::runtime_error("Invalid adaptive filter size");
     });
     options.emplace_back("--reclock-debug-filename", [&] () mutable  -> void {
         retiming_debug_filename = *(it++);

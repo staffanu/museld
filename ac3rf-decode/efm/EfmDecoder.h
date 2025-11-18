@@ -28,7 +28,7 @@ public:
         int max_output_samples, int *sample_count, TwoChannelSample *output_samples,
         bool log_now);
 
-    std::string reedSolomonStatistics() const;
+    std::string reedSolomonStatistics();
 
 private:
     static constexpr int c_minimum_frames_before_c1_c2_valid = 97;

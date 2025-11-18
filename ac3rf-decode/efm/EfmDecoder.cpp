@@ -205,7 +205,7 @@ void EfmDecoder::decode(const bool data[], int input_data_size,
     }
 }
 
-std::string EfmDecoder::reedSolomonStatistics() const {
+std::string EfmDecoder::reedSolomonStatistics() {
     return "C1 statistics: " + m_c1.statistics() + "C2 statistics: " + m_c2.statistics();
 }
 
