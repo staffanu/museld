@@ -24,12 +24,12 @@ endif()
 add_executable(ac3rf-decode
         main.cpp
         Logger.h Logger.cpp
-        InputReader.h
-        LdsInputReader.cpp LdsInputReader.h
-        LdfInputReader.cpp LdfInputReader.h
-        FirFilterStage.cpp FirFilterStage.h
-        ComplexFirFilterStage.cpp ComplexFirFilterStage.h
-        FFT.h
+        input/InputReader.h
+        input/LdsInputReader.cpp input/LdsInputReader.h
+        input/LdfInputReader.cpp input/LdfInputReader.h
+        filter/FirFilterStage.cpp filter/FirFilterStage.h
+        filter/ComplexFirFilterStage.cpp filter/ComplexFirFilterStage.h
+        filter/FFT.h
         rs/ReedSolomon.h
         rs/GFValue.h
         rs/ByteWithErasureFlag.h

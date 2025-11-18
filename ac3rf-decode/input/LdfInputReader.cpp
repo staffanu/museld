@@ -2,11 +2,9 @@
 // Created by Staffan Ulfberg on 10/12/25.
 //
 
-#include "LdfInputReader.h"
-
 #include <unistd.h>
-
 #include "FLAC++/decoder.h"
+#include "LdfInputReader.h"
 
 LdfInputReader::LdfInputReader(int fd, uint32_t block_size)
   : InputReader(fd, block_size),

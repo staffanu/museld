@@ -9,7 +9,7 @@
 #include <string>
 #include "../Logger.h"
 #include "../rs/ReedSolomon.h"
-#include "../ComplexFirFilterStage.h"
+#include "../filter/ComplexFirFilterStage.h"
 #include "Ac3BlockHandler.h"
 #include "Ac3DPLL.h"
 #include "Ac3InputFraming.h"

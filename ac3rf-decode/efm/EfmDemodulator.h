@@ -8,7 +8,7 @@
 #include <string>
 
 #include "../Logger.h"
-#include "../FirFilterStage.h"
+#include "../filter/FirFilterStage.h"
 #include "TwoChannelSample.h"
 #include "EfmPll.h"
 #include "EfmDecoder.h"

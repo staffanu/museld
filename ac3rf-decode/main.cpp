@@ -7,9 +7,9 @@
 #include <format>
 
 #include "Logger.h"
-#include "InputReader.h"
-#include "LdfInputReader.h"
-#include "LdsInputReader.h"
+#include "input/InputReader.h"
+#include "input/LdfInputReader.h"
+#include "input/LdsInputReader.h"
 #include "ac3/Ac3RfDemodulator.h"
 #include "efm/EfmDemodulator.h"
 

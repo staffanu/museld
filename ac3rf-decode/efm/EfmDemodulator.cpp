@@ -8,7 +8,7 @@
 #include <sys/fcntl.h>
 #include <gnuradio/fft/window.h>
 #include <gnuradio/filter/firdes.h>
-#include "../FFT.h"
+#include "../filter/FFT.h"
 #include "EfmDemodulator.h"
 
 static int fd;
