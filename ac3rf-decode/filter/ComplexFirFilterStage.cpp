@@ -3,7 +3,6 @@
 //
 
 #include <format>
-#include <gnuradio/filter/firdes.h>
 #include "ComplexFirFilterStage.h"
 
 ComplexFirFilterStage::ComplexFirFilterStage(

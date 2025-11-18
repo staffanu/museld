@@ -6,7 +6,8 @@
 #include <numeric>
 #include <cassert>
 #include <format>
-#include <gnuradio/filter/firdes.h>
+#include <sstream>
+#include <algorithm>
 #include "FirFilterStage.h"
 
 FirFilterStage::FirFilterStage(
