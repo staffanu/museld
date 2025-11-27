@@ -1,3 +1,3 @@
-lcapy==1.25
+lcapy==1.26
 matplotlib==3.10.0
 numpy==1.25.2
