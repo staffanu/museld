@@ -20,7 +20,7 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
       m_input_block_size(input_block_size),
       m_output_fd(output_fd),
       m_rf_input(rf_input),
-      m_log2decimation(floor(::log(input_sample_frequency / 12e6) / ::log(2))),
+      m_log2decimation(floor(::log(input_sample_frequency / 22e6) / ::log(2))),
       m_decimation_factor(1 << m_log2decimation),
       m_efm_pll(log, input_sample_frequency / m_decimation_factor),
       m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
