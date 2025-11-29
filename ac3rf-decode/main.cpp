@@ -15,7 +15,7 @@
 
 void demodulateFile(Logger &log, bool efm, InputFormat input_format, double input_sample_frequency,
     int in_fd, uint32_t block_size, int out_fd, bool use_simd,
-    bool efm_rf, int adaptive_filter_size, std::optional<std::string> retiming_debug_filename) {
+    bool efm_rf, int efm_log2_decimation, int efm_adaptive_filter_size, std::optional<std::string> efm_retiming_debug_filename) {
 
     InputReader *reader;
     switch (input_format) {
@@ -32,7 +32,7 @@ void demodulateFile(Logger &log, bool efm, InputFormat input_format, double inpu
 
     if (efm) {
         EfmDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd, use_simd,
-            efm_rf, adaptive_filter_size, retiming_debug_filename);
+            efm_rf, efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
 
         while (reader->readFloats(input_buffer) == reader->block_size()) {
             auto output = demodulator.demodulate(input_buffer);
@@ -64,8 +64,9 @@ int main(int argc, char *argv[]) {
     bool use_simd = false;
     bool demodulate_efm = false;
     bool efm_rf = false;
-    int adaptive_filter_size = 0; // default off
-    std::optional<std::string> retiming_debug_filename = std::nullopt;
+    int efm_log2_decimation = 0; // no decimation
+    int efm_adaptive_filter_size = 0; // default off
+    std::optional<std::string> efm_retiming_debug_filename = std::nullopt;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -115,13 +116,18 @@ int main(int argc, char *argv[]) {
         demodulate_efm = true;
         efm_rf = true;
     });
-    options.emplace_back("--adaptive-filter-size", [&] () mutable  -> void {
-        adaptive_filter_size = stoi(*(it++));
-        if (adaptive_filter_size < 0 || adaptive_filter_size == 1 || adaptive_filter_size == 2 || adaptive_filter_size > 50)
-            throw std::runtime_error("Invalid adaptive filter size");
+    options.emplace_back("--decimation", [&] () mutable  -> void {
+        efm_log2_decimation = stoi(*(it++));
+        if (efm_log2_decimation < 0)
+            throw std::runtime_error("Invalid decimation specification");
     });
+    options.emplace_back("--adaptive-filter-size", [&] () mutable  -> void {
+    efm_adaptive_filter_size = stoi(*(it++));
+    if (efm_adaptive_filter_size < 0 || efm_adaptive_filter_size == 1 || efm_adaptive_filter_size == 2 || efm_adaptive_filter_size > 50)
+        throw std::runtime_error("Invalid adaptive filter size");
+});
     options.emplace_back("--reclock-debug-filename", [&] () mutable  -> void {
-        retiming_debug_filename = *(it++);
+        efm_retiming_debug_filename = *(it++);
     });
     options.emplace_back("--output-filename", [&] () mutable  -> void {
         auto output_filename = *it++;
@@ -197,7 +203,7 @@ int main(int argc, char *argv[]) {
                 Logger log(log_selection);
                 log.info(eApplication, std::format("Processing input file {}", filename));
                 demodulateFile(log, demodulate_efm, input_format, input_sample_frequency, fd, block_size, out_fd, use_simd,
-                    efm_rf, adaptive_filter_size, retiming_debug_filename);
+                    efm_rf, efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
 
                 close(fd);
                 it++;
@@ -210,7 +216,7 @@ int main(int argc, char *argv[]) {
 
             log.info(eApplication, std::format("Processing stdin"));
             demodulateFile(log, demodulate_efm, input_format_option.value(), input_sample_frequency, 0, block_size, out_fd, use_simd,
-                efm_rf, adaptive_filter_size, retiming_debug_filename);
+                efm_rf, efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
         }
         if (out_fd != 1)
             close(out_fd);

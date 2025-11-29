@@ -65,6 +65,15 @@ output of some players) is assumed.
 
 Tells the decoder that the input is EFM encoded.  RF input, containing video and EFM is assumed.
 
+> --decimation [log2 of decimation factor]
+
+Decimates the input to the EFM decoder by a factor of 2^[log2 of decimation factor].
+This makes decoding faster, but may also lead to a higher error rate.
+Default is 0 (no decimation).
+
+For an input signal sampled at 40 MHz, it is reasonable to decimate by 2 or 4 
+(specified by --decimation 1 or 2, respectively), but not more.
+
 > --adaptive-filter-size [size]
 
 Enables adaptive filtering of the EFM signal.  Default is 0 (off).  

@@ -12,18 +12,15 @@
 #include "../filter/Window.h"
 #include "EfmDemodulator.h"
 
-static int fd;
-
 EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd, bool use_simd,
-    bool rf_input, int adaptive_filter_size, std::optional<std::string> retiming_debug_filename)
+    bool rf_input, int log2_decimation, int adaptive_filter_size, std::optional<std::string> retiming_debug_filename)
     : m_log(log),
       m_input_sample_frequency(input_sample_frequency),
       m_input_block_size(input_block_size),
       m_output_fd(output_fd),
       m_rf_input(rf_input),
-      m_log2decimation(floor(::log(input_sample_frequency / 22e6) / ::log(2))),
-      m_decimation_factor(1 << m_log2decimation),
-      m_efm_pll(log, input_sample_frequency / m_decimation_factor),
+      m_log2_decimation(log2_decimation),
+      m_decimation_factor(1 << m_log2_decimation),
       m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
           adaptive_filter_size, retiming_debug_filename),
       m_efm_decoder(log),
@@ -31,7 +28,7 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
       m_low_pass_filter(nullptr),
       m_phase_adjust_filter(nullptr) {
 
-    assert(m_log2decimation >= 0);
+    assert(m_log2_decimation >= 0);
     assert(m_input_block_size % m_decimation_factor == 0);
 
     // Buffer for filtered input.  If decimation is performed, the result is placed here and then
@@ -40,10 +37,10 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
     m_filtered_input.resize(m_input_block_size / m_decimation_factor);
 
     // Create decimation filters if needed
-    if (m_log2decimation != 0) {
-        m_decimation_filter_stages.resize(m_log2decimation);
+    if (m_log2_decimation != 0) {
+        m_decimation_filter_stages.resize(m_log2_decimation);
 
-        for (int i = m_log2decimation - 1; i >= 0; i--) {
+        for (int i = m_log2_decimation - 1; i >= 0; i--) {
             double stage_sample_freq = input_sample_frequency / (1 << i);
             auto [description, filter] = FirPM::low_pass<float>(15, stage_sample_freq, 3e6, stage_sample_freq / 2 - 3e6);
             m_decimation_filter_stages[i] = new FirFilterStage(
@@ -51,8 +48,8 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
                 description,
                 filter,
                 2, m_input_block_size >> i,
-                m_decimation_filter_stages[i + 1]->filterSize() - 1,
-                i == m_log2decimation - 1 ? &m_filtered_input : m_decimation_filter_stages[i + 1]->inputBuffer(),
+                i == m_log2_decimation - 1 ? 0 : m_decimation_filter_stages[i + 1]->filterSize() - 1,
+                i == m_log2_decimation - 1 ? &m_filtered_input : m_decimation_filter_stages[i + 1]->inputBuffer(),
                 use_simd);
         }
         for (const auto &stage: m_decimation_filter_stages)
@@ -85,13 +82,9 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
     m_max_reclocked_size = (int)(m_input_block_size / m_input_sample_frequency * 4321800 * 1.1);
     m_reclocked_data = new bool[m_max_reclocked_size];
     m_max_output_samples = (m_max_reclocked_size / 588 + 1) * 6;
-
-    fd = open("debug.bin", O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 }
 
 EfmDemodulator::~EfmDemodulator() {
-    close(fd);
-
     delete m_phase_adjust_filter;
     delete m_low_pass_filter;
 
@@ -125,9 +118,6 @@ std::vector<TwoChannelSample> EfmDemodulator::demodulate(const float *input_buff
         m_filtered_input[i] = y;
     }
 
-    int r = write(fd, m_filtered_input.data(), m_filtered_input.size() * sizeof(float));
-
-//    const int reclocked_bytes = m_efm_pll.reclock(m_filtered_input.data(), m_input_block_size / m_decimation_factor, m_reclocked_data, m_max_reclocked_size);
     const int reclocked_bytes = m_timing_recovery.reclock(m_filtered_input.data(), m_reclocked_data, m_max_reclocked_size);
 
     int actual_output_sample_count;

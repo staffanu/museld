@@ -60,7 +60,6 @@ add_executable(ac3rf-decode
         ac3/Ac3BlockHandler.cpp ac3/Ac3BlockHandler.h
         efm/EfmDemodulator.cpp efm/EfmDemodulator.h
         efm/EfmDecoder.cpp efm/EfmDecoder.h
-        efm/EfmPll.cpp efm/EfmPll.h
         efm/TwoChannelSample.h
         efm/TimingRecovery.cpp efm/TimingRecovery.h
         efm/FractionalResampler.cpp efm/FractionalResampler.h
