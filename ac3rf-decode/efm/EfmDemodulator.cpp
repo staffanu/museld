@@ -5,6 +5,7 @@
 #include <iostream>
 #include <valarray>
 #include <unistd.h>
+#include <complex.h>
 #include <sys/fcntl.h>
 #include "../filter/FirPM.h"
 #include "../filter/FFT.h"
@@ -26,41 +27,60 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
       m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
           adaptive_filter_size, retiming_debug_filename),
       m_efm_decoder(log),
-      m_prev_x(0),
-      m_prev_y(0) {
+      m_remove_dc_filter("Remove DC", {1, -1}, {1, -0.999}),
+      m_low_pass_filter(nullptr),
+      m_phase_adjust_filter(nullptr) {
+
     assert(m_log2decimation >= 0);
     assert(m_input_block_size % m_decimation_factor == 0);
 
-    m_filter_stages.resize(m_log2decimation + 1);
+    // Buffer for filtered input.  If decimation is performed, the result is placed here and then
+    // the IIR filters are applied to the data in place.
+    // If no decimation, the IIR filters filter the input directly and place the output here.
     m_filtered_input.resize(m_input_block_size / m_decimation_factor);
 
-    {
-        std::vector<float> input_filter;
-        std::string description;
-        if (m_rf_input) {
-            input_filter = makeRfInputFilter(input_sample_frequency / m_decimation_factor);
-            description = std::format("EFM RF input samp_freq={}", m_input_sample_frequency / m_decimation_factor);
-        } else {
-            tie(description, input_filter) = FirPM::low_pass<float>(15, input_sample_frequency / m_decimation_factor, 1.7e6, 2.3e6);
+    // Create decimation filters if needed
+    if (m_log2decimation != 0) {
+        m_decimation_filter_stages.resize(m_log2decimation);
+
+        for (int i = m_log2decimation - 1; i >= 0; i--) {
+            double stage_sample_freq = input_sample_frequency / (1 << i);
+            auto [description, filter] = FirPM::low_pass<float>(15, stage_sample_freq, 3e6, stage_sample_freq / 2 - 3e6);
+            m_decimation_filter_stages[i] = new FirFilterStage(
+                std::format("Decimate by 2 stage {}", i + 1),
+                description,
+                filter,
+                2, m_input_block_size >> i,
+                m_decimation_filter_stages[i + 1]->filterSize() - 1,
+                i == m_log2decimation - 1 ? &m_filtered_input : m_decimation_filter_stages[i + 1]->inputBuffer(),
+                use_simd);
         }
-        m_filter_stages[m_log2decimation] = new FirFilterStage("Input filter", description, input_filter, 1, input_block_size / m_decimation_factor, 0, &m_filtered_input, use_simd);
+        for (const auto &stage: m_decimation_filter_stages)
+            m_log.debug(eAudio, std::format("Filter stage: {}", stage->toString()));
     }
 
-    for (int i = m_log2decimation - 1; i >= 0; i--) {
-        double stage_sample_freq = input_sample_frequency / (1 << i);
-        auto [description, filter] = FirPM::low_pass<float>(15, stage_sample_freq, 3e6, stage_sample_freq / 2 - 3e6);
-        m_filter_stages[i] = new FirFilterStage(
-            std::format("Decimate by 2 stage {}", i + 1),
-            description,
-            filter,
-            2, m_input_block_size >> i,
-            m_filter_stages[i + 1]->filterSize() - 1,
-            m_filter_stages[i + 1]->inputBuffer(),
-            use_simd);
+    m_low_pass_filter = makeEllipticLowpassFilter(input_sample_frequency / m_decimation_factor);
+
+    {
+        // Filter from the Sony HIL C1, called "RF EQ" in the service manual schematic. Only the first part -- the second doesn't seem to do much.
+        // See the Python code elsewhere in this project for derivation of the coefficients below!
+        double Fs = input_sample_frequency / m_decimation_factor;
+        std::vector<float> b = {
+            (float)((39176791720000.0*pow(Fs, 2) + 1.0256763e+21*Fs + 1.705e+26)/(136762495344372.0*pow(Fs, 2) + 1.03400100063e+21*Fs + 1.11017205e+27)),
+            (float)((3.41e+26 - 78353583440000.0*pow(Fs, 2))/(136762495344372.0*pow(Fs, 2) + 1.03400100063e+21*Fs + 1.11017205e+27)),
+            (float)((39176791720000.0*pow(Fs, 2) - 1.0256763e+21*Fs + 1.705e+26)/(136762495344372.0*pow(Fs, 2) + 1.03400100063e+21*Fs + 1.11017205e+27))
+        };
+        std::vector<float> a = {
+            1.f,
+            (float)((2.2203441e+27 - 273524990688744.0*pow(Fs, 2))/(136762495344372.0*pow(Fs, 2) + 1.03400100063e+21*Fs + 1.11017205e+27)),
+            (float)((136762495344372.0*pow(Fs, 2) - 1.03400100063e+21*Fs + 1.11017205e+27)/(136762495344372.0*pow(Fs, 2) + 1.03400100063e+21*Fs + 1.11017205e+27))
+        };
+        m_phase_adjust_filter = new IirFilter("RF EQ", b, a);
     }
 
-    for (const auto &stage: m_filter_stages)
-        m_log.debug(eAudio, std::format("Filter stage: {}", stage->toString()));
+    m_log.debug(eAudio, m_remove_dc_filter.toString());
+    m_log.debug(eAudio, m_low_pass_filter->toString());
+    m_log.debug(eAudio, m_phase_adjust_filter->toString());
 
     m_max_reclocked_size = (int)(m_input_block_size / m_input_sample_frequency * 4321800 * 1.1);
     m_reclocked_data = new bool[m_max_reclocked_size];
@@ -72,24 +92,38 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
 EfmDemodulator::~EfmDemodulator() {
     close(fd);
 
-    for (const auto stage: m_filter_stages)
+    delete m_phase_adjust_filter;
+    delete m_low_pass_filter;
+
+    for (const auto stage: m_decimation_filter_stages)
         delete stage;
-    m_filter_stages.clear();
+    m_decimation_filter_stages.clear();
 
     delete[] m_reclocked_data;
 }
 
-std::vector<TwoChannelSample> EfmDemodulator::demodulate(float *input_buffer) {
-    float *filter_input_buffer = m_filter_stages[0]->inputBuffer()->data() + m_filter_stages[0]->filterSize() - 1;
-    for (int i = 0; i < m_input_block_size; i++) {
-        float y = m_prev_y * 0.999f + input_buffer[i] - m_prev_x;
-        filter_input_buffer[i] = y;
-        m_prev_x = input_buffer[i];
-        m_prev_y = y;
+std::vector<TwoChannelSample> EfmDemodulator::demodulate(const float *input_buffer) {
+    const float *iir_input;
+    if (m_decimation_filter_stages.empty()) {
+        iir_input = input_buffer;
+    } else {
+        float *filter_input_buffer = m_decimation_filter_stages[0]->inputBuffer()->data() + m_decimation_filter_stages[0]->filterSize() - 1;
+        for (int i = 0; i < m_input_block_size; i++)
+            filter_input_buffer[i] = input_buffer[i];
+
+        for (auto stage: m_decimation_filter_stages)
+            stage->applyFilter();
+
+        iir_input = m_filtered_input.data();
     }
 
-    for (auto stage: m_filter_stages)
-        stage->applyFilter();
+    for (int i = 0; i < m_input_block_size / m_decimation_factor; i++) {
+        const float x = iir_input[i];
+        float y = m_low_pass_filter->filter(m_remove_dc_filter.filter(x));
+        if (m_rf_input)
+            y = m_phase_adjust_filter->filter(y);
+        m_filtered_input[i] = y;
+    }
 
     int r = write(fd, m_filtered_input.data(), m_filtered_input.size() * sizeof(float));
 
@@ -102,7 +136,7 @@ std::vector<TwoChannelSample> EfmDemodulator::demodulate(float *input_buffer) {
         m_max_output_samples, &actual_output_sample_count, m_output_samples.data(), false);
     m_output_samples.resize(actual_output_sample_count);
 
-    for (auto stage: m_filter_stages)
+    for (auto stage: m_decimation_filter_stages)
         stage->moveDataToFront();
 
     return m_output_samples;
@@ -112,74 +146,72 @@ std::string EfmDemodulator::reedSolomonStatistics() {
     return m_efm_decoder.reedSolomonStatistics();
 }
 
-std::vector<float> EfmDemodulator::makeRfInputFilter(double input_sample_frequency) const {
-    const int response_table_size = 9;
-    const double frequencies[response_table_size] = {0.0e6, 0.25e6, 0.5e6, 0.75e6, 1.0e6, 1.25e6, 1.5e6, 1.75e6, 2.0e6};
-    const double amplitude_response[response_table_size] = {0.0, 0.9705, 0.6962, 0.9912, 0.4231, 0.9197, 0.8901, 0.2975, 0.0};
-    const double phase_response[response_table_size] = {0.0, -1.9174, -1.1931, -1.4658, -1.6696, -0.7053, -0.9591, -1.2714, -1.0};
-    assert(frequencies[response_table_size - 1] != 0);
+IirFilter *EfmDemodulator::makeEllipticLowpassFilter(double Fs) {
+    // Creates an elliptic IIR lowpass filter the same way that
+    // Octave's "ellip(4, 3, 40, 1.7e6/(Fs/2))"
+    //
+    // The reason we cannot just copy the coefficients is that Fs
+    // is unknown at compile time.  The code below is converted from
+    // Octave, but everything that can be hard coded is.  So, for
+    // example, the ncauer call is not implemented since the roots
+    // it returns are independent of Fs.
 
-    const int fft_size = 256;
-    std::valarray<std::complex<float>> fft_data(fft_size);
-    fft_data[0] = 0.f;
-    if (fft_size % 2 == 0)
-        fft_data[fft_size / 2] = 0;
+    double w = 1.7e6 / (Fs / 2); // ellip function argument
+    const int n = 4; // argument
 
-    m_log.debug(eAudio, "Desired input filter frequency response:");
-    for (int i = 1; i < (fft_size + 1) / 2; i++) {
-        float f = (float)input_sample_frequency * i / fft_size;
-        std::complex<float> h;
-        if (f < frequencies[response_table_size - 1]) {
-            float rho = std::max(0.0, interpolate(response_table_size, frequencies, amplitude_response, f));
-            float theta = interpolate(response_table_size, frequencies, phase_response, f);
-            h = std::polar<float>(rho, theta);
-        } else
-            h = std::complex(0.f);
+    // Prewarp
+    const double T = 2.0; // sampling frequency of 2 Hz
+    w = 2 / T * tan(M_PI * w / T);
 
-        if (f < 2.2e6) m_log.debug(eAudio, std::format("{:.0}: {} {}", f, abs(h), arg(h)));
+    // Generate s-plane poles, zeros and gain
+    // [zero, pole, gain] = ncauer(rp, rs, n);
+    std::vector zero = { std::complex(0.0, 2.9988), std::complex(0.0, 1.4209), std::complex(0.0, -2.9988), std::complex(0.0, -1.4209) };
+    std::vector pole = { std::complex(-0.2273, 0.4709), std::complex(-0.0595, 0.9666), std::complex(-0.2273, -0.4709), std::complex(-0.0595, -0.9666) };
+    double gain = 9.9997e-03;
 
-        fft_data[i] = h;
-        fft_data[fft_size - i] = conj(h);
+    // splane frequency transform
+    // [zero, pole, gain] = sftrans(zero, pole, gain, w, false);
+    for (int i = 0; i < n; i++) {
+        zero[i] = zero[i] * w;
+        pole[i] = pole[i] * w;
     }
 
-    FFT<float>::ifft(fft_data); // result in place
-    for (int i = 0; i < fft_size; i++)
-        assert(abs(fft_data[i].imag()) < 1e-6);
-
-    int filter_size = 64;
-    std::vector<float> input_filter;
-    auto window = Window::hamming(filter_size);
-    for (int i = 0; i < filter_size; i++) {
-        int ix = (i + fft_size - filter_size / 2) % fft_size; // ifftshift
-        float v = fft_data[ix].real() * window[i];
-        input_filter.push_back(v);
+    // Use bilinear transform to convert poles to the z plane
+    // [zero, pole, gain] = bilinear (zero, pole, gain, T);
+    //   Zg = real(G * prod((2-Z*T)/T) / prod((2-P*T)/T))
+    //   Zp = (2+P*T)./(2-P*T);
+    //   Zz = (2+Z*T)./(2-Z*T);
+    std::complex<double> Zgc = std::complex<double>(gain, 0);
+    for (int i = 0; i < n; i++) {
+        Zgc *= (2.0 - zero[i] * T) / (2.0 - pole[i] * T);
+        pole[i] = (2.0 + pole[i] * T) / (2.0 - pole[i] * T);
+        zero[i] = (2.0 + zero[i] * T) / (2.0 - zero[i] * T);
     }
-    return input_filter;
-}
+    gain = Zgc.real();
 
-double EfmDemodulator::interpolate(int n, const double x[], const double y[], double p) {
-    auto evalLagrange = [](const double x[4], int j, double p) -> double {
-        double prod = 1;
-        for (int i = 0; i < 4; i++)
-            if (i != j) prod *= (p - x[i]) / (x[j] - x[i]);
-        return prod;
-    };
+    // Convert the roots to polynomials
+    // b = real(gain * poly(zero))
+    // a = real(poly(pole))
 
-    auto interpolate = [evalLagrange](const double x[4], const double y[4], double p) -> double {
-        double s = 0;
-        for (int i = 0; i < 4; i++)
-            s += evalLagrange(x, i, p) * y[i];
-        return s;
-    };
+    auto to_poly = [](const std::vector<std::complex<double>> &roots, double gain) -> std::vector<float> {
+        const int n = roots.size();
+        std::vector<std::complex<double>> poly(n + 1);
+        poly[0] = 1;
+        for (int j = 0; j < n; j++)
+            for (int k = j + 1; k >= 1; k--)
+                poly[k] -= roots[j] * poly[k - 1];
 
-    int first_larger_than_p_ix = -1;
-    for (int i = 0; i < n; i++)
-        if (x[i] > p) {
-            first_larger_than_p_ix = i;
-            break;
+        std::vector<float> coeffs(n + 1);
+        for (int j = 0; j <= n; j++) {
+            assert(abs(poly[j].imag()) < 1e-10);
+            coeffs[j] = gain * poly[j].real();
         }
-    assert(first_larger_than_p_ix != -1);
 
-    int start = std::min(n - 4, std::max(0, first_larger_than_p_ix - 2));
-    return interpolate(x + start, y + start, p);
+        return coeffs;
+    };
+
+    const auto b = to_poly(zero, gain);
+    const auto a = to_poly(pole, 1.0);
+
+    return new IirFilter("Lowpass Elliptic", b, a);
 }

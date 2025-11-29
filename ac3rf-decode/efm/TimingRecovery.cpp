@@ -52,7 +52,7 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
             float s = m_resampler.resample(i * (m_nominal_step_size + m_step_size_adjustment) / 2);
             m_power_estimate = (1 - power_alpha) * m_power_estimate + power_alpha * s * s;
             float gain = sqrt(1 / (m_power_estimate + 1.0));
-            m_filter->add_sample(s * gain);
+            m_filter->addSample(s * gain);
         }
 
         // Initially gain is uncertain and also the signal is not DC
@@ -80,7 +80,7 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
             m_error_sum += error;
             m_error_sum = std::max(std::min(m_error_sum, m_nominal_step_size / m_g2 * 0.02), -m_nominal_step_size / m_g2 * 0.02);
             m_step_size_adjustment = error * m_g1 + m_error_sum * m_g2;
-            assert(abs(m_step_size_adjustment) <= m_nominal_step_size * 0.04);
+            assert(!std::isnan(m_step_size_adjustment) && abs(m_step_size_adjustment) <= m_nominal_step_size * 0.04);
         } else {
             zero_cross = false;
         }
@@ -94,7 +94,7 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
         output[output_size++] = zero_cross;
     }
 
-    if (m_total_symbols - m_last_adaptive_filter_log > 4321800) {
+    if (m_filter->size() != 0 && m_total_symbols - m_last_adaptive_filter_log > 4321800) {
         m_log.debug(eAudio, "Adaptive filter coefficients: " + m_filter->filterString());
         m_last_adaptive_filter_log = m_total_symbols;
     }

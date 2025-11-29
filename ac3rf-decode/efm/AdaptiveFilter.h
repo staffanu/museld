@@ -9,7 +9,8 @@ class AdaptiveFilter {
 public:
     virtual ~AdaptiveFilter() = default;
 
-    virtual void add_sample(float sample) = 0;
+    [[nodiscard]] virtual int size() const = 0;
+    virtual void addSample(float sample) = 0;
     virtual void adaptError(float e) = 0;
     virtual void getLast3(float &f1, float&f2, float &f3) = 0;
     virtual std::string filterString() = 0;
@@ -18,7 +19,10 @@ public:
 class NonAdaptiveFilter : public AdaptiveFilter {
 public:
     NonAdaptiveFilter() : m_window{} {}
-    void add_sample(float sample) override {
+    [[nodiscard]] int size() const override {
+        return 0;
+    }
+    void addSample(float sample) override {
         for (int i = 0; i < 2; i++)
             m_window[i] = m_window[i + 1];
         m_window[2] = sample;

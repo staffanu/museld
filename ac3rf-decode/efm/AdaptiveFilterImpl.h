@@ -19,7 +19,8 @@ public:
 
     ~AdaptiveFilterImpl() override;
 
-    void add_sample(float sample) override;
+    [[nodiscard]] int size() const override;
+    void addSample(float sample) override;
     void adaptError(float e) override;
     void getLast3(float &f1, float&f2, float &f3) override;
     std::string filterString() override;

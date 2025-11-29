@@ -9,6 +9,7 @@
 
 #include "../Logger.h"
 #include "../filter/FirFilterStage.h"
+#include "../filter/IirFilter.h"
 #include "TwoChannelSample.h"
 #include "EfmPll.h"
 #include "EfmDecoder.h"
@@ -25,12 +26,11 @@ public:
     EfmDemodulator(EfmDemodulator &&) = delete;
     EfmDemodulator &operator=(EfmDemodulator &&) = delete;
 
-    std::vector<TwoChannelSample> demodulate(float *input_buffer);
+    std::vector<TwoChannelSample> demodulate(const float *input_buffer);
     [[nodiscard]] std::string reedSolomonStatistics();
 
 private:
-    std::vector<float> makeRfInputFilter(double input_sample_frequency) const;
-    static double interpolate(int n, const double x[], const double y[], double p);
+    static IirFilter *makeEllipticLowpassFilter(double Fs);
 
     Logger &m_log;
     double m_input_sample_frequency;
@@ -39,14 +39,15 @@ private:
     bool m_rf_input;
     int m_log2decimation;
     int m_decimation_factor;
-    std::vector<FirFilterStage *> m_filter_stages;
+    std::vector<FirFilterStage *> m_decimation_filter_stages;
+    IirFilter m_remove_dc_filter;
+    IirFilter *m_low_pass_filter;
+    IirFilter *m_phase_adjust_filter;
     std::vector<float> m_filtered_input;
+
     EfmPll m_efm_pll;
     TimingRecovery m_timing_recovery;
     EfmDecoder m_efm_decoder;
-
-    float m_prev_x; // for minimal IIR filter to kill DC
-    float m_prev_y;
 
     int m_max_reclocked_size;
     bool *m_reclocked_data;

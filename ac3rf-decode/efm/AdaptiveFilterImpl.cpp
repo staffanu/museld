@@ -29,7 +29,11 @@ AdaptiveFilterImpl::~AdaptiveFilterImpl() {
     delete[] m_filtered;
 }
 
-void AdaptiveFilterImpl::add_sample(float sample) {
+int AdaptiveFilterImpl::size() const {
+    return m_filter_size;
+}
+
+void AdaptiveFilterImpl::addSample(float sample) {
     for (int i = 0; i < m_filter_size - 1; i++)
         m_window[i] = m_window[i + 1];
     m_window[m_filter_size - 1] = sample;
