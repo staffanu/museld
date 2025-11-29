@@ -10,6 +10,16 @@
 #include <string>
 #include <format>
 
+enum InputFormat {
+    eUint8,
+    eSint8,
+    eUint16,
+    eSint16,
+    eLds,
+    eFlac,
+    eFlacOgg,
+};
+
 class InputReader {
 public:
     InputReader(int fd, uint32_t block_size)

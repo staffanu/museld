@@ -3,12 +3,15 @@
 //
 
 #include <unistd.h>
+#include <cassert>
 #include "FLAC++/decoder.h"
 #include "LdfInputReader.h"
 
-LdfInputReader::LdfInputReader(int fd, uint32_t block_size)
+LdfInputReader::LdfInputReader(int fd, uint32_t block_size, InputFormat format)
   : InputReader(fd, block_size),
-    FLAC::Decoder::Stream() {
+    FLAC::Decoder::Stream(),
+    m_format(format) {
+    assert(format == eFlacOgg || format == eFlac);
 }
 
 LdfInputReader::~LdfInputReader() {
@@ -16,7 +19,7 @@ LdfInputReader::~LdfInputReader() {
 }
 
 void LdfInputReader::initialize() {
-    auto status = init_ogg();
+    auto status = m_format == eFlac ? init() : init_ogg();
     if (status != FLAC__STREAM_DECODER_INIT_STATUS_OK)
         throw std::runtime_error(std::format("Error initializing decoder: {}", FLAC__StreamDecoderInitStatusString[status]));
 }
@@ -71,8 +74,10 @@ void LdfInputReader::metadata_callback(const ::FLAC__StreamMetadata *metadata) {
     if (metadata->type == FLAC__METADATA_TYPE_STREAMINFO) {
         if (metadata->data.stream_info.channels != 1)
             throw std::runtime_error("LDF files should have only one channel");
-        if (metadata->data.stream_info.bits_per_sample != 16)
-            throw std::runtime_error("LDF files should have 16 bits per sample");
+        if (metadata->data.stream_info.bits_per_sample == 8 || metadata->data.stream_info.bits_per_sample == 16)
+            m_bits_per_sample = metadata->data.stream_info.bits_per_sample;
+        else
+            throw std::runtime_error("LDF files should have 8 or 16 bits per sample");
     }
 }
 

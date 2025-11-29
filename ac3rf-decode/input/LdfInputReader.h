@@ -8,18 +8,9 @@
 #include "InputReader.h"
 #include <FLAC++/decoder.h>
 
-enum InputFormat {
-    eUint8,
-    eSint8,
-    eUint16,
-    eSint16,
-    eLds,
-    eLdf
-};
-
 class LdfInputReader : public InputReader, private FLAC::Decoder::Stream  {
 public:
-    LdfInputReader(int fd, uint32_t block_size);
+    LdfInputReader(int fd, uint32_t block_size, InputFormat format);
 
     LdfInputReader(const LdfInputReader &) = delete;
     LdfInputReader &operator=(const LdfInputReader &) = delete;
@@ -37,6 +28,8 @@ private:
     void metadata_callback(const ::FLAC__StreamMetadata *metadata) override;
     void error_callback(::FLAC__StreamDecoderErrorStatus status) override;
 
+    InputFormat m_format;
+    int m_bits_per_sample = 0;
     uint32_t m_flac_allocated_size = 0;
     uint32_t m_flac_used_size = 0;
     uint32_t m_flac_block_read_count = 0;

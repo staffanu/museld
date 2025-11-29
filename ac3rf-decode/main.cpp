@@ -24,7 +24,7 @@ void demodulateFile(Logger &log, bool efm, InputFormat input_format, double inpu
         case eSint8: reader = new InputReaderImpl<int8_t>(in_fd, block_size); break;
         case eSint16: reader = new InputReaderImpl<int16_t>(in_fd, block_size); break;
         case eLds: reader = new LdsInputReader(in_fd, block_size); break;
-        case eLdf: reader = new LdfInputReader(in_fd, block_size); break;
+        case eFlac: case eFlacOgg: reader = new LdfInputReader(in_fd, block_size, input_format); break;
         default: throw std::runtime_error("Unsupported input format");
     }
     reader->initialize();
@@ -95,9 +95,12 @@ int main(int argc, char *argv[]) {
     options.emplace_back("--lds", [&] () mutable  -> void {
         input_format_option = std::make_optional(eLds);
     });
-    options.emplace_back("--ldf", [&] () mutable  -> void {
-        input_format_option = std::make_optional(eLdf);
+    options.emplace_back("--flac", [&] () mutable  -> void {
+        input_format_option = std::make_optional(eFlac);
     });
+    options.emplace_back("--ldf", [&] () mutable  -> void {
+    input_format_option = std::make_optional(eFlacOgg);
+});
     options.emplace_back("--sample-freq", [&] () mutable  -> void {
         input_sample_frequency = stod(*(it++));
     });
@@ -181,7 +184,8 @@ int main(int argc, char *argv[]) {
                     else if (filename.ends_with(".u16")) input_format = eUint16;
                     else if (filename.ends_with(".s16")) input_format = eSint16;
                     else if (filename.ends_with(".lds")) input_format = eLds;
-                    else if (filename.ends_with(".ldf")) input_format = eLdf;
+                    else if (filename.ends_with(".flac")) input_format = eFlac;
+                    else if (filename.ends_with(".ldf")) input_format = eFlacOgg;
                     else throw std::runtime_error("Input format not given and unknown input file suffix");
                 } else
                     input_format = input_format_option.value();
