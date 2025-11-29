@@ -30,7 +30,7 @@ public:
     [[nodiscard]] std::string reedSolomonStatistics();
 
 private:
-    static IirFilter *makeEllipticLowpassFilter(double Fs);
+    static IirFilter<5> *makeEllipticLowpassFilter(double Fs);
 
     Logger &m_log;
     double m_input_sample_frequency;
@@ -40,9 +40,9 @@ private:
     int m_log2decimation;
     int m_decimation_factor;
     std::vector<FirFilterStage *> m_decimation_filter_stages;
-    IirFilter m_remove_dc_filter;
-    IirFilter *m_low_pass_filter;
-    IirFilter *m_phase_adjust_filter;
+    IirFilter<2> m_remove_dc_filter;
+    IirFilter<5> *m_low_pass_filter;
+    IirFilter<3> *m_phase_adjust_filter;
     std::vector<float> m_filtered_input;
 
     EfmPll m_efm_pll;

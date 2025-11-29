@@ -65,17 +65,17 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
         // Filter from the Sony HIL C1, called "RF EQ" in the service manual schematic. Only the first part -- the second doesn't seem to do much.
         // See the Python code elsewhere in this project for derivation of the coefficients below!
         double Fs = input_sample_frequency / m_decimation_factor;
-        std::vector<float> b = {
+        std::array b = {
             (float)((39176791720000.0*pow(Fs, 2) + 1.0256763e+21*Fs + 1.705e+26)/(136762495344372.0*pow(Fs, 2) + 1.03400100063e+21*Fs + 1.11017205e+27)),
             (float)((3.41e+26 - 78353583440000.0*pow(Fs, 2))/(136762495344372.0*pow(Fs, 2) + 1.03400100063e+21*Fs + 1.11017205e+27)),
             (float)((39176791720000.0*pow(Fs, 2) - 1.0256763e+21*Fs + 1.705e+26)/(136762495344372.0*pow(Fs, 2) + 1.03400100063e+21*Fs + 1.11017205e+27))
         };
-        std::vector<float> a = {
+        std::array a = {
             1.f,
             (float)((2.2203441e+27 - 273524990688744.0*pow(Fs, 2))/(136762495344372.0*pow(Fs, 2) + 1.03400100063e+21*Fs + 1.11017205e+27)),
             (float)((136762495344372.0*pow(Fs, 2) - 1.03400100063e+21*Fs + 1.11017205e+27)/(136762495344372.0*pow(Fs, 2) + 1.03400100063e+21*Fs + 1.11017205e+27))
         };
-        m_phase_adjust_filter = new IirFilter("RF EQ", b, a);
+        m_phase_adjust_filter = new IirFilter<3>("RF EQ", b, a);
     }
 
     m_log.debug(eAudio, m_remove_dc_filter.toString());
@@ -146,7 +146,7 @@ std::string EfmDemodulator::reedSolomonStatistics() {
     return m_efm_decoder.reedSolomonStatistics();
 }
 
-IirFilter *EfmDemodulator::makeEllipticLowpassFilter(double Fs) {
+IirFilter<5> *EfmDemodulator::makeEllipticLowpassFilter(double Fs) {
     // Creates an elliptic IIR lowpass filter the same way that
     // Octave's "ellip(4, 3, 40, 1.7e6/(Fs/2))"
     //
@@ -193,15 +193,14 @@ IirFilter *EfmDemodulator::makeEllipticLowpassFilter(double Fs) {
     // b = real(gain * poly(zero))
     // a = real(poly(pole))
 
-    auto to_poly = [](const std::vector<std::complex<double>> &roots, double gain) -> std::vector<float> {
-        const int n = roots.size();
+    auto to_poly = [n](const std::vector<std::complex<double>> &roots, double gain) -> std::array<float, n + 1> {
         std::vector<std::complex<double>> poly(n + 1);
         poly[0] = 1;
         for (int j = 0; j < n; j++)
             for (int k = j + 1; k >= 1; k--)
                 poly[k] -= roots[j] * poly[k - 1];
 
-        std::vector<float> coeffs(n + 1);
+        std::array<float, n + 1> coeffs{};
         for (int j = 0; j <= n; j++) {
             assert(abs(poly[j].imag()) < 1e-10);
             coeffs[j] = gain * poly[j].real();
@@ -213,5 +212,5 @@ IirFilter *EfmDemodulator::makeEllipticLowpassFilter(double Fs) {
     const auto b = to_poly(zero, gain);
     const auto a = to_poly(pole, 1.0);
 
-    return new IirFilter("Lowpass Elliptic", b, a);
+    return new IirFilter<5>("Lowpass Elliptic", b, a);
 }
