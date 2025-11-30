@@ -8,7 +8,6 @@ find_package(PkgConfig REQUIRED)
 find_package(Eigen3 REQUIRED)  # Used by firpm
 
 pkg_check_modules(FLAC REQUIRED flac++)
-include_directories("${FLAC_INCLUDE_DIRS}")
 
 # -mavx is hopefully implied by -march=native
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math -march=native")
@@ -65,6 +64,10 @@ add_executable(ac3rf-decode
         efm/FractionalResampler.cpp efm/FractionalResampler.h
         efm/AdaptiveFilter.h
         efm/AdaptiveFilterImpl.cpp efm/AdaptiveFilterImpl.h
+)
+
+target_include_directories(ac3rf-decode
+        PRIVATE ${FLAC_INCLUDE_DIRS}
 )
 
 target_link_options(ac3rf-decode PRIVATE "-L/usr/local/lib")

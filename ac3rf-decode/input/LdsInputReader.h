@@ -5,6 +5,7 @@
 #ifndef AC3RF_DECODE_LDSREADER_H
 #define AC3RF_DECODE_LDSREADER_H
 
+#include <stdint.h>
 #include "InputReader.h"
 
 class LdsInputReader : public InputReader {
