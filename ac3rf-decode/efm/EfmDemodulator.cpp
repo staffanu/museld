@@ -112,9 +112,9 @@ std::vector<TwoChannelSample> EfmDemodulator::demodulate(const float *input_buff
 
     for (int i = 0; i < m_input_block_size / m_decimation_factor; i++) {
         const float x = iir_input[i];
-        float y = m_low_pass_filter->filter(m_remove_dc_filter.filter(x));
+        float y = m_remove_dc_filter.filter(x);
         if (m_rf_input)
-            y = m_phase_adjust_filter->filter(y);
+            y = m_phase_adjust_filter->filter(m_low_pass_filter->filter(y));
         m_filtered_input[i] = y;
     }
 
