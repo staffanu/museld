@@ -48,9 +48,13 @@ void AdaptiveFilterImpl::addSample(float sample) {
     // printf("Added %f, last filtered now %f\n", sample, s);
 }
 
-void AdaptiveFilterImpl::adaptError(float e) {
+void AdaptiveFilterImpl::adaptError(float desired, float actual) {
+    // const float adjust = (desired - actual) * m_mu; // LMS
+    // const float adjust = -m_mu * actual * (actual * actual - 1.f) * 0.01f; // CMA
+    const float adjust = m_mu * (desired > actual ? 1.0f : desired < actual ? -1.0f : 0.0f) * 0.02f; // LMS using error sign only
+
     for (int i = 0; i < m_filter_size; i++)
-        m_filter[i] += m_window[i] * e * m_mu;
+        m_filter[i] += m_window[i] * adjust;
 }
 
 void AdaptiveFilterImpl::getLast3(float &f1, float&f2, float &f3) {

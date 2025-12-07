@@ -11,7 +11,7 @@ public:
 
     [[nodiscard]] virtual int size() const = 0;
     virtual void addSample(float sample) = 0;
-    virtual void adaptError(float e) = 0;
+    virtual void adaptError(float desired, float actual) = 0;
     virtual void getLast3(float &f1, float&f2, float &f3) = 0;
     virtual std::string filterString() = 0;
 };
@@ -27,7 +27,7 @@ public:
             m_window[i] = m_window[i + 1];
         m_window[2] = sample;
     }
-    void adaptError(float e) override {}
+    void adaptError(float desired, float actual) override {}
     void getLast3(float &f1, float&f2, float &f3) override {
         f1 = m_window[0];
         f2 = m_window[1];

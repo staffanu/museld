@@ -29,7 +29,7 @@ TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int i
     m_error_sum(0) {
 
     if (retiming_debug_filename.has_value()) {
-        m_debug_fd = open("gardner.bin", O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        m_debug_fd = open(retiming_debug_filename->c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         if (m_debug_fd == -1)
             throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
     }
@@ -74,8 +74,10 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
             zero_cross = true;
 
             // error positive: we're sampling too early, so increase sample spacing
-            double error = sample / (sample_before - sample_after);
-            //printf("%f %f %f  error=%f\n", sample_before, sample, sample_after, error);
+            // double error = sample / (sample_before - sample_after);
+            double error = sample_before > sample_after ? sample : -sample;
+
+            // printf("%f %f %f  error=%f\n", sample_before, sample, sample_after, error);
             error = std::max(std::min(error, m_nominal_step_size / m_g1 * 0.02), -m_nominal_step_size / m_g1 * 0.02);
             m_error_sum += error;
             m_error_sum = std::max(std::min(m_error_sum, m_nominal_step_size / m_g2 * 0.02), -m_nominal_step_size / m_g2 * 0.02);
@@ -86,9 +88,7 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
         }
 
         // equalize on the sample_after symbol value
-        float d = sample_after > 0 ? 1.f : -1.f;
-        float e = std::max(std::min(d - sample_after, 1.f), -1.f);
-        m_filter->adaptError(e);
+        m_filter->adaptError(sample_after > 0 ? 1.f : -1.f, sample_after);
 
         assert(output_size < max_output_size);
         output[output_size++] = zero_cross;
