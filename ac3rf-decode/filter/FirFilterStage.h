@@ -27,6 +27,8 @@ public:
 
     ~FirFilterStage();
 
+    static bool simdSupported();
+
     [[nodiscard]] std::string name() const;
     [[nodiscard]] int filterSize() const;
     [[nodiscard]] int decimationFactor() const;

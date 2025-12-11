@@ -1,9 +1,9 @@
 # README #
 
-### C++ AC3RF demodulator / decoder ###
+### C++ AC3RF and EFM demodulator / decoder ###
 
-This directory contains a C++ implementation of an AC3RF demodulator.  It can be
-run on large files and the code is probably considerably easier to understand than the original Scala code.
+This directory contains a C++ implementation of an AC3RF demodulator, and of an EFM decoder.  It can be
+run on large files and is reasonably fast (several times real-time on a modern CPU).
 
 #### Building
 
@@ -55,6 +55,7 @@ Sets the log level.  Default is warn (2).  Supported levels are: 0 (off), 1 (err
 > --simd
 
 Use SIMD instructions to speed up FIR filtering.  Not available for all platforms/compilers.
+Default enabled if supported.
 
 > --efm
 
@@ -68,33 +69,34 @@ Tells the decoder that the input is EFM encoded.  RF input, containing video and
 > --decimation [log2 of decimation factor]
 
 Decimates the input to the EFM decoder by a factor of 2^[log2 of decimation factor].
-This makes decoding faster, but may also lead to a higher error rate.
-Default is 0 (no decimation).
-
-For an input signal sampled at 40 MHz, it is reasonable to decimate by 2 or 4 
-(specified by --decimation 1 or 2, respectively), but not more.
+This makes decoding faster.  Default is to decimate using the highest possible decimation
+that keeps the sample rate before the fractional resampler over 8 MHz.
 
 > --adaptive-filter-size [size]
 
-Enables adaptive filtering of the EFM signal.  Default is 0 (off).  
-Reasonable values are 3 and up; over 20 is probably overkill.  This 
-is an experimental feature but seems to help on same inputs.
+Enables adaptive filtering of the EFM signal.  Default is 3.  
+Reasonable values are 2 and up; over 15 is probably overkill.
+Try increasing this to 9 or 11 if there are lots of errors, which might be
+caused by a distorted input signal.
 
 > --reclock-debug-filename [filename]
 
-Outputs a file containing resampled data from the clock recovery stage.  This can be shown,
-e.g., using gnuplot with the following command:
-> s=80000000; l=200;
-> plot "reclock.bin" binary format="%float%float" every ::s::(s+l) using (\$1) with lines,
->      "reclock.bin" binary format="%float%float" every ::s::(s+l) using (\$2*1-1) with lines
+Outputs a file containing resampled data from the clock recovery stage of the EFM decoder.
+This can be shown, e.g., using gnuplot with the following command:
+
+> s=1861950; l=200; plot "cmake-build-relwithdebinfo/reclock.bin" binary format="%float%float" every ::s::(s+l) using (\$1) with linespoints,
+> "" binary format="%float%float" every ::s::(s+l) using (\$2*1-1) with points
+
+The file contains binary float pairs. The first float in every pair is the symbol sample used by
+the Mueller-Muller timing detector, and the second is the computed timing error.
 
 > --output-filename [filename]
 
-Sets the output filename.  Default is to print the output to stdout.`
+Sets the output filename.  Default is to write the output to stdout.
 
 > [filename]
 
-Any other filenames are read and processed.  Multiple files can be read and are processed in order.
+Any other arguments are assumed to be filenames that are read and processed.  Multiple files can be read and are processed in order.
 The most recent setting for input format, sample frequency, and output file is used.  If the
 same output file is used for consecutive input files, the output is appended.
 
@@ -106,7 +108,7 @@ Pipe the output of the AC3RF demodulator to [ffplay](https://ffmpeg.org/ffplay.h
 > ./cmake-build-release/ac3rf-decode --sample-freq 24.583e6 --uint8 rf-ac3.24.583MHz.u8 | ffplay -f ac3 -i pipe:
 
 Pipe the output of the EFM decoder to play (from the SoX package):
-> ./cmake-build-release/ac3rf-decode --efm-rf --simd --sample-freq 40e6 --adaptive-filter-size 7 capture.lds | play -t raw -c 2 -r 44100 -b 16 -e signed-integer -
+> ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 capture.lds | play -t raw -c 2 -r 44100 -b 16 -e signed-integer -
 
 Pipe the output of the EFM decoder to ffplay (for EFM encoded DTS):
-> ./cmake-build-release/ac3rf-decode --efm-rf --simd --sample-freq 40e6 --adaptive-filter-size 7 video.ldf | ffplay -f dts -i pipe:
+> ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 video.ldf | ffplay -f dts -i pipe:

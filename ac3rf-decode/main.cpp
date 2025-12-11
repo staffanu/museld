@@ -13,9 +13,9 @@
 #include "ac3/Ac3RfDemodulator.h"
 #include "efm/EfmDemodulator.h"
 
-void demodulateFile(Logger &log, bool efm, InputFormat input_format, double input_sample_frequency,
+void demodulateFile(Logger &logger, bool efm, InputFormat input_format, double input_sample_frequency,
     int in_fd, uint32_t block_size, int out_fd, bool use_simd,
-    bool efm_rf, int efm_log2_decimation, int efm_adaptive_filter_size, std::optional<std::string> efm_retiming_debug_filename) {
+    bool efm_rf, std::optional<int> efm_log2_decimation_opt, int efm_adaptive_filter_size, std::optional<std::string> efm_retiming_debug_filename) {
 
     InputReader *reader;
     switch (input_format) {
@@ -31,7 +31,9 @@ void demodulateFile(Logger &log, bool efm, InputFormat input_format, double inpu
     auto *input_buffer = new float[block_size];
 
     if (efm) {
-        EfmDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd, use_simd,
+        int efm_log2_decimation = efm_log2_decimation_opt.value_or(std::max(0, (int)(log(input_sample_frequency / 8e6) / log(2))));
+
+        EfmDemodulator demodulator(logger, input_sample_frequency, reader->block_size(), out_fd, use_simd,
             efm_rf, efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
 
         while (reader->readFloats(input_buffer) == reader->block_size()) {
@@ -39,16 +41,16 @@ void demodulateFile(Logger &log, bool efm, InputFormat input_format, double inpu
             if (write(out_fd, (const uint8_t *)output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
                 throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
         }
-        log.info(eAudio, demodulator.reedSolomonStatistics());
+        logger.info(eAudio, demodulator.reedSolomonStatistics());
     } else {
-        Ac3RfDemodulator demodulator(log, input_sample_frequency, reader->block_size(), out_fd, use_simd);
+        Ac3RfDemodulator demodulator(logger, input_sample_frequency, reader->block_size(), out_fd, use_simd);
 
         while (reader->readFloats(input_buffer) == reader->block_size()) {
             for (auto output: demodulator.demodulate(input_buffer))
                 if (write(out_fd, output.data(), output.size()) == -1)
                     throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
         }
-        log.info(eAudio, demodulator.reedSolomonStatistics());
+        logger.info(eAudio, demodulator.reedSolomonStatistics());
     }
 
     delete[] input_buffer;
@@ -61,11 +63,11 @@ int main(int argc, char *argv[]) {
     double input_sample_frequency = 40e6;
     int out_fd = 1;
     uint32_t block_size = 16 * 1024;
-    bool use_simd = false;
+    bool use_simd = FirFilterStage::simdSupported();
     bool demodulate_efm = false;
     bool efm_rf = false;
-    int efm_log2_decimation = 0; // no decimation
-    int efm_adaptive_filter_size = 0; // default off
+    std::optional<int> efm_log2_decimation = std::nullopt;
+    int efm_adaptive_filter_size = 3;
     std::optional<std::string> efm_retiming_debug_filename = std::nullopt;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
@@ -123,9 +125,9 @@ int main(int argc, char *argv[]) {
     });
     options.emplace_back("--adaptive-filter-size", [&] () mutable  -> void {
     efm_adaptive_filter_size = stoi(*(it++));
-    if (efm_adaptive_filter_size < 0 || efm_adaptive_filter_size == 1 || efm_adaptive_filter_size == 2 || efm_adaptive_filter_size > 50)
+    if (efm_adaptive_filter_size < 0 || efm_adaptive_filter_size > 100)
         throw std::runtime_error("Invalid adaptive filter size");
-});
+    });
     options.emplace_back("--reclock-debug-filename", [&] () mutable  -> void {
         efm_retiming_debug_filename = *(it++);
     });

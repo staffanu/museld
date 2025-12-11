@@ -12,33 +12,33 @@ public:
     [[nodiscard]] virtual int size() const = 0;
     virtual void addSample(float sample) = 0;
     virtual void adaptError(float desired, float actual) = 0;
-    virtual void getLast3(float &f1, float&f2, float &f3) = 0;
-    virtual std::string filterString() = 0;
+    [[nodiscard]] virtual float getOutput() const = 0;
+    [[nodiscard]] virtual float calcCenter() const = 0;
+    [[nodiscard]] virtual std::string filterString() const = 0;
 };
 
 class NonAdaptiveFilter : public AdaptiveFilter {
 public:
-    NonAdaptiveFilter() : m_window{} {}
+    NonAdaptiveFilter() : m_sample{} {}
     [[nodiscard]] int size() const override {
         return 0;
     }
     void addSample(float sample) override {
-        for (int i = 0; i < 2; i++)
-            m_window[i] = m_window[i + 1];
-        m_window[2] = sample;
+        m_sample = sample;
     }
     void adaptError(float desired, float actual) override {}
-    void getLast3(float &f1, float&f2, float &f3) override {
-        f1 = m_window[0];
-        f2 = m_window[1];
-        f3 = m_window[2];
+    [[nodiscard]] float getOutput() const override {
+        return m_sample;
     }
-    std::string filterString() override {
+    [[nodiscard]] float calcCenter() const override {
+        return 0.f;
+    }
+    [[nodiscard]] std::string filterString() const override {
         return "[non-adaptive]";
     }
 
 private:
-    float m_window[3];
+    float m_sample;
 };
 
 #endif //AC3RF_DECODE_ADAPTIVEFILTER_H

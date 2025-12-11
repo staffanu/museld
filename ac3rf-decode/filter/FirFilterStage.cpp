@@ -41,6 +41,16 @@ FirFilterStage::~FirFilterStage() {
     delete m_input_buffer;
 }
 
+bool FirFilterStage::simdSupported() {
+#if defined __AVX__
+    return true;
+#elif __ARM_NEON == 1
+    return true;
+#else
+    return false;
+#endif
+}
+
 std::string FirFilterStage::name() const {
     return m_name;
 }
@@ -59,7 +69,10 @@ std::vector<float> *FirFilterStage::inputBuffer() {
 
 std::string FirFilterStage::toString() const {
     std::ostringstream ss;
-    ss << std::format("{}: {}, size: {}, decimation: {}, coefficients:", m_name, m_description, m_filter.size(), m_decimation_factor);
+    ss << std::format("{}: {}, SIMD {}, size: {}, decimation: {}, coefficients:",
+        m_name, m_description,
+        m_use_simd ? "enabled" : "disabled",
+        m_filter.size(), m_decimation_factor);
     for (int i = m_filter.size() - 1; i >= 0; i--) // we store the coefficients reversed
         ss << " " << m_filter[i];;
     return ss.str();

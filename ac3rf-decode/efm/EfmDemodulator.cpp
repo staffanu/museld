@@ -38,6 +38,7 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
 
     // Create decimation filters if needed
     if (m_log2_decimation != 0) {
+        log.debug(eAudio, std::format("Decimating input by 2^{}", m_log2_decimation));
         m_decimation_filter_stages.resize(m_log2_decimation);
 
         for (int i = m_log2_decimation - 1; i >= 0; i--) {

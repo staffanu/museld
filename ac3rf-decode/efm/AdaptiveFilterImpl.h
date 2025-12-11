@@ -22,8 +22,9 @@ public:
     [[nodiscard]] int size() const override;
     void addSample(float sample) override;
     void adaptError(float desired, float actual) override;
-    void getLast3(float &f1, float&f2, float &f3) override;
-    std::string filterString() override;
+    [[nodiscard]] float getOutput() const override;
+    [[nodiscard]] float calcCenter() const override;
+    [[nodiscard]] std::string filterString() const override;
 
 private:
     const int m_filter_size;

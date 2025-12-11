@@ -149,7 +149,7 @@ void EfmDecoder::decode(const bool data[], int input_data_size,
             m_bits_since_sync = 0;
             m_consecutive_sync_failures = 0;
             m_consecutive_syncs += 1; // this is not right -- we increment consecutive_syncs even if not in an expected position
-            if (m_consecutive_syncs >= 3 && !m_locked) {
+            if (m_consecutive_syncs >= 7 && !m_locked) {
                 m_locked = true;
                 m_efm_frames_since_lock = 0;
                 m_log.debug(eAudio, std::format("efm locked index {}", m_total_bits));

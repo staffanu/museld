@@ -17,7 +17,7 @@ TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int i
     m_input_sample_frequency(input_sample_frequency),
     m_input_block_size(input_block_size),
     m_resampler(input_block_size),
-    m_filter(adaptive_filter_size != 0 ? (AdaptiveFilter *)new AdaptiveFilterImpl(adaptive_filter_size, 0.001f) : (AdaptiveFilter *)new NonAdaptiveFilter()),
+    m_filter(adaptive_filter_size != 0 ? (AdaptiveFilter *)new AdaptiveFilterImpl(adaptive_filter_size, 1e-3f) : (AdaptiveFilter *)new NonAdaptiveFilter()),
     m_power_estimate(1),
     m_total_symbols(0),
     m_last_adaptive_filter_log(0),
@@ -44,54 +44,43 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
     m_resampler.updateInput(input);
 
     int output_size = 0;
-    while (m_resampler.advanceTime(m_nominal_step_size + m_step_size_adjustment, (m_nominal_step_size + m_step_size_adjustment) / 2)) {
+    while (m_resampler.advanceTime(m_nominal_step_size + m_step_size_adjustment)) {
         m_total_symbols++;
         float power_alpha = m_total_symbols < 5000 ? 0.1f : 0.0001f;
 
-        for (int i = 0; i < 2; i++) {
-            float s = m_resampler.resample(i * (m_nominal_step_size + m_step_size_adjustment) / 2);
-            m_power_estimate = (1 - power_alpha) * m_power_estimate + power_alpha * s * s;
-            float gain = sqrt(1 / (m_power_estimate + 1.0));
-            m_filter->addSample(s * gain);
-        }
+        float s = m_resampler.resample();
+        m_power_estimate = (1 - power_alpha) * m_power_estimate + power_alpha * s * s;
+        float gain = sqrt(1 / (m_power_estimate + 1.0));
+        m_filter->addSample(s * gain);
 
         // Initially gain is uncertain and also the signal is not DC
         if (m_total_symbols < 5000)
             continue;
 
-        float sample_before, sample, sample_after;
-        m_filter->getLast3(sample_before, sample, sample_after);
+        float sample = m_filter->getOutput();
+
+        // error positive: we're sampling too early, so increase sample spacing
+        // Mueller and Muller timing detector
+        double error = (m_prev_sample > 0 ? 1. : -1.) * sample - (sample > 0 ? 1. : -1.) * m_prev_sample;
+        //printf("%f %f %f  error=%f sum=%f\n", sample_before, sample, sample_after, error, m_error_sum);
+        error = std::max(std::min(error, m_nominal_step_size / m_g1 * 0.02), -m_nominal_step_size / m_g1 * 0.02);
+        m_error_sum += error;
+        m_error_sum = std::max(std::min(m_error_sum, m_nominal_step_size / m_g2 * 0.02), -m_nominal_step_size / m_g2 * 0.02);
+        m_step_size_adjustment = error * m_g1 + m_error_sum * m_g2;
+        assert(!std::isnan(m_step_size_adjustment) && abs(m_step_size_adjustment) <= m_nominal_step_size * 0.04);
+
+        m_filter->adaptError(sample > 0 ? 1.f : -1.f, sample);
 
         if (m_debug_fd.has_value()) {
-            float debug_floats[4] = { sample, 1.f, sample_after, 0.f};
-            int r = write(m_debug_fd.value(), debug_floats, 4 * sizeof(float));
+            float debug_floats[2] = { sample, (float)error };
+            int r = write(m_debug_fd.value(), debug_floats, 2 * sizeof(float));
             if (r == -1)
                 throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
         }
 
-        bool zero_cross;
-        if (sample_before * sample_after < 0) {
-            zero_cross = true;
-
-            // error positive: we're sampling too early, so increase sample spacing
-            // double error = sample / (sample_before - sample_after);
-            double error = sample_before > sample_after ? sample : -sample;
-
-            // printf("%f %f %f  error=%f\n", sample_before, sample, sample_after, error);
-            error = std::max(std::min(error, m_nominal_step_size / m_g1 * 0.02), -m_nominal_step_size / m_g1 * 0.02);
-            m_error_sum += error;
-            m_error_sum = std::max(std::min(m_error_sum, m_nominal_step_size / m_g2 * 0.02), -m_nominal_step_size / m_g2 * 0.02);
-            m_step_size_adjustment = error * m_g1 + m_error_sum * m_g2;
-            assert(!std::isnan(m_step_size_adjustment) && abs(m_step_size_adjustment) <= m_nominal_step_size * 0.04);
-        } else {
-            zero_cross = false;
-        }
-
-        // equalize on the sample_after symbol value
-        m_filter->adaptError(sample_after > 0 ? 1.f : -1.f, sample_after);
-
         assert(output_size < max_output_size);
-        output[output_size++] = zero_cross;
+        output[output_size++] = sample * m_prev_sample < 0;
+        m_prev_sample = sample;
     }
 
     if (m_filter->size() != 0 && m_total_symbols - m_last_adaptive_filter_log > 4321800) {
