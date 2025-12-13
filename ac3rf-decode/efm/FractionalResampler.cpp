@@ -25,19 +25,17 @@ void FractionalResampler::updateInput(const float *input) {
 
 // Returns true if we can safely access data max_look_forward in time after advancing time by dt.
 // If false, updateInput needs to be called before calling resample.
-bool FractionalResampler::advanceTime(double dt) {
+bool FractionalResampler::advanceTimeAndResample(double dt, float &output) {
     double new_time = m_t + dt;
-    if (new_time + 2.0 < m_input_block_size) {
-        m_t += dt;
-        return true;
-    }
-    // Returning false will trigger a call to updateInput, but then the input buffer contains new data.
-    // Save the end of the input now.
-    memcpy(m_prev_data, m_buffer + m_input_block_size - c_max_look_back, c_max_look_back * sizeof(float));
-    return false;
-}
 
-float FractionalResampler::resample() const {
+    if (new_time + 2.0 >= m_input_block_size) {
+        // Returning false will trigger a call to updateInput, but then the input buffer contains new data.
+        // Save the end of the input now.
+        memcpy(m_prev_data, m_buffer + m_input_block_size - c_max_look_back, c_max_look_back * sizeof(float));
+        return false;
+    }
+
+    m_t += dt;
     const double t = m_t;
 
     // Create an interpolating polynomial at for points ix0 ... ix3
@@ -60,9 +58,9 @@ float FractionalResampler::resample() const {
     double a2 = (b2 - a0 - 2 * a1) / 2;
     double a3 = (b3 - a0 - 3 * a1 - 6 * a2) / 6;
     // now evaluate at point 1 + p
-    double y = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
+    output = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
 
-    return (float)y;
+    return true;
 }
 
 size_t FractionalResampler::get_index() const {

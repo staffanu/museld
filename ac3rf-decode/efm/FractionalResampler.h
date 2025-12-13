@@ -15,12 +15,11 @@ public:
     FractionalResampler &operator=(FractionalResampler &&) = delete;
 
     void updateInput(const float *input);
-    bool advanceTime(double dt);
-    [[nodiscard]] float resample() const;
+    bool advanceTimeAndResample(double dt, float &output);
     [[nodiscard]] size_t get_index() const;
 
 private:
-    static constexpr int c_max_look_back = 2;
+    static constexpr int c_max_look_back = 3;
 
     int m_input_block_size;
     const float *m_buffer;

@@ -44,11 +44,11 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
     m_resampler.updateInput(input);
 
     int output_size = 0;
-    while (m_resampler.advanceTime(m_nominal_step_size + m_step_size_adjustment)) {
+    float s;
+    while (m_resampler.advanceTimeAndResample(m_nominal_step_size + m_step_size_adjustment, s)) {
         m_total_symbols++;
         float power_alpha = m_total_symbols < 5000 ? 0.1f : 0.0001f;
 
-        float s = m_resampler.resample();
         m_power_estimate = (1 - power_alpha) * m_power_estimate + power_alpha * s * s;
         float gain = sqrt(1 / (m_power_estimate + 1.0));
         m_filter->addSample(s * gain);

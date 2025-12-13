@@ -24,7 +24,7 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
       m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
           adaptive_filter_size, retiming_debug_filename),
       m_efm_decoder(log),
-      m_remove_dc_filter("Remove DC", {1, -1}, {1, -0.999}),
+      m_remove_dc_filter("Remove DC", {1, -1}, {1, -0.9999}),
       m_low_pass_filter(nullptr),
       m_phase_adjust_filter(nullptr) {
 

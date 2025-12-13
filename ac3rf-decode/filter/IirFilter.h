@@ -20,7 +20,6 @@ class IirFilter {
 public:
     IirFilter(const std::string name, const std::array<float, N> &b, const std::array<float, N> &a)
     : m_name(name), m_b(b), m_a(a), m_x{}, m_y{}, m_x0_ix(0) {
-        assert(a[0] == 1.f);
         static_assert(N <= c_max_filter_size);
     }
 
@@ -36,7 +35,7 @@ public:
             y -= m_a[i] * m_y[ix];
         }
 
-        m_y[m_x0_ix] = y;
+        m_y[m_x0_ix] = y / m_a[0];
 
         return y;
     }
