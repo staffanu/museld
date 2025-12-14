@@ -131,10 +131,6 @@ void EfmDecoder::decode(const bool data[], int input_data_size,
                         bool log_now) {
     auto t0 = chrono::high_resolution_clock::now();
 
-    if (log_now && m_log.isEnabled(eDebug, eAudio)) {
-        m_log.info(eAudio, reedSolomonStatistics());
-    }
-
     *sample_count = 0;
     for (int i = 0; i < input_data_size; i++) {
         int bit = data[i] ? 1 : 0;

@@ -21,12 +21,13 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
       m_rf_input(rf_input),
       m_log2_decimation(log2_decimation),
       m_decimation_factor(1 << m_log2_decimation),
+      m_remove_dc_filter("Remove DC", {1, -1}, {1, -0.9999}),
+      m_low_pass_filter(nullptr),
+      m_phase_adjust_filter(nullptr),
       m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
           adaptive_filter_size, retiming_debug_filename),
       m_efm_decoder(log),
-      m_remove_dc_filter("Remove DC", {1, -1}, {1, -0.9999}),
-      m_low_pass_filter(nullptr),
-      m_phase_adjust_filter(nullptr) {
+      m_processed_input_blocks(0) {
 
     assert(m_log2_decimation >= 0);
     assert(m_input_block_size % m_decimation_factor == 0);
@@ -121,14 +122,17 @@ std::vector<TwoChannelSample> EfmDemodulator::demodulate(const float *input_buff
 
     const int reclocked_bytes = m_timing_recovery.reclock(m_filtered_input.data(), m_reclocked_data, m_max_reclocked_size);
 
+    for (auto stage: m_decimation_filter_stages)
+        stage->moveDataToFront();
+
+    m_processed_input_blocks++;
+
     int actual_output_sample_count;
     m_output_samples.resize(m_max_output_samples);
     m_efm_decoder.decode(m_reclocked_data, reclocked_bytes,
-        m_max_output_samples, &actual_output_sample_count, m_output_samples.data(), false);
+        m_max_output_samples, &actual_output_sample_count, m_output_samples.data(),
+        m_processed_input_blocks % (int)(m_input_sample_frequency / m_input_block_size) == 0);
     m_output_samples.resize(actual_output_sample_count);
-
-    for (auto stage: m_decimation_filter_stages)
-        stage->moveDataToFront();
 
     return m_output_samples;
 }

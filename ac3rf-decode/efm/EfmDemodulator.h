@@ -51,6 +51,7 @@ private:
     bool *m_reclocked_data;
     int m_max_output_samples;
     std::vector<TwoChannelSample> m_output_samples;
+    int m_processed_input_blocks;
 };
 
 #endif //AC3RF_EFM_DECODE_EFMDEMODULATOR_H
