@@ -109,7 +109,7 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
                 input_type == EfmRf, efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
             EfmDecoder efm_decoder(logger);
 
-            std::vector<bool> reclocked_data;
+            std::vector<float> reclocked_data;
             std::vector<TwoChannelSampleWithErasureFlags> output_with_erasures;
             int processed_input_blocks = 0;
             while (reader->readFloats(input_buffer) == reader->block_size()) {
@@ -133,15 +133,16 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
             EfmDecoder efm_decoder(logger);
 
             // Reading floats is "wrong" but this is a very unusual use case, so whatever makes the shortest code
-            std::vector<bool> reclocked_data;
+            std::vector<float> reclocked_data;
             std::vector<TwoChannelSampleWithErasureFlags> output_with_erasures;
             int processed_input_blocks = 0;
+            float data = 1.f;
             while (reader->readFloats(input_buffer) == reader->block_size()) {
                 reclocked_data.clear();
                 for (int i = 0; i < block_size; i++) {
-                    reclocked_data.push_back(true);
-                    for (int j = 0; j < (int)input_buffer[i] - 1; j++)
-                        reclocked_data.push_back(false);
+                    data *= -1.f;
+                    for (int j = 0; j < (int)input_buffer[i]; j++)
+                        reclocked_data.push_back(data);
                 }
 
                 processed_input_blocks++;

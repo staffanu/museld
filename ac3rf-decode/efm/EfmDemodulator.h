@@ -24,7 +24,7 @@ public:
     EfmDemodulator &operator=(EfmDemodulator &&) = delete;
 
     // Filters the input samples and performs clock recovery to extract the channel bit stream of 4.3218 M symbols/s
-    void demodulate(const float *input_buffer, std::vector<bool> &reclocked_data);
+    void demodulate(const float *input_buffer, std::vector<float> &reclocked_data);
 
 private:
     static IirFilter<5> *makeEllipticLowpassFilter(double Fs);

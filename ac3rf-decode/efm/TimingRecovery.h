@@ -25,7 +25,7 @@ public:
 
     ~TimingRecovery();
 
-    void reclock(const float *input, std::vector<bool> &output);
+    void reclock(const float *input, std::vector<float> &output);
 
 private:
     Logger &m_log;

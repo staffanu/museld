@@ -6,10 +6,11 @@
 #define MUSECPP_EFMDECODER_H
 
 #include <array>
-//#include "InputReader.h"
+#include <deque>
+
+#include "TimingRecovery.h"
 #include "TwoChannelSample.h"
 #include "../rs/ReedSolomon.h"
-//#include "InputBlockBase.h"
 
 class Logger;
 
@@ -23,14 +24,16 @@ public:
     EfmDecoder(EfmDecoder &&) = delete;
     EfmDecoder &operator=(EfmDecoder &&) = delete;
 
-    void decode(const std::vector<bool> &data, std::vector<TwoChannelSampleWithErasureFlags> &output_samples, bool log_now);
+    void decode(const std::vector<float> &data, std::vector<TwoChannelSampleWithErasureFlags> &output_samples, bool log_now);
     std::string reedSolomonStatistics();
 
 private:
     static constexpr int c_minimum_frames_before_c1_c2_valid = 97;
 
+    static const std::array<uint16_t, 256> c_byte_to_efm_table;
     static const std::array<ByteWithErasureFlag, 1 << 14> c_efm_to_byte_table;
     static std::array<ByteWithErasureFlag, 1 << 14> makeEfmInversionTable();
+
     static const std::array<std::pair<int, bool>, 32> c_initial_delays;
     static std::array<std::pair<int, bool>, 32> makeInitialDelays();
     static const std::array<int, 28> c_c1_to_c2_delays;
@@ -44,9 +47,13 @@ private:
     void handleFrame(std::vector<TwoChannelSampleWithErasureFlags> &output_samples);
     void handleSubcode();
 
+    uint8_t estimateSymbol() const;
+
     Logger &m_log;
     int m_total_bits;
+    float m_prev_symbol;
     int m_shift_register;
+    std::deque<float> m_symbol_history;
     int m_bit_index;
     int m_byte_index;
     int m_bits_in_frame;

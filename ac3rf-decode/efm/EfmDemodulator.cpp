@@ -89,7 +89,7 @@ EfmDemodulator::~EfmDemodulator() {
     m_decimation_filter_stages.clear();
 }
 
-void EfmDemodulator::demodulate(const float *input_buffer, std::vector<bool> &reclocked_data) {
+void EfmDemodulator::demodulate(const float *input_buffer, std::vector<float> &reclocked_data) {
     const float *iir_input;
     if (m_decimation_filter_stages.empty()) {
         iir_input = input_buffer;
