@@ -22,6 +22,66 @@ enum InputType {
     EfmTValues,
 };
 
+static int consecutive_erased_samples[2] = {0, 0};
+static std::map<int, int> erased_stats{};
+
+// This is very preliminary code.  We need to change the call semantics to be able to handle erasures at the
+// start/end of the input vector.  But it seems that for samples with many errors, this doesn't seem to help
+// much anyway. (The function below just performs linear interpolation over missing samples.)
+std::vector<TwoChannelSample> concealErasures(const std::vector<TwoChannelSampleWithErasureFlags> &output_with_erasures) {
+    int l = output_with_erasures.size();
+    std::vector<TwoChannelSample> output(l);
+
+    for (int ch = 0; ch < 2; ch++) {
+        // Statistics
+        for (int i = 0; i < l; i++) {
+            if (output_with_erasures[i].erased[ch])
+                consecutive_erased_samples[ch]++;
+            else {
+                erased_stats[consecutive_erased_samples[ch]]++;
+                consecutive_erased_samples[ch] = 0;
+            }
+        }
+
+        // Copy data to output
+        for (int i = 0; i < l; i++)
+            output[i].samples[ch] = output_with_erasures[i].samples[ch];
+
+        // Interpolate erasures
+#if false
+        for (int i = 1; i < l - 1; i++) {
+            if (output_with_erasures[i - 1].erased[ch])
+                continue;
+            int j;
+            for (j = i; j < l - 1 && output_with_erasures[j].erased[ch]; j++)
+                ;
+            int n_erased = j - i;
+            if (n_erased == 0)
+                continue; // no erased data
+            if (j == l - 1)
+                continue; // no un-erased data after
+            // data from i until j (exclusive) is erased
+
+            int prev = output_with_erasures[i - 1].samples[ch];
+            int next = output_with_erasures[j].samples[ch];
+            for (int k = 0; k < n_erased; k++) {
+                int16_t concealed = (int16_t)(prev + (k + 1) * (next - prev) / (n_erased + 1));
+                output[i + k].samples[ch] = concealed;
+            }
+            i = j;
+        }
+#endif
+    }
+    return output;
+}
+
+std::string erasureStatistics() {
+    std::ostringstream oss;
+    for (auto p: erased_stats)
+        oss << std::format("{}: {}, ", p.first, p.second);
+    return oss.str();
+}
+
 void demodulateFile(Logger &logger, InputType input_type, InputFormat input_format, double input_sample_frequency,
     int in_fd, uint32_t block_size, int out_fd, bool use_simd,
     std::optional<int> efm_log2_decimation_opt,
@@ -50,20 +110,22 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
             EfmDecoder efm_decoder(logger);
 
             std::vector<bool> reclocked_data;
-            std::vector<TwoChannelSample> output_samples;
-            int processed_input_blocks;
+            std::vector<TwoChannelSampleWithErasureFlags> output_with_erasures;
+            int processed_input_blocks = 0;
             while (reader->readFloats(input_buffer) == reader->block_size()) {
                 efm_demodulator.demodulate(input_buffer, reclocked_data);
 
-                efm_decoder.decode(reclocked_data, output_samples,
+                processed_input_blocks++;
+                efm_decoder.decode(reclocked_data, output_with_erasures,
                     processed_input_blocks % (int)(input_sample_frequency / block_size) == 0);
 
-                if (write(out_fd, (const uint8_t *)output_samples.data(), output_samples.size() * sizeof(TwoChannelSample)) == -1)
-                    throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
+                std::vector<TwoChannelSample> output = concealErasures(output_with_erasures);
 
-                processed_input_blocks++;
+                if (write(out_fd, output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
+                    throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
             }
             logger.info(eAudio, efm_decoder.reedSolomonStatistics());
+            logger.info(eAudio, "Output erasure run length statistics: " + erasureStatistics());
             break;
         }
 
@@ -71,17 +133,24 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
             EfmDecoder efm_decoder(logger);
 
             // Reading floats is "wrong" but this is a very unusual use case, so whatever makes the shortest code
+            std::vector<bool> reclocked_data;
+            std::vector<TwoChannelSampleWithErasureFlags> output_with_erasures;
+            int processed_input_blocks = 0;
             while (reader->readFloats(input_buffer) == reader->block_size()) {
-                std::vector<bool> reclocked_data;
+                reclocked_data.clear();
                 for (int i = 0; i < block_size; i++) {
                     reclocked_data.push_back(true);
                     for (int j = 0; j < (int)input_buffer[i] - 1; j++)
                         reclocked_data.push_back(false);
                 }
-                std::vector<TwoChannelSample> output_samples;
-                efm_decoder.decode(reclocked_data, output_samples, true);
 
-                if (write(out_fd, (const uint8_t *)output_samples.data(), output_samples.size() * sizeof(TwoChannelSample)) == -1)
+                processed_input_blocks++;
+                efm_decoder.decode(reclocked_data, output_with_erasures,
+                    processed_input_blocks % (int)(input_sample_frequency / block_size) == 0);
+
+                std::vector<TwoChannelSample> output = concealErasures(output_with_erasures);
+
+                if (write(out_fd, output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
                     throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
             }
             break;

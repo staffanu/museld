@@ -23,7 +23,7 @@ public:
     EfmDecoder(EfmDecoder &&) = delete;
     EfmDecoder &operator=(EfmDecoder &&) = delete;
 
-    void decode(const std::vector<bool> &data, std::vector<TwoChannelSample> &output_samples, bool log_now);
+    void decode(const std::vector<bool> &data, std::vector<TwoChannelSampleWithErasureFlags> &output_samples, bool log_now);
     std::string reedSolomonStatistics();
 
 private:
@@ -41,20 +41,30 @@ private:
     static const std::array<std::pair<int, int>, 6> c_left_output_map;
     static const std::array<std::pair<int, int>, 6> c_right_output_map;
 
-    void handleFrame(std::vector<TwoChannelSample> &output_samples);
+    void handleFrame(std::vector<TwoChannelSampleWithErasureFlags> &output_samples);
+    void handleSubcode();
 
     Logger &m_log;
     int m_total_bits;
     int m_shift_register;
     int m_bit_index;
     int m_byte_index;
-    int m_bits_since_sync;
+    int m_bits_in_frame;
     int m_consecutive_syncs;
     bool m_locked;
-    int m_consecutive_sync_failures; // if not at the exact expected place
+    int m_frames_since_sync; // if not at the exact expected place
     int m_efm_frames_since_lock;
 
+    // -3 -- 95; the symbol itself is in m_frame[0] for indices 0--95
+    // -3 means that we didn't see the sync sequence S0, S1
+    // -2, -1 means that we are in the sync sequence
+    int m_subcode_symbol_index;
     std::array<ByteWithErasureFlag, 33> m_frame; // first byte is the control data
+
+    // bits 0-7 correspond to P-W
+    std::array<ByteWithErasureFlag, 96> m_subcode;
+    bool m_subcode_p_start_flag;
+    std::optional<bool> m_subcode_q_pre_emphasis;
 
     ReedSolomon<0x11d, 2> m_c1;
     ReedSolomon<0x11d, 2> m_c2;

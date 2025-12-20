@@ -7,9 +7,13 @@
 
 #include <cstdint>
 
+struct TwoChannelSampleWithErasureFlags {
+    bool erased[2];
+    int16_t samples[2];
+};
+
 struct TwoChannelSample {
-    int16_t left;
-    int16_t right;
+    int16_t samples[2];
 };
 
 #endif //AC3RF_EFM_DECODE_TWOCHANNELSAMPLE_H

@@ -89,12 +89,15 @@ EfmDecoder::EfmDecoder(Logger &log)
           m_shift_register(0),
           m_bit_index(0),
           m_byte_index(33),
-          m_bits_since_sync(0),
+          m_bits_in_frame(0),
           m_consecutive_syncs(0),
           m_locked(false),
-          m_consecutive_sync_failures(0), // if not at the exact expected place
+          m_frames_since_sync(0), // if not at the exact expected place
           m_efm_frames_since_lock(0),
+          m_subcode_symbol_index(-3),
           m_frame{},
+          m_subcode_p_start_flag(false),
+          m_subcode_q_pre_emphasis(nullopt),
           m_c1(32, 28, 0, true, false),
           m_c2(28, 24, 0, true, false),
           m_initial_delay_lines{},
@@ -126,39 +129,43 @@ EfmDecoder::~EfmDecoder() {
         delete[] p;
 }
 
-void EfmDecoder::decode(const std::vector<bool> &data, std::vector<TwoChannelSample> &output_samples, bool log_now) {
+void EfmDecoder::decode(const std::vector<bool> &data, std::vector<TwoChannelSampleWithErasureFlags> &output_samples, bool log_now) {
     auto t0 = chrono::high_resolution_clock::now();
 
     output_samples.clear();
     for (bool bit : data) {
         m_total_bits += 1;
         m_shift_register = m_shift_register << 1 | bit;
-        m_bits_since_sync += 1;
+        m_bits_in_frame += 1;
+
+        bool new_frame = false;
         bool sync = (m_shift_register & 0xffffff) == 0x801002; // 1000 0000 0001 0000 0000 0010
 
-        if (sync && (m_bits_since_sync == 588 || !m_locked)) { // expected -- all fine!
-            m_bit_index = 0;
-            m_byte_index = 0;
-            m_bits_since_sync = 0;
-            m_consecutive_sync_failures = 0;
+        if (sync) {
+            m_frames_since_sync = 0;
             m_consecutive_syncs += 1; // this is not right -- we increment consecutive_syncs even if not in an expected position
             if (m_consecutive_syncs >= 7 && !m_locked) {
                 m_locked = true;
                 m_efm_frames_since_lock = 0;
                 m_log.debug(eAudio, std::format("efm locked index {}", m_total_bits));
             }
-        } else if (m_bits_since_sync == 588 && m_locked) {
-            m_bit_index = 0;
-            m_byte_index = 0;
-            m_bits_since_sync = 0;
-            m_consecutive_sync_failures += 1;
+            new_frame = true;
+        } else if (m_bits_in_frame == 588) {
+            m_frames_since_sync += 1;
             m_consecutive_syncs = 0;
-            if (m_consecutive_sync_failures >= 7 && m_locked) {
+            if (m_frames_since_sync >= 7 && m_locked) {
                 m_locked = false;
                 m_log.debug(eAudio, std::format("efm lock lost index {}", m_total_bits));
                 if (m_efm_frames_since_lock > c_minimum_frames_before_c1_c2_valid)
                     m_log.debug(eAudio, reedSolomonStatistics());
             }
+            new_frame = true;
+        }
+
+        if (new_frame) {
+            m_bit_index = 0;
+            m_byte_index = 0;
+            m_bits_in_frame = 0;
         } else if (m_byte_index < 33) {
             if (m_bit_index == 16) {
                 int efm_value = m_shift_register & 0x3fff; // 14 bits
@@ -167,8 +174,20 @@ void EfmDecoder::decode(const std::vector<bool> &data, std::vector<TwoChannelSam
                 if (octet.isErased())
                     m_total_erasures_in_last_second++;
 
+                if (m_byte_index == 0) {
+                    if (efm_value == 0b00100000000001)
+                        m_subcode_symbol_index = -2;
+                    else if (efm_value == 0b00000000010010 && m_subcode_symbol_index == -2)
+                        m_subcode_symbol_index = -1;
+                    else if (m_subcode_symbol_index < 95)
+                        m_subcode_symbol_index++;
+                    else
+                        m_subcode_symbol_index = -3;
+                }
+
                 if (m_byte_index == 32) {
                     handleFrame(output_samples);
+                    handleSubcode();
                     m_efm_frame_count_last_second++;
                 }
                 m_bit_index = 0;
@@ -202,7 +221,54 @@ std::string EfmDecoder::reedSolomonStatistics() {
     return "C1 statistics: " + m_c1.statistics() + "C2 statistics: " + m_c2.statistics();
 }
 
-void EfmDecoder::handleFrame(std::vector<TwoChannelSample> &output_samples) {
+void EfmDecoder::handleSubcode() {
+    if (m_subcode_symbol_index < 0)
+        return;
+    m_subcode[m_subcode_symbol_index] = m_frame[0];
+    if (m_subcode_symbol_index < 95)
+        return;
+
+    // we have collected a complete 96 bit subcode
+
+    // Handle subcode P
+    for (int i = 0; i < 96; i++) {
+        if ((m_subcode[i].byteValue() & 1) != m_subcode_p_start_flag) {
+            m_subcode_p_start_flag = m_subcode[i].byteValue() & 1;
+            // TODO: check for consecutive values, but this is not used; might implement for fun or when needed
+            // m_log.debug(eAudio, std::format("Subcode P start flag = {}", m_subcode_p_start_flag));
+        }
+    }
+
+    // Handle subcode Q
+
+    uint16_t crc = 0x0000;
+    for (int i = 0; i < 96; i++) {
+        uint8_t inbit = (m_subcode[i].byteValue() & 2) != 0;
+
+        uint8_t msb = (crc >> 15) & 1;
+        crc <<= 1;
+        crc &= 0xFFFF;
+
+        if (msb ^ inbit) {
+            crc ^= 0x1021;
+        }
+    }
+
+    if (crc == 0) {
+        // Pre-emphasis
+        if ((m_subcode[0].byteValue() & 2) == 0 && (m_subcode[1].byteValue() & 2) == 0) {
+            bool pre_emphasis = m_subcode[3].byteValue() & 2;
+            if (!m_subcode_q_pre_emphasis.has_value() || m_subcode_q_pre_emphasis.value() != pre_emphasis) {
+                m_subcode_q_pre_emphasis = pre_emphasis;
+                m_log.debug(eAudio, std::format("Subcode Q pre-emphasis = {}", pre_emphasis));
+            }
+        }
+    } else {
+        //m_log.debug(eAudio, "Subcode Q CRC check failed");
+    }
+}
+
+void EfmDecoder::handleFrame(std::vector<TwoChannelSampleWithErasureFlags> &output_samples) {
     std::vector<ByteWithErasureFlag> c1_data(32);
 
     for (int i = 0; i < 32; i++) {
@@ -240,20 +306,19 @@ void EfmDecoder::handleFrame(std::vector<TwoChannelSample> &output_samples) {
     }
 
     for (int i = 0; i < 6; i++) {
-        TwoChannelSample sample{};
+        TwoChannelSampleWithErasureFlags sample{};
+
         auto [lh, ll] = c_left_output_map[i];
         bool lErased = out[lh].isErased() || out[ll].isErased();
-        if (lErased && !output_samples.empty()) // simplest imaginable recovery -- just repeat the previous sample
-            sample.left = output_samples.back().left;
-        else
-            sample.left = (int16_t) ((out[lh].byteValue() << 8) | out[ll].byteValue());
+
+        sample.samples[0] = (int16_t) ((out[lh].byteValue() << 8) | out[ll].byteValue());
+        sample.erased[0] = lErased;
 
         auto [rh, rl] = c_right_output_map[i];
         bool rErased = out[rh].isErased() || out[rl].isErased();
-        if (rErased && !output_samples.empty())
-            sample.right = output_samples.back().right;
-        else
-            sample.right = (int16_t) ((out[rh].byteValue() << 8) | out[rl].byteValue());
+
+        sample.samples[1] = (int16_t) ((out[rh].byteValue() << 8) | out[rl].byteValue());
+        sample.erased[1] = rErased;
 
         output_samples.push_back(sample);
     }
