@@ -57,6 +57,10 @@ Sets the log level.  Default is warn (2).  Supported levels are: 0 (off), 1 (err
 Use SIMD instructions to speed up FIR filtering.  Not available for all platforms/compilers.
 Default enabled if supported.
 
+> --no-simd
+
+Do not use SIMD instructions for FIR filtering. (For debugging, if there's a suspicion that SIMD is causing problems.)
+
 > --efm
 
 Tells the decoder that the input is EFM encoded.  Baseband EFM (as captured from the EFM
@@ -65,6 +69,11 @@ output of some players) is assumed.
 > --efm-rf
 
 Tells the decoder that the input is EFM encoded.  RF input, containing video and EFM is assumed.
+
+> --efm-t-values
+
+Tells the decoder that the input is a file containing "T values" from ld-decode.  The input file
+is expected to be unsigned bytes.
 
 > --decimation [log2 of decimation factor]
 
@@ -109,6 +118,9 @@ Pipe the output of the AC3RF demodulator to [ffplay](https://ffmpeg.org/ffplay.h
 
 Pipe the output of the EFM decoder to play (from the SoX package):
 > ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 capture.lds | play -t raw -c 2 -r 44100 -b 16 -e signed-integer -
+
+Pipe the output of the EFM decoder to ffplay:
+> ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 capture.lds | ffplay -f s16le -ar 44100 -ch_layout stereo -i pipe:
 
 Pipe the output of the EFM decoder to ffplay (for EFM encoded DTS):
 > ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 video.ldf | ffplay -f dts -i pipe:

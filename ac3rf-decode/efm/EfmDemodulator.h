@@ -10,8 +10,6 @@
 #include "../Logger.h"
 #include "../filter/FirFilterStage.h"
 #include "../filter/IirFilter.h"
-#include "TwoChannelSample.h"
-#include "EfmDecoder.h"
 #include "TimingRecovery.h"
 
 class EfmDemodulator {
@@ -25,8 +23,8 @@ public:
     EfmDemodulator(EfmDemodulator &&) = delete;
     EfmDemodulator &operator=(EfmDemodulator &&) = delete;
 
-    std::vector<TwoChannelSample> demodulate(const float *input_buffer);
-    [[nodiscard]] std::string reedSolomonStatistics();
+    // Filters the input samples and performs clock recovery to extract the channel bit stream of 4.3218 M symbols/s
+    void demodulate(const float *input_buffer, std::vector<bool> &reclocked_data);
 
 private:
     static IirFilter<5> *makeEllipticLowpassFilter(double Fs);
@@ -45,13 +43,6 @@ private:
     std::vector<float> m_filtered_input;
 
     TimingRecovery m_timing_recovery;
-    EfmDecoder m_efm_decoder;
-
-    int m_max_reclocked_size;
-    bool *m_reclocked_data;
-    int m_max_output_samples;
-    std::vector<TwoChannelSample> m_output_samples;
-    int m_processed_input_blocks;
 };
 
 #endif //AC3RF_EFM_DECODE_EFMDEMODULATOR_H

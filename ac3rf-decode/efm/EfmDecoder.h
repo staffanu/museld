@@ -23,11 +23,7 @@ public:
     EfmDecoder(EfmDecoder &&) = delete;
     EfmDecoder &operator=(EfmDecoder &&) = delete;
 
-    // output samples are written to the first two channels
-    void decode(const bool data[], int input_data_size,
-        int max_output_samples, int *sample_count, TwoChannelSample *output_samples,
-        bool log_now);
-
+    void decode(const std::vector<bool> &data, std::vector<TwoChannelSample> &output_samples, bool log_now);
     std::string reedSolomonStatistics();
 
 private:
@@ -45,7 +41,7 @@ private:
     static const std::array<std::pair<int, int>, 6> c_left_output_map;
     static const std::array<std::pair<int, int>, 6> c_right_output_map;
 
-    void handleFrame(int max_output_samples, int &sample_count, TwoChannelSample output_samples[2048]);
+    void handleFrame(std::vector<TwoChannelSample> &output_samples);
 
     Logger &m_log;
     int m_total_bits;

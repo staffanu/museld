@@ -39,11 +39,11 @@ TimingRecovery::~TimingRecovery() {
     delete m_filter;
 }
 
-int TimingRecovery::reclock(const float *input, bool *output, int max_output_size) {
+void TimingRecovery::reclock(const float *input, std::vector<bool> &output) {
 
     m_resampler.updateInput(input);
 
-    int output_size = 0;
+    output.clear();
     float s;
     while (m_resampler.advanceTimeAndResample(m_nominal_step_size + m_step_size_adjustment, s)) {
         m_total_symbols++;
@@ -78,8 +78,7 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
                 throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
         }
 
-        assert(output_size < max_output_size);
-        output[output_size++] = sample * m_prev_sample < 0;
+        output.push_back(sample * m_prev_sample < 0);
         m_prev_sample = sample;
     }
 
@@ -87,6 +86,4 @@ int TimingRecovery::reclock(const float *input, bool *output, int max_output_siz
         m_log.debug(eAudio, "Adaptive filter coefficients: " + m_filter->filterString());
         m_last_adaptive_filter_log = m_total_symbols;
     }
-
-    return output_size;
 }

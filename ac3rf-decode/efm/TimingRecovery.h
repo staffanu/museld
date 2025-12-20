@@ -7,6 +7,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <vector>
 
 #include "../Logger.h"
 #include "FractionalResampler.h"
@@ -24,7 +25,7 @@ public:
 
     ~TimingRecovery();
 
-    int reclock(const float *input, bool *output, int max_output_size);
+    void reclock(const float *input, std::vector<bool> &output);
 
 private:
     Logger &m_log;

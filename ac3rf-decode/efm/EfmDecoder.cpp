@@ -126,14 +126,11 @@ EfmDecoder::~EfmDecoder() {
         delete[] p;
 }
 
-void EfmDecoder::decode(const bool data[], int input_data_size,
-                        int max_output_samples, int *sample_count, TwoChannelSample *output_samples,
-                        bool log_now) {
+void EfmDecoder::decode(const std::vector<bool> &data, std::vector<TwoChannelSample> &output_samples, bool log_now) {
     auto t0 = chrono::high_resolution_clock::now();
 
-    *sample_count = 0;
-    for (int i = 0; i < input_data_size; i++) {
-        int bit = data[i] ? 1 : 0;
+    output_samples.clear();
+    for (bool bit : data) {
         m_total_bits += 1;
         m_shift_register = m_shift_register << 1 | bit;
         m_bits_since_sync += 1;
@@ -171,7 +168,7 @@ void EfmDecoder::decode(const bool data[], int input_data_size,
                     m_total_erasures_in_last_second++;
 
                 if (m_byte_index == 32) {
-                    handleFrame(max_output_samples, *sample_count, output_samples);
+                    handleFrame(output_samples);
                     m_efm_frame_count_last_second++;
                 }
                 m_bit_index = 0;
@@ -205,7 +202,7 @@ std::string EfmDecoder::reedSolomonStatistics() {
     return "C1 statistics: " + m_c1.statistics() + "C2 statistics: " + m_c2.statistics();
 }
 
-void EfmDecoder::handleFrame(int max_output_samples, int &sample_count, TwoChannelSample output_samples[2048]) {
+void EfmDecoder::handleFrame(std::vector<TwoChannelSample> &output_samples) {
     std::vector<ByteWithErasureFlag> c1_data(32);
 
     for (int i = 0; i < 32; i++) {
@@ -243,23 +240,24 @@ void EfmDecoder::handleFrame(int max_output_samples, int &sample_count, TwoChann
     }
 
     for (int i = 0; i < 6; i++) {
+        TwoChannelSample sample{};
         auto [lh, ll] = c_left_output_map[i];
         bool lErased = out[lh].isErased() || out[ll].isErased();
-        if (lErased && sample_count > 0) // simplest imaginable recovery -- just repeat the previous sample
-            output_samples[sample_count].left = output_samples[sample_count - 1].left;
+        if (lErased && !output_samples.empty()) // simplest imaginable recovery -- just repeat the previous sample
+            sample.left = output_samples.back().left;
         else
-            output_samples[sample_count].left = (int16_t) ((out[lh].byteValue() << 8) | out[ll].byteValue());
+            sample.left = (int16_t) ((out[lh].byteValue() << 8) | out[ll].byteValue());
 
         auto [rh, rl] = c_right_output_map[i];
         bool rErased = out[rh].isErased() || out[rl].isErased();
-        if (rErased && sample_count > 0)
-            output_samples[sample_count].right = output_samples[sample_count - 1].right;
+        if (rErased && !output_samples.empty())
+            sample.right = output_samples.back().right;
         else
-            output_samples[sample_count].right = (int16_t) ((out[rh].byteValue() << 8) | out[rl].byteValue());
+            sample.right = (int16_t) ((out[rh].byteValue() << 8) | out[rl].byteValue());
 
-        sample_count++;
-        assert(sample_count <= max_output_samples);
+        output_samples.push_back(sample);
     }
+
     m_efm_frames_since_lock++;
     if (m_efm_frames_since_lock < c_minimum_frames_before_c1_c2_valid) {
         m_c1.resetStatistics();

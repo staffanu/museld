@@ -25,9 +25,7 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
       m_low_pass_filter(nullptr),
       m_phase_adjust_filter(nullptr),
       m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
-          adaptive_filter_size, retiming_debug_filename),
-      m_efm_decoder(log),
-      m_processed_input_blocks(0) {
+          adaptive_filter_size, retiming_debug_filename) {
 
     assert(m_log2_decimation >= 0);
     assert(m_input_block_size % m_decimation_factor == 0);
@@ -80,10 +78,6 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
     m_log.debug(eAudio, m_remove_dc_filter.toString());
     m_log.debug(eAudio, m_low_pass_filter->toString());
     m_log.debug(eAudio, m_phase_adjust_filter->toString());
-
-    m_max_reclocked_size = (int)(m_input_block_size / m_input_sample_frequency * 4321800 * 1.1);
-    m_reclocked_data = new bool[m_max_reclocked_size];
-    m_max_output_samples = (m_max_reclocked_size / 588 + 1) * 6;
 }
 
 EfmDemodulator::~EfmDemodulator() {
@@ -93,11 +87,9 @@ EfmDemodulator::~EfmDemodulator() {
     for (const auto stage: m_decimation_filter_stages)
         delete stage;
     m_decimation_filter_stages.clear();
-
-    delete[] m_reclocked_data;
 }
 
-std::vector<TwoChannelSample> EfmDemodulator::demodulate(const float *input_buffer) {
+void EfmDemodulator::demodulate(const float *input_buffer, std::vector<bool> &reclocked_data) {
     const float *iir_input;
     if (m_decimation_filter_stages.empty()) {
         iir_input = input_buffer;
@@ -120,25 +112,10 @@ std::vector<TwoChannelSample> EfmDemodulator::demodulate(const float *input_buff
         m_filtered_input[i] = y;
     }
 
-    const int reclocked_bytes = m_timing_recovery.reclock(m_filtered_input.data(), m_reclocked_data, m_max_reclocked_size);
+    m_timing_recovery.reclock(m_filtered_input.data(), reclocked_data);
 
     for (auto stage: m_decimation_filter_stages)
         stage->moveDataToFront();
-
-    m_processed_input_blocks++;
-
-    int actual_output_sample_count;
-    m_output_samples.resize(m_max_output_samples);
-    m_efm_decoder.decode(m_reclocked_data, reclocked_bytes,
-        m_max_output_samples, &actual_output_sample_count, m_output_samples.data(),
-        m_processed_input_blocks % (int)(m_input_sample_frequency / m_input_block_size) == 0);
-    m_output_samples.resize(actual_output_sample_count);
-
-    return m_output_samples;
-}
-
-std::string EfmDemodulator::reedSolomonStatistics() {
-    return m_efm_decoder.reedSolomonStatistics();
 }
 
 IirFilter<5> *EfmDemodulator::makeEllipticLowpassFilter(double Fs) {
