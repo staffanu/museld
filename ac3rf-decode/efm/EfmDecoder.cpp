@@ -8,7 +8,7 @@
 
 using namespace std;
 
-const std::array<uint16_t, 256> EfmDecoder::c_byte_to_efm_table {
+const std::array<uint16_t, 256> EfmDecoder::c_byte_to_efm_toggles_table {
     0x1220, 0x2100, 0x2420, 0x2220, 0x1100, 0x0110, 0x0420, 0x0900,
     0x1240, 0x2040, 0x2440, 0x2240, 0x1040, 0x0040, 0x0440, 0x0840,
     0x2020, 0x2080, 0x2480, 0x0820, 0x1080, 0x0080, 0x0480, 0x0880,
@@ -49,11 +49,31 @@ std::array<ByteWithErasureFlag, 1 << 14> EfmDecoder::makeEfmInversionTable() {
     table.fill(ByteWithErasureFlag(0, true));
 
     for (int i = 0; i < 256; i++)
-        table[c_byte_to_efm_table[i]] = ByteWithErasureFlag(i, false);
+        table[c_byte_to_efm_toggles_table[i]] = ByteWithErasureFlag(i, false);
 
     return table;
 }
-const std::array<ByteWithErasureFlag, 1 << 14> EfmDecoder::c_efm_to_byte_table = makeEfmInversionTable();
+const std::array<ByteWithErasureFlag, 1 << 14> EfmDecoder::c_efm_toggles_to_byte_table = makeEfmInversionTable();
+
+std::array<uint16_t, 256> EfmDecoder::makeEfmChannelSymbolTable() {
+    std::array<uint16_t, 256> table{};
+
+    for (int i = 0; i < 256; i++) {
+        int toggles = c_byte_to_efm_toggles_table[i];
+        int seq = 0; // i as symbol sequence (from toggles) assume start with 0
+        int prev = 0;
+        for (int k = 0; k < 14; k++) {
+            if (toggles & 1 << (13 - k))
+                prev = 1 - prev;
+            seq = seq << 1 | prev;
+        }
+        table[i] = seq;
+    }
+
+    return table;
+}
+
+const std::array<uint16_t, 256> EfmDecoder::c_byte_to_channel_symbols_table = makeEfmChannelSymbolTable();
 
 std::array<std::pair<int, bool>, 32> EfmDecoder::makeInitialDelays() {
     std::array<std::pair<int, bool>, 32> delays{};
@@ -178,7 +198,7 @@ void EfmDecoder::decode(const std::vector<float> &data, std::vector<TwoChannelSa
         } else if (m_byte_index < 33) {
             if (m_bit_index == 16) {
                 int efm_value = m_shift_register & 0x3fff; // 14 bits
-                ByteWithErasureFlag octet = c_efm_to_byte_table[efm_value];
+                ByteWithErasureFlag octet = c_efm_toggles_to_byte_table[efm_value];
                 m_frame[m_byte_index] = octet;
                 if (octet.isErased()) {
                     m_total_erasures_in_last_second++;
@@ -280,21 +300,13 @@ void EfmDecoder::handleSubcode() {
     }
 }
 
+// ML estimation of the received symbol -- used only when we do not have a perfect match
 uint8_t EfmDecoder::estimateSymbol() const {
-    // ML estimation of the received symbol -- used only when we do not have a perfect match
     double max_p = 0;
     uint8_t found = 0;
     for (int i = 0; i < 256; i++) {
-        int toggles = c_byte_to_efm_table[i];
-        int seq = 0; // i as symbol sequence (from toggles) assume start with 0
-        int prev = 0;
-        for (int k = 0; k < 14; k++) {
-            if (toggles & 1 << (13 - k))
-                prev = 1 - prev;
-            seq = seq << 1 | prev;
-        }
-
-        int seqs[2] = {seq, ~seq}; // as above, or inverted
+        const int symbol_sequence = c_byte_to_channel_symbols_table[i];
+        const int seqs[2] = {symbol_sequence, ~symbol_sequence}; // two possibilities
         for (auto seq: seqs) {
             double p_tot = 1.0;
             for (int j = 0; j < 15; j++) {

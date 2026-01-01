@@ -30,10 +30,12 @@ public:
 private:
     static constexpr int c_minimum_frames_before_c1_c2_valid = 97;
 
-    static const std::array<uint16_t, 256> c_byte_to_efm_table;
-    static const std::array<ByteWithErasureFlag, 1 << 14> c_efm_to_byte_table;
+    static const std::array<uint16_t, 256> c_byte_to_efm_toggles_table;
+    static const std::array<ByteWithErasureFlag, 1 << 14> c_efm_toggles_to_byte_table;
     static std::array<ByteWithErasureFlag, 1 << 14> makeEfmInversionTable();
 
+    static const std::array<uint16_t, 256> c_byte_to_channel_symbols_table;
+    static std::array<uint16_t, 256> makeEfmChannelSymbolTable();
     static const std::array<std::pair<int, bool>, 32> c_initial_delays;
     static std::array<std::pair<int, bool>, 32> makeInitialDelays();
     static const std::array<int, 28> c_c1_to_c2_delays;
