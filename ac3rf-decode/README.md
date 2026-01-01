@@ -44,22 +44,22 @@ always has to be specified.
 
 "flac" files have 8-bit or 16-bit samples compressed using FLAC.
 
-> --sample-freq [frequency]
+> --sample-freq <frequency>
 
 The the sample frequency in Hz.  Default is 40 MHz. 
 
-> --log [level]
+> -- seek <seconds>
+
+Seeks to the specified time in the input file before starting to decode.
+
+> --log <level>
 
 Sets the log level.  Default is warn (2).  Supported levels are: 0 (off), 1 (error), 2 (warn), 3 (info), 4 (debug). 
 
-> --simd
+> --simd / --no-simd
 
-Use SIMD instructions to speed up FIR filtering.  Not available for all platforms/compilers.
-Default enabled if supported.
-
-> --no-simd
-
-Do not use SIMD instructions for FIR filtering. (For debugging, if there's a suspicion that SIMD is causing problems.)
+Use (or do not use) SIMD instructions to speed up FIR filtering.  Not available for all platforms/compilers.
+Default is enabled if supported.
 
 > --efm
 
@@ -75,20 +75,20 @@ Tells the decoder that the input is EFM encoded.  RF input, containing video and
 Tells the decoder that the input is a file containing "T values" from ld-decode.  The input file
 is expected to be unsigned bytes.
 
-> --decimation [log2 of decimation factor]
+> --decimation <log2 of decimation factor>
 
 Decimates the input to the EFM decoder by a factor of 2^[log2 of decimation factor].
 This makes decoding faster.  Default is to decimate using the highest possible decimation
 that keeps the sample rate before the fractional resampler over 8 MHz.
 
-> --adaptive-filter-size [size]
+> --adaptive-filter-size <size>
 
 Enables adaptive filtering of the EFM signal.  Default is 3.  
 Reasonable values are 2 and up; over 15 is probably overkill.
 Try increasing this to 9 or 11 if there are lots of errors, which might be
 caused by a distorted input signal.
 
-> --reclock-debug-filename [filename]
+> --reclock-debug-filename <filename>
 
 Outputs a file containing resampled data from the clock recovery stage of the EFM decoder.
 This can be shown, e.g., using gnuplot with the following command:
@@ -99,7 +99,7 @@ This can be shown, e.g., using gnuplot with the following command:
 The file contains binary float pairs. The first float in every pair is the symbol sample used by
 the Mueller-Muller timing detector, and the second is the computed timing error.
 
-> --output-filename [filename]
+> --output-filename <filename>
 
 Sets the output filename.  Default is to write the output to stdout.
 

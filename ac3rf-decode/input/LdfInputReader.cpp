@@ -24,6 +24,11 @@ void LdfInputReader::initialize() {
         throw std::runtime_error(std::format("Error initializing decoder: {}", FLAC__StreamDecoderInitStatusString[status]));
 }
 
+void LdfInputReader::seek(off_t no_samples) {
+    throw std::runtime_error("LDF files cannot be seeked");
+}
+
+
 int LdfInputReader::readFloats(float *f) {
     int filled_floats = 0;
     while (filled_floats < m_block_size) {

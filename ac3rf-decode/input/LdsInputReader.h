@@ -20,6 +20,7 @@ public:
     ~LdsInputReader() override;
 
     void initialize() override;
+    void seek(off_t no_samples) override;
     int readFloats(float *f) override;
 
 private:

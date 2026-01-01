@@ -82,7 +82,8 @@ std::string erasureStatistics() {
     return oss.str();
 }
 
-void demodulateFile(Logger &logger, InputType input_type, InputFormat input_format, double input_sample_frequency,
+void demodulateFile(Logger &logger, InputType input_type, InputFormat input_format, double initial_seek_seconds,
+    double input_sample_frequency,
     int in_fd, uint32_t block_size, int out_fd, bool use_simd,
     std::optional<int> efm_log2_decimation_opt,
     int efm_adaptive_filter_size, std::optional<std::string> efm_retiming_debug_filename) {
@@ -98,6 +99,8 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
         default: throw std::runtime_error("Unsupported input format");
     }
     reader->initialize();
+    if (initial_seek_seconds != 0)
+        reader->seek((off_t)(input_sample_frequency * initial_seek_seconds));
     auto *input_buffer = new float[block_size];
 
     switch (input_type) {
@@ -181,8 +184,8 @@ int main(int argc, char *argv[]) {
     int out_fd = 1;
     uint32_t block_size = 16 * 1024;
     bool use_simd = FirFilterStage::simdSupported();
-    bool demodulate_efm = false;
     InputType input_type = Ac3;
+    double initial_seek_seconds = 0;
     std::optional<int> efm_log2_decimation = std::nullopt;
     int efm_adaptive_filter_size = 3;
     std::optional<std::string> efm_retiming_debug_filename = std::nullopt;
@@ -221,6 +224,9 @@ int main(int argc, char *argv[]) {
     options.emplace_back("--ldf", [&] () mutable  -> void {
         input_format_option = std::make_optional(eFlacOgg);
     });
+    options.emplace_back("--seek", [&] () mutable -> void {
+        initial_seek_seconds = stod(*(it++));
+    });
     options.emplace_back("--sample-freq", [&] () mutable  -> void {
         input_sample_frequency = stod(*(it++));
     });
@@ -231,15 +237,12 @@ int main(int argc, char *argv[]) {
         use_simd = false;
     });
     options.emplace_back("--efm", [&] () mutable  -> void {
-        demodulate_efm = true;
         input_type = Efm;
     });
     options.emplace_back("--efm-rf", [&] () mutable  -> void {
-        demodulate_efm = true;
         input_type = EfmRf;
     });
     options.emplace_back("--efm-t-values", [&] () mutable  -> void {
-        demodulate_efm = true;
         input_format_option = std::make_optional(eUint8);
         input_type = EfmTValues;
     });
@@ -329,7 +332,7 @@ int main(int argc, char *argv[]) {
 
                 Logger log(log_selection);
                 log.info(eApplication, std::format("Processing input file {}", filename));
-                demodulateFile(log, input_type, input_format, input_sample_frequency, fd, block_size, out_fd, use_simd,
+                demodulateFile(log, input_type, input_format, initial_seek_seconds, input_sample_frequency, fd, block_size, out_fd, use_simd,
                     efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
 
                 close(fd);
@@ -342,7 +345,7 @@ int main(int argc, char *argv[]) {
                 throw std::runtime_error("Input format must be given for stdin");
 
             log.info(eApplication, std::format("Processing stdin"));
-            demodulateFile(log, input_type, input_format_option.value(), input_sample_frequency, 0, block_size, out_fd, use_simd,
+            demodulateFile(log, input_type, input_format_option.value(), initial_seek_seconds, input_sample_frequency, 0, block_size, out_fd, use_simd,
                 efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
         }
         if (out_fd != 1)

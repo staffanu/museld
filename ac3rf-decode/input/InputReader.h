@@ -28,6 +28,7 @@ public:
     virtual ~InputReader() = default;
 
     virtual void initialize() = 0;
+    virtual void seek(off_t no_samples) = 0;
     virtual int readFloats(float *f) = 0;
 
     uint32_t block_size() const {
@@ -56,7 +57,12 @@ public:
         delete[] m_buffer;
     }
 
-    void initialize() override {};
+    void initialize() override {}
+
+    void seek(off_t no_samples) override {
+        off_t bytes_to_seek = no_samples * sizeof(*m_buffer);
+        lseek(m_fd, bytes_to_seek, SEEK_CUR);
+    }
 
     // reads block_size values and stores them at f.  Returns the number of values actually read.
     int readFloats(float *f) override {

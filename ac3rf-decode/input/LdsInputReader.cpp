@@ -18,6 +18,11 @@ LdsInputReader::~LdsInputReader() {
 void LdsInputReader::initialize() {
 }
 
+void LdsInputReader::seek(off_t no_samples) {
+    off_t bytes_to_seek = no_samples / 4 * 5;
+    lseek(m_fd, bytes_to_seek, SEEK_CUR);
+}
+
 int LdsInputReader::readFloats(float *f) {
     int filled_bytes = 0;
     ssize_t read_count;
