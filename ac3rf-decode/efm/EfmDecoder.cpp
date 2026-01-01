@@ -181,14 +181,18 @@ void EfmDecoder::decode(const std::vector<float> &data, std::vector<TwoChannelSa
         bool new_frame = false;
         bool sync = (m_shift_register & 0xffffff) == 0x801002; // 1000 0000 0001 0000 0000 0010
 
-        if (sync) {
+        if (sync && m_bits_in_frame == 588) {
             m_frames_since_sync = 0;
-            m_consecutive_syncs += 1; // this is not right -- we increment consecutive_syncs even if not in an expected position
+            m_consecutive_syncs += 1;
             if (m_consecutive_syncs >= 7 && !m_locked) {
                 m_locked = true;
                 m_efm_frames_since_lock = 0;
                 m_log.debug(eAudio, std::format("efm locked index {}", m_total_bits));
             }
+            new_frame = true;
+        } else if (sync && m_consecutive_syncs == 0) {
+            m_frames_since_sync = 0;
+            m_consecutive_syncs = 1;
             new_frame = true;
         } else if (m_bits_in_frame == 588) {
             m_frames_since_sync += 1;
