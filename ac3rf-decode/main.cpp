@@ -47,6 +47,22 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
         reader->seek((off_t)(input_sample_frequency * initial_seek_seconds));
     auto *input_buffer = new float[block_size];
 
+    if (false) {
+        FractionalResampler resampler(block_size);
+        double step_size = input_sample_frequency / 24.58333e6;
+        uint8_t samples[block_size];
+        float s;
+        while (reader->readFloats(input_buffer) == reader->block_size()) {
+            resampler.updateInput(input_buffer);
+            int i = 0;
+            while (resampler.advanceTimeAndResample(step_size, s))
+                samples[i++] = 128 + (int)(s / 256.0f);
+            if (write(out_fd, samples, i) == -1)
+                throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
+        }
+        exit(0);
+    }
+
     switch (input_type) {
         case Efm:
         case EfmRf: {
