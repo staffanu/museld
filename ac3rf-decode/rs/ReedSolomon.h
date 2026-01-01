@@ -7,25 +7,30 @@
 
 #include <vector>
 #include <map>
-#include <cstdint>
 #include <algorithm>
 #include <sstream>
 #include <format>
 #include "GFValue.h"
 #include "ByteWithErasureFlag.h"
-#include "../Logger.h"
+
+enum DecodingStrategy {
+    RS_NONE, // No correction at all
+    RS_C1, // Very conservative: only corrects one error and erases the entire frame otherwise
+    RS_C2, // Assumes few unflagged errors
+    RS_MAX // Tries its best to correct as many erasures/errors possible (with the risk of incorrect corrections)
+};
 
 template<int irreducible_poly, int alpha_decimal> class ReedSolomon {
 public:
     typedef GFValue<8, irreducible_poly, alpha_decimal> GF;
 
     // Notice this is only tested for k = n - 4.
-    ReedSolomon(int n, int k, int fcr, bool make_corrections, bool create_diagnotics)
+    ReedSolomon(int n, int k, int fcr, DecodingStrategy decoding_strategy, bool create_diagnotics)
             : m_alpha(GF(alpha_decimal)),
               m_n(n),
               m_k(k),
               m_fcr(fcr),
-              m_make_corrections(make_corrections),
+              m_strategy(decoding_strategy),
               m_create_diagnotics(create_diagnotics),
               m_alpha_inverse(m_alpha.inverse()),
               m_alpha_squared(m_alpha * m_alpha),
@@ -77,7 +82,7 @@ private:
     int m_n;
     int m_k;
     int m_fcr;
-    bool m_make_corrections;
+    DecodingStrategy m_strategy;
     bool m_create_diagnotics;
     GF m_alpha_inverse;
     GF m_alpha_squared;
@@ -113,8 +118,8 @@ private:
         return syndromes;
     }
 
-    void eraseAll(std::vector<ByteWithErasureFlag> const &data) {
-        for (auto b: data)
+    void eraseAll(std::vector<ByteWithErasureFlag> &data) {
+        for (auto &b: data)
             b.setErased(true);
     }
 
@@ -364,15 +369,14 @@ private:
 template<int irreducible_poly, int alpha>
 void ReedSolomon<irreducible_poly, alpha>::decode(std::vector<ByteWithErasureFlag> &data) {
     assert(data.size() == m_n);
-    if (m_make_corrections) {
-        // we want the right end of the codeword to have location 0 -- this makes the index for coefficients the same as their corresponding monomial power
-        std::reverse(data.begin(), data.end());
-        m_statistics["numberOfCalls"] += 1;
 
-        doDecode(data);
+    // we want the right end of the codeword to have location 0 -- this makes the index for coefficients the same as their corresponding monomial power
+    std::reverse(data.begin(), data.end());
+    m_statistics["numberOfCalls"] += 1;
 
-        std::reverse(data.begin(), data.end());
-    }
+    doDecode(data);
+
+    std::reverse(data.begin(), data.end());
 }
 
 template<int irreducible_poly, int alpha>
@@ -394,52 +398,89 @@ void ReedSolomon<irreducible_poly, alpha>::doDecode(std::vector<ByteWithErasureF
     } else {
         auto determinant = syndromes[1] * syndromes[1] + syndromes[0] * syndromes[2];
 
-        bool corrected;
-        if (number_of_erasures >= 1) {
-            if (tryDecodeErasures(syndromes, data)) {
-                corrected = true;
-                m_statistics["corrected erasures"]++;
-            } else {
-                if (number_of_erasures == 2) // since erasure decoding failed we know we have at least one error
-                    corrected = tryDecodeOneErrorTwoErasures(syndromes, data);
-                else if (number_of_erasures == 1 && determinant != GF(0))
-                    corrected = tryCorrectTwoErrors(syndromes, data);
-                else if (number_of_erasures == 1 && determinant == GF(0)) // in this case the erasure is wrong -- risk of incorrect decoding?
-                    corrected = tryCorrectOneError(syndromes, data);
-                else
-                    corrected = false;
-                if (corrected)
-                    m_statistics["corrected errors/erasures"]++;
-                else
-                    m_statistics["failed"]++;
-            }
-        } else {
-            if (determinant != GF(0))
-                corrected = tryCorrectTwoErrors(syndromes, data);
-            else
-                corrected = tryCorrectOneError(syndromes, data);
-            if (corrected)
-                m_statistics["corrected errors"]++;
-            else
-                m_statistics["failed"]++;
-        }
+        switch (m_strategy) {
+            case RS_NONE:
+                break;
+            case RS_C1:
+                if (tryCorrectOneError(syndromes, data)) {
+                    uneraseAll(data);
+                    m_statistics["corrected one error"]++;
+                } else if (number_of_erasures == 2 || number_of_erasures == 3) {
+                    if (tryDecodeErasures(syndromes,data))
+                        m_statistics["corrected erasures"]++;
+                    else
+                        eraseAll(data);
+                } else
+                    eraseAll(data);
+                break;
 
-        if (corrected) {
-            auto s = computeSyndromes(data);
-            int number_of_non_zero = std::count_if(s.cbegin(), s.cend(), [](GFValue<8, irreducible_poly, alpha> s) -> bool { return s.nonZero(); });
-            if (number_of_non_zero != 0) {
-                printf("Still %d non-zero syndromes after correction\n", number_of_non_zero);
-                for (int i = 0; i < data_copy.size(); i++) {
-                    printf("{0x%x, %s}, ", data_copy[i].byteValue(), data_copy[i].isErased() ? "true" : "false");
-                    if (i % 4 == 3)
-                        printf("\n");
+            case RS_C2:
+                if (tryCorrectOneError(syndromes, data)) {
+                    uneraseAll(data);
+                    m_statistics["corrected one error"]++;
+                } else if (number_of_erasures == 2 || number_of_erasures == 3) {
+                    tryDecodeErasures(syndromes,data);
+                    m_statistics["corrected erasures"]++;
+                } else if (number_of_erasures == 1 && determinant != GF(0) && tryCorrectTwoErrors(syndromes, data)) {
+                    int erasures_now = std::count_if(data.cbegin(), data.cend(), [](ByteWithErasureFlag b) -> bool { return b.isErased(); });
+                    if (erasures_now == 0) {
+                        uneraseAll(data);
+                        m_statistics["corrected two errors"]++;
+                    } else
+                        eraseAll(data);
+                } else
+                    eraseAll(data);
+                break;
+
+            case RS_MAX: {
+                bool corrected;
+                if (false && number_of_erasures >= 1) {
+                    if (tryDecodeErasures(syndromes, data)) {
+                        corrected = true;
+                        m_statistics["corrected erasures"]++;
+                    } else {
+                        if (number_of_erasures == 2) // since erasure decoding failed we know we have at least one error
+                            corrected = tryDecodeOneErrorTwoErasures(syndromes, data);
+                        else if (number_of_erasures == 1 && determinant != GF(0))
+                            corrected = tryCorrectTwoErrors(syndromes, data);
+                        else if (number_of_erasures == 1 && determinant == GF(0)) // in this case the erasure is wrong -- risk of incorrect decoding?
+                            corrected = tryCorrectOneError(syndromes, data);
+                        else
+                            corrected = false;
+                        if (corrected)
+                            m_statistics["corrected errors/erasures"]++;
+                        else
+                            m_statistics["failed"]++;
+                    }
+                } else {
+                    if (determinant != GF(0))
+                        corrected = tryCorrectTwoErrors(syndromes, data);
+                    else
+                        corrected = tryCorrectOneError(syndromes, data);
+                    if (corrected)
+                        m_statistics["corrected errors"]++;
+                    else
+                        m_statistics["failed"]++;
                 }
-                printf("\n");
+
+                if (corrected) {
+                    auto s = computeSyndromes(data);
+                    int number_of_non_zero = std::count_if(s.cbegin(), s.cend(), [](GFValue<8, irreducible_poly, alpha> s) -> bool { return s.nonZero(); });
+                    if (number_of_non_zero != 0) {
+                        printf("Still %d non-zero syndromes after correction\n", number_of_non_zero);
+                        for (int i = 0; i < data_copy.size(); i++) {
+                            printf("{0x%x, %s}, ", data_copy[i].byteValue(), data_copy[i].isErased() ? "true" : "false");
+                            if (i % 4 == 3)
+                                printf("\n");
+                        }
+                        printf("\n");
+                    }
+                    if (number_of_erasures != 0)
+                        uneraseAll(data);
+                } else
+                    eraseAll(data);
             }
-            if (number_of_erasures != 0)
-                uneraseAll(data);
-        } else
-            eraseAll(data);
+        }
     }
 }
 

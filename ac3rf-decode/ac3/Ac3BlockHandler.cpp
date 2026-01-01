@@ -4,13 +4,14 @@
 
 #include "../rs/ByteWithErasureFlag.h"
 #include "../rs/ReedSolomon.h"
+#include "../Logger.h"
 #include "Ac3BlockHandler.h"
 #include "Ac3InputFraming.h"
 
 Ac3BlockHandler::Ac3BlockHandler(Logger &log)
 : m_log(log),
-  m_c1(37, 33, 120, true, true),
-  m_c2(36, 32, 120, true, true)
+  m_c1(37, 33, 120, RS_C1, true),
+  m_c2(36, 32, 120, RS_C2, true)
 {
 }
 
