@@ -99,6 +99,18 @@ This can be shown, e.g., using gnuplot with the following command:
 The file contains binary float pairs. The first float in every pair is the symbol sample used by
 the Mueller-Muller timing detector, and the second is the computed timing error.
 
+> --error-concealment <repeat|lp|ar|none>
+
+For EFM decoding, determines how residual erasures after the CIRC decoder are handled.
+Default is "ar", which uses an auto-regressive model to interpolate missing samples.
+Other choices are "repeat" (just repeat the previous sample value), "li" (use linear
+interpolation) and "none".
+
+The auto-regressive model usually works best to avoid artifacts caused by missing samples,
+but it may change the actual values of non-erased samples by tine values.  So, if exact
+reproduction is desired, use one of the other options.  This is important, for example,
+for DTS audio.
+
 > --output-filename <filename>
 
 Sets the output filename.  Default is to write the output to stdout.
@@ -123,4 +135,4 @@ Pipe the output of the EFM decoder to ffplay:
 > ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 capture.lds | ffplay -f s16le -ar 44100 -ch_layout stereo -i pipe:
 
 Pipe the output of the EFM decoder to ffplay (for EFM encoded DTS):
-> ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 video.ldf | ffplay -f dts -i pipe:
+> ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 --error-concealment none video.ldf | ffplay -f dts -i pipe:

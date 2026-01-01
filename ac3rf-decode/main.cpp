@@ -14,6 +14,9 @@
 #include "efm/EfmDemodulator.h"
 #include "efm/EfmDecoder.h"
 #include "efm/TwoChannelSample.h"
+#include "efm/concealment/ArErasureConcealer.h"
+#include "efm/concealment/InterpolatingErasureConcealer.h"
+#include "efm/concealment/RepeatingSampleErasureConcealer.h"
 
 enum InputType {
     Ac3,
@@ -22,71 +25,12 @@ enum InputType {
     EfmTValues,
 };
 
-static int consecutive_erased_samples[2] = {0, 0};
-static std::map<int, int> erased_stats{};
-
-// This is very preliminary code.  We need to change the call semantics to be able to handle erasures at the
-// start/end of the input vector.  But it seems that for samples with many errors, this doesn't seem to help
-// much anyway. (The function below just performs linear interpolation over missing samples.)
-std::vector<TwoChannelSample> concealErasures(const std::vector<TwoChannelSampleWithErasureFlags> &output_with_erasures) {
-    int l = output_with_erasures.size();
-    std::vector<TwoChannelSample> output(l);
-
-    for (int ch = 0; ch < 2; ch++) {
-        // Statistics
-        for (int i = 0; i < l; i++) {
-            if (output_with_erasures[i].erased[ch])
-                consecutive_erased_samples[ch]++;
-            else {
-                erased_stats[consecutive_erased_samples[ch]]++;
-                consecutive_erased_samples[ch] = 0;
-            }
-        }
-
-        // Copy data to output
-        for (int i = 0; i < l; i++)
-            output[i].samples[ch] = output_with_erasures[i].samples[ch];
-
-        // Interpolate erasures
-#if false
-        for (int i = 1; i < l - 1; i++) {
-            if (output_with_erasures[i - 1].erased[ch])
-                continue;
-            int j;
-            for (j = i; j < l - 1 && output_with_erasures[j].erased[ch]; j++)
-                ;
-            int n_erased = j - i;
-            if (n_erased == 0)
-                continue; // no erased data
-            if (j == l - 1)
-                continue; // no un-erased data after
-            // data from i until j (exclusive) is erased
-
-            int prev = output_with_erasures[i - 1].samples[ch];
-            int next = output_with_erasures[j].samples[ch];
-            for (int k = 0; k < n_erased; k++) {
-                int16_t concealed = (int16_t)(prev + (k + 1) * (next - prev) / (n_erased + 1));
-                output[i + k].samples[ch] = concealed;
-            }
-            i = j;
-        }
-#endif
-    }
-    return output;
-}
-
-std::string erasureStatistics() {
-    std::ostringstream oss;
-    for (auto p: erased_stats)
-        oss << std::format("{}: {}, ", p.first, p.second);
-    return oss.str();
-}
-
 void demodulateFile(Logger &logger, InputType input_type, InputFormat input_format, double initial_seek_seconds,
     double input_sample_frequency,
     int in_fd, uint32_t block_size, int out_fd, bool use_simd,
     std::optional<int> efm_log2_decimation_opt,
-    int efm_adaptive_filter_size, std::optional<std::string> efm_retiming_debug_filename) {
+    int efm_adaptive_filter_size, std::optional<std::string> efm_retiming_debug_filename,
+    ErasureConcealer::ConcealmentImplementation concealment_impl) {
 
     InputReader *reader;
     switch (input_format) {
@@ -111,10 +55,13 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
             EfmDemodulator efm_demodulator(logger, input_sample_frequency, reader->block_size(), out_fd, use_simd,
                 input_type == EfmRf, efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
             EfmDecoder efm_decoder(logger);
+            std::unique_ptr<ErasureConcealer> erasure_concealer =
+                ErasureConcealer::create(concealment_impl, logger, std::nullopt);
 
             std::vector<float> reclocked_data;
             std::vector<TwoChannelSampleWithErasureFlags> output_with_erasures;
             int processed_input_blocks = 0;
+
             while (reader->readFloats(input_buffer) == reader->block_size()) {
                 efm_demodulator.demodulate(input_buffer, reclocked_data);
 
@@ -122,18 +69,20 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
                 efm_decoder.decode(reclocked_data, output_with_erasures,
                     processed_input_blocks % (int)(input_sample_frequency / block_size) == 0);
 
-                std::vector<TwoChannelSample> output = concealErasures(output_with_erasures);
+                std::vector<TwoChannelSample> output = erasure_concealer->processSamples(output_with_erasures);
 
                 if (write(out_fd, output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
                     throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
             }
             logger.info(eAudio, efm_decoder.reedSolomonStatistics());
-            logger.info(eAudio, "Output erasure run length statistics: " + erasureStatistics());
+            logger.info(eAudio, erasure_concealer->erasureStatistics());
             break;
         }
 
         case EfmTValues: {
             EfmDecoder efm_decoder(logger);
+            std::unique_ptr<ErasureConcealer> erasure_concealer =
+                ErasureConcealer::create(concealment_impl, logger, std::nullopt);
 
             // Reading floats is "wrong" but this is a very unusual use case, so whatever makes the shortest code
             std::vector<float> reclocked_data;
@@ -152,7 +101,7 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
                 efm_decoder.decode(reclocked_data, output_with_erasures,
                     processed_input_blocks % (int)(input_sample_frequency / block_size) == 0);
 
-                std::vector<TwoChannelSample> output = concealErasures(output_with_erasures);
+                std::vector<TwoChannelSample> output = erasure_concealer->processSamples(output_with_erasures);
 
                 if (write(out_fd, output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
                     throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
@@ -189,6 +138,7 @@ int main(int argc, char *argv[]) {
     std::optional<int> efm_log2_decimation = std::nullopt;
     int efm_adaptive_filter_size = 3;
     std::optional<std::string> efm_retiming_debug_filename = std::nullopt;
+    ErasureConcealer::ConcealmentImplementation concealment_impl = ErasureConcealer::AutoregressiveModel;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -252,12 +202,25 @@ int main(int argc, char *argv[]) {
             throw std::runtime_error("Invalid decimation specification");
     });
     options.emplace_back("--adaptive-filter-size", [&] () mutable  -> void {
-    efm_adaptive_filter_size = stoi(*(it++));
-    if (efm_adaptive_filter_size < 0 || efm_adaptive_filter_size > 100)
-        throw std::runtime_error("Invalid adaptive filter size");
+        efm_adaptive_filter_size = stoi(*(it++));
+        if (efm_adaptive_filter_size < 0 || efm_adaptive_filter_size > 100)
+            throw std::runtime_error("Invalid adaptive filter size");
     });
     options.emplace_back("--reclock-debug-filename", [&] () mutable  -> void {
         efm_retiming_debug_filename = *(it++);
+    });
+    options.emplace_back("--error-concealment", [&] () mutable  -> void {
+        std::string concealment_impl_name = *(it++);
+        if (concealment_impl_name == "none")
+            concealment_impl = ErasureConcealer::None;
+        else if (concealment_impl_name == "ar")
+            concealment_impl = ErasureConcealer::AutoregressiveModel;
+        else if (concealment_impl_name == "li")
+            concealment_impl = ErasureConcealer::Interpolating;
+        else if (concealment_impl_name == "repeat")
+            concealment_impl = ErasureConcealer::RepeatingSample;
+        else
+            throw std::runtime_error("Invalid error concealment model");
     });
     options.emplace_back("--output-filename", [&] () mutable  -> void {
         auto output_filename = *it++;
@@ -333,7 +296,7 @@ int main(int argc, char *argv[]) {
                 Logger log(log_selection);
                 log.info(eApplication, std::format("Processing input file {}", filename));
                 demodulateFile(log, input_type, input_format, initial_seek_seconds, input_sample_frequency, fd, block_size, out_fd, use_simd,
-                    efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
+                    efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl);
 
                 close(fd);
                 it++;
@@ -346,7 +309,7 @@ int main(int argc, char *argv[]) {
 
             log.info(eApplication, std::format("Processing stdin"));
             demodulateFile(log, input_type, input_format_option.value(), initial_seek_seconds, input_sample_frequency, 0, block_size, out_fd, use_simd,
-                efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
+                efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl);
         }
         if (out_fd != 1)
             close(out_fd);
