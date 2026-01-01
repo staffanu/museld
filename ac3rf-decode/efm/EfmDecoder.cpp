@@ -2,6 +2,7 @@
 // Created by staffanu on 2/8/24.
 //
 
+#include <cstring>
 #include <format>
 #include <cassert>
 #include "EfmDecoder.h"
@@ -104,8 +105,9 @@ const std::array<std::pair<int, int>, 6> EfmDecoder::c_left_output_map =
 const std::array<std::pair<int, int>, 6> EfmDecoder::c_right_output_map =
         array<pair<int, int>, 6> { pair{6, 7}, pair{18, 19}, pair{8, 9}, pair{20, 21}, pair{10, 11}, pair{22, 23}};
 
-EfmDecoder::EfmDecoder(Logger &log)
+EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt)
         : m_log(log),
+          m_circ_debug_file(nullptr),
           m_total_bits(0),
           m_prev_symbol(0.f),
           m_shift_register(0),
@@ -140,9 +142,18 @@ EfmDecoder::EfmDecoder(Logger &log)
         m_c1_to_c2_delay_lines[i] = new ByteWithErasureFlag[c_c1_to_c2_delays[i] + 1];
     for (int i = 0; i < m_output_delay_lines.size(); i++)
         m_output_delay_lines[i] = new ByteWithErasureFlag[c_output_delays[i] + 1];
+
+    if (circ_debug_filename_opt.has_value()) {
+        m_circ_debug_file = fopen(circ_debug_filename_opt.value().c_str(), "w");
+        if (m_circ_debug_file == nullptr)
+            throw std::runtime_error(std::format("Error opening CIRC debug file: {}", strerror(errno)));
+    }
 }
 
 EfmDecoder::~EfmDecoder() {
+    if (m_circ_debug_file != nullptr)
+        fclose(m_circ_debug_file);
+
     for (auto p: m_initial_delay_lines)
         delete[] p;
     for (auto p: m_c1_to_c2_delay_lines)
@@ -324,7 +335,21 @@ uint8_t EfmDecoder::estimateSymbol() const {
     return found;
 }
 
+// Dumps data to the CIRC debug file, in the same format as can be done from the VHDL code
+// in efm_cric.vhd (see the Disco-Link project)
+void EfmDecoder::dumpArray(std::string const &prefix, std::span<ByteWithErasureFlag> const &data) {
+    if (m_circ_debug_file != nullptr) {
+        fprintf(m_circ_debug_file, "%s", prefix.c_str());
+        for (auto i : data)
+            fprintf(m_circ_debug_file, " %c %02X", i.isErased() ? '1' : '0', i.byteValue());
+        fprintf(m_circ_debug_file, "\n");
+    }
+}
+
 void EfmDecoder::handleFrame(std::vector<TwoChannelSampleWithErasureFlags> &output_samples) {
+
+    dumpArray("F:", std::span(m_frame).subspan(1, 32));
+
     std::vector<ByteWithErasureFlag> c1_data(32);
 
     for (int i = 0; i < 32; i++) {
@@ -335,7 +360,9 @@ void EfmDecoder::handleFrame(std::vector<TwoChannelSampleWithErasureFlags> &outp
         c1_data[i] = c_initial_delays[i].second ? ByteWithErasureFlag{(uint8_t)~v.byteValue(), v.isErased()} : v;
     }
 
+    dumpArray("C1:", c1_data);
     m_c1.decode(c1_data);
+    dumpArray("D1:", c1_data);
 
     std::vector<ByteWithErasureFlag> c2_data(28);
 
@@ -348,7 +375,9 @@ void EfmDecoder::handleFrame(std::vector<TwoChannelSampleWithErasureFlags> &outp
             m_total_erasures_past_c1_last_second++;
     }
 
+    dumpArray("C2:", c2_data);
     m_c2.decode(c2_data);
+    dumpArray("D2:", c2_data);
 
     ByteWithErasureFlag out[24];
 

@@ -16,7 +16,7 @@ class Logger;
 
 class EfmDecoder {
 public:
-    explicit EfmDecoder(Logger &log);
+    explicit EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt = std::nullopt);
     ~EfmDecoder();
 
     EfmDecoder(const EfmDecoder &) = delete;
@@ -36,6 +36,7 @@ private:
 
     static const std::array<uint16_t, 256> c_byte_to_channel_symbols_table;
     static std::array<uint16_t, 256> makeEfmChannelSymbolTable();
+
     static const std::array<std::pair<int, bool>, 32> c_initial_delays;
     static std::array<std::pair<int, bool>, 32> makeInitialDelays();
     static const std::array<int, 28> c_c1_to_c2_delays;
@@ -46,12 +47,14 @@ private:
     static const std::array<std::pair<int, int>, 6> c_left_output_map;
     static const std::array<std::pair<int, int>, 6> c_right_output_map;
 
+    void dumpArray(std::string const &prefix, std::span<ByteWithErasureFlag> const &data);
     void handleFrame(std::vector<TwoChannelSampleWithErasureFlags> &output_samples);
     void handleSubcode();
 
     uint8_t estimateSymbol() const;
 
     Logger &m_log;
+    FILE *m_circ_debug_file;
     int m_total_bits;
     float m_prev_symbol;
     int m_shift_register;
