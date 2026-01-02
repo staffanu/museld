@@ -66,7 +66,7 @@ add_executable(ac3rf-decode
         efm/AdaptiveFilterImpl.cpp efm/AdaptiveFilterImpl.h
         efm/concealment/ArErasureConcealer.cpp efm/concealment/ArErasureConcealer.h
         efm/concealment/ErasureConcealer.h efm/concealment/ErasureConcealer.cpp
-        efm/concealment/InterpolatingErasureConcealer.cpp efm/concealment/InterpolatingErasureConcealer.h
+        efm/concealment/LinearInterpolationErasureConcealer.cpp efm/concealment/LinearInterpolationErasureConcealer.h
         efm/concealment/RepeatingSampleErasureConcealer.cpp efm/concealment/RepeatingSampleErasureConcealer.h
 )
 

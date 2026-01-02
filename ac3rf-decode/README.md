@@ -102,14 +102,18 @@ the Mueller-Muller timing detector, and the second is the computed timing error.
 > --error-concealment <repeat|lp|ar|none>
 
 For EFM decoding, determines how residual erasures after the CIRC decoder are handled.
-Default is "ar", which uses an auto-regressive model to interpolate missing samples.
-Other choices are "repeat" (just repeat the previous sample value), "li" (use linear
-interpolation) and "none".
 
-The auto-regressive model usually works best to avoid artifacts caused by missing samples,
-but it may change the actual values of non-erased samples by tine values.  So, if exact
-reproduction is desired, use one of the other options.  This is important, for example,
-for DTS audio.
+There are four options: "none" (no concealment), "repeat" (just repeat the previous sample
+value), "li" (use linear interpolation), and "ar" (an autoregressive model).
+
+The default is "li".
+
+The autoregressive model is best at avoiding artifacts caused by missing samples, especially
+for larger gaps.  For very high error rates, however, the algorithm takes very long to run.
+This is the reason that it is not the default.
+
+When decoding DTS audio, turn concealment off: the computed concealment values are likely worse
+than the values in erasure positions, which are sometimes correct.
 
 > --output-filename <filename>
 

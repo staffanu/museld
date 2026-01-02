@@ -13,7 +13,7 @@
 #include "ErasureConcealer.h"
 
 #include "ArErasureConcealer.h"
-#include "InterpolatingErasureConcealer.h"
+#include "LinearInterpolationErasureConcealer.h"
 #include "RepeatingSampleErasureConcealer.h"
 #include "../TwoChannelSample.h"
 
@@ -24,8 +24,8 @@ std::unique_ptr<ErasureConcealer> ErasureConcealer::create(
             return std::make_unique<NullErasureConcealer>(log, debug_filename);
         case RepeatingSample:
             return std::make_unique<RepeatingSampleErasureConcealer>(log, debug_filename);
-        case Interpolating:
-            return std::make_unique<InterpolatingErasureConcealer>(log, debug_filename);
+        case LinearInterpolation:
+            return std::make_unique<LinearInterpolationErasureConcealer>(log, debug_filename);
         case AutoregressiveModel:
             return std::make_unique<ArErasureConcealer>(log, 400, 2000, debug_filename);
         default:

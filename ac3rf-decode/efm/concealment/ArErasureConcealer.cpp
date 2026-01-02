@@ -108,17 +108,13 @@ void ArErasureConcealer::processFrame(std::span<TwoChannelSampleWithErasureFlags
 double ArErasureConcealer::dotProduct(const std::vector<double> &x, int i_minx, int i_maxx, const std::vector<double> &y, int i_miny, int i_maxy) {
     const int Nx = x.size();
     const int Ny = y.size();
-    if (i_minx < 0 || i_maxx > Nx - 1 || i_miny < 0 || i_maxy > Ny - 1)
-        throw std::runtime_error("Indexes are out of range");
-
+    assert(!(i_minx < 0 || i_maxx > Nx - 1 || i_miny < 0 || i_maxy > Ny - 1));
     const int N = i_maxx - i_minx + 1;
-
-    if (i_maxy - i_miny + 1 != N)
-        throw std::runtime_error("Dot product is impossible : both vectors have not the same size");
+    assert(i_maxy - i_miny + 1 == N);
 
     double value = 0;
     for (int i = 0; i < N; i++)
-        value += x[i+i_minx] * y[i+i_miny];
+        value += x[i + i_minx] * y[i + i_miny];
 
     return value;
 }

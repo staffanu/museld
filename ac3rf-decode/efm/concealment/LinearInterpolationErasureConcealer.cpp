@@ -4,15 +4,15 @@
 
 #include <cstdint>
 #include "../TwoChannelSample.h"
-#include "InterpolatingErasureConcealer.h"
+#include "LinearInterpolationErasureConcealer.h"
 
-InterpolatingErasureConcealer::InterpolatingErasureConcealer(Logger &log, std::optional<std::string> debug_filename) :
+LinearInterpolationErasureConcealer::LinearInterpolationErasureConcealer(Logger &log, std::optional<std::string> debug_filename) :
     ErasureConcealer(log, debug_filename) {
     m_input.insert(m_input.end(), c_overlap_size, TwoChannelSampleWithErasureFlags{});
 }
 
 // Conceals erasures by performing linear interpolation over missing samples.
-std::vector<TwoChannelSampleWithErasureFlags> InterpolatingErasureConcealer::processSamplesImpl(const std::vector<TwoChannelSampleWithErasureFlags> &samples_with_erasures) {
+std::vector<TwoChannelSampleWithErasureFlags> LinearInterpolationErasureConcealer::processSamplesImpl(const std::vector<TwoChannelSampleWithErasureFlags> &samples_with_erasures) {
     m_input.insert(m_input.end(), samples_with_erasures.begin(), samples_with_erasures.end());
 
     std::vector<TwoChannelSampleWithErasureFlags> output;

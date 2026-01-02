@@ -18,7 +18,7 @@ public:
     enum ConcealmentImplementation {
         None,
         RepeatingSample,
-        Interpolating,
+        LinearInterpolation,
         AutoregressiveModel
     };
 

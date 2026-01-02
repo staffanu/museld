@@ -15,7 +15,7 @@
 #include "efm/EfmDecoder.h"
 #include "efm/TwoChannelSample.h"
 #include "efm/concealment/ArErasureConcealer.h"
-#include "efm/concealment/InterpolatingErasureConcealer.h"
+#include "efm/concealment/LinearInterpolationErasureConcealer.h"
 #include "efm/concealment/RepeatingSampleErasureConcealer.h"
 
 enum InputType {
@@ -154,7 +154,7 @@ int main(int argc, char *argv[]) {
     std::optional<int> efm_log2_decimation = std::nullopt;
     int efm_adaptive_filter_size = 3;
     std::optional<std::string> efm_retiming_debug_filename = std::nullopt;
-    ErasureConcealer::ConcealmentImplementation concealment_impl = ErasureConcealer::AutoregressiveModel;
+    ErasureConcealer::ConcealmentImplementation concealment_impl = ErasureConcealer::LinearInterpolation;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -232,7 +232,7 @@ int main(int argc, char *argv[]) {
         else if (concealment_impl_name == "ar")
             concealment_impl = ErasureConcealer::AutoregressiveModel;
         else if (concealment_impl_name == "li")
-            concealment_impl = ErasureConcealer::Interpolating;
+            concealment_impl = ErasureConcealer::LinearInterpolation;
         else if (concealment_impl_name == "repeat")
             concealment_impl = ErasureConcealer::RepeatingSample;
         else
