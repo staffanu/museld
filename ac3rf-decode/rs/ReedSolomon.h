@@ -408,10 +408,14 @@ void ReedSolomon<irreducible_poly, alpha>::doDecode(std::vector<ByteWithErasureF
                 } else if (number_of_erasures == 2 || number_of_erasures == 3) {
                     if (tryDecodeErasures(syndromes,data))
                         m_statistics["corrected erasures"]++;
-                    else
+                    else {
                         eraseAll(data);
-                } else
+                        m_statistics["failed"]++;
+                    }
+                } else {
                     eraseAll(data);
+                    m_statistics["failed"]++;
+                }
                 break;
 
             case RS_C2:
@@ -426,10 +430,14 @@ void ReedSolomon<irreducible_poly, alpha>::doDecode(std::vector<ByteWithErasureF
                     if (erasures_now == 0) {
                         uneraseAll(data);
                         m_statistics["corrected two errors"]++;
-                    } else
+                    } else {
                         eraseAll(data);
-                } else
+                        m_statistics["failed"]++;
+                    }
+                } else {
                     eraseAll(data);
+                    m_statistics["failed"]++;
+                }
                 break;
 
             case RS_MAX: {

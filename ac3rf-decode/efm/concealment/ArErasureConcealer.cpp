@@ -5,7 +5,6 @@
 #include <cassert>
 #include <cmath>
 #include <format>
-#include <stdexcept>
 #include "ArErasureConcealer.h"
 #include "../../filter/Window.h"
 
@@ -70,7 +69,7 @@ std::vector<TwoChannelSampleWithErasureFlags> ArErasureConcealer::processSamples
                 for (int j = 0; j < 4; j++) {
                     sum += m_output_buffers[ch][j][i + (3 - j) * m_hop_size];
                 }
-                sample.samples[ch] = (int16_t)roundeven(sum);
+                sample.samples[ch] = (int16_t)round(sum);
                 sample.erased[ch] = false; // TODO: check if concealment worked!
             }
             output.push_back(sample);

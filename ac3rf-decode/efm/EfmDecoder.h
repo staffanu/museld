@@ -7,6 +7,7 @@
 
 #include <array>
 #include <deque>
+#include <span>
 
 #include "TimingRecovery.h"
 #include "TwoChannelSample.h"
