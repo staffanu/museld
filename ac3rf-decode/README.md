@@ -140,3 +140,7 @@ Pipe the output of the EFM decoder to ffplay:
 
 Pipe the output of the EFM decoder to ffplay (for EFM encoded DTS):
 > ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 --error-concealment none video.ldf | ffplay -f dts -i pipe:
+
+Create a raw sample file using the EFM decoder, and convert it to a WAV file:
+> ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 --output-filename output.pcm capture.lds
+> ffmpeg -f s16le -ar 44100 -ch_layout stereo -i output.pcm output.wav

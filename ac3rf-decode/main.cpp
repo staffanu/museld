@@ -122,6 +122,8 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
                 if (write(out_fd, output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
                     throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
             }
+            logger.info(eAudio, efm_decoder.reedSolomonStatistics());
+            logger.info(eAudio, erasure_concealer->erasureStatistics());
             break;
         }
 

@@ -121,7 +121,7 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
           m_subcode_symbol_index(-3),
           m_frame{},
           m_subcode_p_start_flag(false),
-          m_subcode_q_pre_emphasis(nullopt),
+          m_subcode_q_use(nullopt),
           m_c1(32, 28, 0, RS_C1, false),
           m_c2(28, 24, 0, RS_C2, false),
           m_initial_delay_lines{},
@@ -134,7 +134,8 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
           m_total_time_us_last_second(0),
           m_total_erasures_in_last_second(0),
           m_total_erasures_past_c1_last_second(0),
-          m_total_erasures_out_last_second(0)
+          m_total_erasures_out_last_second(0),
+          m_total_q_subcode_crc_failures_last_second(0)
 {
     for (int i = 0; i < m_initial_delay_lines.size(); i++)
         m_initial_delay_lines[i] = new ByteWithErasureFlag[c_initial_delays[i].first + 1];
@@ -225,7 +226,7 @@ void EfmDecoder::decode(const std::vector<float> &data, std::vector<TwoChannelSa
                         m_subcode_symbol_index = -2;
                     else if (efm_value == 0b00000000010010 && m_subcode_symbol_index == -2)
                         m_subcode_symbol_index = -1;
-                    else if (m_subcode_symbol_index < 95)
+                    else if (m_subcode_symbol_index < 95 && m_subcode_symbol_index >= -1)
                         m_subcode_symbol_index++;
                     else
                         m_subcode_symbol_index = -3;
@@ -250,17 +251,20 @@ void EfmDecoder::decode(const std::vector<float> &data, std::vector<TwoChannelSa
     if (log_now) {
         m_log.info(eAudio | ePerformance,
                    std::format("Time spent decoding last second: {:.1f} ms; efm frame count: {}, "
-                               "input erasure rate: {:.0f} ppm, past c1 erasure rate: {:.0f} ppm, output erasure rate: {:.0f} ppm",
+                               "input erasure rate: {:.0f} ppm, past c1 erasure rate: {:.0f} ppm, output erasure rate: {:.0f} ppm, "
+                               "q subcode crc failure rate: {:.1f} %",
                                (double)m_total_time_us_last_second / 1000.0,
                                m_efm_frame_count_last_second,
                                1000000.0 * m_total_erasures_in_last_second / m_efm_frame_count_last_second / 33,
                                1000000.0 * m_total_erasures_past_c1_last_second / m_efm_frame_count_last_second / 28,
-                               1000000.0 * m_total_erasures_out_last_second / m_efm_frame_count_last_second / 24));
+                               1000000.0 * m_total_erasures_out_last_second / m_efm_frame_count_last_second / 24,
+                               100.0 * m_total_q_subcode_crc_failures_last_second / m_efm_frame_count_last_second * 98));
         m_efm_frame_count_last_second = 0;
         m_total_time_us_last_second = 0;
         m_total_erasures_in_last_second = 0;
         m_total_erasures_past_c1_last_second = 0;
         m_total_erasures_out_last_second = 0;
+        m_total_q_subcode_crc_failures_last_second = 0;
     }
 }
 
@@ -277,42 +281,56 @@ void EfmDecoder::handleSubcode() {
 
     // we have collected a complete 96 bit subcode
 
+    auto get_bit = [sc = &m_subcode](int i, char channel) -> bool {
+        int bit = 7 - (channel - 'P');
+        assert(bit >= 0 && bit <= 7);
+        return sc->at(i).byteValue() & (1 << bit);
+    };
+
     // Handle subcode P
-    for (int i = 0; i < 96; i++) {
-        if ((m_subcode[i].byteValue() & 1) != m_subcode_p_start_flag) {
-            m_subcode_p_start_flag = m_subcode[i].byteValue() & 1;
-            // TODO: check for consecutive values, but this is not used; might implement for fun or when needed
-            // m_log.debug(eAudio, std::format("Subcode P start flag = {}", m_subcode_p_start_flag));
-        }
+    int p_bits_set = 0;
+    for (int i = 0; i < 96; i++)
+            if (get_bit(i, 'P'))
+                p_bits_set++;
+
+    if (p_bits_set > 48 != m_subcode_p_start_flag) {
+        m_subcode_p_start_flag = p_bits_set > 48;
+        m_log.debug(eAudio, std::format("Subcode P start flag = {}", m_subcode_p_start_flag));
     }
 
     // Handle subcode Q
 
     uint16_t crc = 0x0000;
     for (int i = 0; i < 96; i++) {
-        uint8_t inbit = (m_subcode[i].byteValue() & 2) != 0;
-
-        uint8_t msb = (crc >> 15) & 1;
-        crc <<= 1;
-        crc &= 0xFFFF;
-
-        if (msb ^ inbit) {
+        const bool bit = i < 80 ? get_bit(i, 'Q') : !get_bit(i, 'Q');
+        const bool msb = crc & 0x8000;
+        crc = ((crc << 1) | bit) & 0xFFFF;
+        if (msb)
             crc ^= 0x1021;
-        }
     }
 
     if (crc == 0) {
+        std::optional<SubcodePUse> use;
         // Pre-emphasis
-        if ((m_subcode[0].byteValue() & 2) == 0 && (m_subcode[1].byteValue() & 2) == 0) {
-            bool pre_emphasis = m_subcode[3].byteValue() & 2;
-            if (!m_subcode_q_pre_emphasis.has_value() || m_subcode_q_pre_emphasis.value() != pre_emphasis) {
-                m_subcode_q_pre_emphasis = pre_emphasis;
-                m_log.debug(eAudio, std::format("Subcode Q pre-emphasis = {}", pre_emphasis));
-            }
+        if ((get_bit(0, 'Q')) == 0 && (get_bit(1, 'Q')) == 0) {
+            bool pre_emphasis = get_bit(3, 'Q');
+            use = pre_emphasis ? Audio2ChannelWithPreEmphasis : Audio2ChannelNoPreEmphasis;
+        } else if ((get_bit(0, 'Q')) == 0 && (get_bit(1, 'Q')) == 1
+            && (get_bit(3, 'Q')) == 0)
+            use = DigitalData;
+        else if ((get_bit(0, 'Q')) == 1)
+            use = Broadcasting;
+
+        if (use.has_value() && (!m_subcode_q_use.has_value() || m_subcode_q_use.value() != use)) {
+            m_subcode_q_use = use;
+            m_log.debug(eAudio, std::format("Subcode Q use = {}",
+                use.value() == Audio2ChannelWithPreEmphasis ? "Audio2ChannelWithPreEmphasis" :
+                use.value() == Audio2ChannelNoPreEmphasis ? "Audio2ChannelNoPreEmphasis" :
+                use.value() == DigitalData ? "DigitalData" :
+                "Broadcasting"));
         }
-    } else {
-        //m_log.debug(eAudio, "Subcode Q CRC check failed");
-    }
+    } else
+        m_total_q_subcode_crc_failures_last_second++;
 }
 
 // ML estimation of the received symbol -- used only when we do not have a perfect match

@@ -74,10 +74,16 @@ private:
     int m_subcode_symbol_index;
     std::array<ByteWithErasureFlag, 33> m_frame; // first byte is the control data
 
-    // bits 0-7 correspond to P-W
+    // bits 7-0 correspond to P-W
     std::array<ByteWithErasureFlag, 96> m_subcode;
     bool m_subcode_p_start_flag;
-    std::optional<bool> m_subcode_q_pre_emphasis;
+    enum SubcodePUse {
+        Audio2ChannelNoPreEmphasis,
+        Audio2ChannelWithPreEmphasis,
+        DigitalData,
+        Broadcasting
+    };
+    std::optional<SubcodePUse> m_subcode_q_use;
 
     ReedSolomon<0x11d, 2> m_c1;
     ReedSolomon<0x11d, 2> m_c2;
@@ -93,6 +99,7 @@ private:
     int m_total_erasures_in_last_second;
     int m_total_erasures_past_c1_last_second;
     int m_total_erasures_out_last_second;
+    int m_total_q_subcode_crc_failures_last_second;
 };
 
 #endif //MUSECPP_EFMDECODER_H
