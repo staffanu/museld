@@ -1,21 +1,56 @@
 # README #
 
-### C++ AC3RF and EFM demodulator / decoder ###
+## C++ AC3RF and EFM demodulator / decoder ###
 
 This directory contains a C++ implementation of an AC3RF demodulator, and of an EFM decoder.  It can be
-run on large files and is reasonably fast (several times real-time on a modern CPU).
+run on large files and is reasonably fast (several times real-time on a modern CPU).  It runs
+successfully run on Linux, FreeBSD, Macos, and Windows.
 
-#### Building
+### Building
 
-The project uses cmake, and the following commands should build the project on Ubuntu.  This also installs most
-of the dependencies, but you also need a C++ compiler, and I didn't want to pick one for you.  Recent versions of
-g++ and clang should both work (the project uses C++23).  I'm using Ubuntu 25.10.  For macOS, modify as needed
-(I used [Homebrew](https://brew.sh/) for the dependencies; they mostly have similar names, currently "gnuradio-dev" and "flac".)
-I also tried compiling on Windows using MSYS2, which worked with no modifications.  I don't promise to keep testing
-that is does, however.
+The project uses cmake and C++23.  Here are build instructions for some specific platforms.
+
+#### Ubuntu Linux
+
+The following installs most of the dependencies, but you also need a C++ compiler, and I didn't
+want to pick one for you.  Recent versions of g++ and clang should both work.  Odds are that
+they are already installed.  I'm using Ubuntu 25.10, but I've built the project on several other
+versions with minor or no changes.
 
 ```console
 sudo apt install cmake libeigen3-dev libflac++-dev
+git clone https://bitbucket.org/staffanulfberg/ldaudio.git
+cd ldaudio/ac3rf-decode
+git submodule update --init --recursive
+cmake -DCMAKE_BUILD_TYPE=Release -B build-release .
+cmake --build build-release
+```
+
+#### Macos
+
+In Macos, I use [Homebrew](https://brew.sh/) for the dependencies.  Here too, you need a C++ compiler: you
+can use clang from Apple's developer tools, or g++ (e.g., from Homebrew).  Notice that a git
+client is also part of the command line developer tools.
+
+```console
+brew install cmake eigen flac
+git clone https://bitbucket.org/staffanulfberg/ldaudio.git
+cd ldaudio/ac3rf-decode
+git submodule update --init --recursive
+cmake -DCMAKE_BUILD_TYPE=Release -B build-release .
+cmake --build build-release
+```
+
+#### Windows
+
+In Windows, I've compiled using [MSYS2](https://www.msys2.org).  I used the UCRT64 environment: after
+installing MSYS2 there should be a shortcut or menu entry to start a UCRT64 environment bash shell.
+
+```console
+pacman -S mingw-w64-ucrt-x86_64-cmake
+pacman -S mingw-w64-ucrt-x86_64-gcc
+pacman -S mingw-w64-ucrt-x86_64-eigen3
+pacman -S mingw-w64-ucrt-x86_64-flac
 git clone https://bitbucket.org/staffanulfberg/ldaudio.git
 cd ldaudio/ac3rf-decode
 git submodule update --init --recursive
