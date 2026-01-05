@@ -8,6 +8,11 @@
 #include <cstring>
 #include <format>
 #include <stdexcept>
+
+#ifndef O_BINARY
+#  define O_BINARY 0
+#endif
+
 #include "TimingRecovery.h"
 #include "AdaptiveFilterImpl.h"
 
@@ -31,7 +36,7 @@ TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int i
     m_prev_sample(0) {
 
     if (retiming_debug_filename.has_value()) {
-        m_debug_fd = open(retiming_debug_filename->c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        m_debug_fd = open(retiming_debug_filename->c_str(), O_WRONLY | O_TRUNC | O_CREAT | O_BINARY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         if (m_debug_fd == -1)
             throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
     }

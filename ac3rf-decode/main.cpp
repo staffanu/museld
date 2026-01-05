@@ -6,6 +6,10 @@
 #include <filesystem>
 #include <format>
 
+#ifndef O_BINARY
+#  define O_BINARY 0
+#endif
+
 #include "Logger.h"
 #include "input/InputReader.h"
 #include "input/LdfInputReader.h"
@@ -14,9 +18,7 @@
 #include "efm/EfmDemodulator.h"
 #include "efm/EfmDecoder.h"
 #include "efm/TwoChannelSample.h"
-#include "efm/concealment/ArErasureConcealer.h"
-#include "efm/concealment/LinearInterpolationErasureConcealer.h"
-#include "efm/concealment/RepeatingSampleErasureConcealer.h"
+#include "efm/concealment/ErasureConcealer.h"
 
 enum InputType {
     Ac3,
@@ -245,7 +247,7 @@ int main(int argc, char *argv[]) {
         if (out_fd != 1)
             close(out_fd);
         out_fd = open(output_filename.c_str(),
-            O_WRONLY | O_TRUNC | O_CREAT,
+            O_WRONLY | O_TRUNC | O_CREAT | O_BINARY,
             S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         if (out_fd == -1)
             throw std::runtime_error(std::format("Unable to open output file {}: {}", output_filename, strerror(errno)));
@@ -307,7 +309,7 @@ int main(int argc, char *argv[]) {
                 } else
                     input_format = input_format_option.value();
 
-                int fd = open(filename.c_str(), O_RDONLY);
+                int fd = open(filename.c_str(), O_RDONLY | O_BINARY);
                 if (fd == -1)
                     throw std::runtime_error(std::format("Error opening input file {}: {}", filename, strerror(errno)));
 

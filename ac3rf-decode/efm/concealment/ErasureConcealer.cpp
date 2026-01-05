@@ -11,8 +11,12 @@
 #include <unistd.h>
 #include <optional>
 #include <sstream>
-#include "ErasureConcealer.h"
 
+#ifndef O_BINARY
+#  define O_BINARY 0
+#endif
+
+#include "ErasureConcealer.h"
 #include "ArErasureConcealer.h"
 #include "LinearInterpolationErasureConcealer.h"
 #include "RepeatingSampleErasureConcealer.h"
@@ -40,7 +44,7 @@ ErasureConcealer::ErasureConcealer(Logger &log, std::optional<std::string> debug
     m_consecutive_erased_samples{0, 0} {
 
     if (debug_filename.has_value()) {
-        m_debug_fd = open(debug_filename.value().c_str(), O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        m_debug_fd = open(debug_filename.value().c_str(), O_WRONLY | O_TRUNC | O_CREAT | O_BINARY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         if (m_debug_fd == -1)
             throw std::runtime_error(std::format("Unable to open output erasure debug file: {}", strerror(errno)));
     }
