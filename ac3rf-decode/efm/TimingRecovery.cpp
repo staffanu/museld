@@ -2,7 +2,8 @@
 // Created by staffanu on 11/11/25.
 //
 
-#include <fcntl.h>
+#include <sys/fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <cstring>
 #include <format>

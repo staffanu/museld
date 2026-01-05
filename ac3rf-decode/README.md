@@ -9,8 +9,10 @@ run on large files and is reasonably fast (several times real-time on a modern C
 
 The project uses cmake, and the following commands should build the project on Ubuntu.  This also installs most
 of the dependencies, but you also need a C++ compiler, and I didn't want to pick one for you.  Recent versions of
-g++ and clang should both work (the project uses C++23).  I'm using Ubuntu 25.04.  For macOS, modify as needed
+g++ and clang should both work (the project uses C++23).  I'm using Ubuntu 25.10.  For macOS, modify as needed
 (I used [Homebrew](https://brew.sh/) for the dependencies; they mostly have similar names, currently "gnuradio-dev" and "flac".)
+I also tried compiling on Windows using MSYS2, which worked with no modifications.  I don't promise to keep testing
+that is does, however.
 
 ```console
 sudo apt install cmake libeigen3-dev libflac++-dev

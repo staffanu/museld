@@ -2,8 +2,9 @@
 // Created by staffanu on 12/30/25.
 //
 
+#include <sys/fcntl.h>
+#include <sys/stat.h>
 #include <vector>
-#include <fcntl.h>
 #include <stdexcept>
 #include <cstring>
 #include <format>
