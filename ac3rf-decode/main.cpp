@@ -68,6 +68,9 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
     switch (input_type) {
         case Efm:
         case EfmRf: {
+            if (input_sample_frequency < 4.3218e6)
+                throw std::runtime_error("Efm input sample frequency must be at least 4.3218 MHz");
+
             int efm_log2_decimation = efm_log2_decimation_opt.value_or(std::max(0, (int)(log(input_sample_frequency / 8e6) / log(2))));
 
             EfmDemodulator efm_demodulator(logger, input_sample_frequency, reader->block_size(), out_fd, use_simd,
