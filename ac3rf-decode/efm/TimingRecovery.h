@@ -52,6 +52,7 @@ private:
     double m_step_size_adjustment;
     double m_error_sum;
     float m_prev_sample;
+    double m_avg_speed_deviation;
 
     std::optional<int> m_debug_fd;
 };

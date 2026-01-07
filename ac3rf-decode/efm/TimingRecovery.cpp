@@ -33,7 +33,8 @@ TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int i
     m_g2(c_G2 / m_GpdGvco),
     m_step_size_adjustment(0),
     m_error_sum(0),
-    m_prev_sample(0) {
+    m_prev_sample(0),
+    m_avg_speed_deviation(0) {
 
     if (retiming_debug_filename.has_value()) {
         m_debug_fd = open(retiming_debug_filename->c_str(), O_WRONLY | O_TRUNC | O_CREAT | O_BINARY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
@@ -89,8 +90,17 @@ void TimingRecovery::reclock(const float *input, std::vector<float> &output) {
         m_prev_sample = sample;
     }
 
-    if (m_filter->size() != 0 && m_total_symbols - m_last_adaptive_filter_log > 4321800) {
-        m_log.debug(eAudio, "Adaptive filter coefficients: " + m_filter->filterString());
+    m_avg_speed_deviation = (1 - 1e-5) * m_avg_speed_deviation + 1e-5 * m_step_size_adjustment / m_nominal_step_size;
+    if (m_total_symbols - m_last_adaptive_filter_log > 4321800) {
+        if (m_filter->size() != 0)
+            m_log.debug(eAudio,
+                std::format("Adaptive filter coefficients: {}.  DPLL adjustment: {:.0f} ppm",
+                m_filter->filterString(), 1e6 * m_avg_speed_deviation));
+        else
+            m_log.debug(eAudio,
+                std::format("DPLL adjustment: {:.0f} ppm",
+                1e6 * m_avg_speed_deviation));
+
         m_last_adaptive_filter_log = m_total_symbols;
     }
 }
