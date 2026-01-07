@@ -19,6 +19,7 @@
 #include "efm/EfmDecoder.h"
 #include "efm/TwoChannelSample.h"
 #include "efm/concealment/ErasureConcealer.h"
+#include "Version.h"
 
 enum InputType {
     Ac3,
@@ -162,6 +163,7 @@ int main(int argc, char *argv[]) {
     int efm_adaptive_filter_size = 3;
     std::optional<std::string> efm_retiming_debug_filename = std::nullopt;
     ErasureConcealer::ConcealmentImplementation concealment_impl = ErasureConcealer::AutoregressiveModel;
+    bool did_show_help_or_version = false;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -282,6 +284,11 @@ int main(int argc, char *argv[]) {
     });
     options.emplace_back("--help", [&] () mutable -> void {
         usage();
+        did_show_help_or_version = true;
+    });
+    options.emplace_back("--version", [&] () mutable -> void {
+        std::cerr << "ac3rf-decode version " << AC3RF_DECODE_VERSION << std::endl;
+        did_show_help_or_version = true;
     });
 
     try {
@@ -319,6 +326,7 @@ int main(int argc, char *argv[]) {
                     throw std::runtime_error(std::format("Error opening input file {}: {}", filename, strerror(errno)));
 
                 Logger log(log_selection);
+                log.debug(eApplication, std::format("ac3rf-decode version {}", AC3RF_DECODE_VERSION));
                 log.info(eApplication, std::format("Processing input file {}", filename));
                 demodulateFile(log, input_type, input_format, initial_seek_seconds, input_sample_frequency, fd, block_size, out_fd, use_simd,
                     efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl);
@@ -327,7 +335,7 @@ int main(int argc, char *argv[]) {
                 it++;
             }
         }
-        if (!filename_found) {
+        if (!filename_found && !did_show_help_or_version) {
             Logger log(log_selection);
             if (!input_format_option.has_value())
                 throw std::runtime_error("Input format must be given for stdin");

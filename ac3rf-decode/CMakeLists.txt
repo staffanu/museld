@@ -9,6 +9,20 @@ find_package(Eigen3 REQUIRED)  # Used by firpm
 
 pkg_check_modules(FLAC REQUIRED flac++)
 
+find_package(Git REQUIRED)
+execute_process(
+        COMMAND ${GIT_EXECUTABLE} describe --always --dirty
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE GIT_VERSION
+        RESULT_VARIABLE ERROR_CODE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(GIT_VERSION STREQUAL "")
+    set(GIT_VERSION GitVersionUnknown)
+    message(WARNING "Failed to determine version from Git tags: ${ERROR_CODE}. Using default version ${GIT_VERSION}.")
+endif()
+configure_file(Version.h.in Version.h @ONLY)
+
 # -mavx is hopefully implied by -march=native
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math -march=native")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ffast-math -fsanitize=address -march=native")
@@ -18,7 +32,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -mmacosx-version-min=15.0")
     set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -mmacosx-version-min=15.0")
 endif()
-
 
 add_library(firpm STATIC
         external/firpm/src/pm.cpp
@@ -31,6 +44,7 @@ target_include_directories(firpm
         PUBLIC
         external/firpm/include
         Eigen3::Eigen
+        ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 target_link_libraries(firpm
@@ -40,6 +54,7 @@ target_link_libraries(firpm
 
 add_executable(ac3rf-decode
         main.cpp
+        Version.h
         Logger.h Logger.cpp
         input/InputReader.h
         input/LdsInputReader.cpp input/LdsInputReader.h

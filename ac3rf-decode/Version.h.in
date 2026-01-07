@@ -1,0 +1,2 @@
+#pragma once
+#define AC3RF_DECODE_VERSION "@GIT_VERSION@"
