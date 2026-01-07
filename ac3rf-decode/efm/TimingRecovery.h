@@ -35,8 +35,8 @@ private:
     AdaptiveFilter *m_filter;
 
     float m_power_estimate;
-    long m_total_symbols;
-    long m_last_adaptive_filter_log;
+    uint64_t m_total_symbols;
+    uint64_t m_last_adaptive_filter_log;
 
     static constexpr double c_omega = 2 * M_PI * 1200; // un-dampened frequency
     static constexpr double c_zeta = 0.6; // damping factor

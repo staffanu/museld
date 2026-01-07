@@ -82,7 +82,7 @@ void TimingRecovery::reclock(const float *input, std::vector<float> &output) {
             float debug_floats[2] = { sample, (float)error };
             int r = write(m_debug_fd.value(), debug_floats, 2 * sizeof(float));
             if (r == -1)
-                throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
+                throw std::runtime_error(std::format("Error writing to debug output file: {}", strerror(errno)));
         }
 
         output.emplace_back(sample);

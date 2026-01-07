@@ -28,7 +28,7 @@ public:
 private:
     Logger &m_log;
 
-    long m_total_symbols_seen = 0;
+    int64_t m_total_symbols_seen = 0;
     int m_frame_number = -1;
     int m_previous_frame_number = 0;
 
@@ -37,7 +37,7 @@ private:
     int m_symbol_in_frame_counter = 0;
     uint8_t m_symbols_in_frame[37 * 4];
     int m_consecutive_synched = 0;
-    long m_auto_sync_at = -1;
+    int64_t m_auto_sync_at = -1;
 };
 
 

@@ -12,7 +12,7 @@ Ac3DPLL::Ac3DPLL(Logger &log)
 
 int Ac3DPLL::reclockSymbols(double sampling_frequency, const std::vector<uint8_t> &input_symbols, int input_size, std::vector<uint8_t> &output_symbols, int max_output_size) {
     int output_size = 0;
-    int nominalAdd = ((1 << counterBits) * (long)c_nominal_symbol_frequency / sampling_frequency);
+    int nominalAdd = (int)((1 << counterBits) * (double)c_nominal_symbol_frequency / sampling_frequency);
 
     for (int i = 0; i < input_size; i++) {
         uint8_t dataIn = input_symbols[i];
