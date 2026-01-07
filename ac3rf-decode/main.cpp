@@ -6,6 +6,10 @@
 #include <filesystem>
 #include <format>
 
+#ifdef _WIN32
+#  include <io.h>
+#  define fsync _commit
+#endif
 #ifndef O_BINARY
 #  define O_BINARY 0
 #endif
