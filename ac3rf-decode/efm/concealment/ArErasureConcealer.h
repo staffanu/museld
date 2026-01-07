@@ -1,21 +1,21 @@
 //
-// Created by staffanu on 12/28/25.
+// Created by staffanu on 1/7/26.
 //
 
 #ifndef AC3RF_DECODE_ARERASURECONCEALER_H
 #define AC3RF_DECODE_ARERASURECONCEALER_H
 
 #include <deque>
-#include <span>
-#include <vector>
+
 #include "ErasureConcealer.h"
+#include "LinearInterpolationErasureConcealer.h"
 #include "../../Logger.h"
-#include "../TwoChannelSample.h"
+
 
 class ArErasureConcealer : public ErasureConcealer {
 public:
     // The window size is 4 * hop_size, and needs to be at least 8/3 * order, so hos size needs to be at least 2/3 * order.
-    ArErasureConcealer(Logger &log, int order, int hop_size, std::optional<std::string> debug_filename = std::nullopt);
+    ArErasureConcealer(Logger &log, int order, double mu, int max_li_erasures, int crossfade_length, std::optional<std::string> debug_filename);
 
     ArErasureConcealer(const ArErasureConcealer &) = delete;
     ArErasureConcealer &operator=(const ArErasureConcealer &) = delete;
@@ -25,25 +25,27 @@ public:
     std::vector<TwoChannelSampleWithErasureFlags> processSamplesImpl(const std::vector<TwoChannelSampleWithErasureFlags> &samples_with_erasures) override;
 
 private:
-    void processFrame(std::span<TwoChannelSampleWithErasureFlags> samples, std::vector<double> &left_out, std::vector<double> &right_out) const;
-
-    void reconstruct_signal(std::vector<double> const &samples, std::vector<bool> const &burst, std::vector<double> &output) const;
-    void update_a(const std::vector<double> &y, std::vector<double> &a) const;
-    bool update_x(const std::vector<double> &y, const std::vector<double> &a, const std::vector<int> &t,
-                  std::vector<double> &x) const;
-    static inline bool solveCholesky(const std::vector<std::vector<double> > &A, std::vector<double> &x);
-    static double dotProduct(const std::vector<double> &x, int i_minx, int i_maxx, const std::vector<double> &y, int i_miny, int i_maxy);
-    static bool isPresent(int value, const std::vector<int> &x);
 
     Logger &m_log;
-    int m_order;
-    int m_hop_size;
-    int m_window_size;
-    std::vector<double> m_hamming_window;
-    std::vector<TwoChannelSampleWithErasureFlags> m_samples;
+    LinearInterpolationErasureConcealer m_linear_interpolator;
+    const int m_order;
+    const double m_mu;
+    const int m_error_replay_size;
+    const int m_crossfade_length;
 
-    // The last four processed frames; newly processed frames are added to the back
-    std::deque<std::vector<double>> m_output_buffers[2];
+    // input history is used to update the AR model
+    std::deque<TwoChannelSampleWithErasureFlags> m_input_history; // newest in front
+    // output history is used to predict the next sample when data is missing
+    // notice that corrected/changed data is used to predict the next sample, but not to train the model
+    std::deque<TwoChannelSampleWithErasureFlags> m_output_history; // newest in front
+    std::vector<double> m_a[2]; // for left and right channels
+
+    // residual errors
+    std::deque<double> m_error_history[2];
+
+    uint64_t m_index;
+    uint64_t m_last_valid_index[2];
+    uint64_t m_last_erased_index[2];
 };
 
 

@@ -17,9 +17,10 @@
 #endif
 
 #include "ErasureConcealer.h"
-#include "ArErasureConcealer.h"
+#include "SlowArErasureConcealer.h"
 #include "LinearInterpolationErasureConcealer.h"
 #include "RepeatingSampleErasureConcealer.h"
+#include "ArErasureConcealer.h"
 #include "../TwoChannelSample.h"
 
 std::unique_ptr<ErasureConcealer> ErasureConcealer::create(
@@ -30,9 +31,11 @@ std::unique_ptr<ErasureConcealer> ErasureConcealer::create(
         case RepeatingSample:
             return std::make_unique<RepeatingSampleErasureConcealer>(log, debug_filename);
         case LinearInterpolation:
-            return std::make_unique<LinearInterpolationErasureConcealer>(log, debug_filename);
+            return std::make_unique<LinearInterpolationErasureConcealer>(log, 100, debug_filename);
+        case SlowAutoregressiveModel:
+            return std::make_unique<SlowArErasureConcealer>(log, 400, 2000, debug_filename);
         case AutoregressiveModel:
-            return std::make_unique<ArErasureConcealer>(log, 400, 2000, debug_filename);
+            return std::make_unique<ArErasureConcealer>(log, 30, 0.01, 16, 32, debug_filename);
         default:
             throw std::runtime_error(std::format("Unknown concealment implementation: {}", static_cast<int>(impl)));
     }

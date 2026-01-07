@@ -161,7 +161,7 @@ int main(int argc, char *argv[]) {
     std::optional<int> efm_log2_decimation = std::nullopt;
     int efm_adaptive_filter_size = 3;
     std::optional<std::string> efm_retiming_debug_filename = std::nullopt;
-    ErasureConcealer::ConcealmentImplementation concealment_impl = ErasureConcealer::LinearInterpolation;
+    ErasureConcealer::ConcealmentImplementation concealment_impl = ErasureConcealer::AutoregressiveModel;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -236,6 +236,8 @@ int main(int argc, char *argv[]) {
         std::string concealment_impl_name = *(it++);
         if (concealment_impl_name == "none")
             concealment_impl = ErasureConcealer::None;
+        else if (concealment_impl_name == "sar")
+            concealment_impl = ErasureConcealer::SlowAutoregressiveModel;
         else if (concealment_impl_name == "ar")
             concealment_impl = ErasureConcealer::AutoregressiveModel;
         else if (concealment_impl_name == "li")

@@ -405,7 +405,7 @@ void ReedSolomon<irreducible_poly, alpha>::doDecode(std::vector<ByteWithErasureF
                 if (tryCorrectOneError(syndromes, data)) {
                     uneraseAll(data);
                     m_statistics["corrected one error"]++;
-                } else if (number_of_erasures == 2 || number_of_erasures == 3) {
+                } else if (number_of_erasures == 2) {
                     if (tryDecodeErasures(syndromes,data))
                         m_statistics["corrected erasures"]++;
                     else {

@@ -62,15 +62,10 @@ cmake --build build-release
 
 The following command line options are supported:
 
-> --uint8
-> --sint8
-> --uint16
-> --sint16
-> --lds
-> --flac
-> --ldf
-
-The input format.  This option can be omitted if the input file ends with ".u8",
+```bash
+--uint8 --sint8 --uint16 --sint16 --lds --flac --ldf
+```
+Use one of these options to Specify the input format.  Can be omitted if the input filename ends with ".u8",
 ".s8", ".u16", ".s16", ".lds", ".flac", or ".ldf" respectively.  For reading from stdin the format
 always has to be specified.
 
@@ -81,52 +76,53 @@ always has to be specified.
 
 "flac" files have 8-bit or 16-bit samples compressed using FLAC.
 
-> --sample-freq <frequency>
+```bash
+--sample-freq <frequency>
+```
+The the sample frequency in Hz.  Default is 40 MHz (written as "40000000" or "40e6", not "40"!). 
 
-The the sample frequency in Hz.  Default is 40 MHz. 
-
-> -- seek <seconds>
-
+```bash
+-- seek <seconds>
+```
 Seeks to the specified time in the input file before starting to decode.
 
-> --log <level>
-
+```bash
+--log <level>
+```
 Sets the log level.  Default is warn (2).  Supported levels are: 0 (off), 1 (error), 2 (warn), 3 (info), 4 (debug). 
 
-> --simd / --no-simd
-
+```bash
+--simd / --no-simd
+```
 Use (or do not use) SIMD instructions to speed up FIR filtering.  Not available for all platforms/compilers.
 Default is enabled if supported.
 
-> --efm
+```bash
+--efm --efm-rf --efm-t-values
+```
+Specify one of these options to decode EFM (stereo PCM data encoded the way that CDs are encoded).
+There are three different ways that the program can read EFM data: baseband EFM (as captured from the EFM
+output of some players), RF (the raw signal from te pickup of a modified player), or "T values" from ld-decode.
+--efm-t-values also implicitly sets the input file type to unsigned bytes.
 
-Tells the decoder that the input is EFM encoded.  Baseband EFM (as captured from the EFM
-output of some players) is assumed.
-
-> --efm-rf
-
-Tells the decoder that the input is EFM encoded.  RF input, containing video and EFM is assumed.
-
-> --efm-t-values
-
-Tells the decoder that the input is a file containing "T values" from ld-decode.  The input file
-is expected to be unsigned bytes.
-
-> --decimation <log2 of decimation factor>
-
+```bash
+--decimation <log2 of decimation factor>
+```
 Decimates the input to the EFM decoder by a factor of 2^[log2 of decimation factor].
 This makes decoding faster.  Default is to decimate using the highest possible decimation
 that keeps the sample rate before the fractional resampler over 8 MHz.
 
-> --adaptive-filter-size <size>
-
+```bash
+--adaptive-filter-size <size>
+```
 Enables adaptive filtering of the EFM signal.  Default is 3.  
 Reasonable values are 2 and up; over 15 is probably overkill.
 Try increasing this to 9 or 11 if there are lots of errors, which might be
 caused by a distorted input signal.
 
-> --reclock-debug-filename <filename>
-
+```bash
+--reclock-debug-filename <filename>
+```
 Outputs a file containing resampled data from the clock recovery stage of the EFM decoder.
 This can be shown, e.g., using gnuplot with the following command:
 
@@ -136,28 +132,28 @@ This can be shown, e.g., using gnuplot with the following command:
 The file contains binary float pairs. The first float in every pair is the symbol sample used by
 the Mueller-Muller timing detector, and the second is the computed timing error.
 
-> --error-concealment <repeat|lp|ar|none>
-
+```bash
+--error-concealment <repeat|lp|ar|sar|none>
+```
 For EFM decoding, determines how residual erasures after the CIRC decoder are handled.
 
-There are four options: "none" (no concealment), "repeat" (just repeat the previous sample
-value), "li" (use linear interpolation), and "ar" (an autoregressive model).
+There are five options: "none" (no concealment), "repeat" (just repeat the previous sample
+value), "li" (use linear interpolation), "ar" (an autoregressive model), and "sar" (a
+second, more advanced but slow autoregressive model).
 
-The default is "li".
-
-The autoregressive model is best at avoiding artifacts caused by missing samples, especially
-for larger gaps.  For very high error rates, however, the algorithm takes very long to run.
-This is the reason that it is not the default.
+The default is "ar".
 
 When decoding DTS audio, turn concealment off: the computed concealment values are likely worse
 than the values in erasure positions, which are sometimes correct.
 
-> --output-filename <filename>
-
+```bash
+--output-filename <filename>
+```
 Sets the output filename.  Default is to write the output to stdout.
 
-> [filename]
-
+```bash
+[filename]
+```
 Any other arguments are assumed to be filenames that are read and processed.  Multiple files can be read and are processed in order.
 The most recent setting for input format, sample frequency, and output file is used.  If the
 same output file is used for consecutive input files, the output is appended.

@@ -6,8 +6,10 @@
 #include "../TwoChannelSample.h"
 #include "LinearInterpolationErasureConcealer.h"
 
-LinearInterpolationErasureConcealer::LinearInterpolationErasureConcealer(Logger &log, std::optional<std::string> debug_filename) :
-    ErasureConcealer(log, debug_filename) {
+LinearInterpolationErasureConcealer::LinearInterpolationErasureConcealer(
+    Logger &log, int max_interpolated_erasures, std::optional<std::string> debug_filename) :
+    ErasureConcealer(log, debug_filename),
+    m_max_interpolated_erasures(max_interpolated_erasures) {
     m_input.insert(m_input.end(), c_overlap_size, TwoChannelSampleWithErasureFlags{});
 }
 
@@ -31,6 +33,8 @@ std::vector<TwoChannelSampleWithErasureFlags> LinearInterpolationErasureConceale
                 int n_erased = j - i;
                 if (n_erased == 0)
                     continue; // no erased data
+                if (n_erased > m_max_interpolated_erasures)
+                    continue;
                 // data from i until j (exclusive) is erased (or, j is also erased if end of buffer)
 
                 // If we didn't find any non-erased data, just use 0

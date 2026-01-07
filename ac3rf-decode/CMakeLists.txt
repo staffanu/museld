@@ -64,10 +64,11 @@ add_executable(ac3rf-decode
         efm/FractionalResampler.cpp efm/FractionalResampler.h
         efm/AdaptiveFilter.h
         efm/AdaptiveFilterImpl.cpp efm/AdaptiveFilterImpl.h
-        efm/concealment/ArErasureConcealer.cpp efm/concealment/ArErasureConcealer.h
+        efm/concealment/SlowArErasureConcealer.cpp efm/concealment/SlowArErasureConcealer.h
         efm/concealment/ErasureConcealer.h efm/concealment/ErasureConcealer.cpp
         efm/concealment/LinearInterpolationErasureConcealer.cpp efm/concealment/LinearInterpolationErasureConcealer.h
         efm/concealment/RepeatingSampleErasureConcealer.cpp efm/concealment/RepeatingSampleErasureConcealer.h
+        efm/concealment/ArErasureConcealer.cpp efm/concealment/ArErasureConcealer.h
 )
 
 target_include_directories(ac3rf-decode

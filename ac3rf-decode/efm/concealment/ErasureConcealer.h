@@ -19,7 +19,8 @@ public:
         None,
         RepeatingSample,
         LinearInterpolation,
-        AutoregressiveModel
+        SlowAutoregressiveModel,
+        AutoregressiveModel,
     };
 
     static std::unique_ptr<ErasureConcealer> create(ConcealmentImplementation impl, Logger &log, std::optional<std::string> debug_filename);
