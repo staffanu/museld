@@ -88,9 +88,12 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
                 efm_demodulator.demodulate(input_buffer, reclocked_data);
 
                 processed_input_blocks++;
-                efm_decoder.decode(reclocked_data, output_with_erasures,
-                    processed_input_blocks % (int)(input_sample_frequency / block_size) == 0);
-
+                bool log_now = processed_input_blocks % (int)(input_sample_frequency / block_size) == 0;
+                efm_decoder.decode(reclocked_data, output_with_erasures, log_now);
+                if (log_now) {
+                    fsync(out_fd);
+                    fsync(STDERR_FILENO);
+                }
                 std::vector<TwoChannelSample> output = erasure_concealer->processSamples(output_with_erasures);
 
                 if (write(out_fd, output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
@@ -154,8 +157,8 @@ int main(int argc, char *argv[]) {
     auto log_selection = Logger::c_log_warn;
     std::optional<InputFormat> input_format_option = std::nullopt;
     double input_sample_frequency = 40e6;
-    int out_fd = 1;
-    uint32_t block_size = 16 * 1024;
+    int out_fd = STDOUT_FILENO;
+    uint32_t block_size = 1024 * 1024;
     bool use_simd = FirFilterStage::simdSupported();
     InputType input_type = Ac3;
     double initial_seek_seconds = 0;
