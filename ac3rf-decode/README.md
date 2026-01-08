@@ -47,6 +47,7 @@ In Windows, I've compiled using [MSYS2](https://www.msys2.org).  I used the UCRT
 installing MSYS2 there should be a shortcut or menu entry to start a UCRT64 environment bash shell.
 
 ```console
+pacman -S git
 pacman -S mingw-w64-ucrt-x86_64-cmake
 pacman -S mingw-w64-ucrt-x86_64-gcc
 pacman -S mingw-w64-ucrt-x86_64-eigen3
@@ -106,6 +107,14 @@ output of some players), RF (the raw signal from te pickup of a modified player)
 --efm-t-values also implicitly sets the input file type to unsigned bytes.
 
 ```bash
+--resample <target sample frequency>
+```
+Instead of decoding the input, the input is resampled to the specified target sample frequency
+using a fractional resampler.  The output is written in uint8 format.
+For general resampling operations there are better tools,
+but I use this for development.
+
+```bash
 --decimation <log2 of decimation factor>
 ```
 Decimates the input to the EFM decoder by a factor of 2^[log2 of decimation factor].
@@ -115,8 +124,9 @@ that keeps the sample rate before the fractional resampler over 8 MHz.
 ```bash
 --adaptive-filter-size <size>
 ```
-Enables adaptive filtering of the EFM signal.  Default is 3.  
-Reasonable values are 2 and up; over 15 is probably overkill.
+Enables adaptive filtering of the EFM signal.  Default is 3.
+A value of 0 disables adaptive filtering.
+Reasonable values for the filter are 2 and up; over 15 is probably overkill.
 Try increasing this to 9 or 11 if there are lots of errors, which might be
 caused by a distorted input signal.
 
@@ -133,7 +143,7 @@ The file contains binary float pairs. The first float in every pair is the symbo
 the Mueller-Muller timing detector, and the second is the computed timing error.
 
 ```bash
---error-concealment <repeat|lp|ar|sar|none>
+--error-concealment <repeat|li|ar|sar|none>
 ```
 For EFM decoding, determines how residual erasures after the CIRC decoder are handled.
 
@@ -163,18 +173,27 @@ If no filename is given input is read from stdin.
 ### Examples
 
 Pipe the output of the AC3RF demodulator to [ffplay](https://ffmpeg.org/ffplay.html):
-> ./cmake-build-release/ac3rf-decode --sample-freq 24.583e6 --uint8 rf-ac3.24.583MHz.u8 | ffplay -f ac3 -i pipe:
+```bash
+./cmake-build-release/ac3rf-decode --sample-freq 24.583e6 --uint8 rf-ac3.24.583MHz.u8 | ffplay -f ac3 -i pipe:
+```
 
 Pipe the output of the EFM decoder to play (from the SoX package):
-> ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 capture.lds | play -t raw -c 2 -r 44100 -b 16 -e signed-integer -
+```bash
+./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 capture.lds | play -t raw -c 2 -r 44100 -b 16 -e signed-integer -
+```
 
 Pipe the output of the EFM decoder to ffplay:
-> ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 capture.lds | ffplay -f s16le -ar 44100 -ch_layout stereo -i pipe:
+```bash
+./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 capture.lds | ffplay -f s16le -ar 44100 -ch_layout stereo -i pipe:
+```
 
 Pipe the output of the EFM decoder to ffplay (for EFM encoded DTS):
-> ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 --error-concealment none video.ldf | ffplay -f dts -i pipe:
+```bash
+./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 --error-concealment none video.ldf | ffplay -f dts -i pipe:
+```
 
 Create a raw sample file using the EFM decoder, and convert it to a WAV file:
-> ./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 --output-filename output.pcm capture.lds
-
-> ffmpeg -f s16le -ar 44100 -ch_layout stereo -i output.pcm output.wav
+```bash
+./cmake-build-release/ac3rf-decode --efm-rf --sample-freq 40e6 --output-filename output.pcm capture.lds
+ffmpeg -f s16le -ar 44100 -ch_layout stereo -i output.pcm output.wav
+```

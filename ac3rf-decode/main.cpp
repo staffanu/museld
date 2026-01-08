@@ -25,19 +25,21 @@
 #include "efm/concealment/ErasureConcealer.h"
 #include "Version.h"
 
-enum InputType {
+enum Operation {
     Ac3,
     Efm,
     EfmRf,
     EfmTValues,
+    Resample,
 };
 
-void demodulateFile(Logger &logger, InputType input_type, InputFormat input_format, double initial_seek_seconds,
+void processFile(Logger &logger, Operation input_type, InputFormat input_format, double initial_seek_seconds,
     double input_sample_frequency,
     int in_fd, uint32_t block_size, int out_fd, bool use_simd,
     std::optional<int> efm_log2_decimation_opt,
     int efm_adaptive_filter_size, std::optional<std::string> efm_retiming_debug_filename,
-    ErasureConcealer::ConcealmentImplementation concealment_impl) {
+    ErasureConcealer::ConcealmentImplementation concealment_impl,
+    double target_sample_frequency) {
 
     InputReader *reader;
     switch (input_format) {
@@ -54,25 +56,11 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
         reader->seek((off_t)(input_sample_frequency * initial_seek_seconds));
     auto *input_buffer = new float[block_size];
 
-    if (false) {
-        FractionalResampler resampler(block_size);
-        double step_size = input_sample_frequency / 24.58333e6;
-        uint8_t samples[block_size];
-        float s;
-        while (reader->readFloats(input_buffer) == reader->block_size()) {
-            resampler.updateInput(input_buffer);
-            int i = 0;
-            while (resampler.advanceTimeAndResample(step_size, s))
-                samples[i++] = 128 + (int)(s / 256.0f);
-            if (write(out_fd, samples, i) == -1)
-                throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
-        }
-        exit(0);
-    }
-
     switch (input_type) {
         case Efm:
         case EfmRf: {
+            logger.info(eApplication,
+                std::format("Processing EFM using input sample frequency {} MHz", input_sample_frequency / 1e6));
             if (input_sample_frequency < 4.3218e6)
                 throw std::runtime_error("Efm input sample frequency must be at least 4.3218 MHz");
 
@@ -109,6 +97,8 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
         }
 
         case EfmTValues: {
+            logger.info(eApplication, "Processing EFM t-values");
+
             EfmDecoder efm_decoder(logger);
             std::unique_ptr<ErasureConcealer> erasure_concealer =
                 ErasureConcealer::create(concealment_impl, logger, std::nullopt);
@@ -141,6 +131,9 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
         }
 
         case Ac3: {
+            logger.info(eApplication,
+                std::format("Processing AC3 using input sample frequency {} MHz", input_sample_frequency / 1e6));
+
             Ac3RfDemodulator ac3Demodulator(logger, input_sample_frequency, reader->block_size(), out_fd, use_simd);
 
             while (reader->readFloats(input_buffer) == reader->block_size()) {
@@ -149,6 +142,24 @@ void demodulateFile(Logger &logger, InputType input_type, InputFormat input_form
                         throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
             }
             logger.info(eAudio, ac3Demodulator.reedSolomonStatistics());
+            break;
+        }
+
+        case Resample: {
+            logger.info(eApplication,
+                std::format("Resampling input at {} MHz to {} MHz", input_sample_frequency / 1e6, target_sample_frequency / 1e6));
+            FractionalResampler resampler(block_size);
+            double step_size = input_sample_frequency / target_sample_frequency;
+            uint8_t samples[block_size];
+            float s;
+            while (reader->readFloats(input_buffer) == reader->block_size()) {
+                resampler.updateInput(input_buffer);
+                int i = 0;
+                while (resampler.advanceTimeAndResample(step_size, s))
+                    samples[i++] = (int)s;
+                if (write(out_fd, samples, i) == -1)
+                    throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
+            }
             break;
         }
     }
@@ -161,10 +172,11 @@ int main(int argc, char *argv[]) {
     auto log_selection = Logger::c_log_warn;
     std::optional<InputFormat> input_format_option = std::nullopt;
     double input_sample_frequency = 40e6;
+    double target_sample_frequency = -1;
     int out_fd = STDOUT_FILENO;
     uint32_t block_size = 1024 * 1024;
     bool use_simd = FirFilterStage::simdSupported();
-    InputType input_type = Ac3;
+    Operation operation = Ac3;
     double initial_seek_seconds = 0;
     std::optional<int> efm_log2_decimation = std::nullopt;
     int efm_adaptive_filter_size = 3;
@@ -219,14 +231,18 @@ int main(int argc, char *argv[]) {
         use_simd = false;
     });
     options.emplace_back("--efm", [&] () mutable  -> void {
-        input_type = Efm;
+        operation = Efm;
     });
     options.emplace_back("--efm-rf", [&] () mutable  -> void {
-        input_type = EfmRf;
+        operation = EfmRf;
     });
     options.emplace_back("--efm-t-values", [&] () mutable  -> void {
         input_format_option = std::make_optional(eUint8);
-        input_type = EfmTValues;
+        operation = EfmTValues;
+    });
+    options.emplace_back("--resample", [&] () mutable  -> void {
+        target_sample_frequency = stod(*(it++));
+        operation = Resample;
     });
     options.emplace_back("--decimation", [&] () mutable  -> void {
         efm_log2_decimation = stoi(*(it++));
@@ -335,8 +351,8 @@ int main(int argc, char *argv[]) {
                 Logger log(log_selection);
                 log.debug(eApplication, std::format("ac3rf-decode version {}", AC3RF_DECODE_VERSION));
                 log.info(eApplication, std::format("Processing input file {}", filename));
-                demodulateFile(log, input_type, input_format, initial_seek_seconds, input_sample_frequency, fd, block_size, out_fd, use_simd,
-                    efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl);
+                processFile(log, operation, input_format, initial_seek_seconds, input_sample_frequency, fd, block_size, out_fd, use_simd,
+                    efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl, target_sample_frequency);
 
                 close(fd);
                 it++;
@@ -348,8 +364,8 @@ int main(int argc, char *argv[]) {
                 throw std::runtime_error("Input format must be given for stdin");
 
             log.info(eApplication, std::format("Processing stdin"));
-            demodulateFile(log, input_type, input_format_option.value(), initial_seek_seconds, input_sample_frequency, 0, block_size, out_fd, use_simd,
-                efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl);
+            processFile(log, operation, input_format_option.value(), initial_seek_seconds, input_sample_frequency, 0, block_size, out_fd, use_simd,
+                efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl, target_sample_frequency);
         }
         if (out_fd != 1)
             close(out_fd);
