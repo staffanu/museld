@@ -45,13 +45,11 @@ cmake --build build-release
 
 In Windows, I've compiled using [MSYS2](https://www.msys2.org).  I used the UCRT64 environment: after
 installing MSYS2 there should be a shortcut or menu entry to start a UCRT64 environment bash shell.
+There will be confirmation prompts for installing packages, so copy this line by line!
 
 ```console
 pacman -S git
-pacman -S mingw-w64-ucrt-x86_64-cmake
-pacman -S mingw-w64-ucrt-x86_64-gcc
-pacman -S mingw-w64-ucrt-x86_64-eigen3
-pacman -S mingw-w64-ucrt-x86_64-flac
+pacman -S $MINGW_PACKAGE_PREFIX-{cmake,gcc,eigen3,flac}
 git clone https://bitbucket.org/staffanulfberg/ldaudio.git
 cd ldaudio/ac3rf-decode
 git submodule update --init --recursive
@@ -160,6 +158,12 @@ than the values in erasure positions, which are sometimes correct.
 --output-filename <filename>
 ```
 Sets the output filename.  Default is to write the output to stdout.
+
+```bash
+--version
+```
+Prints the version of the program.  This is the output from `git describe --always --dirty` when the program was built.
+The is normally just part of the md5 sum of the latest commit, since there are currently no real release schedule in place.
 
 ```bash
 [filename]
