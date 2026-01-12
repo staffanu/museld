@@ -5,6 +5,7 @@
 #ifndef MUSECPP_LOGGER_H
 #define MUSECPP_LOGGER_H
 
+#include <iostream>
 #include <string>
 #include <algorithm>
 #include <map>
@@ -44,8 +45,9 @@ public:
     // The log_priority_per_category map contains the minimum priority for each category
     // to produce a log message.  eError messages are always logged, so passing an empty
     // map logs all eError logs.
-    explicit Logger(std::map<LogCategoryFlags, LogPriority> log_priority_per_category) :
+    explicit Logger(std::map<LogCategoryFlags, LogPriority> log_priority_per_category, std::ostream &log_stream = std::cerr) :
     m_log_priority_per_category(std::move(log_priority_per_category)),
+    m_log_stream(log_stream),
     m_minimum_priority(eDebug),
     m_mutex()
     {
@@ -72,11 +74,14 @@ public:
     }
     bool isEnabled(LogPriority priority, LogCategoryFlags categorization) const;
 
+    void sync();
+
 private:
     static const std::map<int, std::string> c_priority_names;
     static const std::map<int, std::string> c_category_names;
 
-    std::map<LogCategoryFlags, LogPriority> m_log_priority_per_category;
+    const std::map<LogCategoryFlags, LogPriority> m_log_priority_per_category;
+    std::ostream &m_log_stream;
     LogPriority m_minimum_priority;
     std::mutex m_mutex;
 };

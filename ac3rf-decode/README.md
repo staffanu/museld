@@ -157,7 +157,14 @@ than the values in erasure positions, which are sometimes correct.
 ```bash
 --output-filename <filename>
 ```
-Sets the output filename.  Default is to write the output to stdout.
+Sets the output filename.  Default is to write the output to stdout.  Stdout can also be explicitly
+specified using the special filename "-".  If stdout is a terminal, the program will not write
+output to stdout unless "-" is specified.
+
+```bash
+--log-filename <filename>
+```
+Sets the filename used for logging.  Default is to write the log to stderr.
 
 ```bash
 --version

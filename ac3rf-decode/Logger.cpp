@@ -107,7 +107,7 @@ void Logger::log(LogPriority priority, LogCategoryFlags categorization, const st
 
         if (do_log) {
             std::unique_lock<std::mutex> lock(m_mutex);
-            cerr << ss.str() << "): " << message << endl;
+            m_log_stream << ss.str() << "): " << message << endl;
         }
     }
 }
@@ -115,4 +115,9 @@ void Logger::log(LogPriority priority, LogCategoryFlags categorization, const st
 bool Logger::isEnabled(LogPriority priority, LogCategoryFlags category) const {
     auto it = m_log_priority_per_category.find(category);
     return it != m_log_priority_per_category.cend() && it->second <= priority;
+}
+
+void Logger::sync() {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_log_stream.flush();
 }

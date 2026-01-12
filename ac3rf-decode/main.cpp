@@ -2,6 +2,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <iostream>
+#include <fstream>
 #include <functional>
 #include <filesystem>
 #include <format>
@@ -84,7 +85,7 @@ void processFile(Logger &logger, Operation input_type, InputFormat input_format,
                 efm_decoder.decode(reclocked_data, output_with_erasures, log_now);
                 if (log_now) {
                     fsync(out_fd);
-                    fsync(STDERR_FILENO);
+                    logger.sync();
                 }
                 std::vector<TwoChannelSample> output = erasure_concealer->processSamples(output_with_erasures);
 
@@ -174,6 +175,8 @@ int main(int argc, char *argv[]) {
     double input_sample_frequency = 40e6;
     double target_sample_frequency = -1;
     int out_fd = STDOUT_FILENO;
+    bool force_stdout = false;
+    std::ostream *log_stream = &std::cerr;
     uint32_t block_size = 1024 * 1024;
     bool use_simd = FirFilterStage::simdSupported();
     Operation operation = Ac3;
@@ -276,11 +279,16 @@ int main(int argc, char *argv[]) {
         auto output_filename = *it++;
         if (out_fd != 1)
             close(out_fd);
-        out_fd = open(output_filename.c_str(),
-            O_WRONLY | O_TRUNC | O_CREAT | O_BINARY,
-            S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-        if (out_fd == -1)
-            throw std::runtime_error(std::format("Unable to open output file {}: {}", output_filename, strerror(errno)));
+        if (*it == "-") {
+            out_fd = STDOUT_FILENO;
+            force_stdout = true;
+        } else {
+            out_fd = open(output_filename.c_str(),
+                O_WRONLY | O_TRUNC | O_CREAT | O_BINARY,
+                S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+            if (out_fd == -1)
+                throw std::runtime_error(std::format("Unable to open output file {}: {}", output_filename, strerror(errno)));
+        }
     });
     options.emplace_back("--log", [&] () mutable -> void {
         int level_number = stod(*it++);
@@ -304,6 +312,17 @@ int main(int argc, char *argv[]) {
             default: throw std::runtime_error("Invalid log level");
         }
         log_selection = level;
+    });
+    options.emplace_back("--log-filename", [&] () mutable  -> void {
+        auto log_filename = *it++;
+        if (log_stream != &std::cerr) {
+            delete log_stream;
+            log_stream = nullptr;
+        }
+        const auto file_stream = new std::ofstream(log_filename);
+        if (!file_stream->good())
+            throw std::runtime_error(std::format("Unable to open log file {}", log_filename));
+        log_stream = file_stream;
     });
     options.emplace_back("--help", [&] () mutable -> void {
         usage();
@@ -348,7 +367,10 @@ int main(int argc, char *argv[]) {
                 if (fd == -1)
                     throw std::runtime_error(std::format("Error opening input file {}: {}", filename, strerror(errno)));
 
-                Logger log(log_selection);
+                if (out_fd == STDOUT_FILENO && isatty(out_fd) && !force_stdout)
+                    throw std::runtime_error("Writing output to stdout requires non-terminal stdout, or force using \"-\" output filename");
+
+                Logger log(log_selection, *log_stream);
                 log.debug(eApplication, std::format("ac3rf-decode version {}", AC3RF_DECODE_VERSION));
                 log.info(eApplication, std::format("Processing input file {}", filename));
                 processFile(log, operation, input_format, initial_seek_seconds, input_sample_frequency, fd, block_size, out_fd, use_simd,
@@ -359,7 +381,7 @@ int main(int argc, char *argv[]) {
             }
         }
         if (!filename_found && !did_show_help_or_version) {
-            Logger log(log_selection);
+            Logger log(log_selection, *log_stream);
             if (!input_format_option.has_value())
                 throw std::runtime_error("Input format must be given for stdin");
 
@@ -369,6 +391,8 @@ int main(int argc, char *argv[]) {
         }
         if (out_fd != 1)
             close(out_fd);
+        if (log_stream != &std::cerr)
+            delete log_stream;
     } catch (const std::exception &x) {
         Logger log(Logger::c_log_all);
         log.error(eApplication, x.what());
