@@ -65,15 +65,18 @@ The following command line options are supported:
 --uint8 --sint8 --uint16 --sint16 --lds --flac --ldf
 ```
 Use one of these options to Specify the input format.  Can be omitted if the input filename ends with ".u8",
-".s8", ".u16", ".s16", ".lds", ".flac", or ".ldf" respectively.  For reading from stdin the format
-always has to be specified.
+".s8", ".u16", ".s16", ".lds", ".flac", or ".ldf" respectively, and the file is in the corresponding format.
+For reading from stdin the format always has to be specified.
 
 "lds" and "ldf" are file formats used by the
-[ld-decode](https://github.com/happycube/ld-decode) toolchain. "lds" files are
-10 bits packed so that 4 10-bit samples occupies 5 bytes.
+[ld-decode](https://github.com/happycube/ld-decode) toolchain. "lds" files are 10 bits packed so that 4 10-bit samples occupies 5 bytes.
 "ldf" files have 16-bit samples compressed using FLAC, wrapped in an Ogg container.
 
 "flac" files have 8-bit or 16-bit samples compressed using FLAC.
+
+It seems that there are "ldf" files that use plain FLAC for storage. In this case "--flac" has to be specified,
+or the program tries to read the file as FLAC inside an Ogg container.  To find out which is the case,
+run `file` on the file.
 
 ```bash
 --sample-freq <frequency>

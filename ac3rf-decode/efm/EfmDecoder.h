@@ -94,12 +94,14 @@ private:
     std::array<ByteWithErasureFlag *, 24> m_output_delay_lines;
     std::array<int, 24> m_output_delay_lines_ix;
 
+    int m_total_efm_frame_count;
     int m_efm_frame_count_last_second;
     long m_total_time_us_last_second;
     int m_total_erasures_in_last_second;
     int m_total_erasures_past_c1_last_second;
     int m_total_erasures_out_last_second;
-    int m_total_q_subcode_crc_failures_last_second;
+    int m_subcodes_last_second;
+    int m_q_subcode_crc_failures_last_second;
 };
 
 #endif //MUSECPP_EFMDECODER_H

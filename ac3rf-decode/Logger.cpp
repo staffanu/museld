@@ -82,22 +82,25 @@ void Logger::log(LogPriority priority, LogCategoryFlags categorization, const st
     int flags = categorization;
     if (priority >= m_minimum_priority) {
         auto tp = chrono::time_point_cast<chrono::milliseconds>(chrono::system_clock::now());
-        auto ms = tp.time_since_epoch().count() % milli::den;
         ostringstream ss;
-        ss << std::format("{:%Y-%m-%d %H:%M:%S}.{:03d} [{}] (",
-                          tp, ms, c_priority_names.at(priority));
+        ss << std::format("{:%Y-%m-%d %H:%M:%S} [{}] ",
+                          tp, c_priority_names.at(priority));
+        if (m_log_category)
+            ss << "(";
         bool first = true;
         bool do_log = false;
         for (int bit = 1; flags != 0; bit <<= 1, flags >>= 1) {
             if (flags & 1) {
-                if (!first)
-                    ss << " ";
-                auto cat_str = c_category_names.find(bit);
-                if (cat_str == c_category_names.cend())
-                    ss << "unknown category " << bit;
-                else
-                    ss << cat_str->second;
-                first = false;
+                if (m_log_category) {
+                    if (!first)
+                        ss << " ";
+                    auto cat_str = c_category_names.find(bit);
+                    if (cat_str == c_category_names.cend())
+                        ss << "unknown category " << bit;
+                    else
+                        ss << cat_str->second;
+                    first = false;
+                }
                 auto cat_level = m_log_priority_per_category.find((LogCategoryFlags)bit);
                 if (cat_level == m_log_priority_per_category.cend() && priority == eError ||
                     cat_level != m_log_priority_per_category.cend() && priority >= cat_level->second)
@@ -106,8 +109,10 @@ void Logger::log(LogPriority priority, LogCategoryFlags categorization, const st
         }
 
         if (do_log) {
+            if (m_log_category)
+                ss << "): ";
             std::unique_lock<std::mutex> lock(m_mutex);
-            m_log_stream << ss.str() << "): " << message << endl;
+            m_log_stream << ss.str() << message << endl;
         }
     }
 }

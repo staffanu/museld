@@ -130,12 +130,14 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
           m_c1_to_c2_delay_lines_ix{},
           m_output_delay_lines{},
           m_output_delay_lines_ix{},
+          m_total_efm_frame_count(0),
           m_efm_frame_count_last_second(0),
           m_total_time_us_last_second(0),
           m_total_erasures_in_last_second(0),
           m_total_erasures_past_c1_last_second(0),
           m_total_erasures_out_last_second(0),
-          m_total_q_subcode_crc_failures_last_second(0)
+          m_subcodes_last_second(0),
+          m_q_subcode_crc_failures_last_second(0)
 {
     for (int i = 0; i < m_initial_delay_lines.size(); i++)
         m_initial_delay_lines[i] = new ByteWithErasureFlag[c_initial_delays[i].first + 1];
@@ -235,6 +237,7 @@ void EfmDecoder::decode(const std::vector<float> &data, std::vector<TwoChannelSa
                 if (m_byte_index == 32) {
                     handleFrame(output_samples);
                     handleSubcode();
+                    m_total_efm_frame_count++;
                     m_efm_frame_count_last_second++;
                 }
                 m_bit_index = 0;
@@ -250,21 +253,23 @@ void EfmDecoder::decode(const std::vector<float> &data, std::vector<TwoChannelSa
 
     if (log_now) {
         m_log.info(eAudio | ePerformance,
-                   std::format("Time spent decoding last second: {:.1f} ms; efm frame count: {}, "
-                               "input erasure rate: {:.0f} ppm, past c1 erasure rate: {:.0f} ppm, output erasure rate: {:.0f} ppm, "
-                               "q subcode crc failure rate: {:.1f} %",
+                   std::format("EFM time = {:.2f} s. Time spent decoding: {:.1f} ms; frame count: {}, "
+                               "input erasures: {:.0f} ppm, past c1 erasures: {:.0f} ppm, output erasures: {:.0f} ppm, "
+                               "q crc failures: {:.1f} %",
+                               m_total_efm_frame_count / 7350.0,
                                (double)m_total_time_us_last_second / 1000.0,
                                m_efm_frame_count_last_second,
                                1000000.0 * m_total_erasures_in_last_second / m_efm_frame_count_last_second / 33,
                                1000000.0 * m_total_erasures_past_c1_last_second / m_efm_frame_count_last_second / 28,
                                1000000.0 * m_total_erasures_out_last_second / m_efm_frame_count_last_second / 24,
-                               100.0 * m_total_q_subcode_crc_failures_last_second / m_efm_frame_count_last_second * 98));
+                               100.0 * m_q_subcode_crc_failures_last_second / m_subcodes_last_second));
         m_efm_frame_count_last_second = 0;
         m_total_time_us_last_second = 0;
         m_total_erasures_in_last_second = 0;
         m_total_erasures_past_c1_last_second = 0;
         m_total_erasures_out_last_second = 0;
-        m_total_q_subcode_crc_failures_last_second = 0;
+        m_subcodes_last_second = 0;
+        m_q_subcode_crc_failures_last_second = 0;
     }
 }
 
@@ -280,6 +285,7 @@ void EfmDecoder::handleSubcode() {
         return;
 
     // we have collected a complete 96 bit subcode
+    m_subcodes_last_second++;
 
     auto get_bit = [sc = &m_subcode](int i, char channel) -> bool {
         int bit = 7 - (channel - 'P');
@@ -330,7 +336,7 @@ void EfmDecoder::handleSubcode() {
                 "Broadcasting"));
         }
     } else
-        m_total_q_subcode_crc_failures_last_second++;
+        m_q_subcode_crc_failures_last_second++;
 }
 
 // ML estimation of the received symbol -- used only when we do not have a perfect match

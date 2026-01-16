@@ -45,11 +45,11 @@ public:
     // The log_priority_per_category map contains the minimum priority for each category
     // to produce a log message.  eError messages are always logged, so passing an empty
     // map logs all eError logs.
-    explicit Logger(std::map<LogCategoryFlags, LogPriority> log_priority_per_category, std::ostream &log_stream = std::cerr) :
+    Logger(std::map<LogCategoryFlags, LogPriority> log_priority_per_category, std::ostream &log_stream = std::cerr, bool log_category = true) :
     m_log_priority_per_category(std::move(log_priority_per_category)),
     m_log_stream(log_stream),
-    m_minimum_priority(eDebug),
-    m_mutex()
+    m_log_category(log_category),
+    m_minimum_priority(eDebug)
     {
         m_minimum_priority = std::min_element(
                 m_log_priority_per_category.cbegin(), m_log_priority_per_category.cend(),
@@ -82,6 +82,7 @@ private:
 
     const std::map<LogCategoryFlags, LogPriority> m_log_priority_per_category;
     std::ostream &m_log_stream;
+    const bool m_log_category;
     LogPriority m_minimum_priority;
     std::mutex m_mutex;
 };
