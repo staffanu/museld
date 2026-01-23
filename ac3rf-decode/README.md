@@ -86,7 +86,9 @@ The the sample frequency in Hz.  Default is 40 MHz (written as "40000000" or "40
 ```bash
 -- seek <seconds>
 ```
-Seeks to the specified time in the input file before starting to decode.
+Seeks to the specified time in the input file before starting to decode.  Notice that FLAC files 
+cannot be seeked unless they contain a seek table in their metadata.  This can be added using the
+`flac` command line tool (e.g., `--seekpoint=100x` for 100 evenly spaced seek points).
 
 ```bash
 --log <level>

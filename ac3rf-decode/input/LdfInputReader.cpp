@@ -4,6 +4,7 @@
 
 #include <unistd.h>
 #include <cassert>
+#include <sys/stat.h>
 #include "FLAC++/decoder.h"
 #include "LdfInputReader.h"
 
@@ -22,12 +23,20 @@ void LdfInputReader::initialize() {
     auto status = m_format == eFlac ? init() : init_ogg();
     if (status != FLAC__STREAM_DECODER_INIT_STATUS_OK)
         throw std::runtime_error(std::format("Error initializing decoder: {}", FLAC__StreamDecoderInitStatusString[status]));
+
+    // Perform first processing so we can seek before readFloats is called
+    FLAC__StreamDecoderState s;
+    while (s = get_state(), s != FLAC__STREAM_DECODER_READ_FRAME && s != FLAC__STREAM_DECODER_SEARCH_FOR_FRAME_SYNC && s != FLAC__STREAM_DECODER_END_OF_STREAM)
+        if (!process_single())
+            throw std::runtime_error(std::format("libFLAC++ process_single: {}",
+                FLAC__StreamDecoderErrorStatusString[get_state()]));
 }
 
 void LdfInputReader::seek(off_t no_samples) {
-    throw std::runtime_error("LDF files cannot be seeked");
+    if (!seek_absolute(m_sample_position + no_samples))
+        throw std::runtime_error("libflac: seek_absolute failed");
+    m_sample_position += no_samples;
 }
-
 
 int LdfInputReader::readFloats(float *f) {
     int filled_floats = 0;
@@ -45,6 +54,7 @@ int LdfInputReader::readFloats(float *f) {
         for (int i = 0; i < n; i++)
             f[filled_floats++] = (int16_t)m_decoded_samples[m_flac_block_read_count++];
     }
+    m_sample_position += m_block_size;
     return m_block_size;
 }
 
@@ -55,8 +65,8 @@ FLAC__StreamDecoderReadStatus LdfInputReader::read_callback(FLAC__byte buffer[],
     *bytes = r;
     if (r == 0)
         return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
-    else
-        return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
+
+    return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
 }
 
 FLAC__StreamDecoderWriteStatus LdfInputReader::write_callback(const FLAC__Frame *frame, const FLAC__int32 *const buffer[]) {
@@ -64,8 +74,11 @@ FLAC__StreamDecoderWriteStatus LdfInputReader::write_callback(const FLAC__Frame 
         m_decoded_samples = new uint16_t[frame->header.blocksize];
         m_flac_allocated_size = frame->header.blocksize;
     } else if ( frame->header.blocksize > m_flac_allocated_size) {
-        throw std::runtime_error("LDF block size increased within file");
-    }
+        delete[] m_decoded_samples;
+        m_decoded_samples = new uint16_t[frame->header.blocksize];
+        m_flac_allocated_size = frame->header.blocksize;
+    } else if (m_flac_allocated_size != m_flac_used_size)
+        throw std::runtime_error("Unexpected call to write_callback");
 
     for (int i = 0; i < frame->header.blocksize; i++)
         m_decoded_samples[i] = buffer[0][i];
@@ -88,4 +101,38 @@ void LdfInputReader::metadata_callback(const ::FLAC__StreamMetadata *metadata) {
 
 void LdfInputReader::error_callback(::FLAC__StreamDecoderErrorStatus status) {
     throw std::runtime_error(std::format("libFLAC++ error_callback: {}", FLAC__StreamDecoderErrorStatusString[status]));
+}
+
+FLAC__StreamDecoderTellStatus LdfInputReader::tell_callback(FLAC__uint64 *absolute_byte_offset) {
+    *absolute_byte_offset = lseek(m_fd, 0, SEEK_CUR);;
+    if (*absolute_byte_offset == -1) {
+        if (errno == ESPIPE)
+            return FLAC__STREAM_DECODER_TELL_STATUS_UNSUPPORTED;
+        return FLAC__STREAM_DECODER_TELL_STATUS_ERROR;
+    }
+    return FLAC__STREAM_DECODER_TELL_STATUS_OK;
+}
+
+FLAC__StreamDecoderSeekStatus LdfInputReader::seek_callback(FLAC__uint64 absolute_byte_offset) {
+    int r = lseek(m_fd, (off_t)absolute_byte_offset, SEEK_SET);
+    if (r == -1) {
+        if (errno == ESPIPE)
+            return FLAC__STREAM_DECODER_SEEK_STATUS_UNSUPPORTED;
+        return FLAC__STREAM_DECODER_SEEK_STATUS_ERROR;
+    }
+    return FLAC__STREAM_DECODER_SEEK_STATUS_OK;
+}
+
+FLAC__StreamDecoderLengthStatus LdfInputReader::length_callback(FLAC__uint64 *stream_length) {
+    struct stat stats{};
+    if(fstat(m_fd, &stats) != 0)
+        return FLAC__STREAM_DECODER_LENGTH_STATUS_ERROR;
+    else {
+        *stream_length = (FLAC__uint64)stats.st_size;
+        return FLAC__STREAM_DECODER_LENGTH_STATUS_OK;
+    }
+}
+
+bool LdfInputReader::eof_callback() {
+    return false; // TODO actually check!
 }
