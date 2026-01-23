@@ -61,6 +61,7 @@ std::vector<TwoChannelSampleWithErasureFlags> ArErasureConcealer::processSamples
                     predicted += m_output_history[i].samples[ch] * m_a[ch][i];
                 if (!m_error_history[ch].empty())
                     predicted += m_error_history[ch][(m_index - m_last_valid_index[ch]) % m_error_history[ch].size()];
+                predicted *= 0.99;
 
                 if (output_sample.erased[ch]) {
                     output_sample.samples[ch] = (int16_t)std::clamp(std::round(predicted), -32768.0, 32767.0);
