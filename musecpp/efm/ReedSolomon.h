@@ -98,8 +98,8 @@ private:
         return syndromes;
     }
 
-    void eraseAll(std::vector<ByteWithErasureFlag> const &data) {
-        for (auto b: data)
+    void eraseAll(std::vector<ByteWithErasureFlag> &data) {
+        for (auto &b: data)
             b.setErased(true);
     }
 

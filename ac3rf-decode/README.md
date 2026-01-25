@@ -91,6 +91,11 @@ cannot be seeked unless they contain a seek table in their metadata.  This can b
 `flac` command line tool (e.g., `--seekpoint=100x` for 100 evenly spaced seek points).
 
 ```bash
+--duration <seconds>
+```
+Stops decoding after the specified duration.
+
+```bash
 --log <level>
 ```
 Sets the log level.  Default is warn (2).  Supported levels are: 0 (off), 1 (error), 2 (warn), 3 (info), 4 (debug). 

@@ -165,10 +165,10 @@ EfmDecoder::~EfmDecoder() {
         delete[] p;
 }
 
-void EfmDecoder::decode(const std::vector<float> &data, std::vector<TwoChannelSampleWithErasureFlags> &output_samples, bool log_now) {
+std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vector<float> &data, bool log_now) {
     auto t0 = chrono::high_resolution_clock::now();
 
-    output_samples.clear();
+    std::vector<TwoChannelSampleWithErasureFlags> output_samples;
     for (float symbol : data) {
         bool toggle = symbol * m_prev_symbol < 0;
         m_total_bits += 1;
@@ -271,6 +271,7 @@ void EfmDecoder::decode(const std::vector<float> &data, std::vector<TwoChannelSa
         m_subcodes_last_second = 0;
         m_q_subcode_crc_failures_last_second = 0;
     }
+    return output_samples;
 }
 
 std::string EfmDecoder::reedSolomonStatistics() {

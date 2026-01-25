@@ -25,7 +25,7 @@ public:
     EfmDecoder(EfmDecoder &&) = delete;
     EfmDecoder &operator=(EfmDecoder &&) = delete;
 
-    void decode(const std::vector<float> &data, std::vector<TwoChannelSampleWithErasureFlags> &output_samples, bool log_now);
+    std::vector<TwoChannelSampleWithErasureFlags> decode(const std::vector<float> &data, bool log_now);
     std::string reedSolomonStatistics();
 
 private:

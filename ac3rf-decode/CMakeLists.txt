@@ -84,6 +84,7 @@ add_executable(ac3rf-decode
         efm/concealment/LinearInterpolationErasureConcealer.cpp efm/concealment/LinearInterpolationErasureConcealer.h
         efm/concealment/RepeatingSampleErasureConcealer.cpp efm/concealment/RepeatingSampleErasureConcealer.h
         efm/concealment/ArErasureConcealer.cpp efm/concealment/ArErasureConcealer.h
+        efm/PopDetector.cpp efm/PopDetector.h
 )
 
 target_include_directories(ac3rf-decode

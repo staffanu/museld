@@ -8,7 +8,7 @@
 #include "util/Logger.h"
 
 void printData(std::vector<ByteWithErasureFlag> const &data) {
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < data.size(); i++) {
         std::cout << (int) data[i].byteValue();
         if (data[i].isErased())
             std::cout << "*";

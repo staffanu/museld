@@ -24,6 +24,7 @@
 #include "efm/EfmDecoder.h"
 #include "efm/TwoChannelSample.h"
 #include "efm/concealment/ErasureConcealer.h"
+#include "efm/PopDetector.h"
 #include "Version.h"
 
 enum Operation {
@@ -34,7 +35,8 @@ enum Operation {
     Resample,
 };
 
-void processFile(Logger &logger, Operation input_type, InputFormat input_format, double initial_seek_seconds,
+void processFile(Logger &logger, Operation input_type, InputFormat input_format,
+    double initial_seek_seconds, std::optional<double> duration_seconds,
     double input_sample_frequency,
     int in_fd, uint32_t block_size, int out_fd, bool use_simd,
     std::optional<int> efm_log2_decimation_opt,
@@ -72,22 +74,25 @@ void processFile(Logger &logger, Operation input_type, InputFormat input_format,
             EfmDecoder efm_decoder(logger);
             std::unique_ptr<ErasureConcealer> erasure_concealer =
                 ErasureConcealer::create(concealment_impl, logger, std::nullopt);
+            PopDetector pop_detector{};
 
             std::vector<float> reclocked_data;
-            std::vector<TwoChannelSampleWithErasureFlags> output_with_erasures;
             int processed_input_blocks = 0;
 
-            while (reader->readFloats(input_buffer) == reader->block_size()) {
+            while (reader->readFloats(input_buffer) == reader->block_size() &&
+                (!duration_seconds.has_value() || processed_input_blocks < duration_seconds.value() * input_sample_frequency / block_size)) {
+
                 efm_demodulator.demodulate(input_buffer, reclocked_data);
 
                 processed_input_blocks++;
                 bool log_now = processed_input_blocks % (int)(input_sample_frequency / block_size) == 0;
-                efm_decoder.decode(reclocked_data, output_with_erasures, log_now);
+                std::vector<TwoChannelSampleWithErasureFlags> decoded_samples = efm_decoder.decode(reclocked_data, log_now);
                 if (log_now) {
                     fsync(out_fd);
                     logger.sync();
                 }
-                std::vector<TwoChannelSample> output = erasure_concealer->processSamples(output_with_erasures);
+                std::vector<TwoChannelSampleWithErasureFlags> pop_detected_samples = pop_detector.processSamples(decoded_samples);
+                std::vector<TwoChannelSample> output = erasure_concealer->processSamples(pop_detected_samples);
 
                 if (write(out_fd, output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
                     throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
@@ -106,7 +111,6 @@ void processFile(Logger &logger, Operation input_type, InputFormat input_format,
 
             // Reading floats is "wrong" but this is a very unusual use case, so whatever makes the shortest code
             std::vector<float> reclocked_data;
-            std::vector<TwoChannelSampleWithErasureFlags> output_with_erasures;
             int processed_input_blocks = 0;
             float data = 1.f;
             while (reader->readFloats(input_buffer) == reader->block_size()) {
@@ -118,8 +122,8 @@ void processFile(Logger &logger, Operation input_type, InputFormat input_format,
                 }
 
                 processed_input_blocks++;
-                efm_decoder.decode(reclocked_data, output_with_erasures,
-                    processed_input_blocks % (int)(input_sample_frequency / block_size) == 0);
+                std::vector<TwoChannelSampleWithErasureFlags> output_with_erasures =
+                    efm_decoder.decode(reclocked_data, processed_input_blocks % (int)(input_sample_frequency / block_size) == 0);
 
                 std::vector<TwoChannelSample> output = erasure_concealer->processSamples(output_with_erasures);
 
@@ -137,10 +141,15 @@ void processFile(Logger &logger, Operation input_type, InputFormat input_format,
 
             Ac3RfDemodulator ac3Demodulator(logger, input_sample_frequency, reader->block_size(), out_fd, use_simd);
 
-            while (reader->readFloats(input_buffer) == reader->block_size()) {
+            int processed_input_blocks = 0;
+            while (reader->readFloats(input_buffer) == reader->block_size() &&
+                (!duration_seconds.has_value() || processed_input_blocks < duration_seconds.value() * input_sample_frequency / block_size)) {
+
                 for (auto output: ac3Demodulator.demodulate(input_buffer))
                     if (write(out_fd, output.data(), output.size()) == -1)
                         throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
+
+                processed_input_blocks++;
             }
             logger.info(eAudio, ac3Demodulator.reedSolomonStatistics());
             break;
@@ -181,6 +190,7 @@ int main(int argc, char *argv[]) {
     bool use_simd = FirFilterStage::simdSupported();
     Operation operation = Ac3;
     double initial_seek_seconds = 0;
+    std::optional<double> duration_seconds = std::nullopt;
     std::optional<int> efm_log2_decimation = std::nullopt;
     int efm_adaptive_filter_size = 3;
     std::optional<std::string> efm_retiming_debug_filename = std::nullopt;
@@ -223,6 +233,9 @@ int main(int argc, char *argv[]) {
     });
     options.emplace_back("--seek", [&] () mutable -> void {
         initial_seek_seconds = stod(*(it++));
+    });
+    options.emplace_back("--duration", [&] () mutable -> void {
+        duration_seconds = stod(*(it++));
     });
     options.emplace_back("--sample-freq", [&] () mutable  -> void {
         input_sample_frequency = stod(*(it++));
@@ -373,7 +386,7 @@ int main(int argc, char *argv[]) {
                 Logger log(log_selection, *log_stream, false);
                 log.debug(eApplication, std::format("ac3rf-decode version {}", AC3RF_DECODE_VERSION));
                 log.info(eApplication, std::format("Processing input file {}", filename));
-                processFile(log, operation, input_format, initial_seek_seconds, input_sample_frequency, fd, block_size, out_fd, use_simd,
+                processFile(log, operation, input_format, initial_seek_seconds, duration_seconds, input_sample_frequency, fd, block_size, out_fd, use_simd,
                     efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl, target_sample_frequency);
 
                 close(fd);
@@ -386,7 +399,7 @@ int main(int argc, char *argv[]) {
                 throw std::runtime_error("Input format must be given for stdin");
 
             log.info(eApplication, std::format("Processing stdin"));
-            processFile(log, operation, input_format_option.value(), initial_seek_seconds, input_sample_frequency, 0, block_size, out_fd, use_simd,
+            processFile(log, operation, input_format_option.value(), initial_seek_seconds, duration_seconds, input_sample_frequency, 0, block_size, out_fd, use_simd,
                 efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl, target_sample_frequency);
         }
         if (out_fd != 1)
