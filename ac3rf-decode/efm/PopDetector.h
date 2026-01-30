@@ -24,10 +24,15 @@ public:
     std::vector<TwoChannelSampleWithErasureFlags> processSamples(const std::vector<TwoChannelSampleWithErasureFlags> &samples);
 
 private:
+    // The number of samples on each side of the processed sample that are considered.
+    static constexpr int c_samples_per_side = 3;
+
     // Contains at least two samples that have already been processed.  These are the first samples of the vector.
     // Any other samples were not processed yet. Typically, this means we save 4 samples between calls, since the
     // two last samples can can be processed without knowing later samples.
     std::vector<TwoChannelSampleWithErasureFlags> m_saved_samples;
+
+    unsigned long m_processed_samples;
 };
 
 
