@@ -77,19 +77,21 @@ void processFile(Logger &logger, Operation input_type, InputFormat input_format,
             PopDetector pop_detector{};
 
             std::vector<float> reclocked_data;
-            int processed_input_blocks = 0;
+            double processed_time = 0.0;
+            double prev_processed_time = 0.0;
 
             while (reader->readFloats(input_buffer) == reader->block_size() &&
-                (!duration_seconds.has_value() || processed_input_blocks < duration_seconds.value() * input_sample_frequency / block_size)) {
+                (!duration_seconds.has_value() || processed_time < duration_seconds.value())) {
 
                 efm_demodulator.demodulate(input_buffer, reclocked_data);
 
-                processed_input_blocks++;
-                bool log_now = processed_input_blocks % (int)(input_sample_frequency / block_size) == 0;
+                processed_time += block_size / input_sample_frequency;
+                bool log_now = (int)processed_time > (int)prev_processed_time;
                 std::vector<TwoChannelSampleWithErasureFlags> decoded_samples = efm_decoder.decode(reclocked_data, log_now);
                 if (log_now) {
                     fsync(out_fd);
                     logger.sync();
+                    prev_processed_time = processed_time;
                 }
                 std::vector<TwoChannelSampleWithErasureFlags> pop_detected_samples = pop_detector.processSamples(decoded_samples);
                 std::vector<TwoChannelSample> output = erasure_concealer->processSamples(pop_detected_samples);

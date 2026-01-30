@@ -254,13 +254,16 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
     if (log_now) {
         m_log.info(eAudio | ePerformance,
                    std::format("EFM time = {:.2f} s. Time spent decoding: {:.1f} ms; frame count: {}, "
-                               "input erasures: {:.0f} ppm, past c1 erasures: {:.0f} ppm, output erasures: {:.0f} ppm, "
+                               "input erasures: {} ({:.0f} ppm), past c1 erasures: {} ({:.0f} ppm), output erasures: {} ({:.0f} ppm), "
                                "q crc failures: {:.1f} %",
                                m_total_efm_frame_count / 7350.0,
                                (double)m_total_time_us_last_second / 1000.0,
                                m_efm_frame_count_last_second,
+                               m_total_erasures_in_last_second,
                                1000000.0 * m_total_erasures_in_last_second / m_efm_frame_count_last_second / 33,
+                               m_total_erasures_past_c1_last_second,
                                1000000.0 * m_total_erasures_past_c1_last_second / m_efm_frame_count_last_second / 28,
+                               m_total_erasures_out_last_second,
                                1000000.0 * m_total_erasures_out_last_second / m_efm_frame_count_last_second / 24,
                                100.0 * m_q_subcode_crc_failures_last_second / m_subcodes_last_second));
         m_efm_frame_count_last_second = 0;
