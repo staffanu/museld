@@ -74,7 +74,7 @@ void processFile(Logger &logger, Operation input_type, InputFormat input_format,
             EfmDecoder efm_decoder(logger);
             std::unique_ptr<ErasureConcealer> erasure_concealer =
                 ErasureConcealer::create(concealment_impl, logger, std::nullopt);
-            PopDetector pop_detector{};
+            PopDetector pop_detector{logger};
 
             std::vector<float> reclocked_data;
             double processed_time = 0.0;

@@ -34,19 +34,19 @@ std::vector<TwoChannelSampleWithErasureFlags> ArErasureConcealer::processSamples
         for (int ch = 0; ch < 2; ch++) {
             // LMS update if current sample not erased and history is valid so we can predict the current sample and compute the error
             if (!sample.erased[ch] && m_input_history.size() == m_order
-                && std::all_of(m_input_history.cbegin(), m_input_history.cend(), [ch](const auto &sample) { return !sample.erased[ch]; })) {
+                && std::all_of(m_input_history.cbegin(), m_input_history.cend(), [ch](const auto &s) { return !s.erased[ch]; })) {
                 double prediction = 0;
                 for (int i = 0; i < m_order; i++)
                     prediction += m_input_history[i].samples[ch] * m_a[ch][i];
                 const double error = sample.samples[ch] - prediction;
 
-                double x_sum_2 = 0;
+                double x_2_sum = 0;
                 for (int i = 0; i < m_order; i++)
-                    x_sum_2 += m_input_history[i].samples[ch] * m_input_history[i].samples[ch];
+                    x_2_sum += m_input_history[i].samples[ch] * m_input_history[i].samples[ch];
 
-                const double c = m_mu / (x_sum_2 + 0.1);
+                const double c = m_mu / (x_2_sum + 10.0);
                 for (int i = 0; i < m_order; i++)
-                    m_a[ch][i] += c * error * m_input_history[i].samples[ch];
+                    m_a[ch][i] = m_a[ch][i] * (1 - 1e-5) + c * error * m_input_history[i].samples[ch];
 
                 m_error_history[ch].push_back(error);
                 if (m_error_history[ch].size() > m_error_replay_size)
@@ -61,20 +61,20 @@ std::vector<TwoChannelSampleWithErasureFlags> ArErasureConcealer::processSamples
                     predicted += m_output_history[i].samples[ch] * m_a[ch][i];
                 if (!m_error_history[ch].empty())
                     predicted += m_error_history[ch][(m_index - m_last_valid_index[ch]) % m_error_history[ch].size()];
-                predicted *= 0.98;
+                predicted *= 0.9;
 
                 if (output_sample.erased[ch]) {
-                    output_sample.samples[ch] = (int16_t)std::clamp(std::round(predicted), -32768.0, 32767.0);
+                    output_sample.samples[ch] = (int16_t)std::clamp(std::round(predicted), (double)INT16_MIN, (double)INT16_MAX);
                     output_sample.erased[ch] = false;
                 } else {
                     // crossfade
                     double p = (double)d / m_crossfade_length;
-                    output_sample.samples[ch] = (int16_t)std::round((1 - p) * predicted + p * sample.samples[ch]);
+                    output_sample.samples[ch] = (int16_t)std::clamp(std::round((1 - p) * predicted + p * sample.samples[ch]), (double)INT16_MIN, (double)INT16_MAX);
                 }
             }
 
-            // if (m_index - m_last_valid_index[ch] > 20)
-            //     printf("%ld %ld\n", m_index, m_index - m_last_valid_index[ch]);
+            // if (m_index - m_last_valid_index[ch] > 500 && !sample.erased[ch])
+            //      printf("%ld %ld\n", m_index, m_index - m_last_valid_index[ch]);
 
             if (sample.erased[ch])
                 m_last_erased_index[ch] = m_index;

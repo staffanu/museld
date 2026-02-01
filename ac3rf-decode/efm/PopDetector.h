@@ -6,6 +6,7 @@
 #define AC3RF_DECODE_POPDETECTOR_H
 
 #include <vector>
+#include "../Logger.h"
 #include "TwoChannelSample.h"
 
 /*
@@ -14,7 +15,7 @@
 
 class PopDetector {
 public:
-    PopDetector();
+    explicit PopDetector(Logger &log);
     PopDetector(const PopDetector &) = delete;
     PopDetector &operator=(const PopDetector &) = delete;
     PopDetector(PopDetector &&) = delete;
@@ -25,11 +26,12 @@ public:
 
 private:
     // The number of samples on each side of the processed sample that are considered.
-    static constexpr int c_samples_per_side = 3;
+    static constexpr int c_samples_per_side = 4;
 
-    // Contains at least two samples that have already been processed.  These are the first samples of the vector.
-    // Any other samples were not processed yet. Typically, this means we save 4 samples between calls, since the
-    // two last samples can can be processed without knowing later samples.
+    Logger &m_log;
+    // Contains at least c_samples_per_side samples that have already been processed.  These are the first samples of the vector.
+    // Any other samples were not processed yet. Typically, this means we save c_samples_per_side * 2 samples between calls, since the
+    // c_samples_per_side last samples can not be processed without knowing later samples.
     std::vector<TwoChannelSampleWithErasureFlags> m_saved_samples;
 
     unsigned long m_processed_samples;
