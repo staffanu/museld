@@ -107,8 +107,10 @@ std::vector<std::array<uint8_t, 1536>> Ac3BlockHandler::handleCorrectedBlock(con
                     // just skip
                     continue;
                 } else if (byte != 0x0b) {
-                    if (m_last_burst_symbol_index != -1)
+                    if (m_last_burst_symbol_index != -1 && !m_logged_incorrect_start) {
                         m_log.warn(eAudio, "Block does not start with 0x0b");
+                        m_logged_incorrect_start = true;
+                    }
                     continue;
                 }
             } else if (m_ac3_output_block_index == 1) {
@@ -138,6 +140,7 @@ std::vector<std::array<uint8_t, 1536>> Ac3BlockHandler::handleCorrectedBlock(con
                 }
                 m_last_burst_symbol_index = m_first_symbol_in_burst;
             }
+            m_logged_incorrect_start = false;
 
             m_ac3_output_block[m_ac3_output_block_index++] = byte;
 

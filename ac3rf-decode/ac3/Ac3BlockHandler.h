@@ -61,6 +61,7 @@ private:
     size_t m_first_symbol_in_burst = -1;
     int m_ac3_output_block_index = 0;
     std::array<uint8_t, 1536> m_ac3_output_block;
+    bool m_logged_incorrect_start = false;
 };
 
 
