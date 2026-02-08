@@ -13,12 +13,12 @@ Ac3InputFraming::Ac3InputFraming(Logger &log)
 
 // Finds the sync pattens and breaks the sequence up into frames
 std::vector<Ac3InputFraming::NumberedFrame>
-Ac3InputFraming::arrangeInFrames(const std::vector<uint8_t> &symbols, int number_of_symbols) {
+Ac3InputFraming::arrangeInFrames(const std::vector<uint8_t> &symbols) {
 
     std::vector<NumberedFrame> frames;
 
-    for (int i = 0; i < number_of_symbols; i++, m_total_symbols_seen++) {
-        uint8_t s = symbols[i];
+    for (int i = 0; i < symbols.size(); i++, m_total_symbols_seen++) {
+        const uint8_t s = symbols[i];
 
         if (m_sync_frame_symbols_seen < 12 && m_auto_sync_at < m_total_symbols_seen) {
             bool is_next_sync_symbol;

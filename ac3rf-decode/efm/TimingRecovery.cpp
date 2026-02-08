@@ -34,7 +34,8 @@ TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int i
     m_step_size_adjustment(0),
     m_error_sum(0),
     m_prev_sample(0),
-    m_avg_speed_deviation(0) {
+    m_avg_speed_deviation(0),
+    m_debug_fd(std::nullopt) {
 
     if (retiming_debug_filename.has_value()) {
         m_debug_fd = open(retiming_debug_filename->c_str(), O_WRONLY | O_TRUNC | O_CREAT | O_BINARY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);

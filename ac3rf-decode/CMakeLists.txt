@@ -64,6 +64,7 @@ add_executable(ac3rf-decode
         filter/FirPM.h
         filter/FFT.h
         filter/Window.h
+        filter/RaisedCosine.h
         filter/IirFilter.h
         rs/ReedSolomon.h
         rs/GFValue.h

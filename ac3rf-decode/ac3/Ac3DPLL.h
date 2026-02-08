@@ -9,13 +9,21 @@
 
 class Ac3DPLL {
 public:
-    Ac3DPLL(Logger &log);
-    ~Ac3DPLL() = default;
+    Ac3DPLL(Logger &log, double input_sample_frequency, int input_block_size);
 
-    int reclockSymbols(double sampling_frequency, const std::vector<uint8_t> &input_symbols, int input_size, std::vector<uint8_t> &output_symbols, int max_iutput_size);
+    std::vector<uint8_t> reclockSymbols(const std::vector<float> &input_i, const std::vector<float> &input_q);
 
 private:
+    static uint8_t decode(std::complex<float> sample);
+
     Logger &m_log;
+    double m_input_sample_frequency;
+    int m_input_block_size;
+    int m_symbol_distance;
+
+    // We have m_symbol_distance of the input data from the last call so we can
+    // compute the differential symbol for the first input data
+    std::vector<std::complex<float>> m_prev_input;
 
     // state for symbol reclocking
     //    val omega = 2 * math.Pi * 1800 // undamped frequency
@@ -28,8 +36,7 @@ private:
     // we get a new sample with frequency 16 * 2.88 MHz = 46.08 MHz
     constexpr static int c_nominal_symbol_frequency = 576000 / 2;
 
-
-    uint8_t lastIn = 0;
+    uint8_t m_prev_symbol = 0;
     int errorSum = 0;
     int errorSumBits = 15;
     int filterOut = 0; // need to keep this under nominalAdd to ensure counter is strictly increasing

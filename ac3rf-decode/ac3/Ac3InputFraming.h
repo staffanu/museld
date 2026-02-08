@@ -23,7 +23,7 @@ public:
         int frame_number;
         std::array<uint8_t, 37> frame_data;
     };
-    std::vector<NumberedFrame> arrangeInFrames(const std::vector<uint8_t> &symbols, int number_of_symbols);
+    std::vector<NumberedFrame> arrangeInFrames(const std::vector<uint8_t> &symbols);
 
 private:
     Logger &m_log;
