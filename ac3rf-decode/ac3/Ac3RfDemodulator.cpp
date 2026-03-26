@@ -12,11 +12,10 @@
 #include "../rs/ReedSolomon.h"
 #include "Ac3RfDemodulator.h"
 
-Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd, bool use_simd)
+Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, int input_block_size, bool use_simd)
 : m_log(log),
   m_input_sample_frequency(input_sample_frequency),
   m_input_block_size(input_block_size),
-  m_output_fd(output_fd),
   m_dpll(nullptr),
   m_input_framer(log),
   m_block_handler(log)

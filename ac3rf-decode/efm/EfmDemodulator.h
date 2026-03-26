@@ -14,7 +14,7 @@
 
 class EfmDemodulator {
 public:
-    EfmDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd, bool use_simd,
+    EfmDemodulator(Logger &log, double input_sample_frequency, int input_block_size, bool use_simd,
         bool rf_input, int log2_decimation, int adaptive_filter_size, std::optional<std::string> retiming_debug_filename);
     ~EfmDemodulator();
 
@@ -32,7 +32,6 @@ private:
     Logger &m_log;
     double m_input_sample_frequency;
     int m_input_block_size;
-    int m_output_fd;
     bool m_rf_input;
     int m_log2_decimation;
     int m_decimation_factor;

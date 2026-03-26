@@ -12,12 +12,11 @@
 #include "../filter/Window.h"
 #include "EfmDemodulator.h"
 
-EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd, bool use_simd,
+EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int input_block_size, bool use_simd,
     bool rf_input, int log2_decimation, int adaptive_filter_size, std::optional<std::string> retiming_debug_filename)
     : m_log(log),
       m_input_sample_frequency(input_sample_frequency),
       m_input_block_size(input_block_size),
-      m_output_fd(output_fd),
       m_rf_input(rf_input),
       m_log2_decimation(log2_decimation),
       m_decimation_factor(1 << m_log2_decimation),

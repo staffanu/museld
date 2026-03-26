@@ -69,7 +69,7 @@ void processFile(Logger &logger, Operation input_type, InputFormat input_format,
 
             int efm_log2_decimation = efm_log2_decimation_opt.value_or(std::max(0, (int)(log(input_sample_frequency / 8e6) / log(2))));
 
-            EfmDemodulator efm_demodulator(logger, input_sample_frequency, reader->block_size(), out_fd, use_simd,
+            EfmDemodulator efm_demodulator(logger, input_sample_frequency, reader->block_size(), use_simd,
                 input_type == EfmRf, efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
             EfmDecoder efm_decoder(logger);
             std::unique_ptr<ErasureConcealer> erasure_concealer =
@@ -141,7 +141,7 @@ void processFile(Logger &logger, Operation input_type, InputFormat input_format,
             logger.info(eApplication,
                 std::format("Processing AC3 using input sample frequency {} MHz", input_sample_frequency / 1e6));
 
-            Ac3RfDemodulator ac3Demodulator(logger, input_sample_frequency, reader->block_size(), out_fd, use_simd);
+            Ac3RfDemodulator ac3Demodulator(logger, input_sample_frequency, reader->block_size(), use_simd);
 
             int processed_input_blocks = 0;
             while (reader->readFloats(input_buffer) == reader->block_size() &&

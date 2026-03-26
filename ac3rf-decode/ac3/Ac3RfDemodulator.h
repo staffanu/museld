@@ -16,7 +16,7 @@
 
 class Ac3RfDemodulator {
 public:
-    Ac3RfDemodulator(Logger &log, double input_sample_frequency, int input_block_size, int output_fd, bool use_simd);
+    Ac3RfDemodulator(Logger &log, double input_sample_frequency, int input_block_size, bool use_simd);
     ~Ac3RfDemodulator();
 
     Ac3RfDemodulator(const Ac3RfDemodulator &) = delete;
@@ -31,7 +31,6 @@ private:
     Logger &m_log;
     double m_input_sample_frequency;
     int m_input_block_size;
-    int m_output_fd;
 
     Ac3DPLL *m_dpll;
     Ac3InputFraming m_input_framer;
