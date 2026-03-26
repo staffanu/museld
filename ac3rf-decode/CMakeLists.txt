@@ -1,22 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(ac3rf-decode VERSION 0.1.0)
 
-find_package(PkgConfig REQUIRED)
 find_package(Eigen3 REQUIRED)  # Used by firpm
-
-find_package(Git REQUIRED)
-execute_process(
-        COMMAND ${GIT_EXECUTABLE} describe --always --dirty
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        OUTPUT_VARIABLE GIT_VERSION
-        RESULT_VARIABLE ERROR_CODE
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-if(GIT_VERSION STREQUAL "")
-    set(GIT_VERSION GitVersionUnknown)
-    message(WARNING "Failed to determine version from Git tags: ${ERROR_CODE}. Using default version ${GIT_VERSION}.")
-endif()
-configure_file(Version.h.in Version.h @ONLY)
 
 # -mavx is hopefully implied by -march=native
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math -march=native")
@@ -99,7 +84,11 @@ add_dependencies(ac3rf firpm)
 target_include_directories(ac3rf PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/firpm/include>
 )
-target_link_libraries(ac3rf PRIVATE Eigen3::Eigen)
+# Eigen3 is header-only; pull in only its include directories so it does not
+# appear in the exported link interface (consumers don't need it).
+target_include_directories(ac3rf PRIVATE
+    $<TARGET_PROPERTY:Eigen3::Eigen,INTERFACE_INCLUDE_DIRECTORIES>
+)
 
 # Merge firpm's objects into libac3rf.a so consumers only need one library
 add_custom_command(TARGET ac3rf POST_BUILD
@@ -161,6 +150,21 @@ install(FILES
 
 option(BUILD_EXECUTABLE "Build the ac3rf-decode CLI executable" ON)
 if(BUILD_EXECUTABLE)
+    find_package(Git REQUIRED)
+    execute_process(
+            COMMAND ${GIT_EXECUTABLE} describe --always --dirty
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            OUTPUT_VARIABLE GIT_VERSION
+            RESULT_VARIABLE ERROR_CODE
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(GIT_VERSION STREQUAL "")
+        set(GIT_VERSION GitVersionUnknown)
+        message(WARNING "Failed to determine version from Git tags: ${ERROR_CODE}. Using default version ${GIT_VERSION}.")
+    endif()
+    configure_file(Version.h.in Version.h @ONLY)
+
+    find_package(PkgConfig REQUIRED)
     pkg_check_modules(FLAC REQUIRED flac++)
 
     add_executable(ac3rf-decode
