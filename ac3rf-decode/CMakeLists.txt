@@ -1,13 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
-project(ac3rf-decode)
-
-set(CMAKE_CXX_STANDARD 23)
+project(ac3rf-decode VERSION 0.1.0)
 
 find_package(PkgConfig REQUIRED)
-
 find_package(Eigen3 REQUIRED)  # Used by firpm
-
-pkg_check_modules(FLAC REQUIRED flac++)
 
 find_package(Git REQUIRED)
 execute_process(
@@ -33,6 +28,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -mmacosx-version-min=15.0")
 endif()
 
+# ============================================================================
+# firpm — Parks-McClellan FIR filter design (vendored, Eigen3-based)
+# ============================================================================
+
 add_library(firpm STATIC
         external/firpm/src/pm.cpp
         external/firpm/src/band.cpp
@@ -42,23 +41,16 @@ add_library(firpm STATIC
 
 target_include_directories(firpm
         PUBLIC
-        external/firpm/include
-        Eigen3::Eigen
-        ${CMAKE_CURRENT_BINARY_DIR}
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/firpm/include>
 )
+target_link_libraries(firpm PUBLIC Eigen3::Eigen)
 
-target_link_libraries(firpm
-        PUBLIC
-        Eigen3::Eigen
-)
+# ============================================================================
+# ac3rf — reusable library (no CLI, no FLAC, no input readers)
+# ============================================================================
 
-add_executable(ac3rf-decode
-        main.cpp
-        Version.h
+add_library(ac3rf STATIC
         Logger.h Logger.cpp
-        input/InputReader.h
-        input/LdsInputReader.cpp input/LdsInputReader.h
-        input/LdfInputReader.cpp input/LdfInputReader.h
         filter/FirFilterStage.cpp filter/FirFilterStage.h
         filter/ComplexFirFilterStage.cpp filter/ComplexFirFilterStage.h
         filter/FirPM.h
@@ -88,13 +80,101 @@ add_executable(ac3rf-decode
         efm/PopDetector.cpp efm/PopDetector.h
 )
 
-target_include_directories(ac3rf-decode
-        PRIVATE ${FLAC_INCLUDE_DIRS}
+target_compile_features(ac3rf PUBLIC cxx_std_20)
+
+# std::format is experimental in Clang/libc++ < 17; enable it explicitly
+target_compile_options(ac3rf PUBLIC
+    $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-fexperimental-library>
 )
 
-target_link_options(ac3rf-decode PRIVATE "-L/usr/local/lib")
-target_link_libraries(ac3rf-decode
-        PRIVATE ${GNURADIO_FILTER_LINK_LIBRARIES}
-        PRIVATE ${FLAC_LINK_LIBRARIES}
-        PRIVATE firpm
+target_include_directories(ac3rf
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+            $<INSTALL_INTERFACE:include/ac3rf>
 )
+
+# firpm is not linked normally — its objects are merged into libac3rf.a at POST_BUILD.
+# Use add_dependencies for build ordering and a direct include path for compilation.
+add_dependencies(ac3rf firpm)
+target_include_directories(ac3rf PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/firpm/include>
+)
+target_link_libraries(ac3rf PRIVATE Eigen3::Eigen)
+
+# Merge firpm's objects into libac3rf.a so consumers only need one library
+add_custom_command(TARGET ac3rf POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+        -DOUTPUT=$<TARGET_FILE:ac3rf>
+        -DLIB1=$<TARGET_FILE:ac3rf>
+        -DLIB2=$<TARGET_FILE:firpm>
+        -DAR=${CMAKE_AR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/MergeStaticLibs.cmake
+    COMMENT "Merging firpm into libac3rf.a"
+)
+
+# ============================================================================
+# Install — allows decode-orc (and others) to use find_package(ac3rf)
+# ============================================================================
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+install(TARGETS ac3rf
+        EXPORT ac3rfTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+# Install public headers, preserving subdirectory structure
+install(FILES Logger.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ac3rf)
+install(DIRECTORY ac3 efm filter rs
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ac3rf
+        FILES_MATCHING PATTERN "*.h"
+)
+
+install(EXPORT ac3rfTargets
+        FILE ac3rfTargets.cmake
+        NAMESPACE ac3rf::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ac3rf
+)
+
+configure_package_config_file(
+        cmake/ac3rfConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/ac3rfConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ac3rf
+)
+
+write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/ac3rfConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/ac3rfConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/ac3rfConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ac3rf
+)
+
+# ============================================================================
+# ac3rf-decode — CLI executable (adds FLAC input readers on top of the library)
+# ============================================================================
+
+option(BUILD_EXECUTABLE "Build the ac3rf-decode CLI executable" ON)
+if(BUILD_EXECUTABLE)
+    pkg_check_modules(FLAC REQUIRED flac++)
+
+    add_executable(ac3rf-decode
+            main.cpp
+            Version.h
+            input/InputReader.h
+            input/LdsInputReader.cpp input/LdsInputReader.h
+            input/LdfInputReader.cpp input/LdfInputReader.h
+    )
+
+    target_include_directories(ac3rf-decode PRIVATE ${FLAC_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+    target_link_options(ac3rf-decode PRIVATE "-L/usr/local/lib")
+    target_link_libraries(ac3rf-decode
+            PRIVATE ac3rf
+            PRIVATE ${FLAC_LINK_LIBRARIES}
+    )
+endif()

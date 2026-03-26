@@ -4,6 +4,7 @@
 
 #include "PopDetector.h"
 #include <algorithm>
+#include <format>
 #include <sstream>
 
 PopDetector::PopDetector(Logger &log) :

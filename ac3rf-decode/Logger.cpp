@@ -3,8 +3,9 @@
 //
 
 #include <chrono>
+#include <ctime>
+#include <iomanip>
 #include <iostream>
-#include <format>
 #include <sstream>
 #include "Logger.h"
 
@@ -82,9 +83,12 @@ void Logger::log(LogPriority priority, LogCategoryFlags categorization, const st
     int flags = categorization;
     if (priority >= m_minimum_priority) {
         auto tp = chrono::time_point_cast<chrono::milliseconds>(chrono::system_clock::now());
+        auto now_t = chrono::system_clock::to_time_t(tp);
+        struct tm tm_info{};
+        localtime_r(&now_t, &tm_info);
         ostringstream ss;
-        ss << std::format("{:%Y-%m-%d %H:%M:%S} [{}] ",
-                          tp, c_priority_names.at(priority));
+        ss << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S")
+           << " [" << c_priority_names.at(priority) << "] ";
         if (m_log_category)
             ss << "(";
         bool first = true;
