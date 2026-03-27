@@ -124,7 +124,7 @@ Ac3RfDemodulator::~Ac3RfDemodulator() {
     delete m_dpll;
 }
 
-std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(const float *input_buffer) {
+std::vector<uint8_t> Ac3RfDemodulator::demodulateToSymbols(const float *input_buffer) {
     if (m_pre_mix_filter_stages.empty()) {
         // If were not decimating the input before mixing, we store the input directly in the first
         // post-mix filter's real input buffer
@@ -159,7 +159,17 @@ std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(const float 
     // Reclock the incoming data and compute differential QPSK symbols
     auto symbols = m_dpll->reclockSymbols(m_lp_iq_re_buffer, m_lp_iq_im_buffer);
 
-    // Find the sync pattens and break the sequence up into frames (each frame is numbered 0-71 and has 37 bytes of data)
+    // Move the last part of the filter inputs back to the beginning of the buffers
+    for (auto stage: m_pre_mix_filter_stages)
+        stage->moveDataToFront();
+    for (auto stage: m_post_mix_filter_stages)
+        stage->moveDataToFront();
+
+    return symbols;
+}
+
+std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::decodeSymbols(const std::vector<uint8_t> &symbols) {
+    // Find the sync patterns and break the sequence up into frames (each frame is numbered 0-71 and has 37 bytes of data)
     auto frames = m_input_framer.arrangeInFrames(symbols);
 
     // For each set of frames 0-71, create a block, error correct it, and parse it for output data
@@ -171,13 +181,11 @@ std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(const float 
                 result.insert(result.end(), output.cbegin(), output.cend());
             }
 
-    // Move the last part of the filter inputs back to the beginning of the buffers
-    for (auto stage: m_pre_mix_filter_stages)
-        stage->moveDataToFront();
-    for (auto stage: m_post_mix_filter_stages)
-        stage->moveDataToFront();
-
     return result;
+}
+
+std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(const float *input_buffer) {
+    return decodeSymbols(demodulateToSymbols(input_buffer));
 }
 
 std::string Ac3RfDemodulator::reedSolomonStatistics() {

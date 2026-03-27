@@ -24,7 +24,12 @@ public:
     Ac3RfDemodulator(Ac3RfDemodulator &&) = delete;
     Ac3RfDemodulator &operator=(Ac3RfDemodulator &&) = delete;
 
+    // Two-stage API: analog chain (filtering + DPLL) and digital chain (framing + RS) separately.
+    // The combined demodulate() is equivalent to decodeSymbols(demodulateToSymbols(input_buffer)).
+    std::vector<uint8_t> demodulateToSymbols(const float *input_buffer);
+    std::vector<std::array<uint8_t, 1536>> decodeSymbols(const std::vector<uint8_t> &symbols);
     std::vector<std::array<uint8_t, 1536>> demodulate(const float *input_buffer);
+
     std::string reedSolomonStatistics();
 
 private:
