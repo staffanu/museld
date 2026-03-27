@@ -67,8 +67,12 @@ add_library(ac3rf STATIC
 
 target_compile_features(ac3rf PUBLIC cxx_std_20)
 
-# std::format is experimental in Clang/libc++ < 17; enable it explicitly
+# std::format is experimental in Clang/libc++ < 17; enable it at both compile
+# and link time so that libc++experimental.a is linked for consumers too.
 target_compile_options(ac3rf PUBLIC
+    $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-fexperimental-library>
+)
+target_link_options(ac3rf PUBLIC
     $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-fexperimental-library>
 )
 
