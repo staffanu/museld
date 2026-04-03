@@ -24,9 +24,9 @@ add_library(firpm STATIC
         external/firpm/src/cheby.cpp
 )
 
-target_include_directories(firpm
-        PUBLIC
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/firpm/include>
+target_include_directories(firpm PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/firpm/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ac3rf>
 )
 target_link_libraries(firpm PUBLIC Eigen3::Eigen)
 
@@ -83,28 +83,7 @@ target_include_directories(ac3rf
             $<INSTALL_INTERFACE:include/ac3rf>
 )
 
-# firpm is not linked normally — its objects are merged into libac3rf.a at POST_BUILD.
-# Use add_dependencies for build ordering and a direct include path for compilation.
-add_dependencies(ac3rf firpm)
-target_include_directories(ac3rf PRIVATE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/firpm/include>
-)
-# Eigen3 is header-only; pull in only its include directories so it does not
-# appear in the exported link interface (consumers don't need it).
-target_include_directories(ac3rf PRIVATE
-    $<TARGET_PROPERTY:Eigen3::Eigen,INTERFACE_INCLUDE_DIRECTORIES>
-)
-
-# Merge firpm's objects into libac3rf.a so consumers only need one library
-add_custom_command(TARGET ac3rf POST_BUILD
-    COMMAND ${CMAKE_COMMAND}
-        -DOUTPUT=$<TARGET_FILE:ac3rf>
-        -DLIB1=$<TARGET_FILE:ac3rf>
-        -DLIB2=$<TARGET_FILE:firpm>
-        -DAR=${CMAKE_AR}
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/MergeStaticLibs.cmake
-    COMMENT "Merging firpm into libac3rf.a"
-)
+target_link_libraries(ac3rf PUBLIC firpm)
 
 # ============================================================================
 # Install — allows decode-orc (and others) to use find_package(ac3rf)
@@ -113,7 +92,7 @@ add_custom_command(TARGET ac3rf POST_BUILD
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-install(TARGETS ac3rf
+install(TARGETS ac3rf firpm
         EXPORT ac3rfTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
@@ -123,6 +102,9 @@ install(FILES Logger.h StreamLogger.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ac
 install(DIRECTORY ac3 efm filter rs
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ac3rf
         FILES_MATCHING PATTERN "*.h"
+)
+install(DIRECTORY external/firpm/include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ac3rf
 )
 
 install(EXPORT ac3rfTargets
@@ -150,7 +132,7 @@ install(FILES
 )
 
 # ============================================================================
-# ac3rf-decode — CLI executable (adds FLAC input readers on top of the library)
+# ac3rf-decode — CLI executable (adds input readers on top of the library)
 # ============================================================================
 
 option(BUILD_EXECUTABLE "Build the ac3rf-decode CLI executable" ON)
