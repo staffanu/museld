@@ -35,7 +35,7 @@ target_link_libraries(firpm PUBLIC Eigen3::Eigen)
 # ============================================================================
 
 add_library(ac3rf STATIC
-        Logger.h Logger.cpp
+        Logger.h StreamLogger.h StreamLogger.cpp
         filter/FirFilterStage.cpp filter/FirFilterStage.h
         filter/ComplexFirFilterStage.cpp filter/ComplexFirFilterStage.h
         filter/FirPM.h
@@ -119,7 +119,7 @@ install(TARGETS ac3rf
 )
 
 # Install public headers, preserving subdirectory structure
-install(FILES Logger.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ac3rf)
+install(FILES Logger.h StreamLogger.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ac3rf)
 install(DIRECTORY ac3 efm filter rs
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ac3rf
         FILES_MATCHING PATTERN "*.h"

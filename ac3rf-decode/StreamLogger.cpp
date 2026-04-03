@@ -2,16 +2,16 @@
 // Created by staffanu on 7/2/23.
 //
 
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <iomanip>
-#include <iostream>
 #include <sstream>
-#include "Logger.h"
+#include "StreamLogger.h"
 
 using namespace std;
 
-const map<LogCategoryFlags, LogPriority> Logger::c_log_all = {
+const map<LogCategoryFlags, LogPriority> StreamLogger::c_log_all = {
         { eApplication, eDebug },
         { ePerformance, eDebug },
         { eAudio, eDebug },
@@ -21,7 +21,7 @@ const map<LogCategoryFlags, LogPriority> Logger::c_log_all = {
         { eOutput, eDebug },
 };
 
-const map<LogCategoryFlags, LogPriority> Logger::c_log_info = {
+const map<LogCategoryFlags, LogPriority> StreamLogger::c_log_info = {
         { eApplication, eInfo },
         { ePerformance, eInfo },
         { eAudio, eInfo },
@@ -31,7 +31,7 @@ const map<LogCategoryFlags, LogPriority> Logger::c_log_info = {
         { eOutput, eInfo },
 };
 
-const map<LogCategoryFlags, LogPriority> Logger::c_log_warn = {
+const map<LogCategoryFlags, LogPriority> StreamLogger::c_log_warn = {
     { eApplication, eWarn },
     { ePerformance, eWarn },
     { eAudio, eWarn },
@@ -41,7 +41,7 @@ const map<LogCategoryFlags, LogPriority> Logger::c_log_warn = {
     { eOutput, eWarn },
 };
 
-const map<LogCategoryFlags, LogPriority> Logger::c_log_error = {
+const map<LogCategoryFlags, LogPriority> StreamLogger::c_log_error = {
         { eApplication, eError },
         { ePerformance, eError },
         { eAudio, eError },
@@ -51,7 +51,7 @@ const map<LogCategoryFlags, LogPriority> Logger::c_log_error = {
         { eOutput, eError },
 };
 
-const map<LogCategoryFlags, LogPriority> Logger::c_log_off = {
+const map<LogCategoryFlags, LogPriority> StreamLogger::c_log_off = {
     { eApplication, eOff },
     { ePerformance, eOff },
     { eAudio, eOff },
@@ -61,25 +61,41 @@ const map<LogCategoryFlags, LogPriority> Logger::c_log_off = {
     { eOutput, eOff },
 };
 
-const map<int, string> Logger::c_priority_names = {
+const map<int, string> StreamLogger::c_priority_names = {
         { eDebug, "DEBUG" },
-        { eInfo, "INFO " },
-        { eWarn, "WARN " },
+        { eInfo,  "INFO " },
+        { eWarn,  "WARN " },
         { eError, "ERROR" },
-        { eOff, "OFF [NEVER-SHOWN]" },
+        { eOff,   "OFF [NEVER-SHOWN]" },
 };
 
-const map<int, string> Logger::c_category_names = {
+const map<int, string> StreamLogger::c_category_names = {
         { eApplication, "app" },
         { ePerformance, "performance" },
-        { eAudio, "audio" },
-        { eVideo, "video" },
-        { eDecoder, "decoder" },
-        { eInput, "input" },
-        { eOutput, "output" },
+        { eAudio,       "audio" },
+        { eVideo,       "video" },
+        { eDecoder,     "decoder" },
+        { eInput,       "input" },
+        { eOutput,      "output" },
 };
 
-void Logger::log(LogPriority priority, LogCategoryFlags categorization, const std::string &message) {
+StreamLogger::StreamLogger(std::map<LogCategoryFlags, LogPriority> log_priority_per_category,
+                           std::ostream &log_stream,
+                           bool log_category)
+    : m_log_priority_per_category(std::move(log_priority_per_category))
+    , m_log_stream(log_stream)
+    , m_log_category(log_category)
+    , m_minimum_priority(eDebug)
+{
+    if (!m_log_priority_per_category.empty())
+        m_minimum_priority = std::min_element(
+            m_log_priority_per_category.cbegin(), m_log_priority_per_category.cend(),
+            [](const pair<LogCategoryFlags, LogPriority> &a, const pair<LogCategoryFlags, LogPriority> &b) {
+                return a.second < b.second;
+            })->second;
+}
+
+void StreamLogger::log(LogPriority priority, LogCategoryFlags categorization, const std::string &message) {
     int flags = categorization;
     if (priority >= m_minimum_priority) {
         auto tp = chrono::time_point_cast<chrono::milliseconds>(chrono::system_clock::now());
@@ -106,8 +122,8 @@ void Logger::log(LogPriority priority, LogCategoryFlags categorization, const st
                     first = false;
                 }
                 auto cat_level = m_log_priority_per_category.find((LogCategoryFlags)bit);
-                if (cat_level == m_log_priority_per_category.cend() && priority == eError ||
-                    cat_level != m_log_priority_per_category.cend() && priority >= cat_level->second)
+                if ((cat_level == m_log_priority_per_category.cend() && priority == eError) ||
+                    (cat_level != m_log_priority_per_category.cend() && priority >= cat_level->second))
                     do_log = true;
             }
         }
@@ -121,12 +137,12 @@ void Logger::log(LogPriority priority, LogCategoryFlags categorization, const st
     }
 }
 
-bool Logger::isEnabled(LogPriority priority, LogCategoryFlags category) const {
+bool StreamLogger::isEnabled(LogPriority priority, LogCategoryFlags category) const {
     auto it = m_log_priority_per_category.find(category);
     return it != m_log_priority_per_category.cend() && it->second <= priority;
 }
 
-void Logger::sync() {
+void StreamLogger::sync() {
     std::unique_lock<std::mutex> lock(m_mutex);
     m_log_stream.flush();
 }

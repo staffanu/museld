@@ -5,11 +5,7 @@
 #ifndef MUSECPP_LOGGER_H
 #define MUSECPP_LOGGER_H
 
-#include <iostream>
 #include <string>
-#include <algorithm>
-#include <map>
-#include <mutex>
 
 enum LogPriority {
     eDebug = 1,
@@ -36,55 +32,16 @@ inline LogCategoryFlags operator|(LogCategoryFlags a, LogCategoryFlags b)
 
 class Logger {
 public:
-    static const std::map<LogCategoryFlags, LogPriority> c_log_all;
-    static const std::map<LogCategoryFlags, LogPriority> c_log_info;
-    static const std::map<LogCategoryFlags, LogPriority> c_log_warn;
-    static const std::map<LogCategoryFlags, LogPriority> c_log_error;
-    static const std::map<LogCategoryFlags, LogPriority> c_log_off;
+    virtual ~Logger() = default;
 
-    // The log_priority_per_category map contains the minimum priority for each category
-    // to produce a log message.  eError messages are always logged, so passing an empty
-    // map logs all eError logs.
-    Logger(std::map<LogCategoryFlags, LogPriority> log_priority_per_category, std::ostream &log_stream = std::cerr, bool log_category = true) :
-    m_log_priority_per_category(std::move(log_priority_per_category)),
-    m_log_stream(log_stream),
-    m_log_category(log_category),
-    m_minimum_priority(eDebug)
-    {
-        m_minimum_priority = std::min_element(
-                m_log_priority_per_category.cbegin(), m_log_priority_per_category.cend(),
-                [](const std::pair<LogCategoryFlags, LogPriority> a, const std::pair<LogCategoryFlags, LogPriority> b) -> bool {
-                    return a.second < b.second;
-                })->second;
-    }
+    virtual void log(LogPriority priority, LogCategoryFlags categorization, const std::string &message) = 0;
+    [[nodiscard]] virtual bool isEnabled(LogPriority priority, LogCategoryFlags categorization) const = 0;
+    virtual void sync() = 0;
 
-    void log(LogPriority priority, LogCategoryFlags categorization, const std::string &message);
-
-    void error(LogCategoryFlags categorization, const std::string &message) {
-        log(eError, categorization, message);
-    }
-    void warn(LogCategoryFlags categorization, const std::string &message) {
-        log(eWarn, categorization, message);
-    }
-    void info(LogCategoryFlags categorization, const std::string &message) {
-        log(eInfo, categorization, message);
-    }
-    void debug(LogCategoryFlags categorization, const std::string &message) {
-        log(eDebug, categorization, message);
-    }
-    bool isEnabled(LogPriority priority, LogCategoryFlags categorization) const;
-
-    void sync();
-
-private:
-    static const std::map<int, std::string> c_priority_names;
-    static const std::map<int, std::string> c_category_names;
-
-    const std::map<LogCategoryFlags, LogPriority> m_log_priority_per_category;
-    std::ostream &m_log_stream;
-    const bool m_log_category;
-    LogPriority m_minimum_priority;
-    std::mutex m_mutex;
+    void error(LogCategoryFlags c, const std::string &m) { log(eError, c, m); }
+    void warn (LogCategoryFlags c, const std::string &m) { log(eWarn,  c, m); }
+    void info (LogCategoryFlags c, const std::string &m) { log(eInfo,  c, m); }
+    void debug(LogCategoryFlags c, const std::string &m) { log(eDebug, c, m); }
 };
 
 #endif //MUSECPP_LOGGER_H

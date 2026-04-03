@@ -15,7 +15,7 @@
 #  define O_BINARY 0
 #endif
 
-#include "Logger.h"
+#include "StreamLogger.h"
 #include "input/InputReader.h"
 #include "input/LdfInputReader.h"
 #include "input/LdsInputReader.h"
@@ -183,7 +183,7 @@ void processFile(Logger &logger, Operation input_type, InputFormat input_format,
 }
 
 int main(int argc, char *argv[]) {
-    auto log_selection = Logger::c_log_warn;
+    auto log_selection = StreamLogger::c_log_warn;
     std::optional<InputFormat> input_format_option = std::nullopt;
     double input_sample_frequency = 40e6;
     double target_sample_frequency = -1;
@@ -312,19 +312,19 @@ int main(int argc, char *argv[]) {
         std::map<LogCategoryFlags, LogPriority> level;
         switch (level_number) {
             case 0:
-                level = Logger::c_log_off;
+                level = StreamLogger::c_log_off;
                 break;
             case 1:
-                level = Logger::c_log_error;
+                level = StreamLogger::c_log_error;
                 break;
             case 2:
-                level = Logger::c_log_warn;
+                level = StreamLogger::c_log_warn;
                 break;
             case 3:
-                level = Logger::c_log_info;
+                level = StreamLogger::c_log_info;
                 break;
             case 4:
-                level = Logger::c_log_all;
+                level = StreamLogger::c_log_all;
                 break;
             default: throw std::runtime_error("Invalid log level");
         }
@@ -387,7 +387,7 @@ int main(int argc, char *argv[]) {
                 if (out_fd == STDOUT_FILENO && isatty(out_fd) && !force_stdout)
                     throw std::runtime_error("Writing output to stdout requires non-terminal stdout, or force using \"-\" output filename");
 
-                Logger log(log_selection, *log_stream, false);
+                StreamLogger log(log_selection, *log_stream, false);
                 log.debug(eApplication, std::format("ac3rf-decode version {}", AC3RF_DECODE_VERSION));
                 log.info(eApplication, std::format("Processing input file {}", filename));
                 processFile(log, operation, input_format, initial_seek_seconds, duration_seconds, input_sample_frequency, fd, block_size, out_fd, use_simd,
@@ -398,7 +398,7 @@ int main(int argc, char *argv[]) {
             }
         }
         if (!filename_found && !did_show_help_or_version) {
-            Logger log(log_selection, *log_stream);
+            StreamLogger log(log_selection, *log_stream);
             if (!input_format_option.has_value())
                 throw std::runtime_error("Input format must be given for stdin");
 
@@ -411,7 +411,7 @@ int main(int argc, char *argv[]) {
         if (log_stream != &std::cerr)
             delete log_stream;
     } catch (const std::exception &x) {
-        Logger log(Logger::c_log_all);
+        StreamLogger log(StreamLogger::c_log_all);
         log.error(eApplication, x.what());
         return EXIT_FAILURE;
     }
