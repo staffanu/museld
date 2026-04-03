@@ -46,6 +46,7 @@ add_library(ac3rf STATIC
         rs/ReedSolomon.h
         rs/GFValue.h
         rs/ByteWithErasureFlag.h
+        ac3/Ac3Decoder.h ac3/Ac3Decoder.cpp
         ac3/Ac3RfDemodulator.h ac3/Ac3RfDemodulator.cpp
         ac3/Ac3DPLL.cpp ac3/Ac3DPLL.h
         ac3/Ac3InputFraming.cpp ac3/Ac3InputFraming.h

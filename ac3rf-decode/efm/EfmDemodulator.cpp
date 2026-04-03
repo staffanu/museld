@@ -97,8 +97,11 @@ void EfmDemodulator::demodulate(const float *input_buffer, std::vector<float> &r
         for (int i = 0; i < m_input_block_size; i++)
             filter_input_buffer[i] = input_buffer[i];
 
-        for (auto stage: m_decimation_filter_stages)
-            stage->applyFilter();
+        int n = m_input_block_size;
+        for (auto stage: m_decimation_filter_stages) {
+            stage->applyFilter(n);
+            n /= stage->decimationFactor();
+        }
 
         iir_input = m_filtered_input.data();
     }
@@ -113,8 +116,13 @@ void EfmDemodulator::demodulate(const float *input_buffer, std::vector<float> &r
 
     m_timing_recovery.reclock(m_filtered_input.data(), reclocked_data);
 
-    for (auto stage: m_decimation_filter_stages)
-        stage->moveDataToFront();
+    {
+        int n = m_input_block_size;
+        for (auto stage: m_decimation_filter_stages) {
+            stage->moveDataToFront(n);
+            n /= stage->decimationFactor();
+        }
+    }
 }
 
 IirFilter<5> *EfmDemodulator::makeEllipticLowpassFilter(double Fs) {

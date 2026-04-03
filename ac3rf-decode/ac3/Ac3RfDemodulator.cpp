@@ -4,21 +4,18 @@
 
 #include <cassert>
 #include <complex>
+#include <numeric>
 #include <unistd.h>
 #include <format>
 #include "../filter/FirPM.h"
 #include "../filter/RaisedCosine.h"
-#include "../rs/ByteWithErasureFlag.h"
-#include "../rs/ReedSolomon.h"
 #include "Ac3RfDemodulator.h"
 
 Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, int input_block_size, bool use_simd)
 : m_log(log),
   m_input_sample_frequency(input_sample_frequency),
   m_input_block_size(input_block_size),
-  m_dpll(nullptr),
-  m_input_framer(log),
-  m_block_handler(log)
+  m_dpll(nullptr)
 {
     // The AC3-RF signal uses the band 2.88 MHz +- 150 kHz.  We decimate to have a sample frequency of at least 7 MHz
     // before mixing
@@ -33,8 +30,7 @@ Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, i
     m_post_mix_decimation_factor = 1 << post_mix_log2_decimation;
     assert(m_input_block_size % (m_pre_mix_decimation_factor * m_post_mix_decimation_factor) == 0);
 
-    m_dpll = new Ac3DPLL(log, mix_frequency / m_post_mix_decimation_factor,
-        m_input_block_size / m_pre_mix_decimation_factor / m_post_mix_decimation_factor);
+    m_dpll = new Ac3DPLL(log, mix_frequency / m_post_mix_decimation_factor);
 
     // Buffer after low-pass filtering the IQ signal
     m_lp_iq_re_buffer.resize(m_input_block_size / m_pre_mix_decimation_factor / m_post_mix_decimation_factor);
@@ -124,70 +120,87 @@ Ac3RfDemodulator::~Ac3RfDemodulator() {
     delete m_dpll;
 }
 
-std::vector<uint8_t> Ac3RfDemodulator::demodulateToSymbols(const float *input_buffer) {
+int Ac3RfDemodulator::inputSampleAlignment() const {
+    int alignment = 1;
+    int D = 1;
+    for (const auto stage : m_pre_mix_filter_stages) {
+        alignment = std::lcm(alignment, D * stage->inputSampleAlignment());
+        D *= stage->decimationFactor();
+    }
+    for (const auto stage : m_post_mix_filter_stages) {
+        alignment = std::lcm(alignment, D * stage->inputSampleAlignment());
+        D *= stage->decimationFactor();
+    }
+    return alignment;
+}
+
+std::vector<uint8_t> Ac3RfDemodulator::demodulateToSymbols(const float *input_buffer, size_t n_samples) {
+    assert(n_samples > 0);
+    assert(n_samples <= static_cast<size_t>(m_input_block_size));
+    assert(n_samples % static_cast<size_t>(inputSampleAlignment()) == 0);
+
+    const size_t iq_size = n_samples / m_pre_mix_decimation_factor / m_post_mix_decimation_factor;
+    m_lp_iq_re_buffer.resize(iq_size);
+    m_lp_iq_im_buffer.resize(iq_size);
+
     if (m_pre_mix_filter_stages.empty()) {
-        // If were not decimating the input before mixing, we store the input directly in the first
+        // If we are not decimating the input before mixing, store the input directly in the first
         // post-mix filter's real input buffer
         float *first_stage_input_buffer = m_post_mix_filter_stages[0]->inputReBuffer()->data() + m_post_mix_filter_stages[0]->filterSize() - 1;
-        for (int i = 0; i < m_input_block_size; i++)
+        for (size_t i = 0; i < n_samples; i++)
             first_stage_input_buffer[i] = input_buffer[i];
     } else {
         // Store the input in the first filter's input buffer
         float *first_stage_input_buffer = m_pre_mix_filter_stages[0]->inputBuffer()->data() + m_pre_mix_filter_stages[0]->filterSize() - 1;
-        for (int i = 0; i < m_input_block_size; i++)
+        for (size_t i = 0; i < n_samples; i++)
             first_stage_input_buffer[i] = input_buffer[i];
 
         // Low-pass filter and decimate the input signal
-        for (const auto stage: m_pre_mix_filter_stages)
-            stage->applyFilter();
+        size_t n = n_samples;
+        for (const auto stage: m_pre_mix_filter_stages) {
+            stage->applyFilter(static_cast<int>(n));
+            n /= stage->decimationFactor();
+        }
     }
 
     // Mix the input signal with exp(i * 2 * pi * 2.88e6 * t)
-    // Notice the last pre-mix filter stores the result in the first post-mix filter's real input buffer
+    // The last pre-mix filter stores its result in the first post-mix filter's real input buffer
     float *first_stage_input_re = m_post_mix_filter_stages[0]->inputReBuffer()->data() + m_post_mix_filter_stages[0]->filterSize() - 1;
     float *first_stage_input_im = m_post_mix_filter_stages[0]->inputImBuffer()->data() + m_post_mix_filter_stages[0]->filterSize() - 1;
-    for (int i = 0; i < m_input_block_size / m_pre_mix_decimation_factor; i++) {
+    for (size_t i = 0; i < n_samples / m_pre_mix_decimation_factor; i++) {
         first_stage_input_im[i] = first_stage_input_re[i] * m_exp_lut[m_phase_accumulator].imag();
         first_stage_input_re[i] = first_stage_input_re[i] * m_exp_lut[m_phase_accumulator].real();
         m_phase_accumulator = (m_phase_accumulator + m_phase_step) & ((1 << c_phase_accum_bits) - 1);
     }
 
-    // Decimate the I/Q signal in stages and finally lowpass
-    for (const auto stage: m_post_mix_filter_stages)
-        stage->applyFilter();
+    // Decimate the I/Q signal in stages and apply the final lowpass filter
+    {
+        size_t n = n_samples / m_pre_mix_decimation_factor;
+        for (const auto stage: m_post_mix_filter_stages) {
+            stage->applyFilter(static_cast<int>(n));
+            n /= stage->decimationFactor();
+        }
+    }
 
     // Reclock the incoming data and compute differential QPSK symbols
     auto symbols = m_dpll->reclockSymbols(m_lp_iq_re_buffer, m_lp_iq_im_buffer);
 
-    // Move the last part of the filter inputs back to the beginning of the buffers
-    for (auto stage: m_pre_mix_filter_stages)
-        stage->moveDataToFront();
-    for (auto stage: m_post_mix_filter_stages)
-        stage->moveDataToFront();
+    // Move the overlap tail to the front of each filter's input buffer
+    {
+        size_t n = n_samples;
+        for (auto stage: m_pre_mix_filter_stages) {
+            stage->moveDataToFront(static_cast<int>(n));
+            n /= stage->decimationFactor();
+        }
+    }
+    {
+        size_t n = n_samples / m_pre_mix_decimation_factor;
+        for (auto stage: m_post_mix_filter_stages) {
+            stage->moveDataToFront(static_cast<int>(n));
+            n /= stage->decimationFactor();
+        }
+    }
 
     return symbols;
 }
 
-std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::decodeSymbols(const std::vector<uint8_t> &symbols) {
-    // Find the sync patterns and break the sequence up into frames (each frame is numbered 0-71 and has 37 bytes of data)
-    auto frames = m_input_framer.arrangeInFrames(symbols);
-
-    // For each set of frames 0-71, create a block, error correct it, and parse it for output data
-    std::vector<std::array<uint8_t, 1536>> result;
-    for (auto frame: frames)
-        if (auto block = m_block_handler.handleFrame(frame); block.has_value())
-            if (auto correctedBlock = m_block_handler.errorCorrectBlock(block.value()); correctedBlock.has_value()) {
-                auto output = m_block_handler.handleCorrectedBlock(correctedBlock.value());
-                result.insert(result.end(), output.cbegin(), output.cend());
-            }
-
-    return result;
-}
-
-std::vector<std::array<uint8_t, 1536>> Ac3RfDemodulator::demodulate(const float *input_buffer) {
-    return decodeSymbols(demodulateToSymbols(input_buffer));
-}
-
-std::string Ac3RfDemodulator::reedSolomonStatistics() {
-    return m_block_handler.reedSolomonStatistics();
-}

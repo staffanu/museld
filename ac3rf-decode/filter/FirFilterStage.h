@@ -35,8 +35,10 @@ public:
     [[nodiscard]] std::vector<float> *inputBuffer();
     [[nodiscard]] std::string toString() const;
 
-    void applyFilter();
-    void moveDataToFront();
+    [[nodiscard]] int inputSampleAlignment() const;
+
+    void applyFilter(int n);
+    void moveDataToFront(int n);
 
 private:
     void firFilter(const float *input, size_t input_length,

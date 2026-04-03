@@ -19,6 +19,7 @@
 #include "input/InputReader.h"
 #include "input/LdfInputReader.h"
 #include "input/LdsInputReader.h"
+#include "ac3/Ac3Decoder.h"
 #include "ac3/Ac3RfDemodulator.h"
 #include "efm/EfmDemodulator.h"
 #include "efm/EfmDecoder.h"
@@ -142,18 +143,19 @@ void processFile(Logger &logger, Operation input_type, InputFormat input_format,
                 std::format("Processing AC3 using input sample frequency {} MHz", input_sample_frequency / 1e6));
 
             Ac3RfDemodulator ac3Demodulator(logger, input_sample_frequency, reader->block_size(), use_simd);
+            Ac3Decoder ac3Decoder(logger);
 
             int processed_input_blocks = 0;
             while (reader->readFloats(input_buffer) == reader->block_size() &&
                 (!duration_seconds.has_value() || processed_input_blocks < duration_seconds.value() * input_sample_frequency / block_size)) {
 
-                for (auto output: ac3Demodulator.demodulate(input_buffer))
+                for (auto output: ac3Decoder.decodeSymbols(ac3Demodulator.demodulateToSymbols(input_buffer, reader->block_size())))
                     if (write(out_fd, output.data(), output.size()) == -1)
                         throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
 
                 processed_input_blocks++;
             }
-            logger.info(eAudio, ac3Demodulator.reedSolomonStatistics());
+            logger.info(eAudio, ac3Decoder.reedSolomonStatistics());
             break;
         }
 

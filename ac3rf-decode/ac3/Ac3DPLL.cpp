@@ -9,10 +9,9 @@
 #include <complex>
 #include "Ac3DPLL.h"
 
-Ac3DPLL::Ac3DPLL(Logger &log, double input_sample_frequency, int input_block_size) :
+Ac3DPLL::Ac3DPLL(Logger &log, double input_sample_frequency) :
     m_log(log),
     m_input_sample_frequency(input_sample_frequency),
-    m_input_block_size(input_block_size),
     m_symbol_distance(std::round(m_input_sample_frequency / 288e3))
 {
     m_prev_input.resize(m_symbol_distance);
@@ -32,7 +31,7 @@ std::vector<uint8_t> Ac3DPLL::reclockSymbols(const std::vector<float> &input_i, 
     std::vector<uint8_t> output;
     int nominalAdd = (int)((1 << counterBits) * (double)c_nominal_symbol_frequency / m_input_sample_frequency);
 
-    for (int i = 0; i < m_input_block_size; i++) {
+    for (int i = 0; i < (int)input_i.size(); i++) {
         // The current symbol is computed from the phase difference between the current IQ values, and that
         // symbol_distance samples back.
         uint8_t current_symbol = decode(std::complex<float>(input_i[i], input_q[i])
@@ -59,8 +58,9 @@ std::vector<uint8_t> Ac3DPLL::reclockSymbols(const std::vector<float> &input_i, 
         clkCounter = newCounter;
     }
     m_prev_input.clear();
+    const int n = (int)input_i.size();
     for (int i = 0; i < m_symbol_distance; i++)
-        m_prev_input.push_back(std::complex<float>(input_i[m_input_block_size - m_symbol_distance + i], input_q[m_input_block_size - m_symbol_distance + i]));
+        m_prev_input.push_back(std::complex<float>(input_i[n - m_symbol_distance + i], input_q[n - m_symbol_distance + i]));
 
     return output;
 }

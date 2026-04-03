@@ -78,13 +78,27 @@ std::string FirFilterStage::toString() const {
     return ss.str();
 }
 
-void FirFilterStage::applyFilter() {
-    firFilter(m_input_buffer->data(), m_input_buffer_size_without_overlap, m_filter.data(),
-    m_filter.size(), m_output_buffer->data() + m_output_offset, m_decimation_factor);
+int FirFilterStage::inputSampleAlignment() const {
+    if (!m_use_simd)
+        return m_decimation_factor;
+#if defined __AVX__
+    return std::lcm(c_AVX_floats_per_chunk, 2 * m_decimation_factor);
+#elif __ARM_NEON == 1
+    return std::lcm(c_NEON_floats_per_chunk, 2 * m_decimation_factor);
+#else
+    return m_decimation_factor;
+#endif
 }
 
-void FirFilterStage::moveDataToFront() {
-    memmove(m_input_buffer->data(), m_input_buffer->data() + m_input_buffer_size_without_overlap, (m_filter.size() - 1) * sizeof(float));
+void FirFilterStage::applyFilter(int n) {
+    assert(n > 0);
+    assert(n % m_decimation_factor == 0);
+    firFilter(m_input_buffer->data(), n, m_filter.data(),
+        m_filter.size(), m_output_buffer->data() + m_output_offset, m_decimation_factor);
+}
+
+void FirFilterStage::moveDataToFront(int n) {
+    memmove(m_input_buffer->data(), m_input_buffer->data() + n, (m_filter.size() - 1) * sizeof(float));
 }
 
 void FirFilterStage::firFilter(

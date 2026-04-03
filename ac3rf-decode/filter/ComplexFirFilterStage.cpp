@@ -47,12 +47,16 @@ std::string ComplexFirFilterStage::toString() const {
     return m_re_filter.toString();
 }
 
-void ComplexFirFilterStage::applyFilter() {
-    m_re_filter.applyFilter();
-    m_im_filter.applyFilter();
+int ComplexFirFilterStage::inputSampleAlignment() const {
+    return m_re_filter.inputSampleAlignment();
 }
 
-void ComplexFirFilterStage::moveDataToFront() {
-    m_re_filter.moveDataToFront();
-    m_im_filter.moveDataToFront();
+void ComplexFirFilterStage::applyFilter(int n) {
+    m_re_filter.applyFilter(n);
+    m_im_filter.applyFilter(n);
+}
+
+void ComplexFirFilterStage::moveDataToFront(int n) {
+    m_re_filter.moveDataToFront(n);
+    m_im_filter.moveDataToFront(n);
 }

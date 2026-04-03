@@ -9,7 +9,7 @@
 
 class Ac3DPLL {
 public:
-    Ac3DPLL(Logger &log, double input_sample_frequency, int input_block_size);
+    Ac3DPLL(Logger &log, double input_sample_frequency);
 
     std::vector<uint8_t> reclockSymbols(const std::vector<float> &input_i, const std::vector<float> &input_q);
 
@@ -18,7 +18,6 @@ private:
 
     Logger &m_log;
     double m_input_sample_frequency;
-    int m_input_block_size;
     int m_symbol_distance;
 
     // We have m_symbol_distance of the input data from the last call so we can

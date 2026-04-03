@@ -37,8 +37,10 @@ public:
     [[nodiscard]] std::vector<float> *inputImBuffer();
     [[nodiscard]] std::string toString() const;
 
-    void applyFilter();
-    void moveDataToFront();
+    [[nodiscard]] int inputSampleAlignment() const;
+
+    void applyFilter(int n);
+    void moveDataToFront(int n);
 
 private:
     std::string m_name;

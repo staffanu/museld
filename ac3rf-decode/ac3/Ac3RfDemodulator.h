@@ -8,11 +8,8 @@
 #include <complex>
 #include <string>
 #include "../Logger.h"
-#include "../rs/ReedSolomon.h"
 #include "../filter/ComplexFirFilterStage.h"
-#include "Ac3BlockHandler.h"
 #include "Ac3DPLL.h"
-#include "Ac3InputFraming.h"
 
 class Ac3RfDemodulator {
 public:
@@ -24,13 +21,15 @@ public:
     Ac3RfDemodulator(Ac3RfDemodulator &&) = delete;
     Ac3RfDemodulator &operator=(Ac3RfDemodulator &&) = delete;
 
-    // Two-stage API: analog chain (filtering + DPLL) and digital chain (framing + RS) separately.
-    // The combined demodulate() is equivalent to decodeSymbols(demodulateToSymbols(input_buffer)).
-    std::vector<uint8_t> demodulateToSymbols(const float *input_buffer);
-    std::vector<std::array<uint8_t, 1536>> decodeSymbols(const std::vector<uint8_t> &symbols);
-    std::vector<std::array<uint8_t, 1536>> demodulate(const float *input_buffer);
+    // Minimum n_samples alignment required by demodulateToSymbols().
+    // n_samples must be a positive multiple of this value.
+    [[nodiscard]] int inputSampleAlignment() const;
 
-    std::string reedSolomonStatistics();
+    // Analog chain: filtering, mixing, DPLL -> raw QPSK symbols.
+    // Pass the result to Ac3Decoder::decodeSymbols() for framing + RS decoding.
+    // n_samples must be a positive multiple of inputSampleAlignment() and
+    // no greater than the block size passed at construction.
+    std::vector<uint8_t> demodulateToSymbols(const float *input_buffer, size_t n_samples);
 
 private:
     Logger &m_log;
@@ -38,8 +37,6 @@ private:
     int m_input_block_size;
 
     Ac3DPLL *m_dpll;
-    Ac3InputFraming m_input_framer;
-    Ac3BlockHandler m_block_handler;
 
     // The signal is first decimated by a factor of 4 repeatedly, until the final decimation is 2 or 4.
     // At that time, the final lowpass filter is applied.
