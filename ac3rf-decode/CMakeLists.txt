@@ -150,12 +150,6 @@ if(BUILD_PYTHON)
     nanobind_add_module(ac3rf_python python/ac3rf.cpp)
     target_link_libraries(ac3rf_python PRIVATE ac3rf)
     set_target_properties(ac3rf_python PROPERTIES OUTPUT_NAME ac3rf)
-    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-        target_link_options(ac3rf_python PRIVATE
-            -L/usr/local/opt/llvm/lib/c++
-            -Wl,-rpath,/usr/local/opt/llvm/lib/c++
-        )
-    endif()
 
     install(TARGETS ac3rf_python
             LIBRARY DESTINATION ${Python_SITEARCH}
