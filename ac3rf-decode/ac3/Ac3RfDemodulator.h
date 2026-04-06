@@ -1,6 +1,5 @@
-//
-// Created by Staffan Ulfberg on 9/26/25.
-//
+// Copyright 2025-2026 Staffan Ulfberg
+// This file is licensed under the provisions of the Gnu General Public License v3 (see gpl-3.0.txt)
 
 #ifndef AC3RF_DECODE_AC3RFDEMODULATOR_H
 #define AC3RF_DECODE_AC3RFDEMODULATOR_H
@@ -11,6 +10,12 @@
 #include "../filter/ComplexFirFilterStage.h"
 #include "Ac3DPLL.h"
 
+/*
+ * Analog processing for AC3-RF demodulation: down-sampling, filtering, mixing,
+ * and timing recovery.  The output is a stream of raw QPSK symbols (two bits used
+ * in every output byte).
+ * Pass the result to Ac3Decoder::decodeSymbols() for framing + RS decoding.
+ */
 class Ac3RfDemodulator {
 public:
     Ac3RfDemodulator(Logger &log, double input_sample_frequency, int input_block_size, bool use_simd);
@@ -21,14 +26,12 @@ public:
     Ac3RfDemodulator(Ac3RfDemodulator &&) = delete;
     Ac3RfDemodulator &operator=(Ac3RfDemodulator &&) = delete;
 
-    // Minimum n_samples alignment required by demodulateToSymbols().
-    // n_samples must be a positive multiple of this value.
+    // Since the input is down-sampled and run through filters using SIMD
+    // demodulateToSymbols needs input that is a multiple of the number returned by this method.
     [[nodiscard]] int inputSampleAlignment() const;
 
-    // Analog chain: filtering, mixing, DPLL -> raw QPSK symbols.
-    // Pass the result to Ac3Decoder::decodeSymbols() for framing + RS decoding.
-    // n_samples must be a positive multiple of inputSampleAlignment() and
-    // no greater than the block size passed at construction.
+    // n_samples must be a multiple of inputSampleAlignment() and
+    // at most the block size passed at construction.
     std::vector<uint8_t> demodulateToSymbols(const float *input_buffer, size_t n_samples);
 
 private:

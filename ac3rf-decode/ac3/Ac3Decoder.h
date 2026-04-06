@@ -1,9 +1,5 @@
-/*
- * Ac3Decoder.h — digital decoding chain: framing, de-interleaving, Reed-Solomon.
- *
- * Takes raw QPSK symbols (as produced by Ac3RfDemodulator::demodulateToSymbols)
- * and returns decoded AC3 audio bursts.
- */
+// Copyright 2025-2026 Staffan Ulfberg
+// This file is licensed under the provisions of the Gnu General Public License v3 (see gpl-3.0.txt)
 
 #ifndef AC3RF_DECODE_AC3DECODER_H
 #define AC3RF_DECODE_AC3DECODER_H
@@ -16,6 +12,12 @@
 #include "Ac3BlockHandler.h"
 #include "Ac3InputFraming.h"
 
+/*
+ * Digital processing for AC3-RF: framing, de-interleaving, Reed-Solomon.
+*
+* Takes raw QPSK symbols (as produced by Ac3RfDemodulator::demodulateToSymbols)
+* and returns decoded AC3 audio bursts.
+*/
 class Ac3Decoder {
 public:
     explicit Ac3Decoder(Logger &log);

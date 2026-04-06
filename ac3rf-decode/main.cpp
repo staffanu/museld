@@ -1,3 +1,6 @@
+// Copyright 2025-2026 Staffan Ulfberg
+// This file is licensed under the provisions of the Gnu General Public License v3 (see gpl-3.0.txt)
+
 #include <sys/fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
