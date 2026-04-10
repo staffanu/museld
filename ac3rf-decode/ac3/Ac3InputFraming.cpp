@@ -57,7 +57,7 @@ Ac3InputFraming::arrangeInFrames(const std::vector<uint8_t> &symbols) {
                     m_frame_number = (m_sync_frame_no[0] << 6) | (m_sync_frame_no[1] << 4) | (m_sync_frame_no[2] << 2) | m_sync_frame_no[3];
             } else {
                 if (m_consecutive_synched > 0) {
-                    m_log.debug(eAudio, fmt::format("Missing sync symbol index {} (consecutiveSynched={})!", m_total_symbols_seen, m_consecutive_synched));
+                    m_log.debug(eAudio, std::format("Missing sync symbol index {} (consecutiveSynched={})!", m_total_symbols_seen, m_consecutive_synched));
                     m_consecutive_synched -= 1;
                     m_frame_number = (m_previous_frame_number + 1) % 72;
                     m_auto_sync_at = m_total_symbols_seen + 12 - m_sync_frame_symbols_seen;
