@@ -18,7 +18,7 @@
 #  define O_BINARY 0
 #endif
 
-#include "StreamLogger.h"
+#include "logging/StreamLogger.h"
 #include "input/InputReader.h"
 #include "input/LdfInputReader.h"
 #include "input/LdsInputReader.h"

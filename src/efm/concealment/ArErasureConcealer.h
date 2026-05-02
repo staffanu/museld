@@ -8,7 +8,7 @@
 
 #include "ErasureConcealer.h"
 #include "LinearInterpolationErasureConcealer.h"
-#include "../../Logger.h"
+#include "logging/Logger.h"
 
 
 class ArErasureConcealer : public ErasureConcealer {

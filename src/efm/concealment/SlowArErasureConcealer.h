@@ -8,7 +8,7 @@
 #include <span>
 #include <vector>
 #include "ErasureConcealer.h"
-#include "../../Logger.h"
+#include "logging/Logger.h"
 #include "../TwoChannelSample.h"
 
 class SlowArErasureConcealer : public ErasureConcealer {

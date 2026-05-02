@@ -7,8 +7,8 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
-#include "Logger.h"
-#include "StreamLogger.h"
+#include "logging/Logger.h"
+#include "logging/StreamLogger.h"
 #include "ac3/Ac3Decoder.h"
 #include "ac3/Ac3RfDemodulator.h"
 #include "filter/FirFilterStage.h"

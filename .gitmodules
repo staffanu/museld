@@ -1,0 +1,3 @@
+[submodule "external/firpm"]
+	path = external/firpm
+	url = https://github.com/sfilip/firpm

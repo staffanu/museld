@@ -9,7 +9,7 @@
 #include <vector>
 #include <string>
 #include <optional>
-#include "../../Logger.h"
+#include "logging/Logger.h"
 #include "../TwoChannelSample.h"
 
 class ErasureConcealer {

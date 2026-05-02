@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "../Logger.h"
+#include "logging/Logger.h"
 #include "Ac3BlockHandler.h"
 #include "Ac3InputFraming.h"
 
