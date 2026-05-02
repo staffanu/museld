@@ -1,7 +1,0 @@
-cmake-build-debug/
-cmake-build-release/
-cmake-build-relwithdebinfo/
-build-debug/
-build-release/
-build-relwithdebinfo/
-.idea/
