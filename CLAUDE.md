@@ -18,26 +18,31 @@ Supported formats:
 ## Repository Structure
 
 ```
-src/               — All C++ source (shared between both binaries)
-  ac3/             — AC3-RF QPSK demodulation, DPLL, frame sync, decoder
-  efm/             — EFM demodulation, timing recovery, CIRC decoding, concealment
-  filter/          — FIR/IIR primitives, Parks-McClellan, FFT, SIMD (AVX/NEON)
-  rs/              — Header-only Reed-Solomon codec over GF(2^8) with erasure support
-  input/           — Input format readers for ac3rf-efm-decode (lds, ldf/FLAC)
-  logging/         — Abstract Logger, StreamLogger (ac3rf), CategoryLogger (musecpp)
-  bch/             — BCH decoder (MUSE control data)
-  muse/            — MUSE frame buffers, audio/video decoders, GPU shaders interface
-  ntsc/            — NTSC frame buffers, sync detection, field decoder
-  musevk/          — Vulkan abstraction layer (buffers, images, command pools, compute)
-  util/            — PercentileFilter, LinearRegression, ConstExprHelpers, FmtAddons
-  shaders/         — GLSL compute shaders (compiled to SPIR-V at build time)
-  main-musecpp.cpp — musecpp entry point
-  main-ac3rf-efm-decode.cpp — CLI entry point
-tests/             — Catch2 unit tests (ReedSolomonTest, BchDecoderTest)
-external/firpm/    — Vendored Parks-McClellan FIR design library (git submodule)
-cmake/             — CMake helpers (ac3rfConfig.cmake.in, modules/FindPORTAUDIO.cmake, etc.)
+player/            — Main C++ project (musecpp player + ac3rf-efm-decode library/CLI)
+  CMakeLists.txt
+  src/             — All C++ source (shared between both binaries)
+    ac3/           — AC3-RF QPSK demodulation, DPLL, frame sync, decoder
+    efm/           — EFM demodulation, timing recovery, CIRC decoding, concealment
+    filter/        — FIR/IIR primitives, Parks-McClellan, FFT, SIMD (AVX/NEON)
+    rs/            — Header-only Reed-Solomon codec over GF(2^8) with erasure support
+    input/         — Input format readers for ac3rf-efm-decode (lds, ldf/FLAC)
+    logging/       — Abstract Logger, StreamLogger (ac3rf), CategoryLogger (musecpp)
+    bch/           — BCH decoder (MUSE control data)
+    muse/          — MUSE frame buffers, audio/video decoders, GPU shaders interface
+    ntsc/          — NTSC frame buffers, sync detection, field decoder
+    musevk/        — Vulkan abstraction layer (buffers, images, command pools, compute)
+    util/          — PercentileFilter, LinearRegression, ConstExprHelpers, FmtAddons
+    shaders/       — GLSL compute shaders (compiled to SPIR-V at build time)
+    main-musecpp.cpp
+    main-ac3rf-efm-decode.cpp
+  tests/           — Catch2 unit tests (ReedSolomonTest, BchDecoderTest)
+  external/firpm/  — Vendored Parks-McClellan FIR design library (git submodule)
+  cmake/           — CMake helpers (ac3rfConfig.cmake.in, modules/FindPORTAUDIO.cmake, etc.)
+  python/          — nanobind Python bindings source
 fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device
 picostream/        — Standalone: C wrapper for Picoscope oscilloscope capture
+octave/            — Octave/Matlab scripts for filter design and algorithm exploration
+tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parseQ.awk)
 ```
 
 ## Build Commands
@@ -51,25 +56,25 @@ All C++ components use CMake 3.22+ with out-of-source builds.
 git submodule update --init --recursive
 
 # Release build
-cmake -DCMAKE_BUILD_TYPE=Release -B build-release .
-cmake --build build-release
+cmake -DCMAKE_BUILD_TYPE=Release -S player -B player/build-release
+cmake --build player/build-release
 
 # Debug build (includes AddressSanitizer)
-cmake -DCMAKE_BUILD_TYPE=Debug -B build-debug .
-cmake --build build-debug
+cmake -DCMAKE_BUILD_TYPE=Debug -S player -B player/build-debug
+cmake --build player/build-debug
 
 # Optional Python bindings
-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_PYTHON=ON -B build-release .
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_PYTHON=ON -S player -B player/build-release
 ```
 
 ### Main build with musecpp (adds Vulkan, GLFW, PortAudio, GNURadio deps)
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MUSE=ON -B build-muse .
-cmake --build build-muse
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MUSE=ON -S player -B player/build-muse
+cmake --build player/build-muse
 ```
 
-GLSL shaders in `src/shaders/` are compiled to SPIR-V via `glslc` as part of the build.
+GLSL shaders in `player/src/shaders/` are compiled to SPIR-V via `glslc` as part of the build.
 
 ### fl2kmuse (standalone — requires libosmo-fl2k)
 
@@ -88,12 +93,12 @@ cmake --build picostream/build-release
 ## Running Tests
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Debug -B build-debug .
-cmake --build build-debug
-cd build-debug && ctest -V
+cmake -DCMAKE_BUILD_TYPE=Debug -S player -B player/build-debug
+cmake --build player/build-debug
+cd player/build-debug && ctest -V
 ```
 
-Tests are in `tests/` (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`).
+Tests are in `player/tests/` (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`).
 
 ## Architecture
 
@@ -145,7 +150,7 @@ NTSC frame buffer → Vulkan GPU color decode → video output
 
 - Main thread: Vulkan command recording + GLFW event loop
 - Worker thread: Resampling DPLL (CPU bottleneck)
-- GPU: Async compute via SPIR-V shaders (`src/shaders/*.comp`)
+- GPU: Async compute via SPIR-V shaders (`player/src/shaders/*.comp`)
 
 ### Compiler Flags
 

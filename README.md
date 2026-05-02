@@ -51,12 +51,12 @@ git submodule update --init --recursive
 Dependencies: FLAC++ (`libflac++`), Eigen3, pkg-config.
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -B build-release .
-cmake --build build-release
+cmake -DCMAKE_BUILD_TYPE=Release -S player -B player/build-release
+cmake --build player/build-release
 
 # With AddressSanitizer
-cmake -DCMAKE_BUILD_TYPE=Debug -B build-debug .
-cmake --build build-debug
+cmake -DCMAKE_BUILD_TYPE=Debug -S player -B player/build-debug
+cmake --build player/build-debug
 ```
 
 ### musecpp (adds Vulkan, GLFW, PortAudio, GNURadio)
@@ -70,11 +70,11 @@ sudo apt install cmake glslc libglfw3-dev portaudio19-dev libavformat-dev libavc
 macOS (Homebrew): packages have similar names; use Homebrew for dependencies.
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MUSE=ON -B build-muse .
-cmake --build build-muse
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MUSE=ON -S player -B player/build-muse
+cmake --build player/build-muse
 ```
 
-GLSL shaders in `src/shaders/` are compiled to SPIR-V by `glslc` at build time.
+GLSL shaders in `player/src/shaders/` are compiled to SPIR-V by `glslc` at build time.
 
 ### fl2kmuse (standalone, requires libosmo-fl2k)
 
@@ -93,9 +93,9 @@ cmake --build picostream/build-release
 ## Running tests
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Debug -B build-debug .
-cmake --build build-debug
-cd build-debug && ctest -V
+cmake -DCMAKE_BUILD_TYPE=Debug -S player -B player/build-debug
+cmake --build player/build-debug
+cd player/build-debug && ctest -V
 ```
 
 ## Running musecpp
@@ -103,10 +103,10 @@ cd build-debug && ctest -V
 Quick start — download a sample RF capture and play it:
 ```console
 wget --directory-prefix ../data/muse https://madeye.org/muse-demo/makeup-muse-rf-62.5MHz-nofilter.raw
-./build-muse/src/musecpp --demodulate ../data/muse/makeup-muse-rf-62.5MHz-nofilter.raw
+./player/build-muse/src/musecpp --demodulate ../data/muse/makeup-muse-rf-62.5MHz-nofilter.raw
 ```
 
-![MUSE test picture](src/test-picture.png)
+![MUSE test picture](player/src/test-picture.png)
 
 ### Hardware compatibility
 
