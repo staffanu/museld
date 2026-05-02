@@ -4,26 +4,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Project Does
 
-**ldaudio** is a suite of tools for decoding audio signals from laserdiscs. It supports:
-- **EFM** (Eight-to-Fourteen Modulation): CD audio decoding with CIRC Reed-Solomon error correction
-- **AC3RF**: QPSK-demodulated AC3 surround audio from laserdiscs
-- **MUSE**: Hi-Vision laserdisc high-definition video/audio decoding
+**museld** is a real-time MUSE/NTSC laserdisc player and audio decoder suite. Primary components:
+
+- **musecpp** — Real-time MUSE (Hi-Vision HD) and NTSC laserdisc decoder with Vulkan GPU compute, GLFW display, and PortAudio audio output
+- **ac3rf-efm-decode** — CLI tool (and reusable library) for AC3-RF QPSK surround audio and EFM CD audio decoding from laserdisc RF captures
+
+Supported formats:
+- **MUSE**: Hi-Vision laserdisc high-definition video + audio
+- **NTSC**: Standard definition laserdisc video + audio
+- **EFM**: CD audio (CIRC Reed-Solomon, stereo PCM)
+- **AC3RF**: QPSK-demodulated AC3 surround audio
 
 ## Repository Structure
 
-- `ac3rf-decode/` — C++23 static library + CLI for AC3RF and EFM decoding (primary production component)
-- `musecpp/` — Real-time MUSE decoder with Vulkan GPU compute, GLFW display, and PortAudio
-- `fl2kmuse/` — Test signal generator via FL2K USB device
-- `picostream/` — C wrapper for Picoscope oscilloscope capture
-- `scala/` — Reference Scala 3 implementations used for algorithm development and VHDL table generation
-- `src/`, `wcfg/`, `project.tcp/` — VHDL Vivado projects (Xilinx Artix-7, Lattice iCE40)
-- `ac3-efm-pmod/` — KiCad PCB design for analog signal conditioning
+```
+src/               — All C++ source (shared between both binaries)
+  ac3/             — AC3-RF QPSK demodulation, DPLL, frame sync, decoder
+  efm/             — EFM demodulation, timing recovery, CIRC decoding, concealment
+  filter/          — FIR/IIR primitives, Parks-McClellan, FFT, SIMD (AVX/NEON)
+  rs/              — Header-only Reed-Solomon codec over GF(2^8) with erasure support
+  input/           — Input format readers for ac3rf-efm-decode (lds, ldf/FLAC)
+  logging/         — Abstract Logger, StreamLogger (ac3rf), CategoryLogger (musecpp)
+  bch/             — BCH decoder (MUSE control data)
+  muse/            — MUSE frame buffers, audio/video decoders, GPU shaders interface
+  ntsc/            — NTSC frame buffers, sync detection, field decoder
+  musevk/          — Vulkan abstraction layer (buffers, images, command pools, compute)
+  util/            — PercentileFilter, LinearRegression, ConstExprHelpers, FmtAddons
+  shaders/         — GLSL compute shaders (compiled to SPIR-V at build time)
+  main-musecpp.cpp — musecpp entry point
+  main-ac3rf-efm-decode.cpp — CLI entry point
+tests/             — Catch2 unit tests (ReedSolomonTest, BchDecoderTest)
+external/firpm/    — Vendored Parks-McClellan FIR design library (git submodule)
+cmake/             — CMake helpers (ac3rfConfig.cmake.in, modules/FindPORTAUDIO.cmake, etc.)
+fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device
+picostream/        — Standalone: C wrapper for Picoscope oscilloscope capture
+```
 
 ## Build Commands
 
 All C++ components use CMake 3.22+ with out-of-source builds.
 
-### ac3rf-decode
+### Main build (ac3rf-efm-decode only — minimal deps)
 
 ```bash
 # First time: initialize vendored firpm submodule
@@ -41,53 +62,48 @@ cmake --build build-debug
 cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_PYTHON=ON -B build-release .
 ```
 
-### musecpp
+### Main build with musecpp (adds Vulkan, GLFW, PortAudio, GNURadio deps)
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -B build-release .
-cmake --build build-release
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MUSE=ON -B build-muse .
+cmake --build build-muse
 ```
 
-GLSL shaders in `shaders/` are compiled to SPIR-V via `glslc` as part of the build.
+GLSL shaders in `src/shaders/` are compiled to SPIR-V via `glslc` as part of the build.
 
-### Scala
+### fl2kmuse (standalone — requires libosmo-fl2k)
 
 ```bash
-cd scala && sbt compile
+cmake -DCMAKE_BUILD_TYPE=Release -S fl2kmuse -B fl2kmuse/build-release
+cmake --build fl2kmuse/build-release
+```
+
+### picostream (standalone — requires Picoscope SDK at /opt/picoscope)
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release -S picostream -B picostream/build-release
+cmake --build picostream/build-release
 ```
 
 ## Running Tests
 
-### C++ (musecpp only — Catch2)
-
 ```bash
-cmake -B build-debug -DCMAKE_BUILD_TYPE=Debug .
+cmake -DCMAKE_BUILD_TYPE=Debug -B build-debug .
 cmake --build build-debug
 cd build-debug && ctest -V
 ```
 
-Tests are in `musecpp/Catch_tests/` (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`).
-
-### Scala (ScalaCheck property-based tests)
-
-```bash
-cd scala && sbt test
-```
+Tests are in `tests/` (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`).
 
 ## Architecture
 
-### ac3rf-decode Internal Structure
+### src/ Internal Structure
 
-- `ac3/` — AC3-RF QPSK demodulation, DPLL, frame sync, decoder
-- `efm/` — EFM demodulation, Mueller-Müller timing recovery, CIRC decoding, erasure concealment
-- `filter/` — FIR/IIR primitives, Parks-McClellan design, FFT, SIMD-optimized (AVX/NEON)
-- `rs/` — Header-only template Reed-Solomon codec over GF(2^8) with erasure support
-- `input/` — Input format readers: raw uint8/16/sint8/16, `.lds` (10-bit packed), `.ldf` (FLAC-in-Ogg)
-- `external/firpm/` — Vendored Parks-McClellan FIR design library (git submodule)
+The `src/` directory is the include root for both binaries. The `ac3rf` CMake target covers the reusable library (`ac3/`, `efm/`, `filter/`, `rs/`, `logging/`). The `musecpp` target adds everything else (`muse/`, `ntsc/`, `musevk/`, `bch/`, `util/`, `shaders/`).
 
 ### Key Design Patterns
 
-**Static library / CLI separation**: `ac3rf` (pure decoding logic) is a library; `ac3rf-decode` adds I/O. Python bindings wrap only the library.
+**Static library / CLI separation**: `ac3rf` (pure decoding logic) is a library; `ac3rf-efm-decode` adds I/O. Python bindings wrap only the library.
 
 **`ByteWithErasureFlag<T>` template**: Carries erasure metadata through the entire pipeline — filter stages, demodulation, Reed-Solomon — enabling fine-grained error tracking.
 
@@ -108,23 +124,28 @@ Reed-Solomon C1/C2 → AC3 output
 
 **EFM path:**
 ```
-RF/baseband → decimation filters → IIR lowpass → Mueller-Müller timing →
-fractional resampler → EFM demod → CIRC C1/C2 decoding →
-erasure concealment → pop detection → stereo PCM
+RF/baseband → decimation filters → IIR lowpass → TimingRecovery (Mueller-Müller) →
+fractional resampler → EfmDecoder → CIRC C1/C2 → concealment → pop detection → PCM
 ```
 
-**MUSE path (musecpp):**
+**MUSE path:**
 ```
-RF (62.5 MHz) → RF demod → resampling DPLL (16.2 MHz) →
+RF (62.5 MHz) → RF demod → ResamplingInputReader DPLL (16.2 MHz) →
 MUSE frame buffer → video/audio split → Vulkan GPU filters →
-HD video + audio
+HD video + PortAudio
+```
+
+**NTSC path:**
+```
+RF (40 MHz) → NtscRfDemodulator → NtscInputReader DPLL →
+NTSC frame buffer → Vulkan GPU color decode → video output
 ```
 
 ### musecpp Threading
 
 - Main thread: Vulkan command recording + GLFW event loop
 - Worker thread: Resampling DPLL (CPU bottleneck)
-- GPU: Async compute via SPIR-V shaders (`shaders/*.comp`)
+- GPU: Async compute via SPIR-V shaders (`src/shaders/*.comp`)
 
 ### Compiler Flags
 
@@ -132,6 +153,12 @@ HD video + audio
 - Debug: `-fsanitize=address`
 - macOS: `-mmacosx-version-min=15.0`
 
-### Scala Reference Implementations
+### Reed-Solomon Decoder Strategies
 
-The `scala/` directory contains the authoritative algorithmic reference for EFM, AC3RF, and MUSE decoding. When implementing or verifying C++ behavior, consult the Scala versions first. The Scala code also generates GF(256) lookup tables used in the VHDL designs.
+`rs/ReedSolomon.h` supports four `DecodingStrategy` values:
+- `RS_NONE` — no correction
+- `RS_C1` — conservative: correct 1 error or 2 erasures, otherwise erase all
+- `RS_C2` — corrects 1-3 erasures or 1 error (+1 erasure via two-error path)
+- `RS_MAX` — error-only correction (erasure path currently disabled via `false &&`)
+
+The CIRC pipeline uses RS_C1 for the first pass and RS_C2 for the second.
