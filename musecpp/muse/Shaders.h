@@ -10,6 +10,8 @@
 #include <csignal>
 #include "musevk/VulkanBuffer.h"
 #include "musevk/CommandPool.h"
+#include "DropoutMode.h"
+#include "ResultImages.h"
 
 class Logger;
 
@@ -30,10 +32,6 @@ public:
 
     std::shared_ptr<musevk::VulkanBuffer> createMuseBuffer(unsigned int height, unsigned int width, musevk::HostAccess host_access = musevk::eHostNone);
 
-    enum class DropoutMode {
-        eNormal, eDisabled, eHighlight
-    };
-
     void applyEqAndDeemphasisAndGamma(musevk::CommandBuffer &sq,
                                       std::shared_ptr <musevk::VulkanBuffer> const &video_input,
                                       std::shared_ptr <musevk::VulkanBuffer> const &dropout_input,
@@ -49,13 +47,6 @@ public:
 
     void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only,
                                     unsigned int field_parity, bool output_yuv);
-
-    struct ResultImages {
-        std::shared_ptr<musevk::VulkanImage> out_image;
-        std::shared_ptr<musevk::VulkanBuffer> out_Y;
-        std::shared_ptr<musevk::VulkanBuffer> out_U;
-        std::shared_ptr<musevk::VulkanBuffer> out_V;
-    };
 
     ResultImages getResultImages();
 
@@ -82,7 +73,6 @@ private:
 
     Logger &m_log;
     musevk::VulkanManager &m_vulkan_manager;
-    musevk::CommandPool &m_command_pool;
 
     std::shared_ptr<musevk::ComputeShader> m_apply_eq_and_non_linear_algo;
     std::shared_ptr<musevk::ComputeShader> m_apply_dropout_compensation_algo;

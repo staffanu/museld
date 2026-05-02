@@ -8,18 +8,15 @@
 #include <format>
 #include "musevk/VulkanManager.h"
 #include "musevk/TimestampQueryPool.h"
-#include "MuseConstants.h"
-#include "MuseDecoder.h"
-#include "FrameBuffer.h"
-#include "FieldBufferView.h"
+#include "NtscDecoder.h"
 #include "InputReader.h"
-#include "MuseInputBlock.h"
-#include "Shaders.h"
+#include "NtscInputBlock.h"
+#include "NtscShaders.h"
 
 using namespace std;
 
-MuseDecoder::MuseDecoder(
-        Logger &log, InputReader<MuseInputBlock> &reader, musevk::VulkanManager &manager,
+NtscDecoder::NtscDecoder(
+        Logger &log, InputReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
         musevk::CommandPool &command_pool, std::string const &executable_dir,
         bool decode_video, bool decode_all_fields, bool decode_audio,
         musevk::TimestampQueryPool *timestamp_query_pool)
@@ -27,46 +24,42 @@ MuseDecoder::MuseDecoder(
   m_log(log),
   m_reader(reader),
   m_manager(manager),
-  m_shaders(Shaders(log, executable_dir, m_manager, command_pool)),
+  m_shaders(NtscShaders(log, executable_dir, manager, command_pool)),
   m_decode_video(decode_video),
   m_decode_all_fields(decode_all_fields),
   m_decode_audio(decode_audio),
   m_timestamp_query_pool(timestamp_query_pool),
-  m_eq{-1, -1},
+  m_eq{1, 0},
   m_first_stage_complete_semaphore(manager.getDevice().createSemaphore(vk::SemaphoreCreateInfo())),
+  m_reset_timestamp_query_pool_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
   m_first_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
   m_second_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
   m_timestamp_statistics(),
   m_frame_no(-1),
   m_field_index(0),
   m_total_elapsed_time_us(0),
-  m_audio_decoder(log),
   m_efm_decoder(log),
-  m_frame_buffers() {
+  m_frames() {
 }
 
-MuseDecoder::~MuseDecoder() {
-    while (!m_frame_buffers.empty()) {
-        delete m_frame_buffers.back();
-        m_frame_buffers.pop_back();
+NtscDecoder::~NtscDecoder() {
+    while (!m_frames.empty()) {
+        delete m_frames.back();
+        m_frames.pop_back();
     }
     m_manager.getDevice().destroy(m_first_stage_complete_semaphore);
 }
 
-bool MuseDecoder::initialize() {
-    // Always keep the three latest frames (required for motion detection) -- pretend we have three already
+bool NtscDecoder::initialize() {
+    // Always keep the two latest frames (required for motion detection) -- pretend we have two already
     // The newest frame is always at index 0
     for (int i = 0; i < 3; i++)
-        m_frame_buffers.push_back(
-                new FrameBuffer(m_log, -i,
-                                make_unique<musevk::VulkanBuffer>(
-                                        m_manager, musevk::Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT), 2 /* sizeof(float16) */,
-                                        vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostRead)));
+        m_frames.push_back(new NtscFrame(m_log, -i, m_manager));
 
     for (int i = 0; i < 3; i++)
         for (int parity = 0; parity <= 1; parity++) {
-            m_frame_buffers[i]->get_field(parity).set_prev_field(
-                    &m_frame_buffers[parity == 1 ? i : (i + 1) % 3]->get_field(1 - parity));
+            m_frames[i]->get_field(parity).set_prev_field(
+                    &m_frames[parity == 1 ? i : (i + 1) % 2]->get_field(1 - parity));
         }
 
     m_frame_no = 0;
@@ -76,11 +69,12 @@ bool MuseDecoder::initialize() {
     return true;
 }
 
-bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
+// For NTSC, enable_non_linear is not implemented
+bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
                        int *sample_count,
                        AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES],
-                       int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
-                       shared_ptr<DiscInfo> *disc_code,
+                       int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_ntsc_sample,
+                       shared_ptr<DiscInfo> *disc_info,
                        FieldInterpolationMode field_interpolation_mode,
                        bool redo_last_field, bool enable_non_linear, DropoutMode dropout_mode, bool output_yuv) {
     *sample_count = 0;
@@ -90,7 +84,7 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
 
     auto t0 = chrono::high_resolution_clock::now();
 
-    std::unique_ptr<MuseInputBlock> input_block = nullptr;
+    std::unique_ptr<NtscInputBlock> input_block = nullptr;
     InputStatus input_status = InputStatus::eNormal;
     if (m_field_index == 0 && !redo_last_field) {
         tie(input_block, input_status) = m_reader.getNextInputBuffer();
@@ -102,45 +96,31 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
                 return true;
             default:
                 assert(input_block != nullptr);
-            break;
+                break;
         }
     }
 
     m_first_stage_command_buffer->begin();
+
     if (m_timestamp_query_pool != nullptr)
         m_timestamp_query_pool->reset(*m_first_stage_command_buffer);
 
     if (input_block != nullptr) {
-        auto frame_buffer = m_frame_buffers.back();
-        m_frame_buffers.pop_back();
-        m_frame_buffers.push_front(frame_buffer);
-        frame_buffer->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_muse_sample);
-        shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
+        auto frame = m_frames.back();
+        m_frames.pop_back();
+        m_frames.push_front(frame);
 
-        auto eq_estimate = FrameBuffer::EstimateEq(input_vulkan_buffer->data<float>());
-        if (m_eq.first == -1 && m_eq.second == -1)
-            m_eq = eq_estimate;
-        else
-            m_eq = {m_eq.first * 0.9 + eq_estimate.first * 0.1, m_eq.second * 0.9 + eq_estimate.second * 0.1};
-        if (m_frame_no % 30 == 0)
-            m_log.info(eDecoder, std::format("eq: {}, {}", m_eq.first, m_eq.second));
-
+        frame->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_video_sample);
 
         // The input block data was written by the host, so make sure it is visible on the GPU
         input_block->video_data->synchronizeHostWrites(*m_first_stage_command_buffer);
         input_block->dropout_data->synchronizeHostWrites(*m_first_stage_command_buffer);
 
-        m_shaders.applyEqAndDeemphasisAndGamma(*m_first_stage_command_buffer,
-                                               input_vulkan_buffer, input_block->dropout_data,
-                                               frame_buffer->data(),
-                                               m_eq, enable_non_linear, dropout_mode);
-        frame_buffer->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
-        m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame_buffer->data());
+        m_shaders.copyToFrame(*m_first_stage_command_buffer, input_block->video_data, input_block->dropout_data,
+            frame->data(), dropout_mode);
+        frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
 
-        // The control signal is decoded from the input directly so that we do not have to wait for the completion
-        // of applyEqAndDeemphasisAndGamma
-        if (m_decode_video)
-            frame_buffer->ProcessControlData(input_vulkan_buffer->data<float>(), m_eq);
+        m_shaders.filterColorForFrame(*m_first_stage_command_buffer, frame);
     }
     m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
@@ -152,19 +132,18 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
     if (m_decode_video && (m_decode_all_fields || m_field_index == 0)) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
-        *last_frame_buffer_input_offset = m_frame_buffers[0]->getInputOffset();
-        *input_samples_per_muse_sample = m_frame_buffers[0]->getInputSamplesPerMuseSample();
+        *last_frame_buffer_input_offset = m_frames[0]->getInputOffset();
+        *input_samples_per_ntsc_sample = m_frames[0]->getInputSamplesPerNtscSample();
         *field_parity = decoded_field_index;
 
-        m_shaders.decodeIntraField(*m_second_stage_command_buffer, m_frame_buffers[0]->get_field(decoded_field_index));
-        auto fields = vector<reference_wrapper<FieldBufferView>>{
-                m_frame_buffers[0]->get_field(decoded_field_index),
-                m_frame_buffers[1 - decoded_field_index]->get_field(1 - decoded_field_index),
-                m_frame_buffers[1]->get_field(decoded_field_index),
-                m_frame_buffers[2 - decoded_field_index]->get_field(1 - decoded_field_index),
-                m_frame_buffers[2]->get_field(decoded_field_index)};
+        m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[0]->get_field(decoded_field_index));
+        auto fields = vector<reference_wrapper<NtscFieldView>>{
+                m_frames[0]->get_field(decoded_field_index),
+                m_frames[1 - decoded_field_index]->get_field(1 - decoded_field_index),
+                m_frames[1]->get_field(decoded_field_index),
+                m_frames[2 - decoded_field_index]->get_field(1 - decoded_field_index)};
 
-        if (m_shaders.decodeInterFrameAndDetectMotion(*m_second_stage_command_buffer, fields, true)) {
+        if (m_shaders.decodeTwoFieldsAndDetectMotion(*m_second_stage_command_buffer, fields, true)) {
             m_log.debug(eVideo, std::format("Field {} inter-frame interpolation success", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
                                                  field_interpolation_mode == FieldInterpolationMode::eForceIntraField,
@@ -174,23 +153,26 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
         } else {
             m_log.warn(eVideo, std::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false,
-                                                 decoded_field_index, output_yuv);
+                decoded_field_index, output_yuv);
         }
     }
+
     m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});
 
     m_first_stage_command_buffer->wait();
 
     if (input_block != nullptr) {
-        m_frame_buffers[0]->processDiscCode();
+        m_frames[0]->processVbi();
     }
 
     if (m_decode_audio && m_field_index == 0) {
         if (efm_audio && input_block != nullptr) {
             m_efm_decoder.decode(m_frame_no, input_block->efm_data, input_block->efm_data_size, sample_count, output_samples);
             *audio_mode = MODE_EFM;
-        } else // MUSE audio
-            m_audio_decoder.decodeFrame(m_frame_no, m_shaders.getAudioData(), audio_mode, sample_count, output_samples);
+        } else { // Analog audio
+            *audio_mode = MODE_UNKNOWN;
+            *sample_count = 0;
+        }
     }
 
     if (input_block != nullptr)
@@ -207,22 +189,22 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
     m_total_elapsed_time_us += time_us;
     m_log.info(ePerformance, std::format("Field {} elapsed time {} ms; {} ms/frame",
                                          m_field_index, time_us / 1000,
-                                         m_frame_no != 0 ? m_total_elapsed_time_us / 1000 / m_frame_no : -1));
+                                         m_total_elapsed_time_us / 1000 / m_frame_no));
 
     if (input_status == InputStatus::eBuffersFilled)
         m_field_index = 0; // skip second field -- next field will be from the next frame
     else
         m_field_index = (m_field_index + 1) % 2;
 
-    *disc_code = m_frame_buffers[0]->getDiscCode();
+    *disc_info = m_frames[0]->getVbiData();
 
     return true;
 }
 
-void MuseDecoder::outputBenchmarkResults() {
+void NtscDecoder::outputBenchmarkResults() {
     m_timestamp_statistics.print_stats(3);
 }
 
-ResultImages MuseDecoder::getResultImages() {
+ResultImages NtscDecoder::getResultImages() {
     return m_shaders.getResultImages();
 }

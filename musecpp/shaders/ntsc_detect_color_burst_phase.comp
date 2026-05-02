@@ -1,0 +1,48 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// ranging from (0) until (NTSC_TOTAL_HEIGHT).
+// It doesn't do anything useful for the indices that coorespond
+// to lines without color data, but this keeps it simple.
+// For each input line, the shader computes the color burst phase.
+
+#include "muse.h"
+
+layout(set = 0, binding = 0) buffer readonly in_data_buffer {
+    float16_t input_frame[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 1) buffer writeonly y_data_buffer {
+    f16vec2 phase_data[];
+};
+
+float16_t cosine_lut[] = { 1.hf, 0.hf, -1.hf, 0.hf };
+float16_t sine_lut[] = { 0.hf, 1.hf, 0.hf, -1.hf };
+
+float16_t color_cosine(uint col) {
+    return cosine_lut[col % 4];
+}
+
+float16_t color_sine(uint col) {
+    return sine_lut[col % 4];
+}
+
+void main() {
+    uint line = gl_GlobalInvocationID.x;
+
+    if (line < 21 || line > 263 + NTSC_FIELD_START_Y + NTSC_FIELD_HEIGHT)
+        return;
+
+    float16_t b_re = 0.hf;
+    float16_t b_im = 0.hf;
+    for (uint i = 0; i < 32; i++) {
+        uint burst_col = 70 + i;
+        b_re += input_frame[line][burst_col] * color_cosine(burst_col);
+        b_im += input_frame[line][burst_col] * color_sine(burst_col);
+    }
+    float16_t b_abs = sqrt(b_re * b_re + b_im * b_im);
+    b_re /= b_abs;
+    b_im /= b_abs;
+
+    phase_data[line] = f16vec2(b_re, b_im);
+}

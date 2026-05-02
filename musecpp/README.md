@@ -281,9 +281,9 @@ this information either, since they are mostly constant.
 
 #### Audio channel mapping
 
-I'm using the Portaudio library to output audio.  For four-channel (mode A) MUSE audio the channels aren't mapped correctly,
-and I don't understand if it is possible to query the library which channel is which.  The short term plan is to make it right on
-my laptop, but I suspect the channel indices might differ depending on audio hardware.
+The Portaudio library is used for audio output.  For four-channel (mode A) MUSE audio, I've made the code right on my
+computer, but I don't understand if it is possible to query the library which channel is which, so probably the channels
+will be mixed up on other hardware/drivers.
 
 #### Adjustable RF input sample rate
 
@@ -321,10 +321,16 @@ distorted the phase of the signal too much.  Adaptive equalization could be used
 the book by Yuichi Ninomiya (see the list below) describes how to do this in Chapter 4.12.  I've not spent any serious
 time trying to understand this in detail, however.
 
+#### EFM deemphasis
+
+Add deemphasis to the EFM audio if it has emphasis.  Need to decode the EFM bits that say if it does;
+I don't know how common this is.
+
 #### Difference between LD MUSE and BS MUSE
 
 Most or all of the information I've found describes the satellite broadcasting standard.  MUSE decoders have separate 
 inputs for the two signals, so, supposedly, there is some difference between the two, but I do not know what it would be.
+
 
 ### Information on MUSE
 

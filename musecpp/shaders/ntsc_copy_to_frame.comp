@@ -1,0 +1,40 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// ranging from (0, 0) to (NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT).
+// The input are floats, but outputs are float16_t, since all
+// further processing is performed on half floats.
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint dropout_mode; // 0: normal, 1: disabled, 2: highlight
+};
+
+layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
+    float frame_in[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 1) buffer readonly dropout_data_buffer {
+    uint8_t dropout_data[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 2) buffer writeonly frame_out_buffer {
+    float16_t frame_out[][NTSC_TOTAL_WIDTH];
+};
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= NTSC_TOTAL_HEIGHT || col >= NTSC_TOTAL_WIDTH)
+        return;
+
+    // TODO: handle dropouts, and maybe de-emphasis
+
+    float16_t v = float16_t(frame_in[row][col]);
+
+    v = clamp((v - 0.3hf) * 1.43hf, 0.hf, 1.hf);
+
+    frame_out[row][col] = v;
+}

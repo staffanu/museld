@@ -1,0 +1,92 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// from (0, 0) until (NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT).
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint field_parity;
+};
+
+layout(set = 0, binding = 0) buffer readonly input_frame_buffer {
+    float16_t input_frame[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 1) buffer readonly input_frame_y_buffer {
+    float16_t input_frame_y[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 2) buffer readonly input_frame_c_buffer {
+    float16_t input_frame_c[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 3) buffer readonly color_burst_phase_data_buffer {
+    f16vec2 phase_data[];
+};
+
+layout(set = 0, binding = 4) buffer writeonly Y_data_buffer {
+    float16_t Y_data[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 5) buffer writeonly r_data_buffer {
+    float16_t U_data[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 6) buffer writeonly b_data_buffer {
+    float16_t V_data[][NTSC_Y_BUF_WIDTH];
+};
+
+float16_t cosine_lut[] = { 1.hf, 0.hf, -1.hf, 0.hf };
+float16_t sine_lut[] = { 0.hf, 1.hf, 0.hf, -1.hf };
+
+float16_t color_cosine(uint col) {
+    return cosine_lut[col % 4];
+}
+
+float16_t color_sine(uint col) {
+    return sine_lut[col % 4];
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= NTSC_FIELD_HEIGHT || col >= NTSC_Y_BUF_WIDTH)
+        return;
+
+    uint frame_line = 22 + row + 263 * field_parity;
+    uint frame_col = col + NTSC_FIELD_START_X;
+
+    float16_t Y;
+    float16_t c;
+    if (row < 120) {
+        Y = 0.25hf * input_frame[frame_line - 1][frame_col] + 0.5hf * input_frame[frame_line][frame_col] + 0.25hf * input_frame[frame_line][frame_col];
+        c = -0.25hf * input_frame[frame_line - 1][frame_col] + 0.5hf * input_frame[frame_line][frame_col] - 0.25hf * input_frame[frame_line][frame_col];
+    } else {
+        Y = input_frame_y[frame_line][frame_col];
+        c = input_frame_c[frame_line][frame_col];
+    }
+
+    float16_t b_re = phase_data[frame_line].x;
+    float16_t b_im = phase_data[frame_line].y;
+
+    float16_t c_re = 2.hf * c * color_cosine(frame_col);
+    float16_t c_im = 2.hf * c * color_sine(frame_col);
+
+    // rotate the c vector by the conjugate of the burst phase
+    // (a + ib)(c + id) = ac-bd + i(bc+ad)
+
+    float16_t I = c_re * b_re + c_im * b_im;
+    float16_t Q = c_im * b_re - c_re * b_im;
+
+    float16_t rot_re = 0.8387hf;
+    float16_t rot_im = -0.5446hf;
+
+    float16_t V = I * rot_re - Q * rot_im;
+    float16_t U = Q * rot_re + I * rot_im;
+
+    Y_data[row][col] = Y;
+    U_data[row][col] = U;
+    V_data[row][col] = V;
+}

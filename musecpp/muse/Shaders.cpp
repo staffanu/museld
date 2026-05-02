@@ -16,7 +16,6 @@ using namespace musevk;
 Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &manager, CommandPool &command_pool)
 : m_log(log),
   m_vulkan_manager(manager),
-  m_command_pool(command_pool),
   m_non_linear_processed_buffer(createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)),
   m_interpolated32_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
   m_field_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 3)),
@@ -40,7 +39,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_image_V_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(MUSE_Y_BUF_WIDTH * 3 / 2, MUSE_BUF_HEIGHT * 2 / 2), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
-  m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
+  m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
           Size(7, 7), // Notice the total size should not be larger than the workgroup size!
           { // Filter taken from "Perfect reconstruction filter banks for HDTV representation and coding",
             // Martin VETTERLI, Jelena KOVAČEVIĆ, Didier J. LEGALL, Signal Processing: Image Communication 2 (1990) 349-363.
@@ -54,7 +53,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             0.000000, 0.000000, -0.017578, 0.000000, -0.017578, 0.000000, 0.000000,
             0.000000, 0.000000, 0.000000, 0.001953, 0.000000, 0.000000, 0.000000,
           })),
-  m_filter_2_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
+  m_filter_2_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
           Size(23),
           {
                   // cutoff 0.13, transition 0.04, sampling freq 1, Rectangular: 23 coeffs.
@@ -65,7 +64,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   -0.048220863875547020, -0.048790425225316521, -0.022812544748930134, 0.009264361317176931,
                   0.029017564543303277, 0.028343512638849419, 0.011535573644165619
           })),
-  m_filter_4_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, m_command_pool,
+  m_filter_4_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
           Size(65),
           {
                   // cutoff 0.135, transition 0.035, sample freq 1, Kaiser window: 65 coeffs.
@@ -348,7 +347,7 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
                         m_interpolated32_buffer->size().x_size, (1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases}, convert_sample_rate_descriptor_set_index);
 }
 
-Shaders::ResultImages Shaders::getResultImages() {
+ResultImages Shaders::getResultImages() {
     return ResultImages { m_image_out, m_image_Y_out, m_image_V_out, m_image_U_out};
 }
 

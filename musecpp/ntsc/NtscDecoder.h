@@ -2,44 +2,38 @@
 // Created by staffanu on 5/22/23.
 //
 
-#ifndef MUSECPP_MUSEDECODER_H
-#define MUSECPP_MUSEDECODER_H
+#ifndef MUSECPP_NTSCDECODER_H
+#define MUSECPP_NTSCDECODER_H
 
 #include <deque>
 #include "musevk/TimestampStatistics.h"
 #include "efm/EfmDecoder.h"
-#include "AudioDecoder.h"
-#include "Shaders.h"
-#include "FrameBuffer.h"
 #include "musevk/CommandPool.h"
-#include "MuseInputBlock.h"
+#include "NtscInputBlock.h"
 #include "Decoder.h"
+#include "NtscFrame.h"
+#include "NtscShaders.h"
 
 namespace musevk {
     class TimestampQueryPool;
 }
-class AudioDecoder;
 template<class InputBlock> class InputReader;
 class Logger;
-class Shaders;
+class NtscShaders;
 
-class MuseDecoder : public Decoder {
+class NtscDecoder : public Decoder {
 public:
     /// \param decode_all_fields If false, skips decoding of the first field of each
     /// frame individually, so next should be called 30 times per second instead of 60;
     /// useful for slow hardware.
-    MuseDecoder(Logger &log,
-                InputReader<MuseInputBlock> &reader,
-                musevk::VulkanManager &manager,
-                musevk::CommandPool &command_pool,
-                std::string const &executable_dir,
-                bool decode_video,
-                bool decode_all_fields,
-                bool decode_audio,
-                musevk::TimestampQueryPool *timestamp_query_pool);
-    ~MuseDecoder();
-    MuseDecoder(const MuseDecoder&) = delete;
-    void operator=(const MuseDecoder&) = delete;
+    NtscDecoder(
+            Logger &log, InputReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
+            musevk::CommandPool &command_pool, std::string const &executable_dir,
+            bool decode_video, bool decode_all_fields, bool decode_audio,
+            musevk::TimestampQueryPool *timestamp_query_pool);
+    ~NtscDecoder();
+    NtscDecoder(const NtscDecoder&) = delete;
+    void operator=(const NtscDecoder&) = delete;
 
     [[nodiscard]] bool initialize() override;
 
@@ -57,9 +51,9 @@ public:
 
 private:
     Logger &m_log;
-    InputReader<MuseInputBlock> &m_reader;
+    InputReader<NtscInputBlock> &m_reader;
     musevk::VulkanManager &m_manager;
-    Shaders m_shaders;
+    NtscShaders m_shaders;
     const bool m_decode_video;
     const bool m_decode_all_fields;
     const bool m_decode_audio;
@@ -74,10 +68,9 @@ private:
     int m_frame_no;
     int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field
     long m_total_elapsed_time_us;
-    AudioDecoder m_audio_decoder;
     EfmDecoder m_efm_decoder;
-    std::deque<FrameBuffer *> m_frame_buffers; // The front (index 0) is the newest received frame
+    std::deque<NtscFrame *> m_frames; // The front (index 0) is the newest received frame; we keep three frames.
 };
 
 
-#endif //MUSECPP_MUSEDECODER_H
+#endif //MUSECPP_NTSCDECODER_H

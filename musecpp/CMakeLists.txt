@@ -9,6 +9,7 @@ find_package(Vulkan REQUIRED)
 
 #SET(ENV{PKG_CONFIG_PATH} "/usr/local/lib/pkgconfig/")
 SET(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake-modules" ${CMAKE_MODULE_PATH})
+
 find_package(PORTAUDIO REQUIRED)
 include_directories("${PORTAUDIO_INCLUDE_DIRS}")
 
@@ -39,12 +40,16 @@ include_directories(.)
 
 add_executable(musecpp
         main.cpp
+        AudioDefs.h
         AudioPlayback.cpp AudioPlayback.h
         InputReader.h
-        AudioDefs.h
+        Decoder.h
+        DiscInfo.h
+        DropoutMode.h
         TextRenderer.cpp TextRenderer.h
         RfDemodulator.h
         InputBlockBase.h
+        ResultImages.h
         muse/FrameBuffer.cpp muse/FrameBuffer.h
         muse/FieldBufferView.cpp muse/FieldBufferView.h
         muse/AudioDecoder.cpp muse/AudioDecoder.h
@@ -58,9 +63,20 @@ add_executable(musecpp
         muse/MuseRfDemodulator.cpp muse/MuseRfDemodulator.h
         muse/MuseInputBlock.h
         muse/MuseConstants.h
+        muse/DiscCode.h muse/DiscCode.cpp
+        ntsc/NtscRfDemodulator.cpp ntsc/NtscRfDemodulator.h
+        ntsc/NtscInputReader.h ntsc/NtscInputReader.cpp
+        ntsc/NtscInputBlock.h
+        ntsc/NtscDecoder.h ntsc/NtscDecoder.cpp
+        ntsc/NtscShaders.h ntsc/NtscShaders.cpp
+        ntsc/NtscFrame.h ntsc/NtscFrame.cpp
+        ntsc/NtscFieldView.h ntsc/NtscFieldView.cpp
+        ntsc/VbiData.h ntsc/VbiData.cpp
         util/PercentileFilter.cpp util/PercentileFilter.h
         util/Logger.cpp util/Logger.h
         util/ConstExprHelpers.h
+        util/LinearRegression.cpp util/LinearRegression.cpp
+        util/FmtAddons.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandBuffer.cpp musevk/CommandBuffer.h
         musevk/ComputeShader.cpp musevk/ComputeShader.h
@@ -80,7 +96,6 @@ add_executable(musecpp
         efm/EfmPll.cpp efm/EfmPll.h
         efm/EfmDecoder.cpp efm/EfmDecoder.h
         efm/ByteWithErasureFlag.h
-        util/FmtAddons.h
 )
 if (HAVE_LIBAV)
     target_sources(musecpp PRIVATE

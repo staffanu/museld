@@ -1,0 +1,52 @@
+#version 450
+
+// This shader should be invoked with global invocation ids
+// from (0, 0) until (NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2).
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint field_parity;
+};
+
+// The frame for the latest field
+layout(set = 0, binding = 0) buffer readonly input_frame_buffer0 {
+    float16_t input_frame0[][NTSC_TOTAL_WIDTH];
+};
+
+// The frame for the previous field; when field_parity is 1 (second field) this is the same as input_frame0.
+layout(set = 0, binding = 1) buffer readonly input_frame_buffer1 {
+    float16_t input_frame1[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 2) buffer writeonly Y_data_buffer {
+    float16_t Y_data[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 3) buffer writeonly r_data_buffer {
+    float16_t U_data[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 4) buffer writeonly b_data_buffer {
+    float16_t V_data[][NTSC_Y_BUF_WIDTH];
+};
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= NTSC_FIELD_HEIGHT * 2 || col >= NTSC_Y_BUF_WIDTH)
+        return;
+
+    float16_t v;
+    if ((row & 1) == 0) {
+        // top field
+        uint frame_line = 22 + row / 2;
+        v = input_frame0[frame_line][col + NTSC_FIELD_START_X];
+    } else {
+        uint frame_line = 22 + row / 2 + 263;
+        v = input_frame0[frame_line][col + NTSC_FIELD_START_X];
+    }
+
+    Y_data[row][col] = v;
+}

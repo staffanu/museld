@@ -1,0 +1,110 @@
+#version 450
+
+#include "muse.h"
+
+// This shader should be invoked with global invocation ids
+// from (0, 0) until (NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2)
+
+layout(push_constant) uniform PushConstants {
+    // both set to 1 makes no sense
+    uint force_field_only;
+    uint force_inter_frame_only;
+    int field_parity; // Parity for the field buffer: 0 for first field (lower)(?), 1 for second (upper)(?)
+    uint output_yuv;
+};
+
+layout(set = 0, binding = 0) buffer readonly restrict field_Y_buffer {
+    float16_t field_Y[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 1) buffer readonly restrict field_r_buffer {
+    float16_t field_U[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 2) buffer readonly restrict field_b_buffer {
+    float16_t field_V[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 3) buffer readonly restrict inter_frame_Y_buffer {
+    float16_t inter_frame_Y[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 4) buffer readonly restrict inter_frame_r_buffer {
+    float16_t inter_frame_U[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 5) buffer readonly restrict inter_frame_b_buffer {
+    float16_t inter_frame_V[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 6) buffer readonly restrict movement_buffer {
+    float16_t movement_data[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 7, rgba32f) uniform writeonly image2D frame_out_image;
+
+layout(set = 0, binding = 8) buffer writeonly frame_out_y_buffer {
+    uint16_t frame_out_Y[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 9) buffer writeonly frame_out_u_buffer {
+    uint16_t frame_out_U[][NTSC_Y_BUF_WIDTH / 2];
+};
+
+layout(set = 0, binding = 10) buffer writeonly frame_out_v_buffer {
+    uint16_t frame_out_V[][NTSC_Y_BUF_WIDTH / 2];
+};
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= NTSC_FIELD_HEIGHT * 2 || col >= NTSC_Y_BUF_WIDTH)
+        return;
+
+    float16_t Y, U, V;
+    if (force_field_only != 0) {
+        if ((row & 1) == 0) {
+            if (field_parity == 0) {
+                Y = field_Y[row / 2][col];
+                U = field_U[row / 2][col];
+                V = field_V[row / 2][col];
+            } else {
+                Y = 0.5hf * field_Y[row / 2][col] + 0.5hf * field_Y[clamp(row / 2 - 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+                U = 0.5hf * field_U[row / 2][col] + 0.5hf * field_U[clamp(row / 2 - 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+                V = 0.5hf * field_V[row / 2][col] + 0.5hf * field_V[clamp(row / 2 - 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+            }
+        } else {
+            if (field_parity == 0) {
+                Y = 0.5hf * field_Y[row / 2][col] + 0.5hf * field_Y[clamp(row / 2 + 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+                U = 0.5hf * field_U[row / 2][col] + 0.5hf * field_U[clamp(row / 2 + 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+                V = 0.5hf * field_V[row / 2][col] + 0.5hf * field_V[clamp(row / 2 + 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
+            } else {
+                Y = field_Y[row / 2][col];
+                U = field_U[row / 2][col];
+                V = field_V[row / 2][col];
+            }
+        }
+    } else if (force_inter_frame_only != 0) {
+        Y = inter_frame_Y[row][col];
+        U = 0.hf;
+        V = 0.hf;
+    } else {
+        // FIXME: combine!
+        Y = field_Y[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
+        U = field_U[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
+        V = field_V[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
+    }
+    Y = clamp(Y, 0.hf, 1.hf);
+    U = clamp(U, -1.hf, 1.hf);
+    V = clamp(V, -1.hf, 1.hf);
+
+    float16_t r = Y + V * 1.139883hf;
+    float16_t g = Y - U * 0.394642hf - V * 0.580622hf;
+    float16_t b = Y + U * 2.032062hf;
+
+    imageStore(frame_out_image, ivec2(col, row), vec4(float(r), float(g), float(b), 1.f));
+
+    if (output_yuv != 0) {
+    }
+}

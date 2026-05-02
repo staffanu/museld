@@ -19,3 +19,10 @@ layout (local_size_z_id = 3) in;
 #define MUSE_Y_BUF_WIDTH 374
 #define MUSE_C_BUF_WIDTH 94
 #define MUSE_C_OFFSET 11
+
+#define NTSC_TOTAL_HEIGHT 525
+#define NTSC_TOTAL_WIDTH 910
+#define NTSC_Y_BUF_WIDTH 764
+#define NTSC_FIELD_HEIGHT 240
+#define NTSC_FIELD_START_X 129
+#define NTSC_FIELD_START_Y 22
