@@ -15,6 +15,7 @@ endif()
 
 # ============================================================================
 # firpm — Parks-McClellan FIR filter design (vendored, Eigen3-based)
+# BSD 3 Licence
 # ============================================================================
 
 add_library(firpm STATIC
@@ -85,7 +86,8 @@ target_include_directories(ac3rf
 target_link_libraries(ac3rf PUBLIC firpm)
 
 # ============================================================================
-# Install — allows decode-orc (and others) to use find_package(ac3rf)
+# Install — allows the library to be found using find_package(ac3rf)
+# We also install the firpm library since it is a dependency.
 # ============================================================================
 
 include(GNUInstallDirs)
