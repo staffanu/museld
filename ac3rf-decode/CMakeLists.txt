@@ -27,7 +27,7 @@ add_library(firpm STATIC
 
 target_include_directories(firpm PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/firpm/include>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ac3rf>
+        $<INSTALL_INTERFACE:include/ac3rf>
 )
 target_link_libraries(firpm PUBLIC Eigen3::Eigen)
 

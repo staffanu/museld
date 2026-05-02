@@ -1,5 +1,8 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+find_dependency(Eigen3)
+
 include("${CMAKE_CURRENT_LIST_DIR}/ac3rfTargets.cmake")
 
 check_required_components(ac3rf)
