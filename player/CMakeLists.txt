@@ -10,8 +10,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -mmacosx-version-min=15.0")
 endif()
 
-option(BUILD_MUSE   "Build the MUSE/NTSC decoder (needs Vulkan/GLFW/PortAudio/GNU Radio)" OFF)
-option(BUILD_PYTHON "Build the nanobind Python bindings"                                   OFF)
+option(BUILD_AC3RF_DECODE "Build the ac3rf-efm-decode CLI executable"                           ON)
+option(BUILD_MUSE         "Build the MUSE/NTSC decoder (needs Vulkan/GLFW/PortAudio/GNU Radio)" ON)
+option(BUILD_PYTHON       "Build the nanobind Python bindings"                                  ON)
 
 add_subdirectory(src)
 enable_testing()

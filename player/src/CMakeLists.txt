@@ -119,8 +119,7 @@ install(FILES
 # ac3rf-efm-decode — CLI executable (adds input readers on top of the library)
 # ============================================================================
 
-option(BUILD_EXECUTABLE "Build the ac3rf-efm-decode CLI executable" ON)
-if(BUILD_EXECUTABLE)
+if(BUILD_AC3RF_DECODE)
     find_package(Git REQUIRED)
     execute_process(
         COMMAND ${GIT_EXECUTABLE} describe --always --dirty
@@ -158,7 +157,6 @@ endif()
 # musecpp — real-time MUSE/NTSC laserdisc player (Vulkan + GLFW + PortAudio)
 # ============================================================================
 
-option(BUILD_MUSE "Build the MUSE/NTSC decoder" OFF)
 if(BUILD_MUSE)
     find_package(glfw3 3.3 REQUIRED)
     find_package(Vulkan REQUIRED)
