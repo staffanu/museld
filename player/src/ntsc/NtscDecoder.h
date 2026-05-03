@@ -17,7 +17,7 @@
 namespace musevk {
     class TimestampQueryPool;
 }
-template<class InputBlock> class InputReader;
+template<class InputBlock> class FrameReader;
 class Logger;
 class NtscShaders;
 
@@ -27,7 +27,7 @@ public:
     /// frame individually, so next should be called 30 times per second instead of 60;
     /// useful for slow hardware.
     NtscDecoder(
-            Logger &log, InputReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
+            Logger &log, FrameReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
             musevk::CommandPool &command_pool, std::string const &executable_dir,
             bool decode_video, bool decode_all_fields, bool decode_audio,
             musevk::TimestampQueryPool *timestamp_query_pool);
@@ -51,7 +51,7 @@ public:
 
 private:
     Logger &m_log;
-    InputReader<NtscInputBlock> &m_reader;
+    FrameReader<NtscInputBlock> &m_reader;
     musevk::VulkanManager &m_manager;
     NtscShaders m_shaders;
     const bool m_decode_video;

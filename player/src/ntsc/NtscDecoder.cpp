@@ -9,14 +9,14 @@
 #include "musevk/VulkanManager.h"
 #include "musevk/TimestampQueryPool.h"
 #include "NtscDecoder.h"
-#include "InputReader.h"
+#include "FrameReader.h"
 #include "NtscInputBlock.h"
 #include "NtscShaders.h"
 
 using namespace std;
 
 NtscDecoder::NtscDecoder(
-        Logger &log, InputReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
+        Logger &log, FrameReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
         musevk::CommandPool &command_pool, std::string const &executable_dir,
         bool decode_video, bool decode_all_fields, bool decode_audio,
         musevk::TimestampQueryPool *timestamp_query_pool)

@@ -12,14 +12,14 @@
 #include "MuseDecoder.h"
 #include "FrameBuffer.h"
 #include "FieldBufferView.h"
-#include "InputReader.h"
+#include "FrameReader.h"
 #include "MuseInputBlock.h"
 #include "Shaders.h"
 
 using namespace std;
 
 MuseDecoder::MuseDecoder(
-        Logger &log, InputReader<MuseInputBlock> &reader, musevk::VulkanManager &manager,
+        Logger &log, FrameReader<MuseInputBlock> &reader, musevk::VulkanManager &manager,
         musevk::CommandPool &command_pool, std::string const &executable_dir,
         bool decode_video, bool decode_all_fields, bool decode_audio,
         musevk::TimestampQueryPool *timestamp_query_pool)

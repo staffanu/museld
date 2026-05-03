@@ -8,19 +8,19 @@
 #include <cassert>
 #include <filesystem>
 #include "musevk/VulkanBuffer.h"
-#include "ResamplingInputReader.h"
+#include "ResamplingFrameReader.h"
 #include "logging/Logger.h"
 #include "MuseConstants.h"
 #include "MuseInputBlock.h"
 
 using namespace std;
 
-ResamplingInputReader::ResamplingInputReader(
+ResamplingFrameReader::ResamplingFrameReader(
         Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
         const std::string &filename, InputFormat input_format, double sample_rate,
         double initial_seek_seconds, bool demodulate, bool benchmark_shaders,
         const std::optional<std::string> &output_filename)
-        : InputReader(log, filename,
+        : FrameReader(log, filename,
                       filesystem::is_fifo(filename),
                       initial_seek_seconds, output_filename),
           m_input_format(demodulate ? eFloat : input_format),
@@ -71,11 +71,11 @@ ResamplingInputReader::ResamplingInputReader(
     }
 }
 
-bool ResamplingInputReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
+bool ResamplingFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
     if (m_demodulator == nullptr) {
         m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
         if (m_file_fd == -1)
-            throw runtime_error(std::format("ResamplingInputReader: Unable to open input file {}", m_filename));
+            throw runtime_error(std::format("ResamplingFrameReader: Unable to open input file {}", m_filename));
 #ifdef linux
         if (filesystem::is_fifo(m_filename)) {
             m_log.debug(eInput, std::format("Pipe size: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
@@ -105,11 +105,11 @@ bool ResamplingInputReader::initialize(std::vector<std::unique_ptr<MuseInputBloc
     m_input_dropout_buffer = (uint8_t *)calloc(1, c_input_buffer_size);
     assert(m_input_buffer != nullptr && m_input_dropout_buffer != nullptr);
 
-    return InputReader::initialize(buffers);
+    return FrameReader::initialize(buffers);
 }
 
-void ResamplingInputReader::cleanup() {
-    InputReader::cleanup();
+void ResamplingFrameReader::cleanup() {
+    FrameReader::cleanup();
 
     free(m_input_buffer);
     free(m_input_dropout_buffer);
@@ -123,7 +123,7 @@ void ResamplingInputReader::cleanup() {
         close(m_file_fd);
 }
 
-void ResamplingInputReader::seek(double seconds) {
+void ResamplingFrameReader::seek(double seconds) {
     if (!m_input_is_realtime) {
         if (m_demodulator != nullptr) {
             m_demodulator->seek(seconds);
@@ -146,7 +146,7 @@ void ResamplingInputReader::seek(double seconds) {
     }
 }
 
-void ResamplingInputReader::threadFunc() {
+void ResamplingFrameReader::threadFunc() {
     unique_ptr<MuseInputBlock> output_block = nullptr;
 
     for (m_last_input_sub_buffer_ix_read = 0; m_last_input_sub_buffer_ix_read < c_number_of_input_sub_buffers; m_last_input_sub_buffer_ix_read++) {
@@ -166,7 +166,7 @@ void ResamplingInputReader::threadFunc() {
             }
             m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_input_buffers.empty();});
             if (m_stop_request) {
-                m_log.info(eInput, "ResamplingInputReader: stop requested");
+                m_log.info(eInput, "ResamplingFrameReader: stop requested");
                 break;
             }
             output_block = std::move(m_vacant_input_buffers.front());
@@ -175,7 +175,7 @@ void ResamplingInputReader::threadFunc() {
         }
 
         if (!process(output_block)) {
-            m_log.info(eInput, "ResamplingInputReader: end of file");
+            m_log.info(eInput, "ResamplingFrameReader: end of file");
             break;
         }
 
@@ -192,7 +192,7 @@ void ResamplingInputReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
-bool ResamplingInputReader::readInput(std::unique_ptr<MuseInputBlock> const &output_block) {
+bool ResamplingFrameReader::readInput(std::unique_ptr<MuseInputBlock> const &output_block) {
     uint8_t *read_ptr = m_input_buffer + m_bytes_per_sample * c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
     uint8_t *dropout_read_ptr = m_input_dropout_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
 
@@ -205,7 +205,7 @@ bool ResamplingInputReader::readInput(std::unique_ptr<MuseInputBlock> const &out
                 this_thread::sleep_for(chrono::milliseconds(1));
             else if (read_count == 0) {
                 if (!m_input_is_realtime) {
-                    m_log.info(eInput, "ResamplingInputReader: end of file");
+                    m_log.info(eInput, "ResamplingFrameReader: end of file");
                     return false;
                 }
             } else if (read_count == -1)
@@ -219,7 +219,7 @@ bool ResamplingInputReader::readInput(std::unique_ptr<MuseInputBlock> const &out
         m_input_samples_decimation_rate = MuseDemodulatedBlock::c_video_decimation_rate;
         auto block = m_demodulator->getNextDemodulatedBlock();
         if (block == nullptr) {
-            m_log.info(eInput, "ResamplingInputReader: no more demodulated blocks");
+            m_log.info(eInput, "ResamplingFrameReader: no more demodulated blocks");
             return false;
         }
         memcpy(read_ptr, block->video_data->data<float>(), MuseDemodulatedBlock::c_video_block_size * sizeof(float));
@@ -240,7 +240,7 @@ bool ResamplingInputReader::readInput(std::unique_ptr<MuseInputBlock> const &out
     }
 }
 
-bool ResamplingInputReader::resample(float *sample_out, uint8_t *dropout_out,
+bool ResamplingFrameReader::resample(float *sample_out, uint8_t *dropout_out,
                                      double input_samples_per_sample,
                                      std::unique_ptr<MuseInputBlock> const &output_block) {
 
@@ -299,7 +299,7 @@ bool ResamplingInputReader::resample(float *sample_out, uint8_t *dropout_out,
 }
 
 
-bool ResamplingInputReader::process(std::unique_ptr<MuseInputBlock> const &output_block) {
+bool ResamplingFrameReader::process(std::unique_ptr<MuseInputBlock> const &output_block) {
     auto *output = output_block->video_data->data<float>();
     auto *dropout_output = output_block->dropout_data->data<uint8_t>();
 
@@ -429,7 +429,7 @@ bool ResamplingInputReader::process(std::unique_ptr<MuseInputBlock> const &outpu
     return false;
 }
 
-void ResamplingInputReader::setUnlocked() {
+void ResamplingFrameReader::setUnlocked() {
     m_state = eSearching;
     m_line = 333; // make sure we do not recognize old data and immediately re-lock
     m_log.info(eInput, "state externally set to eSearching");

@@ -9,23 +9,23 @@
 #include <format>
 #include "musevk/VulkanBuffer.h"
 #include "MuseConstants.h"
-#include "PhaseCorrect16MHzInputReader.h"
+#include "PhaseCorrect16MHzFrameReader.h"
 #include "logging/Logger.h"
 
 using namespace std;
 
-PhaseCorrect16MHzInputReader::PhaseCorrect16MHzInputReader(
+PhaseCorrect16MHzFrameReader::PhaseCorrect16MHzFrameReader(
         Logger &log,
         const std::string &filename, bool big_endian, double initial_seek_seconds,
         const std::optional<std::string> &output_filename)
-        : InputReader(log, filename,
+        : FrameReader(log, filename,
                       filesystem::is_fifo(filename),
                       initial_seek_seconds, output_filename),
         m_input{},
         m_big_endian(big_endian) {
 }
 
-bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
+bool PhaseCorrect16MHzFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
     auto [samples_to_skip, eq] = compute_initial_skip(m_log);
 
     m_input = ifstream(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
@@ -37,15 +37,15 @@ bool PhaseCorrect16MHzInputReader::initialize(std::vector<std::unique_ptr<MuseIn
     m_log.info(eInput, std::format("Skipping {} initial samples", samples_to_skip));
     readFloats(m_input, skip_buffer.data(), samples_to_skip);
 
-    return InputReader::initialize(buffers);
+    return FrameReader::initialize(buffers);
 }
 
-void PhaseCorrect16MHzInputReader::cleanup() {
-    InputReader::cleanup();
+void PhaseCorrect16MHzFrameReader::cleanup() {
+    FrameReader::cleanup();
     m_input.close();
 }
 
-void PhaseCorrect16MHzInputReader::seek(double seconds) {
+void PhaseCorrect16MHzFrameReader::seek(double seconds) {
     if (!m_input_is_realtime) {
         std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -70,7 +70,7 @@ void PhaseCorrect16MHzInputReader::seek(double seconds) {
     }
 }
 
-void PhaseCorrect16MHzInputReader::threadFunc() {
+void PhaseCorrect16MHzFrameReader::threadFunc() {
     for (;;) {
         unique_ptr<MuseInputBlock> buffer = nullptr;
         {
@@ -97,7 +97,7 @@ void PhaseCorrect16MHzInputReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
-bool PhaseCorrect16MHzInputReader::readFloats(ifstream &input, float *out, size_t n) {
+bool PhaseCorrect16MHzFrameReader::readFloats(ifstream &input, float *out, size_t n) {
     auto *input_buffer = (int16_t *)malloc(n * sizeof(int16_t));
     input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(int16_t));
     for (int i = 0; i < n; i++) {
@@ -107,7 +107,7 @@ bool PhaseCorrect16MHzInputReader::readFloats(ifstream &input, float *out, size_
     return input.good();
 }
 
-pair<int, pair<float, float>> PhaseCorrect16MHzInputReader::compute_initial_skip(Logger &log) {
+pair<int, pair<float, float>> PhaseCorrect16MHzFrameReader::compute_initial_skip(Logger &log) {
     ifstream input(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
     input.exceptions(ifstream::badbit);
     vector<float> buffer(480 * 1125 * 2); // two frames of data

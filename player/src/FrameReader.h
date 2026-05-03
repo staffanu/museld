@@ -2,8 +2,8 @@
 // Created by staffanu on 6/25/23.
 //
 
-#ifndef MUSECPP_INPUTREADER_H
-#define MUSECPP_INPUTREADER_H
+#ifndef MUSECPP_FRAMEREADER_H
+#define MUSECPP_FRAMEREADER_H
 
 #include <thread>
 #include <condition_variable>
@@ -26,11 +26,11 @@ enum class InputStatus {
 };
 
 template<class InputBlock>
-class InputReader {
+class FrameReader {
 public:
-    void operator=(const InputReader&) = delete;
-    InputReader(const InputReader&) = delete;
-    virtual ~InputReader() = default;
+    void operator=(const FrameReader&) = delete;
+    FrameReader(const FrameReader&) = delete;
+    virtual ~FrameReader() = default;
 
     [[nodiscard]] virtual bool initialize(std::vector<std::unique_ptr<InputBlock>> &buffers);
     virtual void cleanup();
@@ -42,7 +42,7 @@ public:
 protected:
     // input_is_realtime is separate from input_is_fifo since we could have non-real-time input from a pipe
     // that is written to by someone that reads from a file (the example so far is reading from the FmDemodulator)
-    InputReader(Logger &log, const std::string &filename,
+    FrameReader(Logger &log, const std::string &filename,
                 bool input_is_realtime,
                 double initial_seek_seconds, const std::optional<std::string> &output_filename);
 
@@ -68,6 +68,6 @@ private:
     void *m_file_write_buffer;
 };
 
-#include "InputReader.impl.h"
+#include "FrameReader.impl.h"
 
-#endif //MUSECPP_INPUTREADER_H
+#endif //MUSECPP_FRAMEREADER_H

@@ -178,7 +178,7 @@ if(BUILD_MUSE)
         main-musecpp.cpp
         AudioDefs.h
         AudioPlayback.cpp AudioPlayback.h
-        InputReader.h InputReader.impl.h
+        FrameReader.h FrameReader.impl.h
         InputBlockBase.h
         Decoder.h
         DiscInfo.h
@@ -199,14 +199,14 @@ if(BUILD_MUSE)
         muse/ControlSignalDecoder.cpp muse/ControlSignalDecoder.h
         muse/Shaders.cpp muse/Shaders.h
         muse/MuseDecoder.cpp muse/MuseDecoder.h
-        muse/ResamplingInputReader.cpp muse/ResamplingInputReader.h
-        muse/PhaseCorrect16MHzInputReader.cpp muse/PhaseCorrect16MHzInputReader.h
+        muse/ResamplingFrameReader.cpp muse/ResamplingFrameReader.h
+        muse/PhaseCorrect16MHzFrameReader.cpp muse/PhaseCorrect16MHzFrameReader.h
         muse/MuseRfDemodulator.cpp muse/MuseRfDemodulator.h
         muse/MuseInputBlock.h
         muse/MuseConstants.h
         muse/DiscCode.h muse/DiscCode.cpp
         ntsc/NtscRfDemodulator.cpp ntsc/NtscRfDemodulator.h
-        ntsc/NtscInputReader.cpp ntsc/NtscInputReader.h
+        ntsc/NtscFrameReader.cpp ntsc/NtscFrameReader.h
         ntsc/NtscInputBlock.h
         ntsc/NtscConstants.h
         ntsc/NtscDecoder.cpp ntsc/NtscDecoder.h

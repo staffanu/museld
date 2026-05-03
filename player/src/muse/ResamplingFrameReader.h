@@ -2,30 +2,30 @@
 // Created by staffanu on 6/30/23.
 //
 
-#ifndef MUSECPP_RESAMPLINGINPUTREADER_H
-#define MUSECPP_RESAMPLINGINPUTREADER_H
+#ifndef MUSECPP_RESAMPLINGFRAMEREADER_H
+#define MUSECPP_RESAMPLINGFRAMEREADER_H
 
-#include "InputReader.h"
+#include "FrameReader.h"
 #include "MuseRfDemodulator.h"
 #include "efm/TimingRecovery.h"
 #include "util/PercentileFilter.h"
 #include "util/ConstExprHelpers.h"
 #include "MuseInputBlock.h"
 
-class ResamplingInputReader : public InputReader<MuseInputBlock> {
+class ResamplingFrameReader : public FrameReader<MuseInputBlock> {
 public:
     enum InputFormat {
         eUnsignedByte,
         eSignedShortLittleEndian,
         eFloat,
     };
-    explicit ResamplingInputReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
+    explicit ResamplingFrameReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
                                    const std::string &filename, InputFormat input_format,
                                    double sample_rate, double initial_seek_seconds,
                                    bool demodulate, bool benchmark_shaders,
                                    const std::optional<std::string> &output_filename);
-    ResamplingInputReader(const ResamplingInputReader&) = delete;
-    void operator=(const ResamplingInputReader&) = delete;
+    ResamplingFrameReader(const ResamplingFrameReader&) = delete;
+    void operator=(const ResamplingFrameReader&) = delete;
 
     bool initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) override;
     void cleanup() override;
@@ -109,4 +109,4 @@ private:
     double m_error_sum;
 };
 
-#endif //MUSECPP_RESAMPLINGINPUTREADER_H
+#endif //MUSECPP_RESAMPLINGFRAMEREADER_H

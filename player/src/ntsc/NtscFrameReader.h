@@ -2,25 +2,25 @@
 // Created by staffanu on 6/30/23.
 //
 
-#ifndef MUSECPP_NTSCINPUTREADER_H
-#define MUSECPP_NTSCINPUTREADER_H
+#ifndef MUSECPP_NTSCFRAMEREADER_H
+#define MUSECPP_NTSCFRAMEREADER_H
 
-#include "InputReader.h"
+#include "FrameReader.h"
 #include "NtscRfDemodulator.h"
 #include "efm/TimingRecovery.h"
 #include "util/PercentileFilter.h"
 #include "util/ConstExprHelpers.h"
 #include "NtscInputBlock.h"
 
-class NtscInputReader : public InputReader<NtscInputBlock> {
+class NtscFrameReader : public FrameReader<NtscInputBlock> {
 public:
-    explicit NtscInputReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
+    explicit NtscFrameReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
                              const std::string &filename,
                              double sample_rate, double initial_seek_seconds,
                              bool benchmark_shaders,
                              const std::optional<std::string> &output_filename);
-    NtscInputReader(const NtscInputReader&) = delete;
-    void operator=(const NtscInputReader&) = delete;
+    NtscFrameReader(const NtscFrameReader&) = delete;
+    void operator=(const NtscFrameReader&) = delete;
 
     bool initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) override;
     void cleanup() override;
@@ -120,4 +120,4 @@ private:
     double m_error_sum;
 };
 
-#endif //MUSECPP_NTSCINPUTREADER_H
+#endif //MUSECPP_NTSCFRAMEREADER_H

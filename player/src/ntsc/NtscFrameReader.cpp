@@ -8,19 +8,19 @@
 #include <cassert>
 #include <filesystem>
 #include "musevk/VulkanBuffer.h"
-#include "NtscInputReader.h"
+#include "NtscFrameReader.h"
 
 #include "NtscRfDemodulator.h"
 #include "logging/Logger.h"
 
 using namespace std;
 
-NtscInputReader::NtscInputReader(
+NtscFrameReader::NtscFrameReader(
         Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
         const std::string &filename, double sample_rate,
         double initial_seek_seconds, bool benchmark_shaders,
         const std::optional<std::string> &output_filename)
-        : InputReader(log, filename,
+        : FrameReader(log, filename,
                       filesystem::is_fifo(filename),
                       initial_seek_seconds, output_filename),
           m_timing_recovery(log, 40e6 / NtscRfDemodulatorConstants::c_efm_decimation_rate, NtscRfDemodulatorConstants::c_efm_block_size, 3, std::nullopt),
@@ -56,11 +56,11 @@ NtscInputReader::NtscInputReader(
     m_output_add = 0.0;
 }
 
-bool NtscInputReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) {
+bool NtscFrameReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) {
     if (m_demodulator == nullptr) {
         m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
         if (m_file_fd == -1)
-            throw runtime_error(std::format("NtscInputReader: Unable to open input file {}", m_filename));
+            throw runtime_error(std::format("NtscFrameReader: Unable to open input file {}", m_filename));
 #ifdef linux
         if (filesystem::is_fifo(m_filename)) {
             m_log.debug(eInput, std::format("Pipe size: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
@@ -84,17 +84,17 @@ bool NtscInputReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &b
     m_g1 = m_G1 / m_GpdGvco;
     m_g2 = m_G2 / m_GpdGvco;
 
-    m_log.debug(eInput, std::format("NtscInputReader: m_g1={:.5f} m_g2={:.7f}", m_g1, m_g2));
+    m_log.debug(eInput, std::format("NtscFrameReader: m_g1={:.5f} m_g2={:.7f}", m_g1, m_g2));
 
     m_input_buffer = (uint8_t *)calloc(m_bytes_per_sample, c_input_buffer_size);
     m_input_dropout_buffer = (uint8_t *)calloc(1, c_input_buffer_size);
     assert(m_input_buffer != nullptr && m_input_dropout_buffer != nullptr);
 
-    return InputReader::initialize(buffers);
+    return FrameReader::initialize(buffers);
 }
 
-void NtscInputReader::cleanup() {
-    InputReader::cleanup();
+void NtscFrameReader::cleanup() {
+    FrameReader::cleanup();
 
     free(m_input_buffer);
     free(m_input_dropout_buffer);
@@ -108,7 +108,7 @@ void NtscInputReader::cleanup() {
         close(m_file_fd);
 }
 
-void NtscInputReader::seek(double seconds) {
+void NtscFrameReader::seek(double seconds) {
     if (!m_input_is_realtime) {
         if (m_demodulator != nullptr) {
             m_demodulator->seek(seconds);
@@ -131,7 +131,7 @@ void NtscInputReader::seek(double seconds) {
     }
 }
 
-void NtscInputReader::threadFunc() {
+void NtscFrameReader::threadFunc() {
     unique_ptr<NtscInputBlock> output_block = nullptr;
 
     for (m_last_input_sub_buffer_ix_read = 0; m_last_input_sub_buffer_ix_read < c_number_of_input_sub_buffers; m_last_input_sub_buffer_ix_read++) {
@@ -151,7 +151,7 @@ void NtscInputReader::threadFunc() {
             }
             m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_input_buffers.empty();});
             if (m_stop_request) {
-                m_log.info(eInput, "NtscInputReader: stop requested");
+                m_log.info(eInput, "NtscFrameReader: stop requested");
                 break;
             }
             output_block = std::move(m_vacant_input_buffers.front());
@@ -160,7 +160,7 @@ void NtscInputReader::threadFunc() {
         }
 
         if (!process(output_block)) {
-            m_log.info(eInput, "NtscInputReader: end of file");
+            m_log.info(eInput, "NtscFrameReader: end of file");
             break;
         }
 
@@ -177,14 +177,14 @@ void NtscInputReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
-bool NtscInputReader::readInput(std::unique_ptr<NtscInputBlock> const &output_block) {
+bool NtscFrameReader::readInput(std::unique_ptr<NtscInputBlock> const &output_block) {
     uint8_t *read_ptr = m_input_buffer + m_bytes_per_sample * c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
     uint8_t *dropout_read_ptr = m_input_dropout_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
 
     m_input_samples_decimation_rate = NtscRfDemodulatorConstants::c_video_decimation_rate;
     auto block = m_demodulator->getNextDemodulatedBlock();
     if (block == nullptr) {
-        m_log.info(eInput, "NtscInputReader: no more demodulated blocks");
+        m_log.info(eInput, "NtscFrameReader: no more demodulated blocks");
         return false;
     }
     memcpy(read_ptr, block->video_data->data<float>(), NtscRfDemodulatorConstants::c_video_block_size * sizeof(float));
@@ -211,7 +211,7 @@ bool NtscInputReader::readInput(std::unique_ptr<NtscInputBlock> const &output_bl
     return true;
 }
 
-bool NtscInputReader::resample(float *sample_out, uint8_t *dropout_out,
+bool NtscFrameReader::resample(float *sample_out, uint8_t *dropout_out,
                                double input_samples_per_sample,
                                std::unique_ptr<NtscInputBlock> const &output_block) {
 
@@ -252,7 +252,7 @@ bool NtscInputReader::resample(float *sample_out, uint8_t *dropout_out,
 }
 
 
-bool NtscInputReader::process(std::unique_ptr<NtscInputBlock> const &output_block) {
+bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_block) {
     auto *output = output_block->video_data->data<float>();
     auto *dropout_output = output_block->dropout_data->data<uint8_t>();
 
@@ -390,13 +390,13 @@ bool NtscInputReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
     return false;
 }
 
-void NtscInputReader::setUnlocked() {
+void NtscFrameReader::setUnlocked() {
     m_state = eSearching;
     m_line = 333; // make sure we do not recognize old data and immediately re-lock
     m_log.info(eInput, "state externally set to eSearching");
 }
 
-int NtscInputReader::expectedPulseSamplesForHalfLine(int line, int halfLine) {
+int NtscFrameReader::expectedPulseSamplesForHalfLine(int line, int halfLine) {
     switch (line) {
         case 1:
         case 2:

@@ -7,15 +7,15 @@
 #include "musevk/CommandPool.h"
 #include "logging/CategoryLogger.h"
 #include "AudioPlayback.h"
-#include "InputReader.h"
+#include "FrameReader.h"
 #include "TextRenderer.h"
 #include "Decoder.h"
-#include "muse/ResamplingInputReader.h"
-#include "muse/PhaseCorrect16MHzInputReader.h"
+#include "muse/ResamplingFrameReader.h"
+#include "muse/PhaseCorrect16MHzFrameReader.h"
 #include "muse/MuseDecoder.h"
 #include "muse/MuseConstants.h"
 #include "ntsc/NtscConstants.h"
-#include "ntsc/NtscInputReader.h"
+#include "ntsc/NtscFrameReader.h"
 #include "ntsc/NtscDecoder.h"
 
 #ifdef HAVE_LIBAV
@@ -46,7 +46,7 @@ void glfw_error_callback(int error, const char* description) {
 }
 
 template<class InputBlock>
-void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, InputReader<InputBlock> &reader,
+void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, FrameReader<InputBlock> &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
                   bool start_paused, bool decode_video, DropoutMode dropout_mode,
                   bool decode_audio, bool efm_audio, bool benchmark_shaders,
@@ -70,7 +70,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         for (int i = 0; i < INPUT_BUFFER_COUNT; i++)
             input_vulkan_buffers.push_back(InputBlockFactory<InputBlock>::makeBlock(manager));
         if (!reader.initialize(input_vulkan_buffers))
-            throw runtime_error("InputReader initialization failed");
+            throw runtime_error("FrameReader initialization failed");
     }
 
 #ifdef HAVE_LIBAV
@@ -105,7 +105,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         std:unique_ptr<Decoder> decoder = nullptr;
         if (std::is_same<InputBlock, MuseInputBlock>::value) {
             decoder = std::make_unique<MuseDecoder>(log,
-                                                    (InputReader<MuseInputBlock> &)reader,
+                                                    (FrameReader<MuseInputBlock> &)reader,
                                                     manager,
                                                     command_pool,
                                                     executable_dir,
@@ -115,7 +115,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                                                     timestamp_query_pool);
         } else {
             decoder = std::make_unique<NtscDecoder>(log,
-                                                    (InputReader<NtscInputBlock> &)reader,
+                                                    (FrameReader<NtscInputBlock> &)reader,
                                                     manager,
                                                     command_pool,
                                                     executable_dir,
@@ -615,7 +615,7 @@ int main(int argc, char *argv[]) {
                 musevk::VulkanManager manager(log);
 
                 if (ntsc_mode) {
-                    auto *reader = new NtscInputReader(
+                    auto *reader = new NtscFrameReader(
                                     log, executable_dir, manager, *it,
                                     input_sample_frequency, initial_seek_seconds, benchmark_shaders,
                                     muse_output_filename);
@@ -627,21 +627,21 @@ int main(int argc, char *argv[]) {
                 } else {
                     if (demodulate)
                         input_format = eOverSampledSignedShortsLittleEndian;
-                    InputReader<MuseInputBlock> *reader;
+                    FrameReader<MuseInputBlock> *reader;
                     switch (input_format) {
                         case eOverSampledUnsignedBytes:
                         case eOverSampledSignedShortsLittleEndian:
-                            reader = new ResamplingInputReader(
+                            reader = new ResamplingFrameReader(
                                     log, executable_dir, manager, *it,
                                     input_format == eOverSampledSignedShortsLittleEndian
-                                    ? ResamplingInputReader::eSignedShortLittleEndian
-                                    : ResamplingInputReader::eUnsignedByte,
+                                    ? ResamplingFrameReader::eSignedShortLittleEndian
+                                    : ResamplingFrameReader::eUnsignedByte,
                                     input_sample_frequency, initial_seek_seconds, demodulate, benchmark_shaders,
                                     muse_output_filename);
                             break;
                         case eLittleEndianShorts:
                         case eBigEndianShorts:
-                            reader = new PhaseCorrect16MHzInputReader(log, *it,
+                            reader = new PhaseCorrect16MHzFrameReader(log, *it,
                                                                       input_format == eBigEndianShorts,
                                                                       initial_seek_seconds, muse_output_filename);
                             break;

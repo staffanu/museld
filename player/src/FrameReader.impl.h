@@ -6,11 +6,11 @@
 #include <unistd.h>
 #include <format>
 #include "musevk/VulkanBuffer.h"
-#include "InputReader.h"
+#include "FrameReader.h"
 #include "logging/Logger.h"
 
 template<class InputBlock>
-InputReader<InputBlock>::InputReader(Logger &log, const std::string &filename, bool input_is_realtime,
+FrameReader<InputBlock>::FrameReader(Logger &log, const std::string &filename, bool input_is_realtime,
                          double initial_seek_seconds, const std::optional<std::string> &output_filename)
         : m_log(log),
           m_filename(filename),
@@ -31,7 +31,7 @@ InputReader<InputBlock>::InputReader(Logger &log, const std::string &filename, b
 }
 
 template<class InputBlock>
-bool InputReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>> &buffers) {
+bool FrameReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>> &buffers) {
     if (m_initial_seek_seconds != 0)
         seek(m_initial_seek_seconds);
 
@@ -43,7 +43,7 @@ bool InputReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>
 
     m_log.debug(eInput, std::format("Using {} input buffers", m_vacant_input_buffers.size()));
 
-    m_reader_thread = new std::thread(&InputReader::threadFunc, this);
+    m_reader_thread = new std::thread(&FrameReader::threadFunc, this);
 #ifdef linux
     pthread_setname_np(m_reader_thread->native_handle(), "musecpp-reader");
 #endif
@@ -65,7 +65,7 @@ bool InputReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>
 }
 
 template<class InputBlock>
-void InputReader<InputBlock>::cleanup() {
+void FrameReader<InputBlock>::cleanup() {
     {
         std::unique_lock<std::mutex> lock(m_mutex);
         m_cv_vacant.notify_one();
@@ -84,7 +84,7 @@ void InputReader<InputBlock>::cleanup() {
 
 template<class InputBlock>
 std::pair<std::unique_ptr<InputBlock>, InputStatus>
-InputReader<InputBlock>::getNextInputBuffer() {
+FrameReader<InputBlock>::getNextInputBuffer() {
     m_get_input_buffers_count++;
     std::unique_ptr<InputBlock> buffer = nullptr;
     InputStatus hint = InputStatus::eNormal;
@@ -120,7 +120,7 @@ InputReader<InputBlock>::getNextInputBuffer() {
 }
 
 template<class InputBlock>
-void InputReader<InputBlock>::returnBuffer(std::unique_ptr<InputBlock> &buffer) {
+void FrameReader<InputBlock>::returnBuffer(std::unique_ptr<InputBlock> &buffer) {
     std::unique_lock<std::mutex> lock(m_mutex);
     m_cv_vacant.notify_one();
     m_vacant_input_buffers.push_back(std::move(buffer));

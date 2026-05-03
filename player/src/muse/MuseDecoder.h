@@ -19,7 +19,7 @@ namespace musevk {
     class TimestampQueryPool;
 }
 class AudioDecoder;
-template<class InputBlock> class InputReader;
+template<class InputBlock> class FrameReader;
 class Logger;
 class Shaders;
 
@@ -29,7 +29,7 @@ public:
     /// frame individually, so next should be called 30 times per second instead of 60;
     /// useful for slow hardware.
     MuseDecoder(Logger &log,
-                InputReader<MuseInputBlock> &reader,
+                FrameReader<MuseInputBlock> &reader,
                 musevk::VulkanManager &manager,
                 musevk::CommandPool &command_pool,
                 std::string const &executable_dir,
@@ -57,7 +57,7 @@ public:
 
 private:
     Logger &m_log;
-    InputReader<MuseInputBlock> &m_reader;
+    FrameReader<MuseInputBlock> &m_reader;
     musevk::VulkanManager &m_manager;
     Shaders m_shaders;
     const bool m_decode_video;

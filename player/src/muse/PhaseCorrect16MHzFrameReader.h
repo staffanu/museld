@@ -2,16 +2,16 @@
 // Created by staffanu on 6/30/23.
 //
 
-#ifndef MUSECPP_PHASECORRECT16MHZINPUTREADER_H
-#define MUSECPP_PHASECORRECT16MHZINPUTREADER_H
+#ifndef MUSECPP_PHASECORRECT16MHZFRAMEREADER_H
+#define MUSECPP_PHASECORRECT16MHZFRAMEREADER_H
 
 #include <fstream>
-#include "InputReader.h"
+#include "FrameReader.h"
 #include "muse/MuseInputBlock.h"
 
-class PhaseCorrect16MHzInputReader : public InputReader<MuseInputBlock> {
+class PhaseCorrect16MHzFrameReader : public FrameReader<MuseInputBlock> {
 public:
-    explicit PhaseCorrect16MHzInputReader(Logger &log, const std::string &filename, bool big_endian,
+    explicit PhaseCorrect16MHzFrameReader(Logger &log, const std::string &filename, bool big_endian,
                                           double initial_seek_seconds,
                                           const std::optional<std::string> &output_filename);
 
@@ -31,4 +31,4 @@ private:
     bool m_big_endian;
 };
 
-#endif //MUSECPP_PHASECORRECT16MHZINPUTREADER_H
+#endif //MUSECPP_PHASECORRECT16MHZFRAMEREADER_H
