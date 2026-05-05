@@ -4,6 +4,7 @@
 #include <cstring>
 #include <format>
 #include <cassert>
+#include <chrono>
 #include "EfmDecoder.h"
 
 using namespace std;

@@ -459,7 +459,7 @@ int main(int argc, char *argv[]) {
     vector<pair<string, function<void ()>>> options;
 
     auto usage = [&options] () -> void {
-        cerr << "usage: musecpp ";
+        cerr << "usage: museld ";
         for (auto o: options)
             cerr << "[" << o.first << "] ";
         cerr << "<input_file> ..." << endl;
