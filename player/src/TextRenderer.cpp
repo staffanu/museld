@@ -1,4 +1,3 @@
-#include <array>
 #include "TextRenderer.h"
 #include "musevk/Size.h"
 #include "musevk/VulkanUtil.h"
@@ -7,7 +6,10 @@ using namespace musevk;
 
 TextRenderer::TextRenderer(std::string const &executable_dir, VulkanManager &vulkan_manager, CommandPool &command_pool)
 : m_vulkan_manager(vulkan_manager),
-  m_font_buffer(VulkanUtil::createDeviceBuffer(vulkan_manager, command_pool, Size(c_font_definition.size()), c_font_definition)),
+  // Font data is widened to uint32_t to avoid corrupted reads on some AMD drivers (observed on
+  // Ryzen integrated GPU). See matching comment in render_text.comp.
+  m_font_buffer(VulkanUtil::createDeviceBuffer(vulkan_manager, command_pool, Size(c_font_definition.size()),
+                    std::vector<uint32_t>(c_font_definition.begin(), c_font_definition.end()))),
   m_render_text_shader(std::shared_ptr<ComputeShader>(
           new ComputeShader(m_vulkan_manager.getDevice(),
                             "render_text", {eBuffer, eImage}, sizeof(uint16_t) * 64,

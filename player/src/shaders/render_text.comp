@@ -14,8 +14,11 @@ layout(push_constant) uniform PushConstants {
     uint16_t text[58]; // coded as byte indices in the font, so 0 means codepoint c_font_codepoint_begin, 2 per item
 };
 
+// uint32_t instead of uint16_t: some AMD drivers (observed on Ryzen integrated GPU) produce
+// corrupted reads from uint16_t SSBOs, causing font pixels to appear byte-swapped. The font
+// data fits in the lower 16 bits of each uint and the bit manipulation below is unaffected.
 layout(set = 0, binding = 0) buffer readonly font_buffer {
-    uint16_t font[];
+    uint font[];
 };
 
 layout(set = 0, binding = 1, rgba32f) uniform writeonly image2D frame_out_image;
@@ -33,8 +36,8 @@ void main() {
 
     uint x_in_glyph = x - char_index * glyph_width * scale;
 
-    uint16_t line = font[y / scale + glyph_index * glyph_height];
-    uint16_t pixel = line & (0x8000us >> (x_in_glyph / scale));
+    uint line = font[y / scale + glyph_index * glyph_height];
+    uint pixel = line & (0x8000u >> (x_in_glyph / scale));
     if (pixel != 0) {
         imageStore(frame_out_image, ivec2(x + top_left_x, y + top_left_y), vec4(1.f, 1.f, 1.f, 1.f));
     }
