@@ -249,6 +249,7 @@ void MuseRfDemodulator::demodulate() {
                 {(uint32_t)efm_lowpass_filter_size, MuseDemodulatedBlock::c_efm_block_size,
                  /* out offset */ efm_equalization_filter_size - 1, MuseDemodulatedBlock::c_efm_decimation_rate}, 2);
 
+        fir_filter_shader->updateWorkgroup(Size(MuseDemodulatedBlock::c_efm_block_size));
         fir_filter_shader->updateBufferDescriptorsInSet(2, {efm_equalization_filter, efm_equalization_in_buffer, block->efm_data});
         command_buffer->enqueueComputeShader<uint32_t>(
                 fir_filter_shader,
