@@ -65,7 +65,7 @@ private:
     const bool m_decode_audio;
     musevk::TimestampQueryPool *m_timestamp_query_pool; // if set we use it
 
-    std::pair<float, float> m_eq;
+    std::pair<float, float> m_rescale;
     vk::Semaphore m_first_stage_complete_semaphore;
     std::shared_ptr<musevk::CommandBuffer> m_reset_timestamp_query_pool_command_buffer;
     std::shared_ptr<musevk::CommandBuffer> m_first_stage_command_buffer;

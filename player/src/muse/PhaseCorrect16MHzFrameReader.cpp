@@ -32,7 +32,7 @@ PhaseCorrect16MHzFrameReader::PhaseCorrect16MHzFrameReader(
 }
 
 bool PhaseCorrect16MHzFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
-    auto [samples_to_skip, eq] = compute_initial_skip(m_log);
+    auto [samples_to_skip, rescale] = compute_initial_skip(m_log);
 
     m_input_reader = makeInputReader(m_filename, m_input_format, c_samples_per_frame);
     m_input_reader->initialize();
@@ -110,11 +110,11 @@ pair<int, pair<float, float>> PhaseCorrect16MHzFrameReader::compute_initial_skip
     sort(sorted.begin(), sorted.end());
     auto y1 = sorted[500];
     auto y2 = sorted[480 * 1125 * 2 - 500];
-    pair<float, float> eq = {(y2 - y1) / (239.0f - 16.0f), y1 - 16.0f};
-    log.info(eInput, std::format("Initial eq: {}, {}", eq.first, eq.second));
+    pair<float, float> rescale = {(y2 - y1) / (239.0f - 16.0f), y1 - 16.0f};
+    log.info(eInput, std::format("Initial rescale: {}, {}", rescale.first, rescale.second));
 
     // The rest of the code only checks the signal for rising or falling values, and never uses the actual
-    // values directly.  We do not need to do any equalization for this.
+    // values directly.  We do not need to do any rescaling for this.
 
     // checks if the m_line starting at off has a positive or a negative sync
     auto isSyncGood = [&buffer](int off, bool expectedPositive) {
@@ -163,5 +163,5 @@ pair<int, pair<float, float>> PhaseCorrect16MHzFrameReader::compute_initial_skip
                                          return p1.second < p2.second;
                                      })->first;
 
-    return { bestLineOffset * 480 + bestPixelOffset, eq };
+    return { bestLineOffset * 480 + bestPixelOffset, rescale };
 }

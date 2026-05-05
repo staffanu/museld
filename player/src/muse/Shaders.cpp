@@ -97,10 +97,10 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
           })),
   m_audio_data(createMuseBuffer(88, MUSE_TOTAL_WIDTH * 3 / 4, eHostRead))
 {
-    m_apply_eq_and_non_linear_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-            "apply_eq_and_non_linear",
+    m_apply_rescale_and_non_linear_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+            "apply_rescale_and_non_linear",
             {eBuffer, eBuffer}, sizeof(float) * 3,
-            VulkanUtil::loadSpirv(executable_dir, "apply_eq_and_non_linear.comp"), Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)));
+            VulkanUtil::loadSpirv(executable_dir, "apply_rescale_and_non_linear.comp"), Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)));
     m_apply_dropout_compensation_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "apply_dropout_compensation",
             {eBuffer, eBuffer}, 4,
@@ -153,15 +153,15 @@ std::shared_ptr<musevk::VulkanBuffer> Shaders::createMuseBuffer(unsigned int hei
     return make_unique<VulkanBuffer>(m_vulkan_manager, Size(width, height), 2 /* sizeof(float16) */, vk::BufferUsageFlagBits::eStorageBuffer, host_access);
 }
 
-void Shaders::applyEqAndDeemphasisAndGamma(
+void Shaders::applyRescaleAndDeemphasisAndGamma(
         CommandBuffer &sq,
         shared_ptr<musevk::VulkanBuffer> const &video_input,
         shared_ptr<musevk::VulkanBuffer> const &dropout_input,
         shared_ptr<musevk::VulkanBuffer> const &buffer,
-        pair<float, float> const &eq, bool enable_non_linear,  DropoutMode dropout_mode) {
-    m_apply_eq_and_non_linear_algo->updateBufferDescriptorsInSet(0, {video_input, m_non_linear_processed_buffer});
-    sq.enqueueComputeShader<float>(m_apply_eq_and_non_linear_algo,
-                            {eq.first, eq.second, enable_non_linear ? 1.0f : 0.0f});
+        pair<float, float> const &rescale, bool enable_non_linear,  DropoutMode dropout_mode) {
+    m_apply_rescale_and_non_linear_algo->updateBufferDescriptorsInSet(0, {video_input, m_non_linear_processed_buffer});
+    sq.enqueueComputeShader<float>(m_apply_rescale_and_non_linear_algo,
+                            {rescale.first, rescale.second, enable_non_linear ? 1.0f : 0.0f});
 
     if (dropout_mode != DropoutMode::eDisabled) {
         m_apply_dropout_compensation_algo->

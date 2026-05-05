@@ -20,7 +20,7 @@ class FrameBuffer {
 public:
     FrameBuffer(Logger &log, int frame_no, std::shared_ptr<musevk::VulkanBuffer> data);
 
-    static std::pair<float, float> EstimateEq(float const *data);
+    static std::pair<float, float> EstimateRescale(float const *data);
 
     void set_frame_no(int frame_no, long input_offset, double input_samples_per_sample);
     [[nodiscard]] long getInputOffset() const;
@@ -28,7 +28,7 @@ public:
     std::shared_ptr<musevk::VulkanBuffer> &data();
     FieldBufferView &get_field(int parity);
     [[nodiscard]] std::shared_ptr<DiscCode> getDiscCode() const;
-    void ProcessControlData(float const *frame_data, std::pair<float, float> const &eq);
+    void ProcessControlData(float const *frame_data, std::pair<float, float> const &rescale);
     void processDiscCode();
 
 private:

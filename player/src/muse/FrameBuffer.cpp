@@ -41,7 +41,7 @@ std::shared_ptr<musevk::VulkanBuffer> &FrameBuffer::data() {
     return m_data;
 }
 
-std::pair<float, float> FrameBuffer::EstimateEq(float const *data) {
+std::pair<float, float> FrameBuffer::EstimateRescale(float const *data) {
     float line_1_high_sum = 0;
     float line_2_low_sum = 0;
     for (int i = 19; i < 259; i++) {
@@ -58,8 +58,8 @@ std::pair<float, float> FrameBuffer::EstimateEq(float const *data) {
     vector<pair<float, float>> v = {{0.0f , avg_low}, {128.0f, avg_blanking }, {255.0f, avg_high }};
     // This is according to the documentation available, but it seems in reality the levels are 0 and 255?
     // vector<pair<float, float>> v = {{16.0f , avg_low}, {128.0f, avg_blanking }, {239.0f, avg_high }};
-    auto eq = LinearRegression::linearRegression(v);
-    return eq;
+    auto rescale = LinearRegression::linearRegression(v);
+    return rescale;
 }
 
 FieldBufferView &FrameBuffer::get_field(int parity) {
@@ -71,9 +71,9 @@ std::shared_ptr<DiscCode> FrameBuffer::getDiscCode() const {
 }
 
 // Notice we use a pointer to the buffer from which the frame data is created before the frame data itself is ready
-void FrameBuffer::ProcessControlData(float const *frame_data, std::pair<float, float> const &eq) {
-    m_fields[0].ProcessControlData(frame_data + 558 * MUSE_TOTAL_WIDTH + 12, eq);
-    m_fields[1].ProcessControlData(frame_data + 1120 * MUSE_TOTAL_WIDTH + 12, eq);
+void FrameBuffer::ProcessControlData(float const *frame_data, std::pair<float, float> const &rescale) {
+    m_fields[0].ProcessControlData(frame_data + 558 * MUSE_TOTAL_WIDTH + 12, rescale);
+    m_fields[1].ProcessControlData(frame_data + 1120 * MUSE_TOTAL_WIDTH + 12, rescale);
 }
 
 void FrameBuffer::processDiscCode() {

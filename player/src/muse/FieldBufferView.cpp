@@ -24,8 +24,8 @@ void FieldBufferView::set_prev_field(FieldBufferView *prev_field) {
     m_prev_field = prev_field;
 }
 
-void FieldBufferView::ProcessControlData(float const *control_data, std::pair<float, float> const &eq) {
-    m_control.emplace(ControlSignalDecoder(m_log, control_data, eq));
+void FieldBufferView::ProcessControlData(float const *control_data, std::pair<float, float> const &rescale) {
+    m_control.emplace(ControlSignalDecoder(m_log, control_data, rescale));
 }
 
 shared_ptr<musevk::VulkanBuffer> FieldBufferView::getVulkanBuffer() {

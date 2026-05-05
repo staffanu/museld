@@ -32,7 +32,7 @@ MuseDecoder::MuseDecoder(
   m_decode_all_fields(decode_all_fields),
   m_decode_audio(decode_audio),
   m_timestamp_query_pool(timestamp_query_pool),
-  m_eq{-1, -1},
+  m_rescale{-1, -1},
   m_first_stage_complete_semaphore(manager.getDevice().createSemaphore(vk::SemaphoreCreateInfo())),
   m_first_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
   m_second_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
@@ -117,30 +117,30 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
         frame_buffer->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_muse_sample);
         shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
 
-        auto eq_estimate = FrameBuffer::EstimateEq(input_vulkan_buffer->data<float>());
-        if (m_eq.first == -1 && m_eq.second == -1)
-            m_eq = eq_estimate;
+        auto rescale_estimate = FrameBuffer::EstimateRescale(input_vulkan_buffer->data<float>());
+        if (m_rescale.first == -1 && m_rescale.second == -1)
+            m_rescale = rescale_estimate;
         else
-            m_eq = {m_eq.first * 0.9 + eq_estimate.first * 0.1, m_eq.second * 0.9 + eq_estimate.second * 0.1};
+            m_rescale = {m_rescale.first * 0.9 + rescale_estimate.first * 0.1, m_rescale.second * 0.9 + rescale_estimate.second * 0.1};
         if (m_frame_no % 30 == 0)
-            m_log.info(eDecoder, std::format("eq: {}, {}", m_eq.first, m_eq.second));
+            m_log.info(eDecoder, std::format("rescale: {}, {}", m_rescale.first, m_rescale.second));
 
 
         // The input block data was written by the host, so make sure it is visible on the GPU
         input_block->video_data->synchronizeHostWrites(*m_first_stage_command_buffer);
         input_block->dropout_data->synchronizeHostWrites(*m_first_stage_command_buffer);
 
-        m_shaders.applyEqAndDeemphasisAndGamma(*m_first_stage_command_buffer,
-                                               input_vulkan_buffer, input_block->dropout_data,
-                                               frame_buffer->data(),
-                                               m_eq, enable_non_linear, dropout_mode);
+        m_shaders.applyRescaleAndDeemphasisAndGamma(*m_first_stage_command_buffer,
+                                                    input_vulkan_buffer, input_block->dropout_data,
+                                                    frame_buffer->data(),
+                                                    m_rescale, enable_non_linear, dropout_mode);
         frame_buffer->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
         m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame_buffer->data());
 
         // The control signal is decoded from the input directly so that we do not have to wait for the completion
         // of applyEqAndDeemphasisAndGamma
         if (m_decode_video)
-            frame_buffer->ProcessControlData(input_vulkan_buffer->data<float>(), m_eq);
+            frame_buffer->ProcessControlData(input_vulkan_buffer->data<float>(), m_rescale);
     }
     m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 

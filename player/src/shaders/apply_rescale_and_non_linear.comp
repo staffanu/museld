@@ -6,8 +6,8 @@
 // further processing is performed on half floats.
 
 /*
- * By eq, we mean rescaling the input values to the standard [0, 255] range
- * of values from the MUSE sepcifications.  The parameters for this are
+ * The rescale step maps raw input sample values into the standard [0, 255] range
+ * of values from the MUSE specifications.  The parameters for this are
  * calculated on the CPU before calling this shader.  Only pixels not affected
  * by emphasis are included in this calculation.
  * Notice that some values will be outside the [0, 255] range due to emphasis.
@@ -21,8 +21,8 @@
 #include "muse.h"
 
 layout(push_constant) uniform PushConstants {
-    float eq1_f;
-    float eq2_f;
+    float rescale1_f;
+    float rescale2_f;
     float enable_non_linear;
 };
 
@@ -73,11 +73,10 @@ void main() {
 
     float16_t v = float16_t(frame_in[row][col]);
 
-    // Apply eq
-
-    float16_t eq1 = float16_t(eq1_f);
-    float16_t eq2 = float16_t(eq2_f);
-    float16_t equalized = (v - eq2) / eq1;
+    // Apply rescale: map raw input values to the [0, 255] range
+    float16_t rescale1 = float16_t(rescale1_f);
+    float16_t rescale2 = float16_t(rescale2_f);
+    float16_t rescaled = (v - rescale2) / rescale1;
 
     // Apply non-linear processing for the picture area
     // notice row and col start at 0 -- in the muse spec numbering starts at 1
@@ -86,9 +85,9 @@ void main() {
 
     float16_t processed;
     if (enable_non_linear != 0 && (is_picture_area || is_color_area)) {
-        processed = non_linear(equalized);
+        processed = non_linear(rescaled);
     } else {
-        processed = equalized;
+        processed = rescaled;
     }
 
     frame_out[row][col] = processed;

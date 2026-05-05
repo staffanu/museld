@@ -32,12 +32,12 @@ public:
 
     std::shared_ptr<musevk::VulkanBuffer> createMuseBuffer(unsigned int height, unsigned int width, musevk::HostAccess host_access = musevk::eHostNone);
 
-    void applyEqAndDeemphasisAndGamma(musevk::CommandBuffer &sq,
-                                      std::shared_ptr <musevk::VulkanBuffer> const &video_input,
-                                      std::shared_ptr <musevk::VulkanBuffer> const &dropout_input,
-                                      std::shared_ptr <musevk::VulkanBuffer> const &buffer,
-                                      const std::pair<float, float> &eq,
-                                      bool enable_non_linear, DropoutMode dropout_mode);
+    void applyRescaleAndDeemphasisAndGamma(musevk::CommandBuffer &sq,
+                                           std::shared_ptr <musevk::VulkanBuffer> const &video_input,
+                                           std::shared_ptr <musevk::VulkanBuffer> const &dropout_input,
+                                           std::shared_ptr <musevk::VulkanBuffer> const &buffer,
+                                           const std::pair<float, float> &rescale,
+                                           bool enable_non_linear, DropoutMode dropout_mode);
 
     void decodeIntraField(musevk::CommandBuffer &sq, FieldBufferView &field);
 
@@ -74,7 +74,7 @@ private:
     Logger &m_log;
     musevk::VulkanManager &m_vulkan_manager;
 
-    std::shared_ptr<musevk::ComputeShader> m_apply_eq_and_non_linear_algo;
+    std::shared_ptr<musevk::ComputeShader> m_apply_rescale_and_non_linear_algo;
     std::shared_ptr<musevk::ComputeShader> m_apply_dropout_compensation_algo;
     std::shared_ptr<musevk::ComputeShader> m_apply_deemphasis_and_gamma_algo;
     std::shared_ptr<musevk::ComputeShader> m_copy_y_for_interpolation_algo;

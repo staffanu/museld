@@ -33,7 +33,7 @@ map<array<int, 4>, int> ControlSignalDecoder::s_H_column_index = [] {
     return ix;
 }();
 
-ControlSignalDecoder::ControlSignalDecoder(Logger &log, float const *data, std::pair<float, float> const &eq)
+ControlSignalDecoder::ControlSignalDecoder(Logger &log, float const *data, std::pair<float, float> const &rescale)
 : m_log(log) {
     auto groups = vector<pair<array<int, 4>, bool>>();
     groups.reserve(25);
@@ -41,8 +41,8 @@ ControlSignalDecoder::ControlSignalDecoder(Logger &log, float const *data, std::
         for (int col = 7; col < 87; col += 16) { // start of each encoded 4 bit group
             array<int, 8> bits{};
             for (int bit_ix = 0; bit_ix < 8; bit_ix++) {
-                float d1 = clamp((data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix] - eq.second) / eq.first, 0.0f, 255.0f);
-                float d2 = clamp((data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix + 1] - eq.second) / eq.first, 0.0f, 255.0f);
+                float d1 = clamp((data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix] - rescale.second) / rescale.first, 0.0f, 255.0f);
+                float d2 = clamp((data[row * MUSE_TOTAL_WIDTH + col + 2 * bit_ix + 1] - rescale.second) / rescale.first, 0.0f, 255.0f);
                 bits[bit_ix] = d1 + d2 > 256 ? 1 : 0;
             }
 
