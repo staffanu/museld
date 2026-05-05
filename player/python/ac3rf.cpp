@@ -50,7 +50,9 @@ NB_MODULE(ac3rf, m) {
 
     nb::class_<StreamLogger, Logger>(m, "StreamLogger")
         // Only exposes the map argument; always writes to stderr.
-        .def(nb::init<std::map<LogCategoryFlags, LogPriority>>(), "level"_a)
+        .def("__init__", [](StreamLogger *self, std::map<LogCategoryFlags, LogPriority> level) {
+            new (self) StreamLogger(std::move(level), std::cerr, false);
+        }, "level"_a)
         .def_ro_static("LOG_ALL",   &StreamLogger::c_log_all)
         .def_ro_static("LOG_INFO",  &StreamLogger::c_log_info)
         .def_ro_static("LOG_WARN",  &StreamLogger::c_log_warn)
