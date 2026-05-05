@@ -23,6 +23,9 @@ private:
     // compute the differential symbol for the first input data
     std::vector<std::complex<float>> m_prev_input;
 
+    static constexpr int c_counter_bits = 10;
+    constexpr static int c_nominal_symbol_frequency = 576000 / 2;
+
     // state for symbol reclocking
     //    val omega = 2 * math.Pi * 1800 // undamped frequency
     //    val zeta = 1.0 // damping factor
@@ -32,16 +35,15 @@ private:
     double g2 = 1 / 512.0; // these constants yield approximately a natural frequency of 2060 Hz and damping factor 0.72
 
     // we get a new sample with frequency 16 * 2.88 MHz = 46.08 MHz
-    constexpr static int c_nominal_symbol_frequency = 576000 / 2;
+    const int m_nominal_add;
 
     uint8_t m_prev_symbol = 0;
-    int errorSum = 0;
-    int errorSumBits = 15;
-    int filterOut = 0; // need to keep this under nominalAdd to ensure counter is strictly increasing
-    int counterBits = 10;
-    int clkCounter = 0;
-    int togglePosition = 0;
-    int number_of_toggles = 0;
+    static constexpr int c_error_sum_bits = 15;
+    int m_error_sum = 0;
+    int m_filter_out = 0; // need to keep this under nominalAdd to ensure counter is strictly increasing
+    int m_clk_counter = 0;
+    int m_toggle_position = 0;
+    int m_number_of_toggles = 0;
 };
 
 

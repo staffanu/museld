@@ -2,7 +2,7 @@
 // This file is licensed under the provisions of the Gnu General Public License v3 (see gpl-3.0.txt)
 
 #include <unistd.h>
-#include <cstring>
+#include <cassert>
 #include <vector>
 #include <cmath>
 #include <complex>
@@ -11,8 +11,10 @@
 Ac3DPLL::Ac3DPLL(Logger &log, double input_sample_frequency) :
     m_log(log),
     m_input_sample_frequency(input_sample_frequency),
-    m_symbol_distance(std::round(m_input_sample_frequency / 288e3))
+    m_symbol_distance(std::round(m_input_sample_frequency / c_nominal_symbol_frequency)),
+    m_nominal_add((1 << c_counter_bits) * c_nominal_symbol_frequency / input_sample_frequency)
 {
+    assert(m_symbol_distance < (int)(input_sample_frequency / c_nominal_symbol_frequency) * 4);
     m_prev_input.resize(m_symbol_distance);
 }
 
@@ -28,7 +30,6 @@ uint8_t Ac3DPLL::decode(std::complex<float> sample) {
 
 std::vector<uint8_t> Ac3DPLL::reclockSymbols(const std::vector<float> &input_i, const std::vector<float> &input_q) {
     std::vector<uint8_t> output;
-    int nominalAdd = (int)((1 << counterBits) * (double)c_nominal_symbol_frequency / m_input_sample_frequency);
 
     for (int i = 0; i < (int)input_i.size(); i++) {
         // The current symbol is computed from the phase difference between the current IQ values, and that
@@ -37,24 +38,24 @@ std::vector<uint8_t> Ac3DPLL::reclockSymbols(const std::vector<float> &input_i, 
             * conj(i >= m_symbol_distance ? std::complex<float>(input_i[i - m_symbol_distance], input_q[i - m_symbol_distance]) : m_prev_input[i]));
 
         if (current_symbol != m_prev_symbol) {
-            togglePosition = clkCounter;
-            number_of_toggles++;
+            m_toggle_position = m_clk_counter;
+            m_number_of_toggles++;
         }
         m_prev_symbol = current_symbol;
 
-        int newCounter = (clkCounter + nominalAdd + filterOut) & ((1 << counterBits) - 1);
-        filterOut = 0;
-        if (newCounter < clkCounter) {
+        int newCounter = (m_clk_counter + m_nominal_add + m_filter_out) & ((1 << c_counter_bits) - 1);
+        m_filter_out = 0;
+        if (newCounter < m_clk_counter) {
             output.push_back(m_prev_symbol);
 
-            int error = number_of_toggles == 1 ? -(togglePosition - (1 << (counterBits - 1))) : 0;
+            int error = m_number_of_toggles == 1 ? -(m_toggle_position - (1 << (c_counter_bits - 1))) : 0;
 
-            errorSum = (errorSum + error) << (32 - errorSumBits) >> (32 - errorSumBits); // truncate and sign extend
-            filterOut = error * g1 + errorSum * g2;
-            number_of_toggles = 0;
+            m_error_sum = (m_error_sum + error) << (32 - c_error_sum_bits) >> (32 - c_error_sum_bits); // truncate and sign extend
+            m_filter_out = error * g1 + m_error_sum * g2;
+            m_number_of_toggles = 0;
         }
 
-        clkCounter = newCounter;
+        m_clk_counter = newCounter;
     }
     m_prev_input.clear();
     const int n = (int)input_i.size();
