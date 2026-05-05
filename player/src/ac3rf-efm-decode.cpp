@@ -217,6 +217,12 @@ int main(int argc, char *argv[]) {
     options.emplace_back("--sint16", [&] () mutable  -> void {
         input_format_option = std::make_optional(eSint16);
     });
+    options.emplace_back("--uint16be", [&] () mutable  -> void {
+        input_format_option = std::make_optional(eUint16BE);
+    });
+    options.emplace_back("--sint16be", [&] () mutable  -> void {
+        input_format_option = std::make_optional(eSint16BE);
+    });
     options.emplace_back("--lds", [&] () mutable  -> void {
         input_format_option = std::make_optional(eLds);
     });

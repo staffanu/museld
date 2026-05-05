@@ -29,7 +29,7 @@ Machines tested and found too slow: NVIDIA Jetson Nano, Raspberry Pi 5 (1–5 fp
 
 | Option | Description |
 |---|---|
-| `--input-format <fmt>` | Input sample type: `u8`, `s8`, `u16`, `s16`, `lds`, `flac`, `ldf`. Auto-detected from filename extension when omitted. |
+| `--input-format <fmt>` | Input sample type: `u8`, `s8`, `u16`, `s16`, `u16be`, `s16be`, `lds`, `flac`, `ldf`. Auto-detected from filename extension when omitted. |
 | `--input-type <type>` | Input type: `muse-rf`, `ntsc-rf`, `muse-16`, `muse-os`. RF input MUSE/NTSC, phase correct 16.2 MHz MUSE baseband, oversampled MUSE baseband. Default is `muse-rf`. |
 | `--sample-freq <Hz>` | Sets the input sample rate. Default 62.5 MHz. |
 

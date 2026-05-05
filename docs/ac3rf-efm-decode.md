@@ -28,7 +28,8 @@ Input is read from stdin if no filename is given. Output is written to stdout by
 | Option | Description |
 |---|---|
 | `--uint8` / `--sint8` | Force 8-bit unsigned / signed sample format |
-| `--uint16` / `--sint16` | Force 16-bit unsigned / signed sample format |
+| `--uint16` / `--sint16` | Force 16-bit unsigned / signed sample format (little-endian) |
+| `--uint16be` / `--sint16be` | Force 16-bit unsigned / signed sample format (big-endian) |
 | `--lds` | Force lds format |
 | `--flac` | Force FLAC format |
 | `--ldf` | Force FLAC-in-Ogg (ldf) format |
@@ -37,7 +38,7 @@ Input is read from stdin if no filename is given. Output is written to stdout by
 | `--duration <seconds>` | Stop after decoding this many seconds of audio |
 
 Format is auto-detected from the filename extension (`.u8`, `.s8`, `.u16`, `.s16`,
-`.lds`, `.flac`, `.ldf`) when no format flag is given.
+`.u16be`, `.s16be`, `.lds`, `.flac`, `.ldf`) when no format flag is given.
 
 ## Decoding options
 

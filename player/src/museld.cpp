@@ -468,13 +468,15 @@ int main(int argc, char *argv[]) {
 
     options.emplace_back("--input-format", [&] () mutable -> void {
         const auto &name = *(it++);
-        if      (name == "u8")   input_format_option = eUint8;
-        else if (name == "s8")   input_format_option = eSint8;
-        else if (name == "u16")  input_format_option = eUint16;
-        else if (name == "s16")  input_format_option = eSint16;
-        else if (name == "lds")  input_format_option = eLds;
-        else if (name == "flac") input_format_option = eFlac;
-        else if (name == "ldf")  input_format_option = eFlacOgg;
+        if      (name == "u8")    input_format_option = eUint8;
+        else if (name == "s8")    input_format_option = eSint8;
+        else if (name == "u16")   input_format_option = eUint16;
+        else if (name == "s16")   input_format_option = eSint16;
+        else if (name == "u16be") input_format_option = eUint16BE;
+        else if (name == "s16be") input_format_option = eSint16BE;
+        else if (name == "lds")   input_format_option = eLds;
+        else if (name == "flac")  input_format_option = eFlac;
+        else if (name == "ldf")   input_format_option = eFlacOgg;
         else throw std::runtime_error(std::format("Unknown input format: {}", name));
     });
     options.emplace_back("--sample-freq", [&] () mutable  -> void {

@@ -10,3 +10,4 @@ player/build-*/
 fl2kmuse/build-*/
 picostream/build-*/
 .claude/
+.cache/

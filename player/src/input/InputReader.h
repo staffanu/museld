@@ -17,6 +17,8 @@ enum InputFormat {
     eSint8,
     eUint16,
     eSint16,
+    eUint16BE,
+    eSint16BE,
     eLds,
     eFlac,
     eFlacOgg,
@@ -52,7 +54,7 @@ protected:
 // On a fifo we block until the data arrives or the writer closes; on a regular file partial reads
 // at end of file are reported as 0 (EOF). EAGAIN is handled with a short sleep to support
 // O_NONBLOCK fds.
-template <typename T>
+template <typename T, bool ByteSwap = false>
 class InputReaderImpl : public InputReader {
 public:
     InputReaderImpl(int fd, uint32_t block_size, bool is_fifo)
@@ -105,8 +107,16 @@ public:
             filled_bytes += (size_t)read_count;
         }
 
-        for (uint32_t i = 0; i < m_block_size; i++)
-            f[i] = m_buffer[i];
+        for (uint32_t i = 0; i < m_block_size; i++) {
+            T val = m_buffer[i];
+            if constexpr (ByteSwap && sizeof(T) == 2) {
+                uint16_t raw;
+                memcpy(&raw, &val, 2);
+                raw = __builtin_bswap16(raw);
+                memcpy(&val, &raw, 2);
+            }
+            f[i] = val;
+        }
 
         return m_block_size;
     }

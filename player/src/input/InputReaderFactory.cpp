@@ -15,10 +15,12 @@
 
 static std::unique_ptr<InputReader> makeInputReaderForFd(int fd, bool is_fifo, InputFormat format, uint32_t block_size) {
     switch (format) {
-        case eUint8:   return std::make_unique<InputReaderImpl<uint8_t>>(fd, block_size, is_fifo);
-        case eSint8:   return std::make_unique<InputReaderImpl<int8_t>>(fd, block_size, is_fifo);
-        case eUint16:  return std::make_unique<InputReaderImpl<uint16_t>>(fd, block_size, is_fifo);
-        case eSint16:  return std::make_unique<InputReaderImpl<int16_t>>(fd, block_size, is_fifo);
+        case eUint8:    return std::make_unique<InputReaderImpl<uint8_t>>(fd, block_size, is_fifo);
+        case eSint8:    return std::make_unique<InputReaderImpl<int8_t>>(fd, block_size, is_fifo);
+        case eUint16:   return std::make_unique<InputReaderImpl<uint16_t>>(fd, block_size, is_fifo);
+        case eSint16:   return std::make_unique<InputReaderImpl<int16_t>>(fd, block_size, is_fifo);
+        case eUint16BE: return std::make_unique<InputReaderImpl<uint16_t, true>>(fd, block_size, is_fifo);
+        case eSint16BE: return std::make_unique<InputReaderImpl<int16_t, true>>(fd, block_size, is_fifo);
         case eLds:     return std::make_unique<LdsInputReader>(fd, block_size, is_fifo);
         case eFlac:
         case eFlacOgg: return std::make_unique<LdfInputReader>(fd, block_size, is_fifo, format);
@@ -56,6 +58,8 @@ std::optional<InputFormat> inputFormatFromFilename(const std::string &filename) 
     if (filename.ends_with(".s8"))    return eSint8;
     if (filename.ends_with(".u16"))   return eUint16;
     if (filename.ends_with(".s16"))   return eSint16;
+    if (filename.ends_with(".u16be")) return eUint16BE;
+    if (filename.ends_with(".s16be")) return eSint16BE;
     if (filename.ends_with(".lds"))   return eLds;
     if (filename.ends_with(".flac"))  return eFlac;
     if (filename.ends_with(".ldf"))   return eFlacOgg;
