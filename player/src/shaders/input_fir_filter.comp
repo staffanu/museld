@@ -38,7 +38,7 @@ layout(set = 0, binding = 2) buffer writeonly output_buffer {
 #define MAX_DECIMATION 4
 
 shared float shared_filter[MAX_FILTER_SIZE];
-shared float shared_input[MAX_WORKGROUP_SIZE * MAX_DECIMATION + MAX_FILTER_SIZE - 1];
+shared float shared_input[MAX_WORKGROUP_SIZE * MAX_DECIMATION + MAX_FILTER_SIZE];
 
 void main() {
     uint global_ix = gl_GlobalInvocationID.x;
