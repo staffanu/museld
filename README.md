@@ -116,7 +116,7 @@ cd player/build-debug && ctest -V
 
 ```console
 wget --directory-prefix ../data/muse https://madeye.org/muse-demo/makeup-muse-rf-62.5MHz-nofilter.raw
-./player/build-muse/src/musecpp --demodulate ../data/muse/makeup-muse-rf-62.5MHz-nofilter.raw
+./player/build-release/src/museld --demodulate ../data/muse/makeup-muse-rf-62.5MHz-nofilter.raw
 ```
 
 ![MUSE test picture](test-picture.png)

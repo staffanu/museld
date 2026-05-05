@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **museld** is a real-time MUSE/NTSC laserdisc player and audio decoder suite. Primary components:
 
-- **musecpp** — Real-time MUSE (Hi-Vision HD) and NTSC laserdisc decoder with Vulkan GPU compute, GLFW display, and PortAudio audio output
+- **museld** — Real-time MUSE (Hi-Vision HD) and NTSC laserdisc decoder with Vulkan GPU compute, GLFW display, and PortAudio audio output
 - **ac3rf-efm-decode** — CLI tool (and reusable library) for AC3-RF QPSK surround audio and EFM CD audio decoding from laserdisc RF captures
 
 Supported formats:
@@ -18,7 +18,7 @@ Supported formats:
 ## Repository Structure
 
 ```
-player/            — Main C++ project (musecpp player + ac3rf-efm-decode library/CLI)
+player/            — Main C++ project (museld player + ac3rf-efm-decode library/CLI)
   CMakeLists.txt
   src/             — All C++ source (shared between both binaries)
     ac3/           — AC3-RF QPSK demodulation, DPLL, frame sync, decoder
@@ -26,7 +26,7 @@ player/            — Main C++ project (musecpp player + ac3rf-efm-decode libra
     filter/        — FIR/IIR primitives, Parks-McClellan, FFT, SIMD (AVX/NEON)
     rs/            — Header-only Reed-Solomon codec over GF(2^8) with erasure support
     input/         — Input format readers for ac3rf-efm-decode (lds, ldf/FLAC)
-    logging/       — Abstract Logger, StreamLogger (ac3rf), CategoryLogger (musecpp)
+    logging/       — Abstract Logger, StreamLogger (shared by both binaries)
     bch/           — BCH decoder (MUSE control data)
     muse/          — MUSE frame buffers, audio/video decoders, GPU shaders interface
     ntsc/          — NTSC frame buffers, sync detection, field decoder
@@ -49,29 +49,23 @@ tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parse
 
 All C++ components use CMake 3.22+ with out-of-source builds.
 
-### Main build (ac3rf-efm-decode only — minimal deps)
+### Main build (all components — default)
 
 ```bash
 # First time: initialize vendored firpm submodule
 git submodule update --init --recursive
 
-# Release build
+# Release build (museld + ac3rf-efm-decode + Python bindings)
 cmake -DCMAKE_BUILD_TYPE=Release -S player -B player/build-release
 cmake --build player/build-release
 
+# ac3rf-efm-decode only (minimal deps)
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF -S player -B player/build-ac3rf
+cmake --build player/build-ac3rf
+
 # Debug build (includes AddressSanitizer)
-cmake -DCMAKE_BUILD_TYPE=Debug -S player -B player/build-debug
+cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF -S player -B player/build-debug
 cmake --build player/build-debug
-
-# Optional Python bindings
-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_PYTHON=ON -S player -B player/build-release
-```
-
-### Main build with musecpp (adds Vulkan, GLFW, PortAudio, GNURadio deps)
-
-```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MUSE=ON -S player -B player/build-muse
-cmake --build player/build-muse
 ```
 
 GLSL shaders in `player/src/shaders/` are compiled to SPIR-V via `glslc` as part of the build.
@@ -104,7 +98,7 @@ Tests are in `player/tests/` (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`).
 
 ### src/ Internal Structure
 
-The `src/` directory is the include root for both binaries. The `ac3rf` CMake target covers the reusable library (`ac3/`, `efm/`, `filter/`, `rs/`, `logging/`). The `musecpp` target adds everything else (`muse/`, `ntsc/`, `musevk/`, `bch/`, `util/`, `shaders/`).
+The `src/` directory is the include root for both binaries. The `ac3rf` CMake target covers the reusable library (`ac3/`, `efm/`, `filter/`, `rs/`, `logging/`). The `museld` target adds everything else (`muse/`, `ntsc/`, `musevk/`, `bch/`, `util/`, `shaders/`).
 
 ### Key Design Patterns
 
@@ -146,7 +140,7 @@ RF (40 MHz) → NtscRfDemodulator → NtscInputReader DPLL →
 NTSC frame buffer → Vulkan GPU color decode → video output
 ```
 
-### musecpp Threading
+### museld Threading
 
 - Main thread: Vulkan command recording + GLFW event loop
 - Worker thread: Resampling DPLL (CPU bottleneck)

@@ -6,7 +6,7 @@ Download a sample RF capture and play it:
 
 ```console
 wget --directory-prefix ../data/muse https://madeye.org/muse-demo/makeup-muse-rf-62.5MHz-nofilter.raw
-./player/build-muse/src/musecpp --demodulate ../data/muse/makeup-muse-rf-62.5MHz-nofilter.raw
+./player/build-release/src/museld --demodulate ../data/muse/makeup-muse-rf-62.5MHz-nofilter.raw
 ```
 
 ![MUSE test picture](../test-picture.png)
@@ -91,7 +91,7 @@ RF capture (40 MHz) → NtscRfDemodulator → NtscInputReader (DPLL)
   → GLFW window
 ```
 
-### Data flow — EFM (inside musecpp)
+### Data flow — EFM (inside museld)
 
 ```
 RF → TimingRecovery (Mueller-Müller PLL) → EfmDecoder → CIRC C1/C2 Reed-Solomon

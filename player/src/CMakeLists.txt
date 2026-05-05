@@ -155,7 +155,7 @@ if(BUILD_AC3RF_DECODE)
 endif()
 
 # ============================================================================
-# musecpp — real-time MUSE/NTSC laserdisc player (Vulkan + GLFW + PortAudio)
+# museld — real-time MUSE/NTSC laserdisc player (Vulkan + GLFW + PortAudio)
 # ============================================================================
 
 if(BUILD_MUSE)
@@ -178,7 +178,7 @@ if(BUILD_MUSE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(FLAC REQUIRED flac++)
 
-    add_executable(musecpp
+    add_executable(museld
         museld.cpp
         AudioDefs.h
         input/InputReader.h
@@ -239,21 +239,21 @@ if(BUILD_MUSE)
     )
 
     if(HAVE_LIBAV)
-        target_sources(musecpp PRIVATE VideoFileWriter.cpp VideoFileWriter.h)
+        target_sources(museld PRIVATE VideoFileWriter.cpp VideoFileWriter.h)
     endif()
 
-    target_include_directories(musecpp PRIVATE
+    target_include_directories(museld PRIVATE
         ${PORTAUDIO_INCLUDE_DIRS}
         ${GNURADIO_INCLUDE_DIRS}
         ${Vulkan_INCLUDE_DIRS}
         ${FLAC_INCLUDE_DIRS}
     )
     if(HAVE_LIBAV)
-        target_include_directories(musecpp PRIVATE ${LIBAV_INCLUDE_DIR})
+        target_include_directories(museld PRIVATE ${LIBAV_INCLUDE_DIR})
     endif()
 
-    target_link_options(musecpp PRIVATE "-L/usr/local/lib")
-    target_link_libraries(musecpp
+    target_link_options(museld PRIVATE "-L/usr/local/lib")
+    target_link_libraries(museld
         PRIVATE ac3rf
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
@@ -262,7 +262,7 @@ if(BUILD_MUSE)
         PRIVATE ${FLAC_LINK_LIBRARIES}
     )
     if(HAVE_LIBAV)
-        target_link_libraries(musecpp PRIVATE ${LIBAV_LIBRARIES})
+        target_link_libraries(museld PRIVATE ${LIBAV_LIBRARIES})
     endif()
 
     # Compile GLSL compute shaders to SPIR-V
@@ -283,5 +283,5 @@ if(BUILD_MUSE)
         list(APPEND SPIRV_BINARY_FILES ${SPIRV})
     endforeach()
     add_custom_target(Shaders DEPENDS ${SPIRV_BINARY_FILES})
-    add_dependencies(musecpp Shaders)
+    add_dependencies(museld Shaders)
 endif()
