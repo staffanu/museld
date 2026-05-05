@@ -5,20 +5,17 @@
 #ifndef MUSECPP_RESAMPLINGFRAMEREADER_H
 #define MUSECPP_RESAMPLINGFRAMEREADER_H
 
+#include <memory>
 #include "FrameReader.h"
 #include "MuseRfDemodulator.h"
 #include "efm/TimingRecovery.h"
+#include "input/InputReader.h"
 #include "util/PercentileFilter.h"
 #include "util/ConstExprHelpers.h"
 #include "MuseInputBlock.h"
 
 class ResamplingFrameReader : public FrameReader<MuseInputBlock> {
 public:
-    enum InputFormat {
-        eUnsignedByte,
-        eSignedShortLittleEndian,
-        eFloat,
-    };
     explicit ResamplingFrameReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
                                    const std::string &filename, InputFormat input_format,
                                    double sample_rate, double initial_seek_seconds,
@@ -47,8 +44,9 @@ private:
     void setUnlocked();
 
     InputFormat m_input_format;
+    bool m_demodulate;
     TimingRecovery m_timing_recovery;
-    int m_file_fd;
+    std::unique_ptr<InputReader> m_input_reader;
     double m_sample_rate;
     int m_input_samples_decimation_rate;
 
@@ -65,16 +63,17 @@ private:
     static constexpr size_t c_input_buffer_size_mask = c_input_buffer_size - 1;
     static constexpr unsigned c_input_sub_buffer_size_bits = ConstHelpers::log2(c_input_sub_buffer_size);
 
-    uint8_t *m_input_buffer;
+    float *m_input_buffer;
     uint8_t *m_input_dropout_buffer;
     long m_input_sub_buffer_input_offsets[c_number_of_input_sub_buffers];
 
     int m_last_input_sub_buffer_ix_read;
     double m_t;
 
-    int m_bytes_per_sample;
-    double m_output_multiplier;
-    double m_output_add;
+    // Scale applied once during readInput so that the file-mode and demodulator paths produce
+    // comparable values (downstream code expects ~0..255).
+    float m_input_scale;
+    float m_input_offset;
 
     double m_input_samples_per_sample_ref;
     double m_input_samples_per_sample;

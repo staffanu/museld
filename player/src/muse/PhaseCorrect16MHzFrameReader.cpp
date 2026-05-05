@@ -2,7 +2,6 @@
 // Created by staffanu on 6/30/23.
 //
 
-#include <netinet/in.h>
 #include <map>
 #include <cassert>
 #include <filesystem>
@@ -10,58 +9,55 @@
 #include "musevk/VulkanBuffer.h"
 #include "MuseConstants.h"
 #include "PhaseCorrect16MHzFrameReader.h"
+#include "input/InputReaderFactory.h"
 #include "logging/Logger.h"
 
 using namespace std;
 
+static constexpr off_t c_samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
+
+// 16.2 MHz baseband captures store 10-bit samples in 16-bit values; scale to the 0..1023 range
+// (divide by 4) that the existing sync-detection logic was written against.
+static constexpr float c_input_scale = 1.f / 4.f;
+
 PhaseCorrect16MHzFrameReader::PhaseCorrect16MHzFrameReader(
         Logger &log,
-        const std::string &filename, bool big_endian, double initial_seek_seconds,
+        const std::string &filename, InputFormat input_format, double initial_seek_seconds,
         const std::optional<std::string> &output_filename)
         : FrameReader(log, filename,
                       filesystem::is_fifo(filename),
                       initial_seek_seconds, output_filename),
-        m_input{},
-        m_big_endian(big_endian) {
+          m_input_format(input_format),
+          m_input_reader(nullptr) {
 }
 
 bool PhaseCorrect16MHzFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
     auto [samples_to_skip, eq] = compute_initial_skip(m_log);
 
-    m_input = ifstream(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
-    m_input.exceptions(ifstream::badbit);
+    m_input_reader = makeInputReader(m_filename, m_input_format, c_samples_per_frame);
+    m_input_reader->initialize();
 
-    off_t samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
-    assert(samples_per_frame >= samples_to_skip);
-    vector<float> skip_buffer(samples_per_frame);
     m_log.info(eInput, std::format("Skipping {} initial samples", samples_to_skip));
-    readFloats(m_input, skip_buffer.data(), samples_to_skip);
+    m_input_reader->seek(samples_to_skip);
 
     return FrameReader::initialize(buffers);
 }
 
 void PhaseCorrect16MHzFrameReader::cleanup() {
     FrameReader::cleanup();
-    m_input.close();
+    m_input_reader.reset();
 }
 
 void PhaseCorrect16MHzFrameReader::seek(double seconds) {
     if (!m_input_is_realtime) {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        off_t samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
         off_t frames_to_seek = (off_t)(seconds * 30);
-
-        // ensure that we do not seek to before the beginning of the file
-        auto current_pos = m_input.tellg();
-        if (current_pos < -2 * frames_to_seek * samples_per_frame)
-            frames_to_seek = -current_pos / 2 / samples_per_frame;
-
-        off_t samples_to_seek = frames_to_seek * samples_per_frame;
+        off_t samples_to_seek = frames_to_seek * c_samples_per_frame;
         double actual_seek_time = (double)frames_to_seek / 30.0;
         m_log.info(eInput, std::format("Seeking relative time {} s, {} samples.",
                                        actual_seek_time, samples_to_seek));
-        m_input.seekg(samples_to_seek * 2, ifstream::cur);
+        m_input_reader->seek(samples_to_seek);
 
         // discard content in existing input buffers
         move(m_filled_input_buffers.begin(), m_filled_input_buffers.end(), back_inserter(m_vacant_input_buffers));
@@ -84,8 +80,10 @@ void PhaseCorrect16MHzFrameReader::threadFunc() {
 
         buffer->input_samples_per_muse_sample = 1;
         auto data = buffer->video_data->data<float>();
-        if (!readFloats(m_input, data, MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH))
+        if (m_input_reader->readFloats(data) != (int)c_samples_per_frame)
             break;
+        for (off_t i = 0; i < c_samples_per_frame; i++)
+            data[i] *= c_input_scale;
         memset(buffer->dropout_data->data<uint8_t>(), 0, sizeof(buffer->dropout_data->size()));
 
         std::unique_lock<std::mutex> lock(m_mutex);
@@ -97,21 +95,16 @@ void PhaseCorrect16MHzFrameReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
-bool PhaseCorrect16MHzFrameReader::readFloats(ifstream &input, float *out, size_t n) {
-    auto *input_buffer = (int16_t *)malloc(n * sizeof(int16_t));
-    input.read(reinterpret_cast<char *>(input_buffer), n * sizeof(int16_t));
-    for (int i = 0; i < n; i++) {
-        out[i] = (float)(short)(m_big_endian ? ntohs(input_buffer[i]) : input_buffer[i]) / 4.0f;
-    }
-    free(input_buffer);
-    return input.good();
-}
-
 pair<int, pair<float, float>> PhaseCorrect16MHzFrameReader::compute_initial_skip(Logger &log) {
-    ifstream input(static_cast<string>(m_filename).c_str(), ios::binary | ios::in);
-    input.exceptions(ifstream::badbit);
-    vector<float> buffer(480 * 1125 * 2); // two frames of data
-    readFloats(input, buffer.data(), 480 * 1125 * 2);
+    constexpr off_t two_frame_size = 480 * 1125 * 2;
+    auto reader = makeInputReader(m_filename, m_input_format, two_frame_size);
+    reader->initialize();
+
+    vector<float> buffer(two_frame_size);
+    if (reader->readFloats(buffer.data()) != (int)two_frame_size)
+        throw runtime_error("PhaseCorrect16MHzFrameReader: not enough input data to compute initial skip");
+    for (off_t i = 0; i < two_frame_size; i++)
+        buffer[i] *= c_input_scale;
 
     auto sorted(buffer);
     sort(sorted.begin(), sorted.end());
@@ -169,8 +162,6 @@ pair<int, pair<float, float>> PhaseCorrect16MHzFrameReader::compute_initial_skip
                                      [] (const pair<int, int> & p1, const pair<int, int> & p2) {
                                          return p1.second < p2.second;
                                      })->first;
-
-    input.close();
 
     return { bestLineOffset * 480 + bestPixelOffset, eq };
 }

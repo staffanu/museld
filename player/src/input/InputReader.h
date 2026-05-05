@@ -6,7 +6,10 @@
 
 #include <string.h>
 #include <unistd.h>
+#include <chrono>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <format>
 
 enum InputFormat {
@@ -21,8 +24,8 @@ enum InputFormat {
 
 class InputReader {
 public:
-    InputReader(int fd, uint32_t block_size)
-    : m_fd(fd), m_block_size(block_size) {}
+    InputReader(int fd, uint32_t block_size, bool is_fifo)
+    : m_fd(fd), m_block_size(block_size), m_is_fifo(is_fifo) {}
 
     virtual ~InputReader() = default;
 
@@ -34,16 +37,26 @@ public:
         return m_block_size;
     }
 
+    bool is_fifo() const {
+        return m_is_fifo;
+    }
+
 protected:
     int m_fd;
     uint32_t m_block_size;
+    bool m_is_fifo;
+    std::mutex m_fd_mutex;
 };
 
+// Reads exactly m_block_size samples of type T from the file descriptor and converts to float.
+// On a fifo we block until the data arrives or the writer closes; on a regular file partial reads
+// at end of file are reported as 0 (EOF). EAGAIN is handled with a short sleep to support
+// O_NONBLOCK fds.
 template <typename T>
 class InputReaderImpl : public InputReader {
 public:
-    InputReaderImpl(int fd, uint32_t block_size)
-    : InputReader(fd, block_size) {
+    InputReaderImpl(int fd, uint32_t block_size, bool is_fifo)
+    : InputReader(fd, block_size, is_fifo) {
         m_buffer = new T[block_size];
     }
 
@@ -59,25 +72,43 @@ public:
     void initialize() override {}
 
     void seek(off_t no_samples) override {
+        if (m_is_fifo)
+            return;
+        std::scoped_lock<std::mutex> lock(m_fd_mutex);
         off_t bytes_to_seek = no_samples * sizeof(*m_buffer);
         lseek(m_fd, bytes_to_seek, SEEK_CUR);
     }
 
-    // reads block_size values and stores them at f.  Returns the number of values actually read.
     int readFloats(float *f) override {
-        int filled_bytes = 0;
-        ssize_t read_count;
-        do {
-            read_count = read(m_fd, (uint8_t *)m_buffer + filled_bytes, sizeof(*m_buffer) * m_block_size - filled_bytes);
-            if (read_count == -1)
+        size_t total_bytes = sizeof(*m_buffer) * m_block_size;
+        size_t filled_bytes = 0;
+        while (filled_bytes < total_bytes) {
+            ssize_t read_count;
+            {
+                std::scoped_lock<std::mutex> lock(m_fd_mutex);
+                read_count = read(m_fd, (uint8_t *)m_buffer + filled_bytes, total_bytes - filled_bytes);
+            }
+            if (read_count == -1) {
+                if (errno == EAGAIN) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
                 throw std::runtime_error(std::format("Error reading from file: {}", strerror(errno)));
-            filled_bytes += (int)read_count;
-        } while (filled_bytes < sizeof(*m_buffer) * m_block_size && read_count > 0);
+            }
+            if (read_count == 0) {
+                if (m_is_fifo) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
+                return 0; // EOF -- signal partial reads as EOF as the original implementation did
+            }
+            filled_bytes += (size_t)read_count;
+        }
 
-        for (int i = 0; i < m_block_size; i++)
+        for (uint32_t i = 0; i < m_block_size; i++)
             f[i] = m_buffer[i];
 
-        return read_count > 0 ? m_block_size : 0;
+        return m_block_size;
     }
 
 protected:

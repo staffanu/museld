@@ -4,7 +4,9 @@
 // and should be invoked with global invocation ids
 // from 0 to output_size -1.
 //
-// The difference from fir_filter is that it works on int16_t input samples.
+// Identical to fir_filter; kept as a separate shader for historical reasons (it used to read
+// int16_t input). Inputs are now floats supplied by the host-side InputReader, which converts
+// any supported input format to floats up front.
 //
 // The input data will be indexed from 0 up to output_size + filter_size - 1.
 // The output data will be indexed from output_offset up to output_offset + output_size - 1.
@@ -23,7 +25,7 @@ layout(set = 0, binding = 0) buffer readonly filter_buffer {
 };
 
 layout(set = 0, binding = 1) buffer readonly input_buffer {
-    int16_t input_data[];
+    float input_data[];
 };
 
 layout(set = 0, binding = 2) buffer writeonly output_buffer {
@@ -38,10 +40,6 @@ layout(set = 0, binding = 2) buffer writeonly output_buffer {
 shared float shared_filter[MAX_FILTER_SIZE];
 shared float shared_input[MAX_WORKGROUP_SIZE * MAX_DECIMATION + MAX_FILTER_SIZE - 1];
 
-float cvt(int16_t a) {
-    return float(a);//int16_t(((a >> 8) & 0xff) | (a << 8));
-}
-
 void main() {
     uint global_ix = gl_GlobalInvocationID.x;
     uint local_ix = gl_LocalInvocationID.x;
@@ -53,9 +51,9 @@ void main() {
     uint base_ix = (global_ix - local_ix) * decimation_rate;
 
     for (int i = 0; i < decimation_rate; i++)
-        shared_input[local_ix + i * local_size] = cvt(input_data[base_ix + local_ix + i * local_size]);
+        shared_input[local_ix + i * local_size] = input_data[base_ix + local_ix + i * local_size];
     if (local_ix < MAX_FILTER_SIZE)
-        shared_input[local_ix + decimation_rate * local_size] = cvt(input_data[base_ix + local_ix + decimation_rate * local_size]);
+        shared_input[local_ix + decimation_rate * local_size] = input_data[base_ix + local_ix + decimation_rate * local_size];
 
     barrier();
 

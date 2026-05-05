@@ -20,8 +20,7 @@
 
 #include "logging/StreamLogger.h"
 #include "input/InputReader.h"
-#include "input/LdfInputReader.h"
-#include "input/LdsInputReader.h"
+#include "input/InputReaderFactory.h"
 #include "ac3/Ac3Decoder.h"
 #include "ac3/Ac3RfDemodulator.h"
 #include "efm/EfmDemodulator.h"
@@ -39,25 +38,15 @@ enum Operation {
     Resample,
 };
 
-void processFile(Logger &logger, Operation input_type, InputFormat input_format,
+void processFile(Logger &logger, Operation input_type,
     double initial_seek_seconds, std::optional<double> duration_seconds,
     double input_sample_frequency,
-    int in_fd, uint32_t block_size, int out_fd, bool use_simd,
+    std::unique_ptr<InputReader> reader, uint32_t block_size, int out_fd, bool use_simd,
     std::optional<int> efm_log2_decimation_opt,
     int efm_adaptive_filter_size, std::optional<std::string> efm_retiming_debug_filename,
     ErasureConcealer::ConcealmentImplementation concealment_impl,
     double target_sample_frequency) {
 
-    InputReader *reader;
-    switch (input_format) {
-        case eUint8: reader = new InputReaderImpl<uint8_t>(in_fd, block_size); break;
-        case eUint16: reader = new InputReaderImpl<uint16_t>(in_fd, block_size); break;
-        case eSint8: reader = new InputReaderImpl<int8_t>(in_fd, block_size); break;
-        case eSint16: reader = new InputReaderImpl<int16_t>(in_fd, block_size); break;
-        case eLds: reader = new LdsInputReader(in_fd, block_size); break;
-        case eFlac: case eFlacOgg: reader = new LdfInputReader(in_fd, block_size, input_format); break;
-        default: throw std::runtime_error("Unsupported input format");
-    }
     reader->initialize();
     if (initial_seek_seconds != 0)
         reader->seek((off_t)(input_sample_frequency * initial_seek_seconds));
@@ -182,7 +171,6 @@ void processFile(Logger &logger, Operation input_type, InputFormat input_format,
     }
 
     delete[] input_buffer;
-    delete reader;
 }
 
 int main(int argc, char *argv[]) {
@@ -371,21 +359,12 @@ int main(int argc, char *argv[]) {
                 filename_found = true;
                 auto filename = *it;
                 InputFormat input_format;
-                if (!input_format_option.has_value()) {
-                    if (filename.ends_with(".u8")) input_format = eUint8;
-                    else if (filename.ends_with(".s8")) input_format = eSint8;
-                    else if (filename.ends_with(".u16")) input_format = eUint16;
-                    else if (filename.ends_with(".s16")) input_format = eSint16;
-                    else if (filename.ends_with(".lds")) input_format = eLds;
-                    else if (filename.ends_with(".flac")) input_format = eFlac;
-                    else if (filename.ends_with(".ldf")) input_format = eFlacOgg;
-                    else throw std::runtime_error("Input format not given and unknown input file suffix");
-                } else
+                if (input_format_option.has_value())
                     input_format = input_format_option.value();
-
-                int fd = open(filename.c_str(), O_RDONLY | O_BINARY);
-                if (fd == -1)
-                    throw std::runtime_error(std::format("Error opening input file {}: {}", filename, strerror(errno)));
+                else if (auto detected = inputFormatFromFilename(filename); detected.has_value())
+                    input_format = detected.value();
+                else
+                    throw std::runtime_error("Input format not given and unknown input file suffix");
 
                 if (out_fd == STDOUT_FILENO && isatty(out_fd) && !force_stdout)
                     throw std::runtime_error("Writing output to stdout requires non-terminal stdout, or force using \"-\" output filename");
@@ -393,10 +372,10 @@ int main(int argc, char *argv[]) {
                 StreamLogger log(log_selection, *log_stream, false);
                 log.debug(eApplication, std::format("ac3rf-decode version {}", AC3RF_DECODE_VERSION));
                 log.info(eApplication, std::format("Processing input file {}", filename));
-                processFile(log, operation, input_format, initial_seek_seconds, duration_seconds, input_sample_frequency, fd, block_size, out_fd, use_simd,
+                processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
+                    makeInputReader(filename, input_format, block_size), block_size, out_fd, use_simd,
                     efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl, target_sample_frequency);
 
-                close(fd);
                 it++;
             }
         }
@@ -406,7 +385,9 @@ int main(int argc, char *argv[]) {
                 throw std::runtime_error("Input format must be given for stdin");
 
             log.info(eApplication, std::format("Processing stdin"));
-            processFile(log, operation, input_format_option.value(), initial_seek_seconds, duration_seconds, input_sample_frequency, 0, block_size, out_fd, use_simd,
+            auto stdin_reader = makeStdinInputReader(input_format_option.value(), block_size);
+            processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
+                std::move(stdin_reader), block_size, out_fd, use_simd,
                 efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl, target_sample_frequency);
         }
         if (out_fd != 1)

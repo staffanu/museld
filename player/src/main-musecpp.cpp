@@ -10,6 +10,8 @@
 #include "FrameReader.h"
 #include "TextRenderer.h"
 #include "Decoder.h"
+#include "input/InputReader.h"
+#include "input/InputReaderFactory.h"
 #include "muse/ResamplingFrameReader.h"
 #include "muse/PhaseCorrect16MHzFrameReader.h"
 #include "muse/MuseDecoder.h"
@@ -247,8 +249,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                                                           vk::AccessFlagBits::eTransferWrite);
 
             auto extent = manager.getSwapChainExtent();
-            int source_width = false ? MUSE_Y_BUF_WIDTH * 3 : NTSC_Y_BUF_WIDTH;
-            int source_height = false ? MUSE_BUF_HEIGHT * 2 : NTSC_FIELD_HEIGHT * 2;
+            int source_width = std::is_same<InputBlock, MuseInputBlock>::value ? MUSE_Y_BUF_WIDTH * 3 : NTSC_Y_BUF_WIDTH;
+            int source_height = std::is_same<InputBlock, MuseInputBlock>::value ? MUSE_BUF_HEIGHT * 2 : NTSC_FIELD_HEIGHT * 2;
             vk::ImageBlit region;
             region.srcOffsets[0] = vk::Offset3D((int32_t)((zoom_center.first - 0.5 / zoom_factor) * source_width),
                                                 (int32_t)((zoom_center.second - 0.5 / zoom_factor) * source_height), 0);
@@ -424,24 +426,23 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     glfwTerminate();
 }
 
+enum InputType {
+    eMuseRf,
+    eNtscRf,
+    eMuse16MHz,
+    eMuseOversampled,
+};
+
 int main(int argc, char *argv[]) {
     auto log_selection = CategoryLogger::c_log_warn;
-    enum InputFormat {
-        eOverSampledUnsignedBytes,
-        eOverSampledSignedShortsLittleEndian,
-        eLittleEndianShorts,
-        eBigEndianShorts,
-        eUnknown
-    };
     std::string executable(argv[0]);
     std::string executable_dir = executable.substr(0, executable.find_last_of('/'));
     bool decode_all_fields = true;
     bool full_screen = false;
     bool no_sync = false;
-    bool demodulate = false;
-    InputFormat input_format = eUnknown;
+    InputType input_type = eMuseRf;
+    std::optional<InputFormat> input_format_option = std::nullopt;
     double input_sample_frequency = 62.5e6;
-    bool input_is_fifo = false;
     double initial_seek_seconds = 0;
     bool start_paused = false;
     optional<string> muse_output_filename; // always written as little endian unsigned short values
@@ -451,7 +452,6 @@ int main(int argc, char *argv[]) {
     bool decode_audio = true;
     bool efm_audio = false;
     bool benchmark_shaders = false;
-    bool ntsc_mode = false;
 
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -466,30 +466,27 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     };
 
-    options.emplace_back("--resample-bytes", [&] () mutable -> void
-    {
-        input_format = eOverSampledUnsignedBytes;
-    });
-    options.emplace_back("--resample-shorts", [&] () mutable  -> void {
-        input_format = eOverSampledSignedShortsLittleEndian;
+    options.emplace_back("--input-format", [&] () mutable -> void {
+        const auto &name = *(it++);
+        if      (name == "u8")   input_format_option = eUint8;
+        else if (name == "s8")   input_format_option = eSint8;
+        else if (name == "u16")  input_format_option = eUint16;
+        else if (name == "s16")  input_format_option = eSint16;
+        else if (name == "lds")  input_format_option = eLds;
+        else if (name == "flac") input_format_option = eFlac;
+        else if (name == "ldf")  input_format_option = eFlacOgg;
+        else throw std::runtime_error(std::format("Unknown input format: {}", name));
     });
     options.emplace_back("--sample-freq", [&] () mutable  -> void {
         input_sample_frequency = stod(*(it++));
     });
-    options.emplace_back("--little-endian", [&] () mutable  -> void {
-        input_format = eLittleEndianShorts;
-    });
-    options.emplace_back("--big-endian", [&] () mutable -> void {
-        input_format = eBigEndianShorts;
-    });
-    options.emplace_back("--demodulate", [&] () mutable -> void {
-        demodulate = true;
-    });
-    options.emplace_back("--ntsc", [&] () mutable -> void {
-        ntsc_mode = true;
-    });
-    options.emplace_back("--fifo", [&] () mutable -> void {
-        input_is_fifo = true;
+    options.emplace_back("--input-type", [&] () mutable -> void {
+        const auto &name = *(it++);
+        if      (name == "muse-rf")  input_type = eMuseRf;
+        else if (name == "ntsc-rf")  input_type = eNtscRf;
+        else if (name == "muse-16")  input_type = eMuse16MHz;
+        else if (name == "muse-os")  input_type = eMuseOversampled;
+        else throw std::runtime_error(std::format("Unknown input type {}", name));
     });
     options.emplace_back("--full-frames-only", [&] () mutable -> void {
         decode_all_fields = false;
@@ -506,7 +503,7 @@ int main(int argc, char *argv[]) {
     options.emplace_back("--pause", [&] () mutable -> void {
         start_paused = true;
     });
-    options.emplace_back("--write-muse", [&] () mutable -> void {
+    options.emplace_back("--write-muse16", [&] () mutable -> void {
         muse_output_filename = *(it++);
     });
     options.emplace_back("--write", [&] () mutable -> void {
@@ -601,7 +598,7 @@ int main(int argc, char *argv[]) {
             } else if (it->find("-", 0) == 0) {
                 usage();
             } else {
-                if (initial_seek_seconds != 0 && input_is_fifo) {
+                if (initial_seek_seconds != 0 && filesystem::is_fifo(*it)) {
                     cerr << "Initial seek is not compatible with reading from fifo" << endl;
                     exit(EXIT_FAILURE);
                 }
@@ -610,51 +607,56 @@ int main(int argc, char *argv[]) {
                     exit(EXIT_FAILURE);
                 }
 
+                InputFormat input_format;
+                if (input_format_option.has_value())
+                    input_format = input_format_option.value();
+                else if (auto detected = inputFormatFromFilename(*it); detected.has_value())
+                    input_format = detected.value();
+                else {
+                    cerr << "No input format specified and unknown input file extension" << endl;
+                    exit(EXIT_FAILURE);
+                }
+
                 CategoryLogger log(log_selection);
 
                 musevk::VulkanManager manager(log);
 
-                if (ntsc_mode) {
-                    auto *reader = new NtscFrameReader(
-                                    log, executable_dir, manager, *it,
-                                    input_sample_frequency, initial_seek_seconds, benchmark_shaders,
-                                    muse_output_filename);
-                    process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                                 full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
-                                                 efm_audio,
-                                                 benchmark_shaders, output_filename);
-                    delete reader;
-                } else {
-                    if (demodulate)
-                        input_format = eOverSampledSignedShortsLittleEndian;
-                    FrameReader<MuseInputBlock> *reader;
-                    switch (input_format) {
-                        case eOverSampledUnsignedBytes:
-                        case eOverSampledSignedShortsLittleEndian:
-                            reader = new ResamplingFrameReader(
-                                    log, executable_dir, manager, *it,
-                                    input_format == eOverSampledSignedShortsLittleEndian
-                                    ? ResamplingFrameReader::eSignedShortLittleEndian
-                                    : ResamplingFrameReader::eUnsignedByte,
-                                    input_sample_frequency, initial_seek_seconds, demodulate, benchmark_shaders,
-                                    muse_output_filename);
-                            break;
-                        case eLittleEndianShorts:
-                        case eBigEndianShorts:
-                            reader = new PhaseCorrect16MHzFrameReader(log, *it,
-                                                                      input_format == eBigEndianShorts,
-                                                                      initial_seek_seconds, muse_output_filename);
-                            break;
-                        case eUnknown:
-                        default:
-                            cerr << "No input format specified" << endl;
-                            exit(EXIT_FAILURE);
+                switch (input_type) {
+                    case eNtscRf: {
+                        auto *reader = new NtscFrameReader(
+                                        log, executable_dir, manager, *it, input_format,
+                                        input_sample_frequency, initial_seek_seconds, benchmark_shaders,
+                                        muse_output_filename);
+                        process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
+                                                     full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
+                                                     efm_audio,
+                                                     benchmark_shaders, output_filename);
+                        delete reader;
+                        break;
                     }
-                    process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                 full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
-                                 efm_audio,
-                                 benchmark_shaders, output_filename);
-                    delete reader;
+                    case eMuse16MHz: {
+                        auto *reader = new PhaseCorrect16MHzFrameReader(
+                                log, *it, input_format, initial_seek_seconds, muse_output_filename);
+                        process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
+                                     full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
+                                     efm_audio, benchmark_shaders, output_filename);
+                        delete reader;
+                        break;
+                    }
+                    case eMuseOversampled:
+                    case eMuseRf: {
+                        auto *reader = new ResamplingFrameReader(
+                                log, executable_dir, manager, *it, input_format,
+                                input_sample_frequency, initial_seek_seconds, input_type == eMuseRf, benchmark_shaders,
+                                muse_output_filename);
+                        process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
+                                     full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
+                                     efm_audio, benchmark_shaders, output_filename);
+                        delete reader;
+                        break;
+                    }
+                    default:
+                        throw std::runtime_error("Unknown input type: {}");
                 }
                 it++;
             }

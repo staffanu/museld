@@ -5,13 +5,14 @@
 #ifndef MUSECPP_PHASECORRECT16MHZFRAMEREADER_H
 #define MUSECPP_PHASECORRECT16MHZFRAMEREADER_H
 
-#include <fstream>
+#include <memory>
 #include "FrameReader.h"
+#include "input/InputReader.h"
 #include "muse/MuseInputBlock.h"
 
 class PhaseCorrect16MHzFrameReader : public FrameReader<MuseInputBlock> {
 public:
-    explicit PhaseCorrect16MHzFrameReader(Logger &log, const std::string &filename, bool big_endian,
+    explicit PhaseCorrect16MHzFrameReader(Logger &log, const std::string &filename, InputFormat input_format,
                                           double initial_seek_seconds,
                                           const std::optional<std::string> &output_filename);
 
@@ -24,11 +25,10 @@ protected:
     void threadFunc() override;
 
 private:
-    bool readFloats(std::ifstream &input, float *out, size_t n);
     std::pair<int, std::pair<float, float>> compute_initial_skip(Logger &log);
 
-    std::ifstream m_input;
-    bool m_big_endian;
+    InputFormat m_input_format;
+    std::unique_ptr<InputReader> m_input_reader;
 };
 
 #endif //MUSECPP_PHASECORRECT16MHZFRAMEREADER_H

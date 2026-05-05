@@ -141,6 +141,7 @@ if(BUILD_AC3RF_DECODE)
         main-ac3rf-efm-decode.cpp
         Version.h
         input/InputReader.h
+        input/InputReaderFactory.cpp input/InputReaderFactory.h
         input/LdsInputReader.cpp input/LdsInputReader.h
         input/LdfInputReader.cpp input/LdfInputReader.h
     )
@@ -174,9 +175,16 @@ if(BUILD_MUSE)
         message("FFmpeg not found or wrong version; not building video file writer support.")
     endif()
 
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(FLAC REQUIRED flac++)
+
     add_executable(musecpp
         main-musecpp.cpp
         AudioDefs.h
+        input/InputReader.h
+        input/InputReaderFactory.cpp input/InputReaderFactory.h
+        input/LdsInputReader.cpp input/LdsInputReader.h
+        input/LdfInputReader.cpp input/LdfInputReader.h
         AudioPlayback.cpp AudioPlayback.h
         FrameReader.h FrameReader.impl.h
         InputBlockBase.h
@@ -238,6 +246,7 @@ if(BUILD_MUSE)
         ${PORTAUDIO_INCLUDE_DIRS}
         ${GNURADIO_INCLUDE_DIRS}
         ${Vulkan_INCLUDE_DIRS}
+        ${FLAC_INCLUDE_DIRS}
     )
     if(HAVE_LIBAV)
         target_include_directories(musecpp PRIVATE ${LIBAV_INCLUDE_DIR})
@@ -250,6 +259,7 @@ if(BUILD_MUSE)
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
         PRIVATE ${GNURADIO_LINK_LIBRARIES}
+        PRIVATE ${FLAC_LINK_LIBRARIES}
     )
     if(HAVE_LIBAV)
         target_link_libraries(musecpp PRIVATE ${LIBAV_LIBRARIES})

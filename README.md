@@ -1,33 +1,50 @@
 # museld — Real-time MUSE/NTSC Laserdisc Player
 
-This repository contains a real-time decoder for Hi-Vision MUSE and NTSC laserdiscs, along with a
-reusable library and CLI for decoding AC3-RF surround audio and EFM CD audio from laserdisc RF captures.
+This repository contains a real-time decoder for Hi-Vision MUSE and NTSC (
+experimental support) laserdiscs, along with a
+reusable library and CLI for decoding AC3-RF surround audio and EFM CD audio
+from laserdisc RF captures.
 
-If you want to decode laserdiscs in general, the [ld-decode project](https://github.com/happycube/ld-decode)
-is probably a better place to start, unless you are specifically interested in real-time MUSE decoding.
+If you want to decode laserdiscs in general,
+the [ld-decode project](https://github.com/happycube/ld-decode)
+is probably a better place to start, unless you are specifically interested in
+real-time MUSE decoding.
 
 ## Components
 
 ### musecpp
 
-A complete real-time [MUSE](https://en.wikipedia.org/wiki/Multiple_sub-Nyquist_sampling_encoding) and NTSC
-laserdisc decoder. Video filtering runs on the GPU via Vulkan and GLSL compute shaders. Audio is output via
-PortAudio.
+A real-time [MUSE](https://en.wikipedia.org/wiki/Multiple_sub-Nyquist_sampling_encoding)
+and NTSC (experimental support) laserdisc decoder. Video filtering runs on the
+GPU via Vulkan and GLSL compute shaders. Audio is output via PortAudio.
 
 Input can be:
-- A MUSE player's baseband output digitized at 16.2 MHz (little-endian 16-bit shorts)
-- Raw RF captured directly from the optical pickup, digitized at 62.5 MHz (unsigned 16-bit)
-- An NTSC RF capture (40 MHz, unsigned 16-bit)
+- A MUSE RF captured directly from the optical pickup 
+(use `--input-type muserf`, this is the default).
+- A MUSE player's baseband output digitized at 16.2 MHz (use
+`--input-type muse16`): the samples should be _phase correct_, i.e., in phase
+with the PAM signal.  This can be captured using specialized hardware, or output
+from the program using `--write-muse16`.
+- A MUSE player's baseband output digitized at a higher frequency (use `--input-type museos`).
+- An NTSC RF capture (use `--input-type --ntscrf`)
 
-EFM CD audio (from the pits on the disc) is decoded alongside the video when `--efm` is specified.
+The sample rate (for RF and oversamples inputs) is set using `--sample-freq <Hz>`.
+
+The input file format (sample type) is auto-detected from the filename extension
+(`.u8`/`.s8`/`.u16`/`.s16`/`.lds`/`.flac`/`.ldf`) or can be set explicitly with `--input-format`.
+
+EFM audio is decoded alongside the video when `--efm` is specified; it requires RF input.
 
 ### ac3rf-efm-decode
 
 A CLI and reusable C++ library for decoding:
-- **EFM**: CD audio stored on laserdisc, using CIRC Reed-Solomon error correction
-- **AC3-RF**: QPSK-modulated AC3 surround audio at 2.88 MHz carrier
+- **EFM**: digital CD audio, using CIRC Reed-Solomon error correction.  This
+works for RF signals from Laserdiscs or CD players.  DTS on Laserdiscs is also
+encoded using EFM.
+- **AC3-RF**: QPSK-modulated AC3 surround audio at 2.88 MHz carrier.  This is
+the format used to store AC3 audio on Laserdiscs.
 
-Supports `.lds` (10-bit packed) and `.ldf` (FLAC-in-Ogg) input formats, plus raw uint8/16/sint8/16.
+Input format support is the same as for `musecpp`.
 
 ### fl2kmuse
 
@@ -122,35 +139,31 @@ is updated 60 times per second (once per field) unless `--full-frames-only` is u
 
 Machines tested and found too slow: NVIDIA Jetson Nano, Raspberry Pi 5 (1–5 fps).
 
-### Input format options
+### Input options
 
-| Option | Description |
-|---|---|
-| `--resample-shorts` | Oversampled input, 16-bit signed little-endian (e.g., 62.5 MHz RF, use with `--sample-freq`) |
-| `--resample-bytes` | Oversampled input, unsigned bytes |
-| `--big-endian` | 16.2 MHz baseband, 10-bit in 16-bit big-endian shorts |
-| `--little-endian` | 16.2 MHz baseband, 10-bit in 16-bit little-endian shorts (preferred) |
-| `--demodulate` | RF input at 62.5 MHz (optical pickup) — enables RF demodulation |
-| `--sample-freq <Hz>` | Sets the input sample rate for RF/oversampled formats |
+| Option                 | Description                                                                                                                                                       |
+|------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--input-format <fmt>` | Input sample type: `u8`, `s8`, `u16`, `s16`, `lds`, `flac`, `ldf`. Auto-detected from filename extension when omitted.                                            |
+| `--input-type <type>`  | Input type: `muse-rf`, `ntsc-rf`, `muse-16`, `muse-os`. RF input MUSE/NTSC, phase correct 16.2 MHz MUSE baseband, oversampled MUSE baseband.  Default is `muse-rf`. |
+| `--sample-freq <Hz>`   | Sets the input sample rate. Default 62.5 MHz.                                                                                                                     |
 
 ### Playback options
 
-| Option | Description |
-|---|---|
-| `--efm` | Use EFM data for audio instead of MUSE audio (RF input only) |
-| `--fifo` | Input is a FIFO; synchronize playback speed to incoming data rate |
-| `--no-video` / `--no-audio` | Disable video or audio output |
-| `--no-sync` | Display frames as fast as possible (benchmark mode) |
-| `--full-frames-only` | Skip every other field update (reduces CPU/GPU load) |
-| `--all-fields` | Update display at 60 Hz (default) |
-| `--full-screen` | Start full screen |
-| `--seek <seconds>` | Seek to position before starting playback |
-| `--pause` | Start paused |
+| Option                                 | Description |
+|----------------------------------------|---|
+| `--efm`                                | Use EFM data for audio instead of MUSE audio (RF input only) |
+| `--no-video` / `--no-audio`            | Disable video or audio output |
+| `--no-sync`                            | Display frames as fast as possible (benchmark mode) |
+| `--full-frames-only`                   | Skip every other field update (reduces CPU/GPU load) |
+| `--all-fields`                         | Update display at 60 Hz (default) |
+| `--full-screen`                        | Start full screen |
+| `--seek <seconds>`                     | Seek to position before starting playback |
+| `--pause`                              | Start paused |
 | `--no-dropout` / `--highlight-dropout` | Suppress or highlight dropout concealment |
-| `--write-muse <file>` | Re-encode input to 16.2 MHz little-endian format |
-| `--write <file>` | Write decoded video to media file (FFmpeg, experimental) |
-| `--log <spec>` | Log level per category, e.g. `A3V4` (Audio=Info, Video=Debug). Categories: M P A V D I O; levels 0–4 = Off Error Warn Info Debug |
-| `--benchmark-shaders` | Print GPU shader timing statistics |
+| `--write-muse16 <file>`                | Re-encode input to 16.2 MHz little-endian format |
+| `--write <file>`                       | Write decoded video to media file (FFmpeg, experimental) |
+| `--log <spec>`                         | Log level per category, e.g. `A3V4` (Audio=Info, Video=Debug). Categories: M P A V D I O; levels 0–4 = Off Error Warn Info Debug |
+| `--benchmark-shaders`                  | Print GPU shader timing statistics |
 
 ### Keyboard shortcuts during playback
 
@@ -215,7 +228,7 @@ C1 is a (37,33) code and C2 is a (36,32) code with first consecutive root 2^120.
   always zero on every disc tested. It is unclear whether this feature was ever used on MUSE laserdiscs.
 - **RF sample rate**: EFM input filters are hard-coded for 62.5 MHz; other sample rates require filter recomputation.
 - **Non-linear de-emphasis**: Unclear whether it has already been applied on baseband (player output) input; use the L key to toggle.
-- **EFM de-emphasis**: Not yet implemented; needed for discs with emphasis flag set.
+- **EFM de-emphasis**: Not yet implemented; needed for discs with emphasis flag set, if any exist.
 - **Audio channel mapping**: Four-channel MUSE audio channel assignment may vary across PortAudio configurations.
 - **Direct USB input**: Currently requires an external capture program writing to a FIFO (e.g., picostream).
 

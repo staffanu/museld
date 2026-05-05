@@ -19,9 +19,10 @@ using namespace musevk;
 
 MuseRfDemodulator::MuseRfDemodulator(Logger &log, std::string executable_dir, std::string filename,
                                      float sample_frequency,
-                                     musevk::VulkanManager &vulkan_manager, bool benchmark_shaders)
+                                     musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders)
 : RfDemodulator<MuseDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency,
-                                      vulkan_manager, benchmark_shaders) {
+                                      vulkan_manager, input_format, MuseDemodulatedBlock::c_sample_block_size,
+                                      benchmark_shaders) {
 }
 
 void MuseRfDemodulator::demodulate() {
@@ -115,7 +116,7 @@ void MuseRfDemodulator::demodulate() {
     const int c_dropout_buffer_size = MuseDemodulatedBlock::c_video_block_size + c_dropout_delay;
 
     shared_ptr<VulkanBuffer> input_buffer = make_unique<musevk::VulkanBuffer>(
-            m_vulkan_manager, Size(input_buffer_size), sizeof(int16_t), buffer_usage_flags, HostAccess::eHostWrite);
+            m_vulkan_manager, Size(input_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostWrite);
 
     shared_ptr<VulkanBuffer> analytic_buffer_re = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
@@ -170,7 +171,7 @@ void MuseRfDemodulator::demodulate() {
         timestamp_query_pool->reset(*command_buffer);
     float zero = 0.f;
     float one = 1.f;
-    command_buffer->enqueueFillBuffer(*input_buffer, 0); // int32_t interpreted as 2 x int16_t
+    command_buffer->enqueueFillBuffer(*input_buffer, 0);
     command_buffer->enqueueFillBuffer(*analytic_buffer_re, reinterpret_cast<uint32_t &>(one));
     command_buffer->enqueueFillBuffer(*analytic_buffer_im, reinterpret_cast<uint32_t &>(one));
     command_buffer->enqueueFillBuffer(*lowpass_in_buffer, reinterpret_cast<uint32_t &>(zero));
@@ -178,7 +179,7 @@ void MuseRfDemodulator::demodulate() {
     command_buffer->submit({}, {}, {});
     command_buffer->wait();
 
-    while (!m_stop_request && readFloats(input_buffer->data<int16_t>() + bandpass_filter_size - 1, MuseDemodulatedBlock::c_sample_block_size)) {
+    while (!m_stop_request && readFloats(input_buffer->data<float>() + bandpass_filter_size - 1, MuseDemodulatedBlock::c_sample_block_size)) {
 
         // First get a free output block to write to
         unique_ptr<MuseDemodulatedBlock> block = nullptr;
@@ -269,13 +270,10 @@ void MuseRfDemodulator::demodulate() {
         // After filtering, we need to copy the last data from the input buffers to their start,
         // since the filter output is shorter than the input.  The same is true for the demodulation input,
         // but here only one byte needs to be copied.
-        auto enqueue_int16_copy = [command_buffer](VulkanBuffer &buffer, uint32_t buffer_size, uint32_t copy_count) -> void {
-            command_buffer->enqueueCopyBuffer(buffer, buffer, (buffer_size - copy_count) * sizeof(int16_t), 0, copy_count * sizeof(int16_t));
-        };
         auto enqueue_float_copy = [command_buffer](VulkanBuffer &buffer, uint32_t buffer_size, uint32_t floats_to_copy) -> void {
             command_buffer->enqueueCopyBuffer(buffer, buffer, (buffer_size - floats_to_copy) * sizeof(float), 0, floats_to_copy * sizeof(float));
         };
-        enqueue_int16_copy(*input_buffer, input_buffer_size, bandpass_filter_size - 1);
+        enqueue_float_copy(*input_buffer, input_buffer_size, bandpass_filter_size - 1);
         enqueue_float_copy(*analytic_buffer_re, analytic_buffer_size, 1);
         enqueue_float_copy(*analytic_buffer_im, analytic_buffer_size, 1);
         enqueue_float_copy(*lowpass_in_buffer, lowpass_in_buffer_size, lowpass_filter_size - 1);

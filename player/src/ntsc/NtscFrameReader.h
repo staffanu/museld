@@ -8,6 +8,7 @@
 #include "FrameReader.h"
 #include "NtscRfDemodulator.h"
 #include "efm/TimingRecovery.h"
+#include "input/InputReader.h"
 #include "util/PercentileFilter.h"
 #include "util/ConstExprHelpers.h"
 #include "NtscInputBlock.h"
@@ -15,7 +16,7 @@
 class NtscFrameReader : public FrameReader<NtscInputBlock> {
 public:
     explicit NtscFrameReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
-                             const std::string &filename,
+                             const std::string &filename, InputFormat input_format,
                              double sample_rate, double initial_seek_seconds,
                              bool benchmark_shaders,
                              const std::optional<std::string> &output_filename);

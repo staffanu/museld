@@ -9,6 +9,7 @@
 #include <filesystem>
 #include "musevk/VulkanBuffer.h"
 #include "ResamplingFrameReader.h"
+#include "input/InputReaderFactory.h"
 #include "logging/Logger.h"
 #include "MuseConstants.h"
 #include "MuseInputBlock.h"
@@ -23,10 +24,11 @@ ResamplingFrameReader::ResamplingFrameReader(
         : FrameReader(log, filename,
                       filesystem::is_fifo(filename),
                       initial_seek_seconds, output_filename),
-          m_input_format(demodulate ? eFloat : input_format),
+          m_input_format(input_format),
+          m_demodulate(demodulate),
+          m_timing_recovery(log, sample_rate / MuseDemodulatedBlock::c_efm_decimation_rate, MuseDemodulatedBlock::c_efm_block_size, 3, "reclock.bin"),
+          m_input_reader(nullptr),
           m_sample_rate(demodulate ? sample_rate / MuseDemodulatedBlock::c_video_decimation_rate : sample_rate),
-          m_timing_recovery(log, sample_rate / MuseDemodulatedBlock::c_efm_decimation_rate, MuseDemodulatedBlock::c_efm_block_size, 3, std::nullopt),
-          m_file_fd(-1),
           m_input_samples_decimation_rate(1),
           m_demodulator(nullptr),
           m_input_buffer(nullptr),
@@ -34,6 +36,8 @@ ResamplingFrameReader::ResamplingFrameReader(
           m_input_sub_buffer_input_offsets{},
           m_last_input_sub_buffer_ix_read(0),
           m_t(0.0),
+          m_input_scale(1.f),
+          m_input_offset(0.f),
           m_state(eSearching),
           m_line(1),
           m_pixel(1),
@@ -46,43 +50,34 @@ ResamplingFrameReader::ResamplingFrameReader(
           m_missed_line_pulses(0),
           m_frame_start_offset(0L),
           m_error_sum(0) {
-    if (demodulate) {
-        m_demodulator = new MuseRfDemodulator(log, executable_dir, m_filename, (float)sample_rate, vulkan_manager, benchmark_shaders);
-    }
-
-    switch (m_input_format) {
-        case eUnsignedByte:
-            m_bytes_per_sample = 1;
-            m_output_multiplier = 1;
-            m_output_add = 0;
-            break;
-        case eSignedShortLittleEndian:
-            m_bytes_per_sample = 2;
-            m_output_multiplier = 1.0 / 256.0;
-            m_output_add = 128;
-            break;
-        case eFloat:
-            m_bytes_per_sample = 4;
-            m_output_multiplier = 1;
-            m_output_add = 0;
-            break;
-        default:
-            throw runtime_error("Unrecognized input format");
+    if (m_demodulate) {
+        m_demodulator = new MuseRfDemodulator(log, executable_dir, m_filename, (float)sample_rate, vulkan_manager,
+                                              m_input_format, benchmark_shaders);
+        // The demodulator already scales output to MUSE 0..255 range.
+        m_input_scale = 1.f;
+        m_input_offset = 0.f;
+    } else {
+        // File mode: scale incoming float samples (which carry the native value range of the input
+        // format) to the ~0..255 range that downstream sync detection expects.
+        switch (m_input_format) {
+            case eUint8:
+                m_input_scale = 1.f;
+                m_input_offset = 0.f;
+                break;
+            case eSint16:
+                m_input_scale = 1.f / 256.f;
+                m_input_offset = 128.f;
+                break;
+            default:
+                throw runtime_error(std::format("ResamplingFrameReader: unsupported input format {}", (int)m_input_format));
+        }
     }
 }
 
 bool ResamplingFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
     if (m_demodulator == nullptr) {
-        m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
-        if (m_file_fd == -1)
-            throw runtime_error(std::format("ResamplingFrameReader: Unable to open input file {}", m_filename));
-#ifdef linux
-        if (filesystem::is_fifo(m_filename)) {
-            m_log.debug(eInput, std::format("Pipe size: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
-            fcntl(m_file_fd, F_SETPIPE_SZ, 1024 * 1024);
-            m_log.debug(eInput, std::format("Pipe size now: {}", fcntl(m_file_fd, F_GETPIPE_SZ)));
-        }
-#endif
+        m_input_reader = makeInputReader(m_filename, m_input_format, c_input_sub_buffer_size);
+        m_input_reader->initialize();
     } else {
         m_demodulator->initialize(MuseDemodulatedBlock::recommendedNumberOfBlockBuffers((float)m_sample_rate * MuseDemodulatedBlock::c_video_decimation_rate));
     }
@@ -101,7 +96,7 @@ bool ResamplingFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBloc
 
     m_log.debug(eInput, std::format("m_g1={:.5f} m_g2={:.7f}", m_g1, m_g2));
 
-    m_input_buffer = (uint8_t *)calloc(m_bytes_per_sample, c_input_buffer_size);
+    m_input_buffer = (float *)calloc(sizeof(float), c_input_buffer_size);
     m_input_dropout_buffer = (uint8_t *)calloc(1, c_input_buffer_size);
     assert(m_input_buffer != nullptr && m_input_dropout_buffer != nullptr);
 
@@ -119,8 +114,7 @@ void ResamplingFrameReader::cleanup() {
         delete m_demodulator;
     }
 
-    if (m_file_fd != -1)
-        close(m_file_fd);
+    m_input_reader.reset();
 }
 
 void ResamplingFrameReader::seek(double seconds) {
@@ -131,10 +125,9 @@ void ResamplingFrameReader::seek(double seconds) {
             std::unique_lock<std::mutex> lock(m_mutex);
 
             off_t samples_to_seek = (off_t) (seconds * 16.2e6 * m_input_samples_per_sample);
-            off_t bytes_to_seek = m_bytes_per_sample * samples_to_seek;
-            m_log.info(eInput, std::format("Seeking relative time {} s, {} samples, {} bytes.",
-                                           seconds, samples_to_seek, bytes_to_seek));
-            lseek(m_file_fd, bytes_to_seek, SEEK_CUR);
+            m_log.info(eInput, std::format("Seeking relative time {} s, {} samples.",
+                                           seconds, samples_to_seek));
+            m_input_reader->seek(samples_to_seek);
 
             // discard content in existing input buffers
             move(m_filled_input_buffers.begin(), m_filled_input_buffers.end(),
@@ -193,27 +186,22 @@ void ResamplingFrameReader::threadFunc() {
 }
 
 bool ResamplingFrameReader::readInput(std::unique_ptr<MuseInputBlock> const &output_block) {
-    uint8_t *read_ptr = m_input_buffer + m_bytes_per_sample * c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
+    float *read_ptr = m_input_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
     uint8_t *dropout_read_ptr = m_input_dropout_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
 
     if (m_demodulator == nullptr) {
         m_input_samples_decimation_rate = 1;
-        int bytes_read = 0;
-        while (bytes_read < c_input_sub_buffer_size * m_bytes_per_sample) {
-            ssize_t read_count = read(m_file_fd, (void *)(read_ptr + bytes_read), c_input_sub_buffer_size * m_bytes_per_sample - bytes_read);
-            if (read_count == -1 && errno == EAGAIN)
-                this_thread::sleep_for(chrono::milliseconds(1));
-            else if (read_count == 0) {
-                if (!m_input_is_realtime) {
-                    m_log.info(eInput, "ResamplingFrameReader: end of file");
-                    return false;
-                }
-            } else if (read_count == -1)
-                throw runtime_error(std::format("Error reading from file: {}", strerror(errno)));
-            else
-                bytes_read += (int) read_count;
+        if (m_input_reader->readFloats(read_ptr) != (int)c_input_sub_buffer_size) {
+            if (!m_input_is_realtime) {
+                m_log.info(eInput, "ResamplingFrameReader: end of file");
+                return false;
+            }
+            return true;
         }
-        assert (bytes_read == c_input_sub_buffer_size * m_bytes_per_sample);
+        if (m_input_scale != 1.f || m_input_offset != 0.f) {
+            for (size_t i = 0; i < c_input_sub_buffer_size; i++)
+                read_ptr[i] = read_ptr[i] * m_input_scale + m_input_offset;
+        }
         return true;
     } else {
         m_input_samples_decimation_rate = MuseDemodulatedBlock::c_video_decimation_rate;
@@ -252,29 +240,10 @@ bool ResamplingFrameReader::resample(float *sample_out, uint8_t *dropout_out,
     const auto i1 = (read_pos - 1) & c_input_buffer_size_mask;
     const auto i0 = read_pos;
 
-    double b0, b1, b2, b3;
-    switch (m_input_format) {
-        case eUnsignedByte:
-            b0 = m_input_buffer[i3];
-            b1 = m_input_buffer[i2];
-            b2 = m_input_buffer[i1];
-            b3 = m_input_buffer[i0];
-            break;
-        case eSignedShortLittleEndian:
-            b0 = ((int16_t *)m_input_buffer)[i3];
-            b1 = ((int16_t *)m_input_buffer)[i2];
-            b2 = ((int16_t *)m_input_buffer)[i1];
-            b3 = ((int16_t *)m_input_buffer)[i0];
-            break;
-        case eFloat:
-            b0 = ((float *)m_input_buffer)[i3];
-            b1 = ((float *)m_input_buffer)[i2];
-            b2 = ((float *)m_input_buffer)[i1];
-            b3 = ((float *)m_input_buffer)[i0];
-            break;
-        default:
-            throw runtime_error("Unrecognized input format");
-    }
+    const double b0 = m_input_buffer[i3];
+    const double b1 = m_input_buffer[i2];
+    const double b2 = m_input_buffer[i1];
+    const double b3 = m_input_buffer[i0];
 
     double x = 1 + (m_t - (unsigned long)m_t);
     // cubic spline though 4 points, f(x) = a0 + a1 x + a2 x(x-1) + a3 x(x-1)(x-2)
@@ -285,7 +254,7 @@ bool ResamplingFrameReader::resample(float *sample_out, uint8_t *dropout_out,
     // now evaluate at point 1 + p
     double y = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
 
-    *sample_out = (float)(y * m_output_multiplier + m_output_add);
+    *sample_out = (float)y;
     *dropout_out = m_input_dropout_buffer[read_pos];
 
     auto current_sub_buffer_index = read_pos >> c_input_sub_buffer_size_bits;

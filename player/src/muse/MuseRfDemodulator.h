@@ -60,7 +60,7 @@ struct MuseDemodulatedBlock {
 class MuseRfDemodulator : public RfDemodulator<MuseDemodulatedBlock> {
 public:
     MuseRfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
-                      musevk::VulkanManager &vulkan_manager, bool benchmark_shaders);
+                      musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders);
     MuseRfDemodulator(const MuseRfDemodulator&) = delete;
     void operator=(const MuseRfDemodulator&) = delete;
 

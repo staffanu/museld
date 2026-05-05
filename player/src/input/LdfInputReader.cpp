@@ -3,12 +3,13 @@
 
 #include <unistd.h>
 #include <cassert>
+#include <mutex>
 #include <sys/stat.h>
 #include "FLAC++/decoder.h"
 #include "LdfInputReader.h"
 
-LdfInputReader::LdfInputReader(int fd, uint32_t block_size, InputFormat format)
-  : InputReader(fd, block_size),
+LdfInputReader::LdfInputReader(int fd, uint32_t block_size, bool is_fifo, InputFormat format)
+  : InputReader(fd, block_size, is_fifo),
     FLAC::Decoder::Stream(),
     m_format(format) {
     assert(format == eFlacOgg || format == eFlac);
@@ -32,12 +33,16 @@ void LdfInputReader::initialize() {
 }
 
 void LdfInputReader::seek(off_t no_samples) {
+    if (m_is_fifo)
+        return;
+    std::scoped_lock<std::mutex> lock(m_fd_mutex);
     if (!seek_absolute(m_sample_position + no_samples))
         throw std::runtime_error("libflac: seek_absolute failed");
     m_sample_position += no_samples;
 }
 
 int LdfInputReader::readFloats(float *f) {
+    std::scoped_lock<std::mutex> lock(m_fd_mutex);
     int filled_floats = 0;
     while (filled_floats < m_block_size) {
         if (m_flac_block_read_count == m_flac_used_size) {
