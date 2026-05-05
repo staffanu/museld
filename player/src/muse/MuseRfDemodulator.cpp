@@ -108,8 +108,8 @@ void MuseRfDemodulator::demodulate() {
     const int input_buffer_size = MuseDemodulatedBlock::c_sample_block_size + bandpass_filter_size - 1;
     const int analytic_buffer_size = MuseDemodulatedBlock::c_sample_block_size + 1;
     const int lowpass_in_buffer_size = MuseDemodulatedBlock::c_sample_block_size + lowpass_filter_size - 1;
-    const int rrc_in_buffer_size = MuseDemodulatedBlock::c_sample_block_size / MuseDemodulatedBlock::c_video_decimation_rate + rrc_filter_size - 1;
-    const int efm_equalization_in_buffer_size = MuseDemodulatedBlock::c_sample_block_size / MuseDemodulatedBlock::c_efm_decimation_rate + efm_equalization_filter_size - 1;
+    const int rrc_in_buffer_size = MuseDemodulatedBlock::c_video_block_size + rrc_filter_size - 1;
+    const int efm_equalization_in_buffer_size = MuseDemodulatedBlock::c_efm_block_size + efm_equalization_filter_size - 1;
 
     // We need to delay the output of the detected dropouts as much as the rest of the filter chain delays the video signal
     const int c_dropout_delay = lowpass_filter_size / MuseDemodulatedBlock::c_video_decimation_rate / 2 + rrc_filter_size / 2 - 1;
@@ -229,17 +229,17 @@ void MuseRfDemodulator::demodulate() {
                                                      m_sample_frequency, c_frequency_deviation, c_center_frequency, /* scale */ 112.f, /* add */ 128.f});
 
         // Lowpass filter the demodulated signal, and down-sample (decimate by factor 2) before rrc filtering
-        fir_filter_shader->updateWorkgroup(Size(MuseDemodulatedBlock::c_sample_block_size / MuseDemodulatedBlock::c_video_decimation_rate));
+        fir_filter_shader->updateWorkgroup(Size(MuseDemodulatedBlock::c_video_block_size));
         command_buffer->enqueueComputeShader<uint32_t>(
                 fir_filter_shader,
-                {(uint32_t)lowpass_filter_size, MuseDemodulatedBlock::c_sample_block_size / MuseDemodulatedBlock::c_video_decimation_rate,
+                {(uint32_t)lowpass_filter_size, MuseDemodulatedBlock::c_video_block_size,
                  /* out offset */ (uint32_t)rrc_filter_size - 1, MuseDemodulatedBlock::c_video_decimation_rate}, 0);
 
         // Run the down-sampled signal through the root raised cosine pulse-shaping filter and store in the output block
         fir_filter_shader->updateBufferDescriptorsInSet(1, {rrc_filter, rrc_in_buffer, block->video_data});
         command_buffer->enqueueComputeShader<uint32_t>(
                 fir_filter_shader,
-                {(uint32_t)rrc_filter_size, MuseDemodulatedBlock::c_sample_block_size / MuseDemodulatedBlock::c_video_decimation_rate,
+                {(uint32_t)rrc_filter_size, MuseDemodulatedBlock::c_video_block_size,
                  /* out offset */ 0, /* decimation */ 1}, 1);
 
         // EFM

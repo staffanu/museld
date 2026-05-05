@@ -110,7 +110,7 @@ void NtscRfDemodulator::demodulate() {
     const int dropout_delay = (int)lowpass_filter_def.size() / c_video_decimation_rate / 2 - 1;
     const int dropout_buffer_size = c_video_block_size + dropout_delay;
 
-    const int efm_equalization_in_buffer_size = c_sample_block_size / c_efm_decimation_rate + (int)efm_equalization_filter_def.size() - 1;
+    const int efm_equalization_in_buffer_size = c_efm_block_size + (int)efm_equalization_filter_def.size() - 1;
 
     shared_ptr<VulkanBuffer> input_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(input_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostWrite);
@@ -224,16 +224,16 @@ void NtscRfDemodulator::demodulate() {
                                                      c_sample_frequency, c_frequency_deviation, c_center_frequency, /* scale */ 0.5f, /* add */ 0.5f});
 
         // Lowpass filter the demodulated signal, and down-sample (decimate by factor 2)
-        fir_filter_shader->updateWorkgroup(Size(c_sample_block_size / c_video_decimation_rate));
+        fir_filter_shader->updateWorkgroup(Size(c_video_block_size));
         command_buffer->enqueueComputeShader<uint32_t>(
                 fir_filter_shader,
-                {(uint32_t)lowpass_filter_def.size(), c_sample_block_size / c_video_decimation_rate, /* out offset */ 0, c_video_decimation_rate}, 0);
+                {(uint32_t)lowpass_filter_def.size(), c_video_block_size, /* out offset */ 0, c_video_decimation_rate}, 0);
 
         // Run the down-sampled signal through the de-emphasis filter and store in the output block
         fir_filter_shader->updateBufferDescriptorsInSet(1, {deemphasis_filter, equalization_in_buffer, block->video_data});
         command_buffer->enqueueComputeShader<uint32_t>(
                 fir_filter_shader,
-                {(uint32_t)deemphasis_filter_def.size(), c_sample_block_size / c_video_decimation_rate, /* out offset */ 0, /* decimation */ 1}, 1);
+                {(uint32_t)deemphasis_filter_def.size(), c_video_block_size, /* out offset */ 0, /* decimation */ 1}, 1);
 
         // EFM
         input_fir_filter_shader->updateWorkgroup(Size(NtscRfDemodulatorConstants::c_efm_block_size));

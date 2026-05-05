@@ -26,7 +26,7 @@ ResamplingFrameReader::ResamplingFrameReader(
                       initial_seek_seconds, output_filename),
           m_input_format(input_format),
           m_demodulate(demodulate),
-          m_timing_recovery(log, sample_rate / MuseDemodulatedBlock::c_efm_decimation_rate, MuseDemodulatedBlock::c_efm_block_size, 3, nullopt),
+          m_timing_recovery(log, sample_rate / MuseDemodulatedBlock::c_efm_decimation_rate, MuseDemodulatedBlock::c_efm_block_size, 3, std::nullopt),
           m_input_reader(nullptr),
           m_sample_rate(demodulate ? sample_rate / MuseDemodulatedBlock::c_video_decimation_rate : sample_rate),
           m_input_samples_decimation_rate(1),
