@@ -322,12 +322,6 @@ namespace musevk {
         createInfo.enabledExtensionCount = static_cast<uint32_t>(c_device_extensions.size());
         createInfo.ppEnabledExtensionNames = c_device_extensions.data();
 
-        if (enableValidationLayers) {
-            createInfo.enabledLayerCount = static_cast<uint32_t>(c_validation_layers.size());
-            createInfo.ppEnabledLayerNames = c_validation_layers.data();
-        } else {
-            createInfo.enabledLayerCount = 0;
-        }
         m_logical_device = m_physical_device.createDevice(createInfo);
         m_graphics_and_compute_queue = new Queue(m_logical_device.getQueue(m_queue_families.graphicsAndComputeFamily.value(), 0));
         if (m_queue_families.graphicsAndComputeFamily != m_queue_families.presentFamily)
