@@ -4,7 +4,7 @@ add_executable(museld-tests
     ReedSolomonTest.cpp
     BchDecoderTest.cpp
     ../src/bch/BchDecoder.cpp
-    ../src/logging/CategoryLogger.cpp
+
 )
 
 target_link_libraries(museld-tests

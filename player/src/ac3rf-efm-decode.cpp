@@ -380,7 +380,7 @@ int main(int argc, char *argv[]) {
             }
         }
         if (!filename_found && !did_show_help_or_version) {
-            StreamLogger log(log_selection, *log_stream);
+            StreamLogger log(log_selection, *log_stream, false);
             if (!input_format_option.has_value())
                 throw std::runtime_error("Input format must be given for stdin");
 
@@ -395,7 +395,7 @@ int main(int argc, char *argv[]) {
         if (log_stream != &std::cerr)
             delete log_stream;
     } catch (const std::exception &x) {
-        StreamLogger log(StreamLogger::c_log_all);
+        StreamLogger log(StreamLogger::c_log_all, std::cerr, false);
         log.error(eApplication, x.what());
         return EXIT_FAILURE;
     }

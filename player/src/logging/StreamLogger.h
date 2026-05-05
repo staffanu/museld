@@ -22,8 +22,8 @@ public:
     // log_priority_per_category: minimum priority per category to emit output.
     // eError messages are always emitted; an empty map logs only errors.
     explicit StreamLogger(std::map<LogCategoryFlags, LogPriority> log_priority_per_category,
-                          std::ostream &log_stream = std::cerr,
-                          bool log_category = true);
+                          std::ostream &log_stream,
+                          bool log_category);
 
     void log(LogPriority priority, LogCategoryFlags categorization, const std::string &message) override;
     [[nodiscard]] bool isEnabled(LogPriority priority, LogCategoryFlags categorization) const override;

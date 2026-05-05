@@ -194,7 +194,7 @@ if(BUILD_MUSE)
         ResultImages.h
         RfDemodulator.h
         TextRenderer.cpp TextRenderer.h
-        logging/CategoryLogger.cpp logging/CategoryLogger.h
+
         bch/BchDecoder.cpp bch/BchDecoder.h
         util/PercentileFilter.cpp util/PercentileFilter.h
         util/LinearRegression.cpp util/LinearRegression.h

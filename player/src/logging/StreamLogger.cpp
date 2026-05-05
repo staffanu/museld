@@ -99,10 +99,12 @@ void StreamLogger::log(LogPriority priority, LogCategoryFlags categorization, co
     if (priority >= m_minimum_priority) {
         auto tp = chrono::time_point_cast<chrono::milliseconds>(chrono::system_clock::now());
         auto now_t = chrono::system_clock::to_time_t(tp);
+        auto ms = tp.time_since_epoch().count() % 1000;
         struct tm tm_info{};
         localtime_r(&now_t, &tm_info);
         ostringstream ss;
         ss << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S")
+           << '.' << std::setfill('0') << std::setw(3) << ms
            << " [" << c_priority_names.at(priority) << "] ";
         if (m_log_category)
             ss << "(";

@@ -5,7 +5,7 @@
 #include "musevk/TimestampQueryPool.h"
 #include "musevk/VulkanManager.h"
 #include "musevk/CommandPool.h"
-#include "logging/CategoryLogger.h"
+#include "logging/StreamLogger.h"
 #include "AudioPlayback.h"
 #include "FrameReader.h"
 #include "TextRenderer.h"
@@ -434,7 +434,7 @@ enum InputType {
 };
 
 int main(int argc, char *argv[]) {
-    auto log_selection = CategoryLogger::c_log_warn;
+    auto log_selection = StreamLogger::c_log_warn;
     std::string executable(argv[0]);
     std::string executable_dir = executable.substr(0, executable.find_last_of('/'));
     bool decode_all_fields = true;
@@ -617,7 +617,7 @@ int main(int argc, char *argv[]) {
                     exit(EXIT_FAILURE);
                 }
 
-                CategoryLogger log(log_selection);
+                StreamLogger log(log_selection, std::cerr, true);
 
                 musevk::VulkanManager manager(log);
 
@@ -662,7 +662,7 @@ int main(int argc, char *argv[]) {
             }
         }
     } catch (const exception &x) {
-        CategoryLogger log(CategoryLogger::c_log_all);
+        StreamLogger log(StreamLogger::c_log_all, std::cerr, true);
         log.error(eApplication, x.what());
         return EXIT_FAILURE;
     }
