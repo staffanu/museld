@@ -33,8 +33,8 @@ player/            — Main C++ project (musecpp player + ac3rf-efm-decode libra
     musevk/        — Vulkan abstraction layer (buffers, images, command pools, compute)
     util/          — PercentileFilter, LinearRegression, ConstExprHelpers, FmtAddons
     shaders/       — GLSL compute shaders (compiled to SPIR-V at build time)
-    main-musecpp.cpp
-    main-ac3rf-efm-decode.cpp
+    museld.cpp
+    ac3rf-efm-decode.cpp
   tests/           — Catch2 unit tests (ReedSolomonTest, BchDecoderTest)
   external/firpm/  — Vendored Parks-McClellan FIR design library (git submodule)
   cmake/           — CMake helpers (ac3rfConfig.cmake.in, modules/FindPORTAUDIO.cmake, etc.)

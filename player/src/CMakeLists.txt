@@ -138,7 +138,7 @@ if(BUILD_AC3RF_DECODE)
     pkg_check_modules(FLAC REQUIRED flac++)
 
     add_executable(ac3rf-efm-decode
-        main-ac3rf-efm-decode.cpp
+        ac3rf-efm-decode.cpp
         Version.h
         input/InputReader.h
         input/InputReaderFactory.cpp input/InputReaderFactory.h
@@ -179,7 +179,7 @@ if(BUILD_MUSE)
     pkg_check_modules(FLAC REQUIRED flac++)
 
     add_executable(musecpp
-        main-musecpp.cpp
+        museld.cpp
         AudioDefs.h
         input/InputReader.h
         input/InputReaderFactory.cpp input/InputReaderFactory.h
