@@ -241,6 +241,9 @@ int main(int argc, char *argv[]) {
     options.emplace_back("--no-simd", [&] () mutable  -> void {
         use_simd = false;
     });
+    options.emplace_back("--ac3", [&] () mutable  -> void {
+        operation = Ac3;
+    });
     options.emplace_back("--efm", [&] () mutable  -> void {
         operation = Efm;
     });
