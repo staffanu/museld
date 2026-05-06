@@ -34,6 +34,7 @@ public:
     virtual void initialize() = 0;
     virtual void seek(off_t no_samples) = 0;
     virtual int readFloats(float *f) = 0;
+    virtual int bitsPerSample() const = 0;
 
     uint32_t block_size() const {
         return m_block_size;
@@ -72,6 +73,7 @@ public:
     }
 
     void initialize() override {}
+    int bitsPerSample() const override { return sizeof(T) * 8; }
 
     void seek(off_t no_samples) override {
         if (m_is_fifo)

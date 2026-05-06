@@ -21,6 +21,7 @@ public:
     void initialize() override;
     void seek(off_t no_samples) override;
     int readFloats(float *f) override;
+    int bitsPerSample() const override { return 10; }
 
 private:
     uint8_t *m_buffer;

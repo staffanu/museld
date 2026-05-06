@@ -21,6 +21,7 @@ public:
     void initialize() override;
     void seek(off_t no_samples) override;
     int readFloats(float *f) override;
+    int bitsPerSample() const override { return m_bits_per_sample; }
 
 private:
     FLAC__StreamDecoderReadStatus read_callback(FLAC__byte buffer[], size_t *bytes) override;

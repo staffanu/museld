@@ -64,9 +64,29 @@ ResamplingFrameReader::ResamplingFrameReader(
                 m_input_scale = 1.f;
                 m_input_offset = 0.f;
                 break;
+            case eSint8:
+                m_input_scale = 1.f;
+                m_input_offset = 128.f;
+                break;
+            case eUint16:
+            case eUint16BE:
+                m_input_scale = 1.f / 256.f;
+                m_input_offset = 0.f;
+                break;
             case eSint16:
+            case eSint16BE:
                 m_input_scale = 1.f / 256.f;
                 m_input_offset = 128.f;
+                break;
+            case eLds:
+                m_input_scale = 1.f / 4.f;
+                m_input_offset = 0.f;
+                break;
+            case eFlac:
+            case eFlacOgg:
+                // Bit depth only known after initialize(); deferred to initialize().
+                m_input_scale = 0.f;
+                m_input_offset = 0.f;
                 break;
             default:
                 throw runtime_error(std::format("ResamplingFrameReader: unsupported input format {}", (int)m_input_format));
@@ -78,6 +98,18 @@ bool ResamplingFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBloc
     if (m_demodulator == nullptr) {
         m_input_reader = makeInputReader(m_filename, m_input_format, c_input_sub_buffer_size);
         m_input_reader->initialize();
+        if (m_input_scale == 0.f) {
+            int bps = m_input_reader->bitsPerSample();
+            if (bps == 8) {
+                m_input_scale = 1.f;
+                m_input_offset = 128.f;
+            } else if (bps == 16) {
+                m_input_scale = 1.f / 256.f;
+                m_input_offset = 128.f;
+            } else {
+                throw runtime_error(std::format("ResamplingFrameReader: unexpected FLAC bits per sample {}", bps));
+            }
+        }
     } else {
         m_demodulator->initialize(MuseDemodulatedBlock::recommendedNumberOfBlockBuffers((float)m_sample_rate * MuseDemodulatedBlock::c_video_decimation_rate));
     }
