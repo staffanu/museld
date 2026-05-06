@@ -29,6 +29,7 @@ private:
 
     InputFormat m_input_format;
     std::unique_ptr<InputReader> m_input_reader;
+    std::pair<float, float> m_input_scale = {0.f, 0.f};
 };
 
 #endif //MUSECPP_PHASECORRECT16MHZFRAMEREADER_H

@@ -16,10 +16,6 @@ using namespace std;
 
 static constexpr off_t c_samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
 
-// 16.2 MHz baseband captures store 10-bit samples in 16-bit values; scale to the 0..1023 range
-// (divide by 4) that the existing sync-detection logic was written against.
-static constexpr float c_input_scale = 1.f / 4.f;
-
 PhaseCorrect16MHzFrameReader::PhaseCorrect16MHzFrameReader(
         Logger &log,
         const std::string &filename, InputFormat input_format, double initial_seek_seconds,
@@ -32,7 +28,8 @@ PhaseCorrect16MHzFrameReader::PhaseCorrect16MHzFrameReader(
 }
 
 bool PhaseCorrect16MHzFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
-    auto [samples_to_skip, rescale] = compute_initial_skip(m_log);
+    auto [samples_to_skip, input_scale] = compute_initial_skip(m_log);
+    m_input_scale = input_scale;
 
     m_input_reader = makeInputReader(m_filename, m_input_format, c_samples_per_frame);
     m_input_reader->initialize();
@@ -83,7 +80,7 @@ void PhaseCorrect16MHzFrameReader::threadFunc() {
         if (m_input_reader->readFloats(data) != (int)c_samples_per_frame)
             break;
         for (off_t i = 0; i < c_samples_per_frame; i++)
-            data[i] *= c_input_scale;
+            data[i] = data[i] * m_input_scale.first + m_input_scale.second;
         memset(buffer->dropout_data->data<uint8_t>(), 0, sizeof(buffer->dropout_data->size()));
 
         std::unique_lock<std::mutex> lock(m_mutex);
@@ -103,15 +100,14 @@ pair<int, pair<float, float>> PhaseCorrect16MHzFrameReader::compute_initial_skip
     vector<float> buffer(two_frame_size);
     if (reader->readFloats(buffer.data()) != (int)two_frame_size)
         throw runtime_error("PhaseCorrect16MHzFrameReader: not enough input data to compute initial skip");
-    for (off_t i = 0; i < two_frame_size; i++)
-        buffer[i] *= c_input_scale;
 
     auto sorted(buffer);
     sort(sorted.begin(), sorted.end());
     auto y1 = sorted[500];
     auto y2 = sorted[480 * 1125 * 2 - 500];
-    pair<float, float> rescale = {(y2 - y1) / (239.0f - 16.0f), y1 - 16.0f};
-    log.info(eInput, std::format("Initial rescale: {}, {}", rescale.first, rescale.second));
+    float a = (239.0f - 16.0f) / (y2 - y1);
+    pair<float, float> input_scale = {a, 16.0f - y1 * a};
+    log.info(eInput, std::format("Computed input scale: {}, {}", input_scale.first, input_scale.second));
 
     // The rest of the code only checks the signal for rising or falling values, and never uses the actual
     // values directly.  We do not need to do any rescaling for this.
@@ -163,5 +159,5 @@ pair<int, pair<float, float>> PhaseCorrect16MHzFrameReader::compute_initial_skip
                                          return p1.second < p2.second;
                                      })->first;
 
-    return { bestLineOffset * 480 + bestPixelOffset, rescale };
+    return { bestLineOffset * 480 + bestPixelOffset, input_scale };
 }
