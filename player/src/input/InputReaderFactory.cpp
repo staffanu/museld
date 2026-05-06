@@ -62,6 +62,20 @@ std::optional<InputFormat> inputFormatFromFilename(const std::string &filename) 
     if (filename.ends_with(".s16be")) return eSint16BE;
     if (filename.ends_with(".lds"))   return eLds;
     if (filename.ends_with(".flac"))  return eFlac;
-    if (filename.ends_with(".ldf"))   return eFlacOgg;
+    if (filename.ends_with(".flac.ldf")) return eFlac;
+    if (filename.ends_with(".ldf"))      return eFlacOgg;
     return std::nullopt;
+}
+
+InputFormat inputFormatFromString(const std::string &name) {
+    if      (name == "u8")    return eUint8;
+    else if (name == "s8")    return eSint8;
+    else if (name == "u16")   return eUint16;
+    else if (name == "s16")   return eSint16;
+    else if (name == "u16be") return eUint16BE;
+    else if (name == "s16be") return eSint16BE;
+    else if (name == "lds")   return eLds;
+    else if (name == "flac")  return eFlac;
+    else if (name == "ldf")   return eFlacOgg;
+    else throw std::runtime_error(std::format("Unknown input format: {}", name));
 }

@@ -205,32 +205,8 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     };
 
-    options.emplace_back("--uint8", [&] () mutable  -> void {
-        input_format_option = std::make_optional(eUint8);
-    });
-    options.emplace_back("--sint8", [&] () mutable  -> void {
-        input_format_option = std::make_optional(eSint8);
-    });
-    options.emplace_back("--uint16", [&] () mutable  -> void {
-        input_format_option = std::make_optional(eUint16);
-    });
-    options.emplace_back("--sint16", [&] () mutable  -> void {
-        input_format_option = std::make_optional(eSint16);
-    });
-    options.emplace_back("--uint16be", [&] () mutable  -> void {
-        input_format_option = std::make_optional(eUint16BE);
-    });
-    options.emplace_back("--sint16be", [&] () mutable  -> void {
-        input_format_option = std::make_optional(eSint16BE);
-    });
-    options.emplace_back("--lds", [&] () mutable  -> void {
-        input_format_option = std::make_optional(eLds);
-    });
-    options.emplace_back("--flac", [&] () mutable  -> void {
-        input_format_option = std::make_optional(eFlac);
-    });
-    options.emplace_back("--ldf", [&] () mutable  -> void {
-        input_format_option = std::make_optional(eFlacOgg);
+    options.emplace_back("--input-format", [&] () mutable -> void {
+        input_format_option = inputFormatFromString(*(it++));
     });
     options.emplace_back("--seek", [&] () mutable -> void {
         initial_seek_seconds = stod(*(it++));

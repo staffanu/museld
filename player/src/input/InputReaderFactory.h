@@ -20,4 +20,8 @@ std::unique_ptr<InputReader> makeStdinInputReader(InputFormat format, uint32_t b
 // Match the well-known input file extensions to a format. Returns nullopt for unknown extensions.
 std::optional<InputFormat> inputFormatFromFilename(const std::string &filename);
 
+// Map a format name (u8, s8, u16, s16, u16be, s16be, lds, flac, ldf) to an InputFormat.
+// Throws std::runtime_error for unknown names.
+InputFormat inputFormatFromString(const std::string &name);
+
 #endif //AC3RF_DECODE_INPUTREADERFACTORY_H
