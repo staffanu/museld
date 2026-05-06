@@ -52,6 +52,7 @@ add_library(ac3rf STATIC
     efm/concealment/RepeatingSampleErasureConcealer.cpp efm/concealment/RepeatingSampleErasureConcealer.h
     efm/concealment/ArErasureConcealer.cpp efm/concealment/ArErasureConcealer.h
     efm/PopDetector.cpp efm/PopDetector.h
+    efm/EfmPcmProcessor.cpp efm/EfmPcmProcessor.h
 )
 
 target_compile_features(ac3rf PUBLIC cxx_std_23)

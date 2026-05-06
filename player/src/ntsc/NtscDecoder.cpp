@@ -39,6 +39,7 @@ NtscDecoder::NtscDecoder(
   m_field_index(0),
   m_total_elapsed_time_us(0),
   m_efm_decoder(log),
+  m_efm_pcm_processor(log),
   m_frames() {
 }
 
@@ -167,7 +168,8 @@ bool NtscDecoder::next(bool efm_audio, AudioMode *audio_mode,
 
     if (m_decode_audio && m_field_index == 0) {
         if (efm_audio && input_block != nullptr) {
-            for (const auto &s : m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0)) {
+            auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
+            for (const auto &s : m_efm_pcm_processor.processSamples(raw)) {
                 if (*sample_count >= MAX_AUDIO_OUTPUT_SAMPLES) break;
                 output_samples[*sample_count].samples[0] = s.samples[0];
                 output_samples[*sample_count].samples[1] = s.samples[1];

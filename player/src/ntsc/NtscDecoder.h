@@ -8,6 +8,7 @@
 #include <deque>
 #include "musevk/TimestampStatistics.h"
 #include "efm/EfmDecoder.h"
+#include "efm/EfmPcmProcessor.h"
 #include "musevk/CommandPool.h"
 #include "NtscInputBlock.h"
 #include "Decoder.h"
@@ -69,6 +70,7 @@ private:
     int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field
     long m_total_elapsed_time_us;
     EfmDecoder m_efm_decoder;
+    EfmPcmProcessor m_efm_pcm_processor;
     std::deque<NtscFrame *> m_frames; // The front (index 0) is the newest received frame; we keep three frames.
 };
 

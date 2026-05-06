@@ -26,8 +26,7 @@
 #include "efm/EfmDemodulator.h"
 #include "efm/EfmDecoder.h"
 #include "efm/TwoChannelSample.h"
-#include "efm/concealment/ErasureConcealer.h"
-#include "efm/PopDetector.h"
+#include "efm/EfmPcmProcessor.h"
 #include "Version.h"
 
 enum Operation {
@@ -65,9 +64,7 @@ void processFile(Logger &logger, Operation input_type,
             EfmDemodulator efm_demodulator(logger, input_sample_frequency, reader->block_size(), use_simd,
                 input_type == EfmRf, efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
             EfmDecoder efm_decoder(logger);
-            std::unique_ptr<ErasureConcealer> erasure_concealer =
-                ErasureConcealer::create(concealment_impl, logger, std::nullopt);
-            PopDetector pop_detector{logger};
+            EfmPcmProcessor efm_pcm_processor(logger, concealment_impl);
 
             std::vector<float> reclocked_data;
             double processed_time = 0.0;
@@ -86,14 +83,13 @@ void processFile(Logger &logger, Operation input_type,
                     logger.sync();
                     prev_processed_time = processed_time;
                 }
-                std::vector<TwoChannelSampleWithErasureFlags> pop_detected_samples = pop_detector.processSamples(decoded_samples);
-                std::vector<TwoChannelSample> output = erasure_concealer->processSamples(pop_detected_samples);
+                std::vector<TwoChannelSample> output = efm_pcm_processor.processSamples(decoded_samples);
 
                 if (write(out_fd, output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
                     throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
             }
             logger.info(eAudio, efm_decoder.reedSolomonStatistics());
-            logger.info(eAudio, erasure_concealer->erasureStatistics());
+            logger.info(eAudio, efm_pcm_processor.statistics());
             break;
         }
 
@@ -101,8 +97,7 @@ void processFile(Logger &logger, Operation input_type,
             logger.info(eApplication, "Processing EFM t-values");
 
             EfmDecoder efm_decoder(logger);
-            std::unique_ptr<ErasureConcealer> erasure_concealer =
-                ErasureConcealer::create(concealment_impl, logger, std::nullopt);
+            EfmPcmProcessor efm_pcm_processor(logger, concealment_impl);
 
             // Reading floats is "wrong" but this is a very unusual use case, so whatever makes the shortest code
             std::vector<float> reclocked_data;
@@ -120,13 +115,13 @@ void processFile(Logger &logger, Operation input_type,
                 std::vector<TwoChannelSampleWithErasureFlags> output_with_erasures =
                     efm_decoder.decode(reclocked_data, processed_input_blocks % (int)(input_sample_frequency / block_size) == 0);
 
-                std::vector<TwoChannelSample> output = erasure_concealer->processSamples(output_with_erasures);
+                std::vector<TwoChannelSample> output = efm_pcm_processor.processSamples(output_with_erasures);
 
                 if (write(out_fd, output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
                     throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
             }
             logger.info(eAudio, efm_decoder.reedSolomonStatistics());
-            logger.info(eAudio, erasure_concealer->erasureStatistics());
+            logger.info(eAudio, efm_pcm_processor.statistics());
             break;
         }
 

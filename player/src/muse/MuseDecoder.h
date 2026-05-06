@@ -8,6 +8,7 @@
 #include <deque>
 #include "musevk/TimestampStatistics.h"
 #include "efm/EfmDecoder.h"
+#include "efm/EfmPcmProcessor.h"
 #include "AudioDecoder.h"
 #include "Shaders.h"
 #include "FrameBuffer.h"
@@ -76,6 +77,7 @@ private:
     long m_total_elapsed_time_us;
     AudioDecoder m_audio_decoder;
     EfmDecoder m_efm_decoder;
+    EfmPcmProcessor m_efm_pcm_processor;
     std::deque<FrameBuffer *> m_frame_buffers; // The front (index 0) is the newest received frame
 };
 
