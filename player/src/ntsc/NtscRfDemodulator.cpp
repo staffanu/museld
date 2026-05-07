@@ -105,7 +105,7 @@ void NtscRfDemodulator::demodulate() {
             m_vulkan_manager, Size(deemphasis_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
     shared_ptr<VulkanBuffer> dropout_buffer = make_unique<musevk::VulkanBuffer>(
-            m_vulkan_manager, Size(dropout_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+            m_vulkan_manager, Size(dropout_buffer_size), sizeof(uint8_t), buffer_usage_flags, HostAccess::eHostNone);
 
 
     // Create shaders
