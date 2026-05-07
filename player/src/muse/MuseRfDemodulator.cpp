@@ -218,6 +218,12 @@ void MuseRfDemodulator::demodulate() {
                 detect_dropouts_shader, {MuseDemodulatedBlock::c_video_block_size,
                                          (uint32_t)lowpass_filter_size - 1, (uint32_t)c_dropout_delay, MuseDemodulatedBlock::c_video_decimation_rate});
 
+        // Barrier: ensure all compute shader writes are visible to the subsequent transfer operations
+        command_buffer->enqueueBarrier(vk::AccessFlagBits::eShaderWrite,
+                                       vk::AccessFlagBits::eTransferRead,
+                                       vk::PipelineStageFlagBits::eComputeShader,
+                                       vk::PipelineStageFlagBits::eTransfer);
+
         // Copy data from dropout detection to the output buffer before writing over the first part of the buffer below
         command_buffer->enqueueCopyBuffer(*dropout_buffer, *block->dropouts, 0, 0, MuseDemodulatedBlock::c_video_block_size * sizeof(uint8_t));
 
