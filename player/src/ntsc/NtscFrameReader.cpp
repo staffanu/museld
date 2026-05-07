@@ -12,6 +12,7 @@
 
 #include "NtscRfDemodulator.h"
 #include "logging/Logger.h"
+#include "util/Interpolate.h"
 
 using namespace std;
 
@@ -220,22 +221,12 @@ bool NtscFrameReader::resample(float *sample_out, uint8_t *dropout_out,
     const auto i1 = (read_pos - 1) & c_input_buffer_size_mask;
     const auto i0 = read_pos;
 
-    double b0, b1, b2, b3;
-    b0 = ((float *)m_input_buffer)[i3];
-    b1 = ((float *)m_input_buffer)[i2];
-    b2 = ((float *)m_input_buffer)[i1];
-    b3 = ((float *)m_input_buffer)[i0];
+    const float b0 = ((float *)m_input_buffer)[i3];
+    const float b1 = ((float *)m_input_buffer)[i2];
+    const float b2 = ((float *)m_input_buffer)[i1];
+    const float b3 = ((float *)m_input_buffer)[i0];
 
-    double x = 1 + (m_t - (unsigned long)m_t);
-    // cubic spline though 4 points, f(x) = a0 + a1 x + a2 x(x-1) + a3 x(x-1)(x-2)
-    double a0 = b0;
-    double a1 = b1 - a0;
-    double a2 = (b2 - a0 - 2 * a1) / 2;
-    double a3 = (b3 - a0 - 3 * a1 - 6 * a2) / 6;
-    // now evaluate at point 1 + p
-    double y = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
-
-    *sample_out = (float)(y * m_output_multiplier + m_output_add);
+    *sample_out = (float)(cubicInterpolate(b0, b1, b2, b3, (float)(m_t - (size_t)m_t)) * m_output_multiplier + m_output_add);
     *dropout_out = m_input_dropout_buffer[read_pos];
 
     auto current_sub_buffer_index = read_pos >> c_input_sub_buffer_size_bits;

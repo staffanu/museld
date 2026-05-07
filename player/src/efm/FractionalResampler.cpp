@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include "FractionalResampler.h"
+#include "util/Interpolate.h"
 
 FractionalResampler::FractionalResampler(int input_block_size)
     : m_input_block_size(input_block_size),
@@ -50,14 +51,7 @@ bool FractionalResampler::advanceTimeAndResample(double dt, float &output) {
     const float b2 = ix2 >= 0 ? m_buffer[ix2] : m_prev_data[c_max_look_back + ix2];
     const float b3 = ix3 >= 0 ? m_buffer[ix3] : m_prev_data[c_max_look_back + ix3];
 
-    double x = 1 + t - ix1;
-    // cubic spline though 4 points, f(x) = a0 + a1 x + a2 x(x-1) + a3 x(x-1)(x-2)
-    double a0 = b0;
-    double a1 = b1 - a0;
-    double a2 = (b2 - a0 - 2 * a1) / 2;
-    double a3 = (b3 - a0 - 3 * a1 - 6 * a2) / 6;
-    // now evaluate at point 1 + p
-    output = a0 + a1 * x + a2 * x * (x - 1) + a3 * x * (x - 1) * (x - 2);
+    output = cubicInterpolate(b0, b1, b2, b3, (float)(t - ix1));
 
     return true;
 }
