@@ -41,7 +41,7 @@ layout(set = 0, binding = 6) buffer readonly restrict movement_buffer {
     float16_t movement_data[][NTSC_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 7, rgba32f) uniform writeonly image2D frame_out_image;
+layout(set = 0, binding = 7, rgba16f) uniform writeonly image2D frame_out_image;
 
 layout(set = 0, binding = 8) buffer writeonly frame_out_y_buffer {
     uint16_t frame_out_Y[][NTSC_Y_BUF_WIDTH];
