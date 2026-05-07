@@ -19,7 +19,7 @@ using namespace std;
 NtscFrameReader::NtscFrameReader(
         Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
         const std::string &filename, InputFormat input_format, double sample_rate,
-        double initial_seek_seconds, bool benchmark_shaders,
+        double initial_seek_seconds, bool benchmark_shaders, bool efm_enabled,
         const std::optional<std::string> &output_filename)
         : FrameReader(log, filename,
                       filesystem::is_fifo(filename),
@@ -48,7 +48,7 @@ NtscFrameReader::NtscFrameReader(
           m_sample_history_ix(0),
           m_error_sum(0) {
 
-    m_demodulator = new NtscRfDemodulator(log, executable_dir, m_filename, sample_rate, vulkan_manager, input_format, benchmark_shaders);
+    m_demodulator = new NtscRfDemodulator(log, executable_dir, m_filename, sample_rate, vulkan_manager, input_format, benchmark_shaders, efm_enabled);
     // m_sample_rate = 31.25e6;
 
     m_bytes_per_sample = 4;
@@ -129,6 +129,11 @@ void NtscFrameReader::seek(double seconds) {
         }
         setUnlocked(); // do not wait to discover that we lost sync
     }
+}
+
+void NtscFrameReader::setEfmEnabled(bool enabled) {
+    if (m_demodulator != nullptr)
+        m_demodulator->setEfmEnabled(enabled);
 }
 
 void NtscFrameReader::threadFunc() {

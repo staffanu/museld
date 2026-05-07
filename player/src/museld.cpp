@@ -422,7 +422,7 @@ int main(int argc, char *argv[]) {
                     case eNtscRf: {
                         auto *reader = new NtscFrameReader(
                                         log, executable_dir, manager, *it, input_format,
-                                        input_sample_frequency, initial_seek_seconds, benchmark_shaders,
+                                        input_sample_frequency, initial_seek_seconds, benchmark_shaders, efm_audio,
                                         muse_output_filename);
                         process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,

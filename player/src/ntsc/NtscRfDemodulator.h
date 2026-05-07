@@ -63,9 +63,12 @@ struct NtscDemodulatedBlock {
 class NtscRfDemodulator : public RfDemodulator<NtscDemodulatedBlock> {
 public:
     NtscRfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
-                      musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders);
+                      musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
+                      bool efm_enabled);
     NtscRfDemodulator(const NtscRfDemodulator&) = delete;
     void operator=(const NtscRfDemodulator&) = delete;
+
+    void setEfmEnabled(bool enabled) { m_efm_enabled = enabled; }
 
 protected:
     void demodulate() override;
@@ -74,6 +77,7 @@ private:
     static constexpr float c_center_frequency = 8.5e6f;
     static constexpr float c_frequency_deviation = 0.85e6f;
     EfmDemodulator m_efm_demodulator;
+    std::atomic<bool> m_efm_enabled;
 };
 
 #endif //MUSECPP_NTSCRFDEMODULATOR_H
