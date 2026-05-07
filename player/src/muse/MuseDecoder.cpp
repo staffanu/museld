@@ -77,14 +77,15 @@ bool MuseDecoder::initialize() {
     return true;
 }
 
-bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
-                       int *sample_count,
-                       AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES],
-                       int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
-                       shared_ptr<DiscInfo> *disc_code,
-                       FieldInterpolationMode field_interpolation_mode,
-                       bool redo_last_field, bool enable_non_linear, DropoutMode dropout_mode, bool output_yuv) {
-    *sample_count = 0;
+bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
+    const bool efm_audio = controls.efm_audio;
+    const FieldInterpolationMode field_interpolation_mode = controls.field_interpolation_mode;
+    const bool redo_last_field = controls.redo_last_field;
+    const bool enable_non_linear = controls.enable_non_linear;
+    const DropoutMode dropout_mode = controls.dropout_mode;
+    const bool output_yuv = controls.output_yuv;
+
+    out.audio_sample_count = 0;
 
     if (redo_last_field) // undo the field advance from the previous call
         m_field_index = (m_field_index + 1) % 2;
@@ -153,9 +154,9 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
     if (m_decode_video && (m_decode_all_fields || m_field_index == 0)) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
-        *last_frame_buffer_input_offset = m_frame_buffers[0]->getInputOffset();
-        *input_samples_per_muse_sample = m_frame_buffers[0]->getInputSamplesPerMuseSample();
-        *field_parity = decoded_field_index;
+        out.last_frame_buffer_input_offset = m_frame_buffers[0]->getInputOffset();
+        out.input_samples_per_muse_sample = m_frame_buffers[0]->getInputSamplesPerMuseSample();
+        out.field_parity = decoded_field_index;
 
         m_shaders.decodeIntraField(*m_second_stage_command_buffer, m_frame_buffers[0]->get_field(decoded_field_index));
         auto fields = vector<reference_wrapper<FieldBufferView>>{
@@ -190,16 +191,16 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
         if (efm_audio && input_block != nullptr) {
             auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
             for (const auto &s : m_efm_pcm_processor.processSamples(raw)) {
-                if (*sample_count >= MAX_AUDIO_OUTPUT_SAMPLES) break;
-                output_samples[*sample_count].samples[0] = s.samples[0];
-                output_samples[*sample_count].samples[1] = s.samples[1];
-                output_samples[*sample_count].samples[2] = 0;
-                output_samples[*sample_count].samples[3] = 0;
-                (*sample_count)++;
+                if (out.audio_sample_count >= MAX_AUDIO_OUTPUT_SAMPLES) break;
+                out.audio_samples[out.audio_sample_count].samples[0] = s.samples[0];
+                out.audio_samples[out.audio_sample_count].samples[1] = s.samples[1];
+                out.audio_samples[out.audio_sample_count].samples[2] = 0;
+                out.audio_samples[out.audio_sample_count].samples[3] = 0;
+                out.audio_sample_count++;
             }
-            *audio_mode = MODE_EFM;
+            out.audio_mode = MODE_EFM;
         } else // MUSE audio
-            m_audio_decoder.decodeFrame(m_frame_no, m_shaders.getAudioData(), audio_mode, sample_count, output_samples);
+            m_audio_decoder.decodeFrame(m_frame_no, m_shaders.getAudioData(), &out.audio_mode, &out.audio_sample_count, out.audio_samples);
     }
 
     if (input_block != nullptr)
@@ -223,9 +224,26 @@ bool MuseDecoder::next(bool efm_audio, AudioMode *audio_mode,
     else
         m_field_index = (m_field_index + 1) % 2;
 
-    *disc_code = m_frame_buffers[0]->getDiscCode();
+    out.disc_info = m_frame_buffers[0]->getDiscCode();
 
     return true;
+}
+
+Decoder::SourceDimensions MuseDecoder::getSourceDimensions() const {
+    return {MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT};
+}
+
+std::optional<Decoder::PixelFileOffsets> MuseDecoder::computePixelFileOffsets(
+        int field_x, int field_y, int field_parity,
+        long buffer_file_offset, double input_samples_per_muse_sample) const {
+    long field_start = buffer_file_offset // start of sound data
+            + (long)((field_parity ? 565 : 2) * MUSE_TOTAL_WIDTH * input_samples_per_muse_sample);
+    PixelFileOffsets r;
+    r.field_start = field_start;
+    r.y  = field_start + (long)(input_samples_per_muse_sample * ((field_y + 44) * MUSE_TOTAL_WIDTH + (field_x + 106)));
+    r.cr = field_start + (long)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2) * MUSE_TOTAL_WIDTH + field_x / 4 + 11);
+    r.cb = field_start + (long)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2 + 1) * MUSE_TOTAL_WIDTH + field_x / 4 + 11);
+    return r;
 }
 
 void MuseDecoder::outputBenchmarkResults() {

@@ -45,16 +45,14 @@ public:
     [[nodiscard]] bool initialize() override;
 
     // true if not eof.  In case of a read timeout also returns true so that we can check for key presses.
-    bool next(bool efm_audio, AudioMode *audio_mode,
-              int *sample_count,
-              AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES],
-              int *field_parity, long *last_frame_buffer_input_offset, double *input_samples_per_muse_sample,
-              std::shared_ptr<DiscInfo> *disc_code,
-              FieldInterpolationMode field_interpolation_mode,
-              bool redo_last_field, bool enable_non_linear, DropoutMode dropout_mode, bool output_yuv) override;
+    bool next(const DecodeControls &controls, DecodedField &out) override;
 
     void outputBenchmarkResults() override;
     ResultImages getResultImages() override;
+    SourceDimensions getSourceDimensions() const override;
+    std::optional<PixelFileOffsets> computePixelFileOffsets(
+            int field_x, int field_y, int field_parity,
+            long buffer_file_offset, double input_samples_per_muse_sample) const override;
 
 private:
     Logger &m_log;

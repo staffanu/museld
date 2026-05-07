@@ -194,6 +194,10 @@ if(BUILD_MUSE)
         ResultImages.h
         RfDemodulator.h
         TextRenderer.cpp TextRenderer.h
+        PlayerState.h
+        OsdOverlay.cpp OsdOverlay.h
+        FrameBlitter.cpp FrameBlitter.h
+        InputController.cpp InputController.h
 
         bch/BchDecoder.cpp bch/BchDecoder.h
         util/PercentileFilter.cpp util/PercentileFilter.h

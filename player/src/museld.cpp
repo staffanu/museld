@@ -1,7 +1,7 @@
 #include <filesystem>
 #include <format>
-#include <set>
 #include <functional>
+#include <chrono>
 #include "musevk/TimestampQueryPool.h"
 #include "musevk/VulkanManager.h"
 #include "musevk/CommandPool.h"
@@ -10,6 +10,10 @@
 #include "FrameReader.h"
 #include "TextRenderer.h"
 #include "Decoder.h"
+#include "PlayerState.h"
+#include "OsdOverlay.h"
+#include "FrameBlitter.h"
+#include "InputController.h"
 #include "input/InputReader.h"
 #include "input/InputReaderFactory.h"
 #include "muse/ResamplingFrameReader.h"
@@ -22,29 +26,124 @@
 
 #ifdef HAVE_LIBAV
 # include "VideoFileWriter.h"
+#else
+class VideoFileWriter {}; // stub for non-libav builds; never instantiated
 #endif
 
 #define INPUT_BUFFER_COUNT 6
 
 using namespace std;
 
-static set<int> current_keys_down;
-
-bool check_glfw_key(GLFWwindow *window, int key) {
-    if (glfwGetKey(window, key) == GLFW_PRESS) {
-        if (current_keys_down.find(key) == current_keys_down.end()) {
-            current_keys_down.insert(key);
-            return true;
-        } else
-            return false;
-    } else {
-        current_keys_down.erase(key);
-        return false;
-    }
-}
-
 void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "Error %d: %s\n", error, description); // FIXME: use logging framework
+}
+
+static void runPlayer(Logger &log,
+                      musevk::VulkanManager &manager,
+                      Decoder &decoder,
+                      ReaderControls &reader_controls,
+                      GLFWwindow *window,
+                      bool full_screen,
+                      bool start_paused,
+                      DropoutMode dropout_mode,
+                      bool efm_audio,
+                      bool benchmark_shaders,
+                      bool output_yuv,
+                      const std::unique_ptr<VideoFileWriter> &vfw,
+                      AudioPlayback *audio_playback,
+                      const std::string &executable_dir) {
+    vk::Device &device = manager.getDevice();
+
+    vk::SemaphoreCreateInfo semaphoreInfo{};
+    auto image_available_semaphore = device.createSemaphore(semaphoreInfo);
+    auto render_finished_semaphore = device.createSemaphore(semaphoreInfo);
+
+    {
+        musevk::CommandPool command_pool(manager);
+        auto command_buffer = command_pool.createCommandBuffer();
+        TextRenderer text_renderer(executable_dir, manager, command_pool);
+
+        auto images = decoder.getResultImages();
+        const auto src_dims = decoder.getSourceDimensions();
+
+        PlayerState state;
+        state.paused_countdown = start_paused ? 5 : 0;
+
+        OsdOverlay osd;
+        FrameBlitter blitter;
+        InputController input(log);
+
+        auto t0 = chrono::high_resolution_clock::now();
+
+        auto make_controls = [&](bool redo) {
+            return Decoder::DecodeControls{
+                    efm_audio,
+                    state.field_interpolation_mode,
+                    redo,
+                    state.enable_non_linear,
+                    dropout_mode,
+                    output_yuv,
+            };
+        };
+
+        while ((state.paused && !state.redo_last_field)
+               || decoder.next(make_controls(state.redo_last_field), state.last_decoded)) {
+
+            if (!state.paused)
+                state.field_count++;
+            state.redo_last_field = false;
+
+#ifdef HAVE_LIBAV
+            if (vfw)
+                vfw->addVideoFrameWithAudio(images.out_Y, images.out_U, images.out_V,
+                                            state.last_decoded.audio_mode,
+                                            state.last_decoded.audio_sample_count,
+                                            state.last_decoded.audio_samples);
+#endif
+
+            if (audio_playback && state.last_decoded.audio_sample_count != 0
+                && state.last_decoded.audio_mode != MODE_UNKNOWN && !state.paused) {
+                audio_playback->add_samples(state.last_decoded.audio_mode,
+                                            state.last_decoded.audio_sample_count,
+                                            state.last_decoded.audio_samples);
+            }
+
+            auto swap_chain_image = manager.acquireNextImage(image_available_semaphore);
+
+            command_buffer->begin();
+            state.last_cursor_string = osd.render(*command_buffer, images, state, decoder, window, text_renderer);
+            blitter.present(*command_buffer, images, state, src_dims,
+                            swap_chain_image, manager.getSwapChainExtent(), manager,
+                            image_available_semaphore);
+
+            manager.present(swap_chain_image);
+
+            if (state.paused_countdown != 0 && --state.paused_countdown == 0) {
+                state.paused = true;
+                state.osd_text = "PAUSE";
+            }
+            if (glfwWindowShouldClose(window))
+                break;
+            if (!input.poll(window, state, reader_controls, dropout_mode, efm_audio,
+                            full_screen, src_dims.width, src_dims.height))
+                break;
+        }
+
+        auto t1 = chrono::high_resolution_clock::now();
+        auto time_us = (double) chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
+        if (state.field_count > 0) {
+            log.info(eApplication | ePerformance,
+                std::format("Total {} frames.  Avg {:.3f} ms/frame ({:.3f} frames/s)",
+                            state.field_count / 2,
+                            time_us / 1000.0 / state.field_count * 2,
+                            1000000.0 / time_us * state.field_count / 2));
+        }
+        if (benchmark_shaders)
+            decoder.outputBenchmarkResults();
+    }
+
+    device.destroy(image_available_semaphore);
+    device.destroy(render_finished_semaphore);
 }
 
 template<class InputBlock>
@@ -57,15 +156,24 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    GLFWwindow *window = glfwCreateWindow(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2,
-                                          "MUSE", full_screen ? glfwGetPrimaryMonitor() : nullptr, nullptr);
+
+    int initial_w, initial_h;
+    const char *title;
+    if constexpr (std::is_same<InputBlock, MuseInputBlock>::value) {
+        initial_w = MUSE_Y_BUF_WIDTH * 3;
+        initial_h = MUSE_BUF_HEIGHT * 2;
+        title = "MUSE";
+    } else {
+        initial_w = NTSC_Y_BUF_WIDTH;
+        initial_h = NTSC_FIELD_HEIGHT * 2;
+        title = "NTSC";
+    }
+    GLFWwindow *window = glfwCreateWindow(initial_w, initial_h, title,
+                                          full_screen ? glfwGetPrimaryMonitor() : nullptr, nullptr);
     glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
 
     manager.initVulkan(window, no_sync);
-    musevk::TimestampQueryPool *timestamp_query_pool =
-            benchmark_shaders ? new musevk::TimestampQueryPool(manager.getPhysicalDevice(), manager.getDevice(), 40) : nullptr;
-    vk::Device &device = manager.getDevice();
 
     {
         std::vector<std::unique_ptr<InputBlock>> input_vulkan_buffers{};
@@ -75,345 +183,56 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             throw runtime_error("FrameReader initialization failed");
     }
 
+    unique_ptr<VideoFileWriter> vfw;
 #ifdef HAVE_LIBAV
-    unique_ptr<VideoFileWriter> vfw = nullptr;
     if (output_filename) {
-        vfw = make_unique<VideoFileWriter>(output_filename.value(), log, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, decode_all_fields ? 60 : 30);
+        vfw = make_unique<VideoFileWriter>(output_filename.value(), log,
+                                           initial_w, initial_h, decode_all_fields ? 60 : 30);
         if (!vfw->init())
             throw runtime_error("Cannot initialize output encoder");
     }
 #endif
 
-    vk::SemaphoreCreateInfo semaphoreInfo{};
-    vk::FenceCreateInfo fenceInfo{};
-    fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
-    auto image_available_semaphore = device.createSemaphore(semaphoreInfo);
-    auto render_finished_semaphore = device.createSemaphore(semaphoreInfo);
-    auto in_flight_fence = device.createFence(fenceInfo);
-
     unique_ptr<AudioPlayback> audio_playback = nullptr;
     if (decode_audio)
-         audio_playback = make_unique<AudioPlayback>(log);
-
-    AudioMode audio_mode;
-    int audio_sample_count;
-    AudioFrame audio_samples[MAX_AUDIO_OUTPUT_SAMPLES];
+        audio_playback = make_unique<AudioPlayback>(log);
 
     {
         musevk::CommandPool command_pool(manager);
-        auto command_buffer = command_pool.createCommandBuffer();
-        TextRenderer text_renderer(executable_dir, manager, command_pool);
 
-        std:unique_ptr<Decoder> decoder = nullptr;
-        if (std::is_same<InputBlock, MuseInputBlock>::value) {
-            decoder = std::make_unique<MuseDecoder>(log,
-                                                    (FrameReader<MuseInputBlock> &)reader,
-                                                    manager,
-                                                    command_pool,
-                                                    executable_dir,
-                                                    decode_video,
-                                                    decode_all_fields,
-                                                    decode_audio,
-                                                    timestamp_query_pool);
+        std::unique_ptr<musevk::TimestampQueryPool> timestamp_query_pool = benchmark_shaders
+                ? std::make_unique<musevk::TimestampQueryPool>(manager.getPhysicalDevice(), manager.getDevice(), 40)
+                : nullptr;
+
+        std::unique_ptr<Decoder> decoder;
+        if constexpr (std::is_same<InputBlock, MuseInputBlock>::value) {
+            decoder = std::make_unique<MuseDecoder>(log, (FrameReader<MuseInputBlock> &)reader,
+                                                    manager, command_pool, executable_dir,
+                                                    decode_video, decode_all_fields, decode_audio,
+                                                    timestamp_query_pool.get());
         } else {
-            decoder = std::make_unique<NtscDecoder>(log,
-                                                    (FrameReader<NtscInputBlock> &)reader,
-                                                    manager,
-                                                    command_pool,
-                                                    executable_dir,
-                                                    decode_video,
-                                                    decode_all_fields,
-                                                    decode_audio,
-                                                    timestamp_query_pool);
+            decoder = std::make_unique<NtscDecoder>(log, (FrameReader<NtscInputBlock> &)reader,
+                                                    manager, command_pool, executable_dir,
+                                                    decode_video, decode_all_fields, decode_audio,
+                                                    timestamp_query_pool.get());
         }
 
         if (!decoder->initialize())
-            throw runtime_error("MuseDecoder initialization failed");
-        auto images = decoder->getResultImages();
+            throw runtime_error("Decoder initialization failed");
 
-        auto t0 = chrono::high_resolution_clock::now();
-        int field_count = 0;
-        bool paused = false;
-        int paused_countdown = start_paused ? 5 : 0;
-        Decoder::FieldInterpolationMode field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
-        bool redo_last_field = false;
-        bool enable_non_linear = true;
-        bool enable_cursor = false;
-        bool show_disc_code = false;
-        int zoom_factor = 1;
-        const double zoom_step = 0.2;
-        pair<double, double> zoom_center = make_pair(0.5, 0.5);
-        string osd_text;
-        string prev_osd_text;
-        int osd_text_remaining_frames = 0;
-        double input_samples_per_muse_sample;
-        long last_buffer_file_offset;
-        std::shared_ptr<DiscInfo> disc_info = nullptr;
-        int field_parity;
+        ReaderControls reader_controls{
+                [&reader](double seconds) { reader.seek(seconds); },
+                [&reader](bool enabled) { reader.setEfmEnabled(enabled); },
+        };
 
-        while (paused && !redo_last_field ||
-            decoder->next(efm_audio, &audio_mode, &audio_sample_count, audio_samples,
-                         &field_parity, &last_buffer_file_offset, &input_samples_per_muse_sample, &disc_info,
-                         field_interpolation_mode, redo_last_field, enable_non_linear, dropout_mode, output_filename.has_value())) {
-
-            if (!paused)
-                field_count++;
-            redo_last_field = false;
-
-#ifdef HAVE_LIBAV
-            if (vfw != nullptr)
-                vfw->addVideoFrameWithAudio(images.out_Y, images.out_U, images.out_V, audio_mode, audio_sample_count, audio_samples);
-#endif
-
-            if (audio_sample_count != 0 && audio_mode != MODE_UNKNOWN && !paused)
-                audio_playback->add_samples(audio_mode, audio_sample_count, audio_samples);
-
-            //vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
-            //vkResetFences(device, 1, &in_flight_fence);
-
-            auto swap_chain_image = manager.acquireNextImage(image_available_semaphore);
-
-            // The output image written by the decoder is finished since the next() call waits for
-            // all commands to finish.
-
-            command_buffer->begin();
-
-            if (osd_text != prev_osd_text) {
-                if (paused && osd_text_remaining_frames)
-                    redo_last_field = true;
-                osd_text_remaining_frames = 100;
-                prev_osd_text = osd_text;
-            }
-            if (osd_text_remaining_frames) {
-                text_renderer.drawText(images.out_image, 90, 50, osd_text, 4, *command_buffer);
-                if (!--osd_text_remaining_frames)
-                    redo_last_field = true;
-            }
-            string cursor_string;
-            if (enable_cursor) {
-                // Draw the pointer coordinates in the top left corner (both in single field and interpolated coordinates)
-                // If paused, and showing only a single field, also show the input stream offset for the start of the frame,
-                // the start of the current field (first line of audio data section), and the offsets for the pixel under the
-                // pointer, in the Y, Cr and Cb data. The offsets unfortunately aren't exact (I don't know why), but the
-                // offsets are very useful when investigating dropouts.
-                int xsize, ysize;
-                glfwGetWindowSize(window, &xsize, &ysize);
-                double xpos, ypos;
-                glfwGetCursorPos(window, &xpos, &ypos);
-                if (xpos >= 0 && ypos >= 0 && xpos < xsize && ypos < ysize) {
-                    double rel_x = (xpos / xsize - 0.5) / zoom_factor + zoom_center.first;
-                    double rel_y = (ypos / ysize - 0.5) / zoom_factor + zoom_center.second;
-                    int field_x = (int)(rel_x * MUSE_Y_BUF_WIDTH);
-                    int field_y = (int)(rel_y * MUSE_BUF_HEIGHT);
-                    cursor_string = std::format("({}, {}) ({}, {})",
-                                                (int)(rel_x * MUSE_Y_BUF_WIDTH * 3),
-                                                (int)(rel_y * MUSE_BUF_HEIGHT * 2),
-                                                field_x, field_y);
-                    text_renderer.drawText(images.out_image, 10, 8, cursor_string, 1, *command_buffer);
-                    if (field_interpolation_mode == Decoder::FieldInterpolationMode::eForceIntraField && paused) {
-                        long field_offset = last_buffer_file_offset // start of sound data
-                                + (long)((field_parity ? 565 : 2) * MUSE_TOTAL_WIDTH * input_samples_per_muse_sample);
-                        string offset_string =
-                                std::format("{} {} {} Y {} Cr {} Cb {}",
-                                            last_buffer_file_offset,
-                                            field_parity ? "ODD" : "EVEN",
-                                            field_offset,
-                                            field_offset + (int)(input_samples_per_muse_sample * ((field_y + 44) * MUSE_TOTAL_WIDTH + (field_x + 106))),
-                                            field_offset + (int)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2) * MUSE_TOTAL_WIDTH + field_x / 4 + 11),
-                                            field_offset + (int)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2 + 1) * MUSE_TOTAL_WIDTH + field_x / 4 + 11));
-                        text_renderer.drawText(images.out_image, 10, 34, offset_string, 1, *command_buffer);
-                        cursor_string += " " + offset_string;
-                    }
-                }
-                if (paused)
-                    redo_last_field = true;
-            }
-            if (show_disc_code) {
-                auto disc_info_strings = disc_info ? disc_info->asStrings() : std::vector<std::string>{"No disc info"};
-                for (int i = disc_info_strings.size() - 1, y = 955; i >= 0; i--, y -= 55) {
-                    text_renderer.drawText(images.out_image, 90, y, disc_info_strings[i], 2, *command_buffer);
-                }
-                if (paused)
-                    redo_last_field = true;
-            }
-
-            images.out_image->enqueueTransitionLayout(*command_buffer, vk::ImageLayout::eTransferSrcOptimal,
-                                           vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer,
-                                           vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead);
-            command_buffer->enqueueTransitionMemoryLayout(swap_chain_image,
-                                                          vk::ImageLayout::eUndefined,
-                                                          vk::ImageLayout::eTransferDstOptimal,
-                                                          vk::PipelineStageFlagBits::eTopOfPipe,
-                                                          vk::PipelineStageFlagBits::eTransfer,
-                                                          vk::AccessFlags(),
-                                                          vk::AccessFlagBits::eTransferWrite);
-
-            auto extent = manager.getSwapChainExtent();
-            int source_width = std::is_same<InputBlock, MuseInputBlock>::value ? MUSE_Y_BUF_WIDTH * 3 : NTSC_Y_BUF_WIDTH;
-            int source_height = std::is_same<InputBlock, MuseInputBlock>::value ? MUSE_BUF_HEIGHT * 2 : NTSC_FIELD_HEIGHT * 2;
-            vk::ImageBlit region;
-            region.srcOffsets[0] = vk::Offset3D((int32_t)((zoom_center.first - 0.5 / zoom_factor) * source_width),
-                                                (int32_t)((zoom_center.second - 0.5 / zoom_factor) * source_height), 0);
-            region.srcOffsets[1] = vk::Offset3D((int32_t)((zoom_center.first + 0.5 / zoom_factor) * source_width),
-                                                (int32_t)((zoom_center.second + 0.5 / zoom_factor) * source_height), 1);
-            region.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
-            region.dstOffsets[0] = vk::Offset3D(0, 0, 0);
-            region.dstOffsets[1] = vk::Offset3D((int) extent.width, (int) extent.height, 1);
-            region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
-            command_buffer->enqueueBlitImage(images.out_image->image(), vk::ImageLayout::eTransferSrcOptimal,
-                                             swap_chain_image, vk::ImageLayout::eTransferDstOptimal,
-                                             region);
-
-            command_buffer->enqueueTransitionMemoryLayout(swap_chain_image,
-                                                          vk::ImageLayout::eTransferDstOptimal,
-                                                          vk::ImageLayout::ePresentSrcKHR,
-                                                          vk::PipelineStageFlagBits::eTransfer,
-                                                          vk::PipelineStageFlagBits::eBottomOfPipe,
-                                                          vk::AccessFlagBits::eTransferWrite,
-                                                          vk::AccessFlags());
-            command_buffer->submit({image_available_semaphore}, {vk::PipelineStageFlagBits::eTopOfPipe}, {});
-            command_buffer->wait();
-
-            manager.present(swap_chain_image);
-
-            if (paused_countdown != 0 && --paused_countdown == 0) {
-                paused = true;
-                osd_text = "PAUSE";
-            }
-            if (glfwWindowShouldClose(window))
-                break;
-            glfwPollEvents();
-
-            if (check_glfw_key(window, GLFW_KEY_ESCAPE) || check_glfw_key(window, GLFW_KEY_Q))
-                break;
-            if (check_glfw_key(window, GLFW_KEY_TAB)) {
-                if (full_screen) {
-                    glfwSetWindowMonitor(window, nullptr, 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
-                    full_screen = false;
-                } else {
-                    glfwSetWindowMonitor(window, glfwGetPrimaryMonitor(), 0, 0, MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT * 2, 60);
-                    full_screen = true;
-                }
-            }
-            if (check_glfw_key(window, GLFW_KEY_SPACE)) {
-                paused = !paused;
-                osd_text = paused ? "PAUSE" : "PLAY";
-            }
-            if (check_glfw_key(window, GLFW_KEY_N)) {
-                paused = false;
-                redo_last_field = false;
-                paused_countdown = 1;
-            }
-            if (check_glfw_key(window, GLFW_KEY_LEFT)) {
-                if (zoom_factor != 1)
-                    zoom_center.first = max(0.5 / zoom_factor, zoom_center.first - zoom_step / zoom_factor);
-                else {
-                    reader.seek(-10);
-                    if (paused) {
-                        paused = false;
-                        paused_countdown = 5;
-                    }
-                }
-            }
-            if (check_glfw_key(window, GLFW_KEY_RIGHT)) {
-                if (zoom_factor != 1)
-                    zoom_center.first = min(1.0 - 0.5 / zoom_factor, zoom_center.first + zoom_step / zoom_factor);
-                else {
-                    reader.seek(10);
-                    if (paused) {
-                        paused = false;
-                        paused_countdown = 5;
-                    }
-                }
-            }
-            if (check_glfw_key(window, GLFW_KEY_UP)) {
-                zoom_center.second = max(0.5 / zoom_factor, zoom_center.second - zoom_step / zoom_factor);
-            }
-            if (check_glfw_key(window, GLFW_KEY_DOWN)) {
-                zoom_center.second = min(1.0 - 0.5 / zoom_factor, zoom_center.second + zoom_step / zoom_factor);
-            }
-            if (check_glfw_key(window, GLFW_KEY_1)) {
-                field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
-                if (paused)
-                    redo_last_field = true;
-                log.info(eApplication | eVideo, "Field interpolation determined by motion detection");
-                osd_text = "MOTION NORMAL";
-            }
-            if (check_glfw_key(window, GLFW_KEY_2)) {
-                field_interpolation_mode = Decoder::FieldInterpolationMode::eForceIntraField;
-                if (paused)
-                    redo_last_field = true;
-                log.info(eApplication | eVideo, "Field interpolation forced to intra field only");
-                osd_text = "MOTION ALL";
-            }
-            if (check_glfw_key(window, GLFW_KEY_3)) {
-                field_interpolation_mode = Decoder::FieldInterpolationMode::eForceInterFrame;
-                if (paused)
-                    redo_last_field = true;
-                log.info(eApplication | eVideo, "Inter-frame interpolation forced");
-                osd_text = "MOTION NONE";
-            }
-            if (check_glfw_key(window, GLFW_KEY_A)) {
-                efm_audio = !efm_audio;
-                reader.setEfmEnabled(efm_audio);
-                osd_text = efm_audio ? "EFM AUDIO" : "MUSE AUDIO";
-            }
-            if (check_glfw_key(window, GLFW_KEY_D)) {
-                switch (dropout_mode) {
-                    case DropoutMode::eNormal:
-                        dropout_mode = DropoutMode::eDisabled;
-                        osd_text = "DROPOUT DISABLED";
-                        break;
-                    case DropoutMode::eDisabled:
-                        dropout_mode = DropoutMode::eHighlight;
-                        osd_text = "DROPOUT HIGHLIGHT";
-                        break;
-                    case DropoutMode::eHighlight:
-                        dropout_mode = DropoutMode::eNormal;
-                        osd_text = "DROPOUT ENABLED";
-                        break;
-                }
-            }
-            if (check_glfw_key(window, GLFW_KEY_L)) {
-                enable_non_linear = !enable_non_linear;
-                osd_text = enable_non_linear ? "NON-LINEAR DE-EMPH ON" : "NON-LINEAR DE-EMPH OFF";
-            }
-            if (check_glfw_key(window, GLFW_KEY_C)) {
-                enable_cursor = !enable_cursor;
-                glfwSetInputMode(window, GLFW_CURSOR, enable_cursor ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
-            }
-            if (check_glfw_key(window, GLFW_KEY_V)) {
-                show_disc_code = !show_disc_code;
-            }
-            if (check_glfw_key(window, GLFW_KEY_PRINT_SCREEN)) {
-                glfwSetClipboardString(window, cursor_string.c_str());
-            }
-            if (check_glfw_key(window, GLFW_KEY_Z)) {
-                zoom_factor = (zoom_factor * 2) % 7;
-                zoom_center.first = max(0.5 / zoom_factor, min(1.0 - 0.5 / zoom_factor, zoom_center.first));
-                zoom_center.second = max(0.5 / zoom_factor, min(1.0 - 0.5 / zoom_factor, zoom_center.second));
-                osd_text = std::format("ZOOM {}", zoom_factor);
-            }
-        }
-        auto t1 = chrono::high_resolution_clock::now();
-        auto time_us = (double) chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
-        log.info(eApplication | ePerformance,
-            std::format("Total {} frames.  Avg {:.3f} ms/frame ({:.3f} frames/s)",
-                        field_count / 2,
-                        time_us / 1000.0 / field_count * 2,
-                        1000000.0 / time_us * field_count / 2));
-        if (benchmark_shaders)
-            decoder->outputBenchmarkResults();
-        decoder = nullptr;
+        runPlayer(log, manager, *decoder, reader_controls, window, full_screen, start_paused,
+                  dropout_mode, efm_audio, benchmark_shaders,
+                  output_filename.has_value(),
+                  vfw, audio_playback.get(), executable_dir);
     }
 
-    delete timestamp_query_pool;
-    device.destroy(image_available_semaphore);
-    device.destroy(render_finished_semaphore);
-    device.destroy(in_flight_fence);
-
 #ifdef HAVE_LIBAV
-    if (vfw != nullptr) {
+    if (vfw) {
         vfw->cleanup();
         vfw = nullptr;
     }
@@ -540,29 +359,14 @@ int main(int argc, char *argv[]) {
         };
         for (int i = 0; i < it->length(); i += 2) {
             switch ((*it)[i]) {
-                case 'M':
-                    log_selection[eApplication] = parseLevel((*it)[i + 1]);
-                    break;
-                case 'P':
-                    log_selection[ePerformance] = parseLevel((*it)[i + 1]);
-                    break;
-                case 'A':
-                    log_selection[eAudio] = parseLevel((*it)[i + 1]);
-                    break;
-                case 'V':
-                    log_selection[eVideo] = parseLevel((*it)[i + 1]);
-                    break;
-                case 'D':
-                    log_selection[eDecoder] = parseLevel((*it)[i + 1]);
-                    break;
-                case 'I':
-                    log_selection[eInput] = parseLevel((*it)[i + 1]);
-                    break;
-                case 'O':
-                    log_selection[eOutput] = parseLevel((*it)[i + 1]);
-                    break;
-                default:
-                    throw runtime_error("Unknown log category");
+                case 'M': log_selection[eApplication] = parseLevel((*it)[i + 1]); break;
+                case 'P': log_selection[ePerformance] = parseLevel((*it)[i + 1]); break;
+                case 'A': log_selection[eAudio] = parseLevel((*it)[i + 1]); break;
+                case 'V': log_selection[eVideo] = parseLevel((*it)[i + 1]); break;
+                case 'D': log_selection[eDecoder] = parseLevel((*it)[i + 1]); break;
+                case 'I': log_selection[eInput] = parseLevel((*it)[i + 1]); break;
+                case 'O': log_selection[eOutput] = parseLevel((*it)[i + 1]); break;
+                default: throw runtime_error("Unknown log category");
             }
         }
         it++;
@@ -587,7 +391,7 @@ int main(int argc, char *argv[]) {
                 it++;
                 option->second();
             } else if (it->find("!", 0) == 0) {
-                it++; // used to ignore options (to easily enable/disable options in debug settings etc.)
+                it++; // used to ignore options (to easily enable/disable options in CLion debug settings)
             } else if (it->find("-", 0) == 0) {
                 usage();
             } else {
