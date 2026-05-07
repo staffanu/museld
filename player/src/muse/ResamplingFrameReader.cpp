@@ -26,7 +26,6 @@ ResamplingFrameReader::ResamplingFrameReader(
                       initial_seek_seconds, output_filename),
           m_input_format(input_format),
           m_demodulate(demodulate),
-          m_timing_recovery(log, sample_rate / MuseDemodulatedBlock::c_efm_decimation_rate, MuseDemodulatedBlock::c_efm_block_size, 3, std::nullopt),
           m_input_reader(nullptr),
           m_sample_rate(demodulate ? sample_rate / MuseDemodulatedBlock::c_video_decimation_rate : sample_rate),
           m_input_samples_decimation_rate(1),
@@ -247,11 +246,9 @@ bool ResamplingFrameReader::readInput(std::unique_ptr<MuseInputBlock> const &out
         m_input_sub_buffer_input_offsets[m_last_input_sub_buffer_ix_read] = block->input_offset;
 
         if (output_block != nullptr) {
-            if (m_state == eLocked) {
-                std::vector<float> block_efm;
-                m_timing_recovery.reclock(block->efm_data->data<float>(), block_efm);
-                output_block->efm_data.insert(output_block->efm_data.end(), block_efm.begin(), block_efm.end());
-            } else
+            if (m_state == eLocked)
+                output_block->efm_data.insert(output_block->efm_data.end(), block->efm_data.begin(), block->efm_data.end());
+            else
                 output_block->efm_data.clear();
         }
 

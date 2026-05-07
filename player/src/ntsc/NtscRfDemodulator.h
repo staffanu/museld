@@ -21,6 +21,7 @@
 #include "logging/Logger.h"
 #include "RfDemodulator.h"
 #include "musevk/VulkanManager.h"
+#include "efm/EfmDemodulator.h"
 
 namespace NtscRfDemodulatorConstants {
     static constexpr float c_sample_frequency = 40.0e6f;
@@ -44,9 +45,6 @@ struct NtscDemodulatedBlock {
         video_data = std::make_unique<musevk::VulkanBuffer>(
                 vulkan_manager, musevk::Size(NtscRfDemodulatorConstants::c_video_block_size), sizeof(float),
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);
-        efm_data = std::make_unique<musevk::VulkanBuffer>(
-                vulkan_manager, musevk::Size(NtscRfDemodulatorConstants::c_efm_block_size), sizeof(float),
-                vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);
         dropouts = std::make_unique<musevk::VulkanBuffer>(
                 vulkan_manager, musevk::Size(NtscRfDemodulatorConstants::c_video_block_size), sizeof(uint8_t),
                 vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, musevk::HostAccess::eHostRead);;
@@ -58,7 +56,7 @@ struct NtscDemodulatedBlock {
     long input_offset; // the number of samples in the input before this block
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropouts; // 1-to-1 with the video_data array. 0 or 1 for now, but could indicate how certain we are in the future
-    std::shared_ptr<musevk::VulkanBuffer> efm_data;
+    std::vector<float> efm_data;
     std::shared_ptr<musevk::VulkanBuffer> audio_data;
 };
 
@@ -75,6 +73,7 @@ protected:
 private:
     static constexpr float c_center_frequency = 8.5e6f;
     static constexpr float c_frequency_deviation = 0.85e6f;
+    EfmDemodulator m_efm_demodulator;
 };
 
 #endif //MUSECPP_NTSCRFDEMODULATOR_H

@@ -22,7 +22,8 @@ MuseRfDemodulator::MuseRfDemodulator(Logger &log, std::string executable_dir, st
                                      musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders)
 : RfDemodulator<MuseDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency,
                                       vulkan_manager, input_format, MuseDemodulatedBlock::c_sample_block_size,
-                                      benchmark_shaders) {
+                                      benchmark_shaders),
+  m_efm_demodulator(log, sample_frequency, MuseDemodulatedBlock::c_sample_block_size, true, true, 2, 3, std::nullopt) {
 }
 
 void MuseRfDemodulator::demodulate() {
@@ -77,39 +78,11 @@ void MuseRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> rrc_filter =
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(rrc_filter_size), rrc_filter_def);
 
-    // Lowpass filter for EFM
-    auto efm_lowpass_filter_def = std::array<float, 16>{
-            // Computed in octave: fir1(15, 2.0e6 / 31.25e6)
-            0.006975, 0.011610, 0.024555, 0.045128, 0.070453, 0.096031, 0.116806, 0.128442,
-            0.128442, 0.116806, 0.096031, 0.070453, 0.045128, 0.024555, 0.011610, 0.006975
-    };
-    std::reverse(efm_lowpass_filter_def.begin(), efm_lowpass_filter_def.end()); // should be symmetric, so really unnecessary
-    const int efm_lowpass_filter_size = efm_lowpass_filter_def.size();
-
-    shared_ptr<VulkanBuffer> efm_lowpass_filter =
-            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(efm_lowpass_filter_size), efm_lowpass_filter_def);
-
-    // Equalization filter for EFM.  Works on 1/4 of the original sample frequency
-    // Computed in octave using the script make_efm_filter.m, and then numerically
-    // optimized using nonlin_min(samin), for decimation factor 4, lowpass 2.0 MHz
-    auto efm_equalization_filter_def = std::array<float, 32>{
-            -0.037621, -0.032380, -0.152833, 0.016591, -0.181817, -0.042276, -0.011685, 0.017400,
-            0.112888, 0.095248, 0.226369, 0.508954, 0.470778, 0.771520, 0.435198, 0.410012,
-            -0.035066, -0.222377, -0.554291, -0.691465, -0.670789, -0.418965, -0.299890, 0.022324,
-            0.139150, 0.209963, 0.198224, 0.001872,-0.033351, 0.040845, -0.023787, 0.024088
-    };
-    std::reverse(efm_equalization_filter_def.begin(), efm_equalization_filter_def.end());
-    const int efm_equalization_filter_size = efm_equalization_filter_def.size();
-
-    shared_ptr<VulkanBuffer> efm_equalization_filter =
-            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(efm_equalization_filter_size), efm_equalization_filter_def);
-
     // Create buffers for data
     const int input_buffer_size = MuseDemodulatedBlock::c_sample_block_size + bandpass_filter_size - 1;
     const int analytic_buffer_size = MuseDemodulatedBlock::c_sample_block_size + 1;
     const int lowpass_in_buffer_size = MuseDemodulatedBlock::c_sample_block_size + lowpass_filter_size - 1;
     const int rrc_in_buffer_size = MuseDemodulatedBlock::c_video_block_size + rrc_filter_size - 1;
-    const int efm_equalization_in_buffer_size = MuseDemodulatedBlock::c_efm_block_size + efm_equalization_filter_size - 1;
 
     // We need to delay the output of the detected dropouts as much as the rest of the filter chain delays the video signal
     const int c_dropout_delay = lowpass_filter_size / MuseDemodulatedBlock::c_video_decimation_rate / 2 + rrc_filter_size / 2 - 1;
@@ -130,9 +103,6 @@ void MuseRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> rrc_in_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(rrc_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
-    shared_ptr<VulkanBuffer> efm_equalization_in_buffer = make_unique<musevk::VulkanBuffer>(
-            m_vulkan_manager, Size(efm_equalization_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
-
     shared_ptr<VulkanBuffer> dropout_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(c_dropout_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
@@ -140,16 +110,15 @@ void MuseRfDemodulator::demodulate() {
     shared_ptr<ComputeShader> input_fir_filter_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager.getDevice(), "input_fir_filter",
                               {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "input_fir_filter.comp"), Size(0), 3));
+                              VulkanUtil::loadSpirv(m_executable_dir, "input_fir_filter.comp"), Size(0), 2));
 
     input_fir_filter_shader->updateBufferDescriptorsInSet(0, {bandpass_filter_re, input_buffer, analytic_buffer_re});
     input_fir_filter_shader->updateBufferDescriptorsInSet(1, {bandpass_filter_im, input_buffer, analytic_buffer_im});
-    input_fir_filter_shader->updateBufferDescriptorsInSet(2, {efm_lowpass_filter, input_buffer, efm_equalization_in_buffer});
 
     shared_ptr<ComputeShader> fir_filter_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager.getDevice(), "fir_filter",
                               {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 3));
+                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 2));
 
     fir_filter_shader->updateBufferDescriptorsInSet(0, {lowpass_filter, lowpass_in_buffer, rrc_in_buffer});
 
@@ -242,19 +211,6 @@ void MuseRfDemodulator::demodulate() {
                 {(uint32_t)rrc_filter_size, MuseDemodulatedBlock::c_video_block_size,
                  /* out offset */ 0, /* decimation */ 1}, 1);
 
-        // EFM
-        input_fir_filter_shader->updateWorkgroup(Size(MuseDemodulatedBlock::c_efm_block_size));
-        command_buffer->enqueueComputeShader<uint32_t>(
-                input_fir_filter_shader,
-                {(uint32_t)efm_lowpass_filter_size, MuseDemodulatedBlock::c_efm_block_size,
-                 /* out offset */ efm_equalization_filter_size - 1, MuseDemodulatedBlock::c_efm_decimation_rate}, 2);
-
-        fir_filter_shader->updateWorkgroup(Size(MuseDemodulatedBlock::c_efm_block_size));
-        fir_filter_shader->updateBufferDescriptorsInSet(2, {efm_equalization_filter, efm_equalization_in_buffer, block->efm_data});
-        command_buffer->enqueueComputeShader<uint32_t>(
-                fir_filter_shader,
-                {efm_equalization_filter_size, MuseDemodulatedBlock::c_efm_block_size, /* out offset */ 0, /* decimation */ 1}, 2);
-
         // Detect dropouts
         command_buffer->enqueueComputeShader<uint32_t>(
                 detect_dropouts_shader, {MuseDemodulatedBlock::c_video_block_size,
@@ -265,7 +221,6 @@ void MuseRfDemodulator::demodulate() {
 
         // Ensure data can be read from the host later
         block->video_data->synchronizeForHostRead(*command_buffer);
-        block->efm_data->synchronizeForHostRead(*command_buffer);
         block->dropouts->synchronizeForHostRead(*command_buffer);
 
         // After filtering, we need to copy the last data from the input buffers to their start,
@@ -279,10 +234,12 @@ void MuseRfDemodulator::demodulate() {
         enqueue_float_copy(*analytic_buffer_im, analytic_buffer_size, 1);
         enqueue_float_copy(*lowpass_in_buffer, lowpass_in_buffer_size, lowpass_filter_size - 1);
         enqueue_float_copy(*rrc_in_buffer, rrc_in_buffer_size, rrc_filter_size - 1);
-        enqueue_float_copy(*efm_equalization_in_buffer, efm_equalization_in_buffer_size, efm_equalization_filter_size - 1);
         command_buffer->enqueueCopyBuffer(*dropout_buffer, *dropout_buffer, (c_dropout_buffer_size - c_dropout_delay) * sizeof(uint8_t), 0, c_dropout_delay * sizeof(uint8_t));
 
         command_buffer->submit({}, {}, {});
+
+        m_efm_demodulator.demodulate(input_buffer->data<float>() + bandpass_filter_size - 1, block->efm_data);
+
         command_buffer->wait();
 
         if (timestamp_query_pool != nullptr)

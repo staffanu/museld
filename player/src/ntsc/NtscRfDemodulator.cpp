@@ -22,7 +22,8 @@ NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string executable_dir, st
 : RfDemodulator<NtscDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency,
                                       vulkan_manager, input_format,
                                       NtscRfDemodulatorConstants::c_sample_block_size,
-                                      benchmark_shaders) {
+                                      benchmark_shaders),
+  m_efm_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size, true, true, 2, 3, std::nullopt) {
 }
 
 void NtscRfDemodulator::demodulate() {
@@ -76,30 +77,6 @@ void NtscRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> deemphasis_filter =
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(deemphasis_filter_def.size()), deemphasis_filter_def);
 
-    // Lowpass filter for EFM
-    auto efm_lowpass_filter_def = std::vector<float> {
-            // Computed in octave: fir1(15, 2.0e6 / 20e6)
-            0.003511, 0.007547, 0.019027, 0.039655, 0.067765, 0.098366, 0.124521, 0.139610,
-            0.139610, 0.124521, 0.098366, 0.067765, 0.039655, 0.019027, 0.007547, 0.003511
-    };
-    shared_ptr<VulkanBuffer> efm_lowpass_filter =
-            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(efm_lowpass_filter_def.size()), efm_lowpass_filter_def);
-
-    // Equalization filter for EFM.  Works on 1/4 of the original sample frequency
-    // Computed in octave using the script make_efm_filter.m, and then numerically
-    // optimized using nonlin_min(samin), for decimation factor 4, lowpass 2.0 MHz
-    auto efm_equalization_filter_def = std::vector<float> { // FIXME: recompute for LD
-            -0.037621, -0.032380, -0.152833, 0.016591, -0.181817, -0.042276, -0.011685, 0.017400,
-            0.112888, 0.095248, 0.226369, 0.508954, 0.470778, 0.771520, 0.435198, 0.410012,
-            -0.035066, -0.222377, -0.554291, -0.691465, -0.670789, -0.418965, -0.299890, 0.022324,
-            0.139150, 0.209963, 0.198224, 0.001872,-0.033351, 0.040845, -0.023787, 0.024088
-    };
-    std::reverse(efm_equalization_filter_def.begin(), efm_equalization_filter_def.end());
-
-    shared_ptr<VulkanBuffer> efm_equalization_filter =
-            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(efm_equalization_filter_def.size()), efm_equalization_filter_def);
-
-
     // Create buffers for data
     const int input_buffer_size = c_sample_block_size + (int)bandpass_filter_def.size() - 1;
     const int analytic_buffer_size = c_sample_block_size + 1;
@@ -109,8 +86,6 @@ void NtscRfDemodulator::demodulate() {
     // We need to delay the output of the detected dropouts as much as the rest of the filter chain delays the video signal
     const int dropout_delay = (int)lowpass_filter_def.size() / c_video_decimation_rate / 2 - 1;
     const int dropout_buffer_size = c_video_block_size + dropout_delay;
-
-    const int efm_equalization_in_buffer_size = c_efm_block_size + (int)efm_equalization_filter_def.size() - 1;
 
     shared_ptr<VulkanBuffer> input_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(input_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostWrite);
@@ -127,9 +102,6 @@ void NtscRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> equalization_in_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(deemphasis_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
-    shared_ptr<VulkanBuffer> efm_equalization_in_buffer = make_unique<musevk::VulkanBuffer>(
-            m_vulkan_manager, Size(efm_equalization_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
-
     shared_ptr<VulkanBuffer> dropout_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(dropout_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
@@ -138,16 +110,15 @@ void NtscRfDemodulator::demodulate() {
     shared_ptr<ComputeShader> input_fir_filter_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager.getDevice(), "input_fir_filter",
                               {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "input_fir_filter.comp"), Size(0), 3));
+                              VulkanUtil::loadSpirv(m_executable_dir, "input_fir_filter.comp"), Size(0), 2));
 
     input_fir_filter_shader->updateBufferDescriptorsInSet(0, {bandpass_filter_re, input_buffer, analytic_buffer_re});
     input_fir_filter_shader->updateBufferDescriptorsInSet(1, {bandpass_filter_im, input_buffer, analytic_buffer_im});
-    input_fir_filter_shader->updateBufferDescriptorsInSet(2, {efm_lowpass_filter, input_buffer, efm_equalization_in_buffer});
 
     shared_ptr<ComputeShader> fir_filter_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager.getDevice(), "fir_filter",
                               {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 3));
+                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 2));
 
     fir_filter_shader->updateBufferDescriptorsInSet(0, {lowpass_filter, lowpass_in_buffer, equalization_in_buffer});
 
@@ -235,18 +206,6 @@ void NtscRfDemodulator::demodulate() {
                 fir_filter_shader,
                 {(uint32_t)deemphasis_filter_def.size(), c_video_block_size, /* out offset */ 0, /* decimation */ 1}, 1);
 
-        // EFM
-        input_fir_filter_shader->updateWorkgroup(Size(NtscRfDemodulatorConstants::c_efm_block_size));
-        command_buffer->enqueueComputeShader<uint32_t>(
-                input_fir_filter_shader,
-                {(uint32_t)efm_lowpass_filter_def.size(), NtscRfDemodulatorConstants::c_efm_block_size, /* out offset */ (uint32_t)efm_equalization_filter_def.size() - 1, c_efm_decimation_rate}, 2);
-
-        fir_filter_shader->updateWorkgroup(Size(NtscRfDemodulatorConstants::c_efm_block_size));
-        fir_filter_shader->updateBufferDescriptorsInSet(2, {efm_equalization_filter, efm_equalization_in_buffer, block->efm_data});
-        command_buffer->enqueueComputeShader<uint32_t>(
-                fir_filter_shader,
-                {(uint32_t)efm_equalization_filter_def.size(), NtscRfDemodulatorConstants::c_efm_block_size, /* out offset */ 0, /* decimation */ 1}, 2);
-
         // Detect dropouts FIXME update for LD
         command_buffer->enqueueComputeShader<uint32_t>(
                 detect_dropouts_shader, {NtscRfDemodulatorConstants::c_video_block_size, (uint32_t)lowpass_filter_def.size() - 1, (uint32_t)dropout_delay, c_video_decimation_rate});
@@ -256,7 +215,6 @@ void NtscRfDemodulator::demodulate() {
 
         // Ensure data can be read from the host later
         block->video_data->synchronizeForHostRead(*command_buffer);
-        block->efm_data->synchronizeForHostRead(*command_buffer);
         block->dropouts->synchronizeForHostRead(*command_buffer);
 
         // After filtering, we need to copy the last data from the input buffers to their start,
@@ -269,21 +227,16 @@ void NtscRfDemodulator::demodulate() {
         enqueue_float_copy(*analytic_buffer_re, analytic_buffer_size, 1);
         enqueue_float_copy(*analytic_buffer_im, analytic_buffer_size, 1);
         enqueue_float_copy(*lowpass_in_buffer, lowpass_in_buffer_size, lowpass_filter_def.size() - 1);
-        enqueue_float_copy(*efm_equalization_in_buffer, efm_equalization_in_buffer_size, efm_equalization_filter_def.size() - 1);
         command_buffer->enqueueCopyBuffer(*dropout_buffer, *dropout_buffer, (dropout_buffer_size - dropout_delay) * sizeof(uint8_t), 0, dropout_delay * sizeof(uint8_t));
 
         command_buffer->submit({}, {}, {});
+
+        m_efm_demodulator.demodulate(input_buffer->data<float>() + bandpass_filter_def.size() - 1, block->efm_data);
+
         command_buffer->wait();
 
         if (timestamp_query_pool != nullptr)
             timestamp_statistics.add_timestamps(timestamp_query_pool->getTimestamps());
-
-        // {
-        //     float *p = block->video_data->data<float>();
-        //     for (int i = 0; i < 100; i++)
-        //         printf("%f ", p[i]);
-        //     printf("\n");
-        // }
 
         // Send away result
         std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);

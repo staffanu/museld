@@ -23,7 +23,6 @@ NtscFrameReader::NtscFrameReader(
         : FrameReader(log, filename,
                       filesystem::is_fifo(filename),
                       initial_seek_seconds, output_filename),
-          m_timing_recovery(log, 40e6 / NtscRfDemodulatorConstants::c_efm_decimation_rate, NtscRfDemodulatorConstants::c_efm_block_size, 3, std::nullopt),
           m_file_fd(-1),
           m_sample_rate(sample_rate / NtscRfDemodulatorConstants::c_video_decimation_rate),
           m_input_samples_decimation_rate(1),
@@ -192,11 +191,9 @@ bool NtscFrameReader::readInput(std::unique_ptr<NtscInputBlock> const &output_bl
     m_input_sub_buffer_input_offsets[m_last_input_sub_buffer_ix_read] = block->input_offset;
 
     if (output_block != nullptr) {
-        if (m_state == eLocked) {
-            std::vector<float> block_efm;
-            m_timing_recovery.reclock(block->efm_data->data<float>(), block_efm);
-            output_block->efm_data.insert(output_block->efm_data.end(), block_efm.begin(), block_efm.end());
-        } else
+        if (m_state == eLocked)
+            output_block->efm_data.insert(output_block->efm_data.end(), block->efm_data.begin(), block->efm_data.end());
+        else
             output_block->efm_data.clear();
     }
 

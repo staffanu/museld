@@ -5,6 +5,7 @@
 #define AC3RF_EFM_DECODE_EFMDEMODULATOR_H
 
 #include <string>
+#include <cstdint>
 
 #include "logging/Logger.h"
 #include "../filter/FirFilterStage.h"
@@ -41,6 +42,12 @@ private:
     std::vector<float> m_filtered_input;
 
     TimingRecovery m_timing_recovery;
+
+    int m_timing_log_period;
+    int m_timing_blocks = 0;
+    int64_t m_decimation_ns = 0;
+    int64_t m_iir_ns = 0;
+    int64_t m_reclock_ns = 0;
 };
 
 #endif //AC3RF_EFM_DECODE_EFMDEMODULATOR_H

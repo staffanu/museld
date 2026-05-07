@@ -21,6 +21,7 @@
 #include "RfDemodulator.h"
 #include "musevk/VulkanManager.h"
 #include "MuseConstants.h"
+#include "efm/EfmDemodulator.h"
 
 struct MuseDemodulatedBlock {
     static constexpr int c_sample_block_size = 512 * 1024;
@@ -43,9 +44,6 @@ struct MuseDemodulatedBlock {
         video_data = std::make_unique<musevk::VulkanBuffer>(
                 vulkan_manager, musevk::Size(c_video_block_size), sizeof(float),
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);
-        efm_data = std::make_unique<musevk::VulkanBuffer>(
-                vulkan_manager, musevk::Size(c_efm_block_size), sizeof(float),
-                vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);
         dropouts = std::make_unique<musevk::VulkanBuffer>(
                 vulkan_manager, musevk::Size(c_video_block_size), sizeof(uint8_t),
                 vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, musevk::HostAccess::eHostRead);
@@ -54,7 +52,7 @@ struct MuseDemodulatedBlock {
     long input_offset; // the number of samples in the input before this block
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropouts; // 1-to-1 with the video_data array. 0 or 1 for now, but could indicate how certain we are in the future
-    std::shared_ptr<musevk::VulkanBuffer> efm_data;
+    std::vector<float> efm_data;
 };
 
 class MuseRfDemodulator : public RfDemodulator<MuseDemodulatedBlock> {
@@ -70,6 +68,7 @@ protected:
 private:
     static constexpr float c_center_frequency = 12.5e6f;
     static constexpr float c_frequency_deviation = 1.9e6f;
+    EfmDemodulator m_efm_demodulator;
 };
 
 #endif //MUSECPP_MUSERFDEMODULATOR_H

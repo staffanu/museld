@@ -8,7 +8,6 @@
 #include <memory>
 #include "FrameReader.h"
 #include "MuseRfDemodulator.h"
-#include "efm/TimingRecovery.h"
 #include "input/InputReader.h"
 #include "util/PercentileFilter.h"
 #include "util/ConstExprHelpers.h"
@@ -45,7 +44,6 @@ private:
 
     InputFormat m_input_format;
     bool m_demodulate;
-    TimingRecovery m_timing_recovery;
     std::unique_ptr<InputReader> m_input_reader;
     double m_sample_rate;
     int m_input_samples_decimation_rate;

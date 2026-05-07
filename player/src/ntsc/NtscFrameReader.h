@@ -7,7 +7,6 @@
 
 #include "FrameReader.h"
 #include "NtscRfDemodulator.h"
-#include "efm/TimingRecovery.h"
 #include "input/InputReader.h"
 #include "util/PercentileFilter.h"
 #include "util/ConstExprHelpers.h"
@@ -45,7 +44,6 @@ private:
     [[nodiscard]] bool process(std::unique_ptr<NtscInputBlock> const &output_block);
     void setUnlocked();
 
-    TimingRecovery m_timing_recovery;
     int m_file_fd;
     double m_sample_rate;
     int m_input_samples_decimation_rate;

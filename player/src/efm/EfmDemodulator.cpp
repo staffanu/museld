@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <complex.h>
 #include <sys/fcntl.h>
+#include <chrono>
 #include "../filter/FirPM.h"
 #include "../filter/FFT.h"
 #include "../filter/Window.h"
@@ -23,7 +24,8 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
       m_low_pass_filter(nullptr),
       m_phase_adjust_filter(nullptr),
       m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
-          adaptive_filter_size, retiming_debug_filename) {
+          adaptive_filter_size, retiming_debug_filename),
+      m_timing_log_period(std::max(1, (int)std::round(input_sample_frequency / input_block_size))) {
 
     assert(m_log2_decimation >= 0);
     assert(m_input_block_size % m_decimation_factor == 0);
@@ -88,7 +90,10 @@ EfmDemodulator::~EfmDemodulator() {
 }
 
 void EfmDemodulator::demodulate(const float *input_buffer, std::vector<float> &reclocked_data) {
+    using clock = std::chrono::steady_clock;
+
     const float *iir_input;
+    auto t0 = clock::now();
     if (m_decimation_filter_stages.empty()) {
         iir_input = input_buffer;
     } else {
@@ -104,6 +109,7 @@ void EfmDemodulator::demodulate(const float *input_buffer, std::vector<float> &r
 
         iir_input = m_filtered_input.data();
     }
+    auto t1 = clock::now();
 
     for (int i = 0; i < m_input_block_size / m_decimation_factor; i++) {
         const float x = iir_input[i];
@@ -112,8 +118,10 @@ void EfmDemodulator::demodulate(const float *input_buffer, std::vector<float> &r
             y = m_phase_adjust_filter->filter(m_low_pass_filter->filter(y));
         m_filtered_input[i] = y;
     }
+    auto t2 = clock::now();
 
     m_timing_recovery.reclock(m_filtered_input.data(), reclocked_data);
+    auto t3 = clock::now();
 
     {
         int n = m_input_block_size;
@@ -121,6 +129,24 @@ void EfmDemodulator::demodulate(const float *input_buffer, std::vector<float> &r
             stage->moveDataToFront(n);
             n /= stage->decimationFactor();
         }
+    }
+
+    m_decimation_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    m_iir_ns        += std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count();
+    m_reclock_ns    += std::chrono::duration_cast<std::chrono::nanoseconds>(t3 - t2).count();
+
+    if (++m_timing_blocks == m_timing_log_period) {
+        m_log.debug(eAudio, std::format(
+            "EfmDemodulator per block: decimation {:.1f} us, iir {:.1f} us, reclock {:.1f} us"
+            " | per second: decimation {:.1f} ms, iir {:.1f} ms, reclock {:.1f} ms",
+            m_decimation_ns / (m_timing_log_period * 1e3),
+            m_iir_ns        / (m_timing_log_period * 1e3),
+            m_reclock_ns    / (m_timing_log_period * 1e3),
+            m_decimation_ns / 1e6,
+            m_iir_ns        / 1e6,
+            m_reclock_ns    / 1e6));
+        m_timing_blocks = 0;
+        m_decimation_ns = m_iir_ns = m_reclock_ns = 0;
     }
 }
 
