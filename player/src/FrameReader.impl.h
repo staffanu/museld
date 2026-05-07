@@ -2,6 +2,7 @@
 // Created by staffanu on 6/25/23.
 //
 
+#include <pthread.h>
 #include <sys/fcntl.h>
 #include <unistd.h>
 #include <format>
@@ -43,10 +44,14 @@ bool FrameReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>
 
     m_log.debug(eInput, std::format("Using {} input buffers", m_vacant_input_buffers.size()));
 
-    m_reader_thread = new std::thread(&FrameReader::threadFunc, this);
-#ifdef linux
-    pthread_setname_np(m_reader_thread->native_handle(), "musecpp-reader");
+    m_reader_thread = new std::thread([this]() {
+#ifdef __APPLE__
+        pthread_setname_np("museld-reader");
+#elif defined(linux)
+        pthread_setname_np(pthread_self(), "museld-reader");
 #endif
+        threadFunc();
+    });
 
     if (m_output_filename) {
         m_output_file_fd = open(m_output_filename.value().c_str(),

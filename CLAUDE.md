@@ -45,6 +45,17 @@ octave/            — Octave/Matlab scripts for filter design and algorithm exp
 tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parseQ.awk)
 ```
 
+## Clangd / LSP Diagnostics
+
+CMake generates `compile_commands.json` in the build directory, which clangd uses for accurate diagnostics. Always build with `player/build-debug` before relying on LSP diagnostics:
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF -S player -B player/build-debug
+cmake --build player/build-debug
+```
+
+Diagnostic errors about missing headers (Vulkan, GLFW, etc.) indicate the build directory hasn't been set up yet — they are not real code errors.
+
 ## Build Commands
 
 All C++ components use CMake 3.22+ with out-of-source builds.

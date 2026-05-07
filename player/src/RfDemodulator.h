@@ -5,6 +5,7 @@
 #ifndef MUSECPP_RFDEMODULATOR_H
 #define MUSECPP_RFDEMODULATOR_H
 
+#include <pthread.h>
 #include <fstream>
 #include <format>
 #include <cassert>
@@ -59,11 +60,14 @@ public:
         for (int i = 0; i < number_of_block_buffers; i++)
             m_vacant_blocks.push_back(std::make_unique<B>(m_vulkan_manager));
 
-        m_demodulator_thread = new std::thread(&RfDemodulator<B>::demodulate, this);
-#ifdef linux
-        pthread_setname_np(m_demodulator_thread->native_handle(), "musecpp-demod");
+        m_demodulator_thread = new std::thread([this]() {
+#ifdef __APPLE__
+            pthread_setname_np("museld-demod");
+#elif defined(linux)
+            pthread_setname_np(pthread_self(), "museld-demod");
 #endif
-
+            demodulate();
+        });
         return true;
     }
 
