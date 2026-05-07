@@ -355,6 +355,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             }
             if (check_glfw_key(window, GLFW_KEY_A)) {
                 efm_audio = !efm_audio;
+                reader.setEfmEnabled(efm_audio);
                 osd_text = efm_audio ? "EFM AUDIO" : "MUSE AUDIO";
             }
             if (check_glfw_key(window, GLFW_KEY_D)) {
@@ -640,7 +641,7 @@ int main(int argc, char *argv[]) {
                         auto *reader = new ResamplingFrameReader(
                                 log, executable_dir, manager, *it, input_format,
                                 input_sample_frequency, initial_seek_seconds, input_type == eMuseRf, benchmark_shaders,
-                                muse_output_filename);
+                                efm_audio, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
                                      efm_audio, benchmark_shaders, output_filename);

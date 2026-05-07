@@ -20,7 +20,7 @@ using namespace std;
 ResamplingFrameReader::ResamplingFrameReader(
         Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
         const std::string &filename, InputFormat input_format, double sample_rate,
-        double initial_seek_seconds, bool demodulate, bool benchmark_shaders,
+        double initial_seek_seconds, bool demodulate, bool benchmark_shaders, bool efm_enabled,
         const std::optional<std::string> &output_filename)
         : FrameReader(log, filename,
                       filesystem::is_fifo(filename),
@@ -52,7 +52,7 @@ ResamplingFrameReader::ResamplingFrameReader(
           m_error_sum(0) {
     if (m_demodulate) {
         m_demodulator = new MuseRfDemodulator(log, executable_dir, m_filename, (float)sample_rate, vulkan_manager,
-                                              m_input_format, benchmark_shaders);
+                                              m_input_format, benchmark_shaders, efm_enabled);
         // The demodulator already scales output to MUSE 0..255 range.
         m_input_scale = 1.f;
         m_input_offset = 0.f;
@@ -417,6 +417,11 @@ bool ResamplingFrameReader::process(std::unique_ptr<MuseInputBlock> const &outpu
         }
     }
     return false;
+}
+
+void ResamplingFrameReader::setEfmEnabled(bool enabled) {
+    if (m_demodulator != nullptr)
+        m_demodulator->setEfmEnabled(enabled);
 }
 
 void ResamplingFrameReader::setUnlocked() {

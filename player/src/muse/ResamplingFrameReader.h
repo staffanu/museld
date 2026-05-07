@@ -18,7 +18,7 @@ public:
     explicit ResamplingFrameReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
                                    const std::string &filename, InputFormat input_format,
                                    double sample_rate, double initial_seek_seconds,
-                                   bool demodulate, bool benchmark_shaders,
+                                   bool demodulate, bool benchmark_shaders, bool efm_enabled,
                                    const std::optional<std::string> &output_filename);
     ResamplingFrameReader(const ResamplingFrameReader&) = delete;
     void operator=(const ResamplingFrameReader&) = delete;
@@ -26,6 +26,7 @@ public:
     bool initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) override;
     void cleanup() override;
     void seek(double seconds) override;
+    void setEfmEnabled(bool enabled) override;
 
 protected:
     void threadFunc() override;

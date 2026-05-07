@@ -38,6 +38,7 @@ public:
     std::pair<std::unique_ptr<InputBlock>, InputStatus> getNextInputBuffer();
     void returnBuffer(std::unique_ptr<InputBlock> &buffer);
     virtual void seek(double seconds) = 0;
+    virtual void setEfmEnabled(bool) {}
 
 protected:
     // input_is_realtime is separate from input_is_fifo since we could have non-real-time input from a pipe

@@ -19,11 +19,13 @@ using namespace musevk;
 
 MuseRfDemodulator::MuseRfDemodulator(Logger &log, std::string executable_dir, std::string filename,
                                      float sample_frequency,
-                                     musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders)
+                                     musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
+                                     bool efm_enabled)
 : RfDemodulator<MuseDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency,
                                       vulkan_manager, input_format, MuseDemodulatedBlock::c_sample_block_size,
                                       benchmark_shaders),
-  m_efm_demodulator(log, sample_frequency, MuseDemodulatedBlock::c_sample_block_size, true, true, 2, 3, std::nullopt) {
+  m_efm_demodulator(log, sample_frequency, MuseDemodulatedBlock::c_sample_block_size, true, true, 2, 3, std::nullopt),
+  m_efm_enabled(efm_enabled) {
 }
 
 void MuseRfDemodulator::demodulate() {
@@ -238,7 +240,10 @@ void MuseRfDemodulator::demodulate() {
 
         command_buffer->submit({}, {}, {});
 
-        m_efm_demodulator.demodulate(input_buffer->data<float>() + bandpass_filter_size - 1, block->efm_data);
+        if (m_efm_enabled)
+            m_efm_demodulator.demodulate(input_buffer->data<float>() + bandpass_filter_size - 1, block->efm_data);
+        else
+            block->efm_data.clear();
 
         command_buffer->wait();
 
