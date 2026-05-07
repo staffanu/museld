@@ -13,7 +13,6 @@
 #endif
 
 #include "TimingRecovery.h"
-#include "AdaptiveFilterImpl.h"
 
 
 TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int input_block_size,
@@ -22,7 +21,7 @@ TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int i
     m_input_sample_frequency(input_sample_frequency),
     m_input_block_size(input_block_size),
     m_resampler(input_block_size),
-    m_filter(adaptive_filter_size != 0 ? (AdaptiveFilter *)new AdaptiveFilterImpl(adaptive_filter_size, 1e-3f) : (AdaptiveFilter *)new NonAdaptiveFilter()),
+    m_filter(adaptive_filter_size, 1e-3f),
     m_power_estimate(1),
     m_total_symbols(0),
     m_last_adaptive_filter_log(0),
@@ -43,9 +42,6 @@ TimingRecovery::TimingRecovery(Logger &log, double input_sample_frequency, int i
     }
 }
 
-TimingRecovery::~TimingRecovery() {
-    delete m_filter;
-}
 
 void TimingRecovery::reclock(const float *input, std::vector<float> &output) {
 
@@ -59,13 +55,13 @@ void TimingRecovery::reclock(const float *input, std::vector<float> &output) {
 
         m_power_estimate = (1 - power_alpha) * m_power_estimate + power_alpha * s * s;
         float gain = sqrt(1 / (m_power_estimate + 1.0));
-        m_filter->addSample(s * gain);
+        m_filter.addSample(s * gain);
 
         // Initially gain is uncertain and also the signal is not DC
         if (m_total_symbols < 5000)
             continue;
 
-        float sample = m_filter->getOutput();
+        float sample = m_filter.getOutput();
 
         // error positive: we're sampling too early, so increase sample spacing
         // Mueller and Muller timing detector
@@ -77,7 +73,7 @@ void TimingRecovery::reclock(const float *input, std::vector<float> &output) {
         m_step_size_adjustment = error * m_g1 + m_error_sum * m_g2;
         assert(!std::isnan(m_step_size_adjustment) && abs(m_step_size_adjustment) <= m_nominal_step_size * 0.04);
 
-        m_filter->adaptError(sample > 0 ? 1.f : -1.f, sample);
+        m_filter.adaptError(sample > 0 ? 1.f : -1.f, sample);
 
         if (m_debug_fd.has_value()) {
             float debug_floats[2] = { sample, (float)error };
@@ -92,10 +88,10 @@ void TimingRecovery::reclock(const float *input, std::vector<float> &output) {
 
     m_avg_speed_deviation = (1 - 1e-5) * m_avg_speed_deviation + 1e-5 * m_step_size_adjustment / m_nominal_step_size;
     if (m_total_symbols - m_last_adaptive_filter_log > 4321800) {
-        if (m_filter->size() != 0)
+        if (m_filter.size() != 0)
             m_log.debug(eAudio,
                 std::format("Adaptive filter coefficients: {}.  DPLL adjustment: {:.0f} ppm",
-                m_filter->filterString(), 1e6 * m_avg_speed_deviation));
+                m_filter.filterString(), 1e6 * m_avg_speed_deviation));
         else
             m_log.debug(eAudio,
                 std::format("DPLL adjustment: {:.0f} ppm",

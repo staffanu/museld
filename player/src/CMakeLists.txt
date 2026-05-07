@@ -44,8 +44,7 @@ add_library(ac3rf STATIC
     efm/TwoChannelSample.h
     efm/TimingRecovery.cpp efm/TimingRecovery.h
     efm/FractionalResampler.cpp efm/FractionalResampler.h
-    efm/AdaptiveFilter.h
-    efm/AdaptiveFilterImpl.cpp efm/AdaptiveFilterImpl.h
+    efm/AdaptiveFilter.cpp efm/AdaptiveFilter.h
     efm/concealment/SlowArErasureConcealer.cpp efm/concealment/SlowArErasureConcealer.h
     efm/concealment/ErasureConcealer.h efm/concealment/ErasureConcealer.cpp
     efm/concealment/LinearInterpolationErasureConcealer.cpp efm/concealment/LinearInterpolationErasureConcealer.h

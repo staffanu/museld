@@ -4,40 +4,35 @@
 #ifndef AC3RF_DECODE_ADAPTIVEFILTER_H
 #define AC3RF_DECODE_ADAPTIVEFILTER_H
 
+#include <string>
+#include <vector>
+
+// LMS adaptive FIR filter with sign-error update.
+// filter_size == 0: non-adaptive passthrough (addSample stores, getOutput returns, adaptError is a no-op).
+// filter_size >  0: adaptive FIR with the given number of taps.
 class AdaptiveFilter {
 public:
-    virtual ~AdaptiveFilter() = default;
+    explicit AdaptiveFilter(int filter_size, float mu = 1e-3f);
 
-    [[nodiscard]] virtual int size() const = 0;
-    virtual void addSample(float sample) = 0;
-    virtual void adaptError(float desired, float actual) = 0;
-    [[nodiscard]] virtual float getOutput() const = 0;
-    [[nodiscard]] virtual float calcCenter() const = 0;
-    [[nodiscard]] virtual std::string filterString() const = 0;
-};
+    AdaptiveFilter(const AdaptiveFilter &) = delete;
+    AdaptiveFilter &operator=(const AdaptiveFilter &) = delete;
+    AdaptiveFilter(AdaptiveFilter &&) = delete;
+    AdaptiveFilter &operator=(AdaptiveFilter &&) = delete;
 
-class NonAdaptiveFilter : public AdaptiveFilter {
-public:
-    NonAdaptiveFilter() : m_sample{} {}
-    [[nodiscard]] int size() const override {
-        return 0;
-    }
-    void addSample(float sample) override {
-        m_sample = sample;
-    }
-    void adaptError(float desired, float actual) override {}
-    [[nodiscard]] float getOutput() const override {
-        return m_sample;
-    }
-    [[nodiscard]] float calcCenter() const override {
-        return 0.f;
-    }
-    [[nodiscard]] std::string filterString() const override {
-        return "[non-adaptive]";
-    }
+    void addSample(float sample);
+    void adaptError(float desired, float actual);
+    [[nodiscard]] float getOutput() const;
+    [[nodiscard]] int size() const { return m_filter_size; }
+    [[nodiscard]] float calcCenter() const;
+    [[nodiscard]] std::string filterString() const;
 
 private:
-    float m_sample;
+    const int m_filter_size;
+    const float m_mu;
+    std::vector<float> m_window;
+    std::vector<float> m_coeffs;
+    std::vector<float> m_filtered;
+    float m_sample = 0.f;
 };
 
 #endif //AC3RF_DECODE_ADAPTIVEFILTER_H

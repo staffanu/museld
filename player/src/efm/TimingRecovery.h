@@ -22,8 +22,6 @@ public:
     TimingRecovery(TimingRecovery &&) = delete;
     TimingRecovery &operator=(TimingRecovery &&) = delete;
 
-    ~TimingRecovery();
-
     void reclock(const float *input, std::vector<float> &output);
 
 private:
@@ -31,7 +29,7 @@ private:
     const double m_input_sample_frequency;
     const int m_input_block_size;
     FractionalResampler m_resampler;
-    AdaptiveFilter *m_filter;
+    AdaptiveFilter m_filter;
 
     float m_power_estimate;
     uint64_t m_total_symbols;
