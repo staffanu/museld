@@ -7,9 +7,9 @@
 #include <vector>
 #include <iostream>
 #include <filesystem>
-#include <gnuradio/fft/window.h>
 #include <gnuradio/filter/firdes.h>
 #include "MuseRfDemodulator.h"
+#include "filter/WindowedSinc.h"
 #include "musevk/VulkanUtil.h"
 #include "musevk/TimestampQueryPool.h"
 #include "musevk/TimestampStatistics.h"
@@ -44,9 +44,11 @@ void MuseRfDemodulator::demodulate() {
 
     // FIR band-pass filter to filter out noise over 22.5 MHz and also the pilot signal and EFM.
     // The pilot signal isn't completely suppressed but that doesn't seem to matter.
+    // Match firdes' rectangular-window ntaps = (int)(21*Fs/(22*tw)) | 1
     std::vector<std::complex<float>> bandpass_filter_def =
-            gr::filter::firdes::complex_band_pass(1.0, m_sample_frequency, 2.7e6, 22.3e6, 2.0e6, gr::fft::window::WIN_RECTANGULAR);
-    std::reverse(bandpass_filter_def.begin(), bandpass_filter_def.end());
+            WindowedSinc::complex_band_pass<float>(WindowedSinc::rectangular_ntaps(m_sample_frequency, 2e6),
+                                                   m_sample_frequency, 2.7e6, 22.3e6);
+    std::reverse(bandpass_filter_def.begin(), bandpass_filter_def.end()); // shader correlates rather than convolves
     const int bandpass_filter_size = (int)bandpass_filter_def.size();
 
     std::vector<float> bandpass_filter_re_coeffs;
@@ -63,8 +65,9 @@ void MuseRfDemodulator::demodulate() {
 
     // FIR lowpass filter for the demodulated signal
     std::vector<float> lowpass_filter_def =
-            gr::filter::firdes::low_pass(1.0, m_sample_frequency, 9.8e6, 2e6, gr::fft::window::WIN_RECTANGULAR);
-    std::reverse(lowpass_filter_def.begin(), lowpass_filter_def.end()); // should be symmetric, so really unnecessary
+            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(m_sample_frequency, 2e6),
+                                          m_sample_frequency, 9.8e6);
+    std::reverse(lowpass_filter_def.begin(), lowpass_filter_def.end()); // symmetric, but the shader correlates
     const int lowpass_filter_size = (int)lowpass_filter_def.size();
 
     shared_ptr<VulkanBuffer> lowpass_filter =

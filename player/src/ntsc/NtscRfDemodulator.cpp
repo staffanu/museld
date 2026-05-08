@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <algorithm>
 #include "NtscRfDemodulator.h"
+#include "filter/WindowedSinc.h"
 #include "musevk/VulkanUtil.h"
 #include "musevk/TimestampQueryPool.h"
 #include "musevk/TimestampStatistics.h"
@@ -46,8 +47,10 @@ void NtscRfDemodulator::demodulate() {
     // Create all the filters
 
     // FIR band-pass filter that also creates an analytic signal.  The passband is 3.5 to 13.5 MHz.
+    // Reverse because the FIR shader correlates rather than convolves.
     std::vector<std::complex<float>> bandpass_filter_def =
-            gr::filter::firdes::complex_band_pass(1.0, 40.0e6, 3.5e6, 13.5e6, 1.5e6, gr::fft::window::WIN_RECTANGULAR);
+            WindowedSinc::complex_band_pass<float>(WindowedSinc::rectangular_ntaps(40e6, 1.5e6),
+                                                   40.0e6, 3.5e6, 13.5e6);
     std::reverse(bandpass_filter_def.begin(), bandpass_filter_def.end());
 
     std::vector<float> bandpass_filter_re_coeffs;
@@ -64,8 +67,8 @@ void NtscRfDemodulator::demodulate() {
 
     // FIR lowpass filter for the demodulated signal
     std::vector<float> lowpass_filter_def =
-            gr::filter::firdes::low_pass(1.0, 40e6, 5.0e6, 2e6, gr::fft::window::WIN_RECTANGULAR);
-    std::reverse(lowpass_filter_def.begin(), lowpass_filter_def.end()); // should be symmetric, so really unnecessary
+            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(40e6, 2e6), 40e6, 5e6);
+    std::reverse(lowpass_filter_def.begin(), lowpass_filter_def.end()); // symmetric, but the shader correlates
 
     shared_ptr<VulkanBuffer> lowpass_filter =
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(lowpass_filter_def.size()), lowpass_filter_def);
@@ -73,8 +76,8 @@ void NtscRfDemodulator::demodulate() {
     // FIR de-emphasis filter (applied to the decimated lowpass filtered signal)
     // For NTSC, the two frequencies are 3.125 MHz and 8.33 MHz
     std::vector<float> deemphasis_filter_def =
-            gr::filter::firdes::low_pass(1.0, 20e6, 5e6, 5e6, gr::fft::window::WIN_RECTANGULAR);
-    std::reverse(deemphasis_filter_def.begin(), deemphasis_filter_def.end());
+            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(20e6, 5e6), 20e6, 5e6);
+    std::reverse(deemphasis_filter_def.begin(), deemphasis_filter_def.end()); // symmetric, but the shader correlates
 
     shared_ptr<VulkanBuffer> deemphasis_filter =
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(deemphasis_filter_def.size()), deemphasis_filter_def);

@@ -17,7 +17,6 @@
 #include <atomic>
 #include <deque>
 #include <condition_variable>
-#include <gnuradio/filter/firdes.h>
 #include "logging/Logger.h"
 #include "RfDemodulator.h"
 #include "musevk/VulkanManager.h"
