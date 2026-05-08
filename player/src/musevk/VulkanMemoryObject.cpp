@@ -6,6 +6,7 @@
 #include <sstream>
 #include "VulkanMemoryObject.h"
 #include "VulkanManager.h"
+#include "logging/Logger.h"
 
 musevk::VulkanMemoryObject::~VulkanMemoryObject() {
     if (m_host_visible_buffer)
@@ -18,7 +19,7 @@ musevk::VulkanMemoryObject::~VulkanMemoryObject() {
 
 std::vector<std::pair<vk::MemoryPropertyFlags, std::optional<vk::MemoryPropertyFlags>>>
 musevk::VulkanMemoryObject::makeMemoryPropertyFlags(HostAccess host_access) {
-    // Notice we currently always use coherent memory (there are asserts in VulkanBuffer and VulkanImage that will trigger otherwise)
+    // For unified (non-separate-buffer) paths without HOST_COHERENT, callers must use flush/invalidate explicitly.
     switch (host_access) {
         case HostAccess::eHostNone:
             return {
@@ -29,7 +30,6 @@ musevk::VulkanMemoryObject::makeMemoryPropertyFlags(HostAccess host_access) {
                     std::make_pair(
                             vk::MemoryPropertyFlagBits::eDeviceLocal |
                             vk::MemoryPropertyFlagBits::eHostVisible |
-                            vk::MemoryPropertyFlagBits::eHostCoherent |
                             vk::MemoryPropertyFlagBits::eHostCached,
                             std::nullopt),
 
@@ -44,8 +44,7 @@ musevk::VulkanMemoryObject::makeMemoryPropertyFlags(HostAccess host_access) {
             return {
                     std::make_pair(
                             vk::MemoryPropertyFlagBits::eDeviceLocal |
-                            vk::MemoryPropertyFlagBits::eHostVisible |
-                            vk::MemoryPropertyFlagBits::eHostCoherent,
+                            vk::MemoryPropertyFlagBits::eHostVisible,
                             std::nullopt),
 
                     std::make_pair(
@@ -125,15 +124,36 @@ void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_re
         m_device_memory_properties = device_memory_type_index_and_properties->second;
         m_allocated_device_memory = m_memory_allocator.allocate(
                 memory_requirements, device_memory_type_index_and_properties.value().first,
-                (device_and_host_memory_flags.first & vk::MemoryPropertyFlagBits::eHostVisible) && !host_visible_memory_type_index_and_properties);
+                (device_and_host_memory_flags.first & vk::MemoryPropertyFlagBits::eHostVisible) && !host_visible_memory_type_index_and_properties,
+                (int)host_access);
 
+        Logger &log = m_vulkan_manager.getLogger();
+        vk::PhysicalDeviceMemoryProperties mem_props = m_vulkan_manager.getPhysicalDevice().getMemoryProperties();
+        int32_t dev_type_idx = device_memory_type_index_and_properties->first;
+        uint32_t dev_heap_idx = mem_props.memoryTypes[dev_type_idx].heapIndex;
         if (host_visible_memory_type_index_and_properties) {
+            int32_t host_type_idx = host_visible_memory_type_index_and_properties->first;
+            uint32_t host_heap_idx = mem_props.memoryTypes[host_type_idx].heapIndex;
+            log.debug(eVideo, std::format("VulkanMemoryObject: {} bytes, hostAccess={} -> separate host-visible buffer (raw copies needed); device=type{}(heap{},{}) host=type{}(heap{},{})",
+                m_memory_size, (int)host_access,
+                dev_type_idx, dev_heap_idx, vk::to_string(device_memory_type_index_and_properties->second),
+                host_type_idx, host_heap_idx, vk::to_string(host_visible_memory_type_index_and_properties->second)));
             m_host_memory_properties = host_visible_memory_type_index_and_properties.value().second;
             m_allocated_host_visible_memory = m_memory_allocator.allocate(host_visible_buffer_memory_requirements,
-                                                                          host_visible_memory_type_index_and_properties.value().first, true);
+                                                                          host_visible_memory_type_index_and_properties.value().first, true,
+                                                                          (int)host_access);
             m_vulkan_manager.getDevice().bindBufferMemory(host_visible_buffer, m_allocated_host_visible_memory.value().device_memory, m_allocated_host_visible_memory.value().offset);
             m_host_visible_buffer = host_visible_buffer;
         } else {
+            if (host_access == eHostNone) {
+                log.debug(eVideo, std::format("VulkanMemoryObject: {} bytes, hostAccess=none -> device-only; type{}(heap{},{})",
+                    m_memory_size, dev_type_idx, dev_heap_idx,
+                    vk::to_string(device_memory_type_index_and_properties->second)));
+            } else {
+                log.debug(eVideo, std::format("VulkanMemoryObject: {} bytes, hostAccess={} -> host-visible device-local (no raw copies); type{}(heap{},{})",
+                    m_memory_size, (int)host_access, dev_type_idx, dev_heap_idx,
+                    vk::to_string(device_memory_type_index_and_properties->second)));
+            }
             m_vulkan_manager.getDevice().destroy(host_visible_buffer);
         }
 

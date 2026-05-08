@@ -77,10 +77,14 @@ namespace musevk {
             assert(m_host_memory_properties &&
                    (m_host_memory_properties.value() & vk::MemoryPropertyFlagBits::eHostCoherent));
         } else {
-            assert(m_device_memory_properties & vk::MemoryPropertyFlagBits::eHostCoherent);
-            // If not, we could do something like this, but there were problems...
-            // auto mappedRange = vk::MappedMemoryRange(m_allocated_device_memory.device_memory, m_allocated_device_memory.offset, m_allocated_device_memory.size);
-            // command_buffer.invalidateMappedMemoryRangeLater(mappedRange);
+            command_buffer.enqueueBarrier(vk::AccessFlagBits::eShaderWrite,
+                                          vk::AccessFlagBits::eHostRead,
+                                          vk::PipelineStageFlagBits::eComputeShader,
+                                          vk::PipelineStageFlagBits::eHost);
+            if (!(m_device_memory_properties & vk::MemoryPropertyFlagBits::eHostCoherent)) {
+                auto mappedRange = vk::MappedMemoryRange(m_allocated_device_memory.device_memory, m_allocated_device_memory.offset, m_allocated_device_memory.size);
+                command_buffer.invalidateMappedMemoryRangeLater(mappedRange);
+            }
         }
     }
 
@@ -100,10 +104,14 @@ namespace musevk {
             assert(m_host_memory_properties &&
                    (m_host_memory_properties.value() & vk::MemoryPropertyFlagBits::eHostCoherent));
         } else {
-            assert(m_device_memory_properties & vk::MemoryPropertyFlagBits::eHostCoherent);
-            // If not, we could do something like this, but there were problems...
-            // auto mappedRange = vk::MappedMemoryRange(m_allocated_device_memory.device_memory, m_allocated_device_memory.offset, m_allocated_device_memory.size);
-            // m_vulkan_manager.getDevice().flushMappedMemoryRanges({mappedRange});
+            if (!(m_device_memory_properties & vk::MemoryPropertyFlagBits::eHostCoherent)) {
+                auto mappedRange = vk::MappedMemoryRange(m_allocated_device_memory.device_memory, m_allocated_device_memory.offset, m_allocated_device_memory.size);
+                command_buffer.flushMappedMemoryRangeLater(mappedRange);
+            }
+            command_buffer.enqueueBarrier(vk::AccessFlagBits::eHostWrite,
+                                          vk::AccessFlagBits::eShaderRead,
+                                          vk::PipelineStageFlagBits::eHost,
+                                          vk::PipelineStageFlagBits::eComputeShader);
         }
     }
 

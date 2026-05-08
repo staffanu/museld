@@ -10,10 +10,10 @@
 
 namespace musevk {
     AllocatedMemory MemoryAllocator::allocate(
-            vk::MemoryRequirements memory_requirements, int32_t memory_type_index, bool host_visible) {
+            vk::MemoryRequirements memory_requirements, int32_t memory_type_index, bool host_visible, int pool_tag) {
         std::scoped_lock lock(m_mutex);
 
-        auto key = std::make_pair(memory_type_index, host_visible);
+        auto key = std::make_tuple(memory_type_index, host_visible, pool_tag);
 
         if (m_memory_pools.find(key) == m_memory_pools.end())
             m_memory_pools[key] = AllocationPool{m_device, key, {}, m_non_coherent_atom_size};
@@ -39,7 +39,7 @@ namespace musevk {
 
         if (rounded_offset + rounded_size <= block_size) {
             AllocatedMemory allocated { device_memory, rounded_offset, rounded_size, allocation_key,
-                                        allocation_key.second ? (char *)host_memory + rounded_offset : nullptr };
+                                        std::get<1>(allocation_key) ? (char *)host_memory + rounded_offset : nullptr };
             free_offset = rounded_offset + rounded_size;
             allocations.push_back(allocated);
             return std::optional(allocated);
@@ -64,10 +64,10 @@ namespace musevk {
             if (allocationOpt)
                 return allocationOpt.value();
         }
-        vk::MemoryAllocateInfo memoryAllocateInfo(ALLOCATION_BLOCK_SIZE, allocation_key.first);
+        vk::MemoryAllocateInfo memoryAllocateInfo(ALLOCATION_BLOCK_SIZE, std::get<0>(allocation_key));
         auto device_memory = device.allocateMemory(memoryAllocateInfo);
 
-        auto ptr = allocation_key.second ?
+        auto ptr = std::get<1>(allocation_key) ?
                    device.mapMemory(device_memory, 0, VK_WHOLE_SIZE, vk::MemoryMapFlags()) : nullptr;
 
         MemoryBlock block {device, allocation_key, device_memory, ALLOCATION_BLOCK_SIZE, 0, {}, ptr, m_non_coherent_atom_size};
