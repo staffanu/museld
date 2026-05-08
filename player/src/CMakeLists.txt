@@ -166,7 +166,6 @@ if(BUILD_MUSE)
     find_package(PORTAUDIO REQUIRED)
 
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(GNURADIO REQUIRED gnuradio-filter)
 
     find_package(LIBAV)
     if(HAVE_LIBAV)
@@ -248,7 +247,6 @@ if(BUILD_MUSE)
 
     target_include_directories(museld PRIVATE
         ${PORTAUDIO_INCLUDE_DIRS}
-        ${GNURADIO_INCLUDE_DIRS}
         ${Vulkan_INCLUDE_DIRS}
         ${FLAC_INCLUDE_DIRS}
     )
@@ -262,7 +260,6 @@ if(BUILD_MUSE)
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
         PRIVATE ${PORTAUDIO_LIBRARIES}
-        PRIVATE ${GNURADIO_LINK_LIBRARIES}
         PRIVATE ${FLAC_LINK_LIBRARIES}
     )
     if(HAVE_LIBAV)

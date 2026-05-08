@@ -7,8 +7,8 @@
 #include <vector>
 #include <iostream>
 #include <filesystem>
-#include <gnuradio/filter/firdes.h>
 #include "MuseRfDemodulator.h"
+#include "filter/RaisedCosine.h"
 #include "filter/WindowedSinc.h"
 #include "musevk/VulkanUtil.h"
 #include "musevk/TimestampQueryPool.h"
@@ -73,11 +73,12 @@ void MuseRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> lowpass_filter =
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(lowpass_filter_size), lowpass_filter_def);
 
-    // Root raised cosine filter for pulse shaping
-    // Notice that the root raised cosine filter works on half the input sample rate, i.e., 31.25 MHz
-    std::vector<float> rrc_filter_def =
-            gr::filter::firdes::root_raised_cosine(1.0, m_sample_frequency / 2, 16.2e6, 0.1, 11);
-    std::reverse(rrc_filter_def.begin(), rrc_filter_def.end()); // should be symmetric, so really unnecessary
+    // Root raised cosine filter for pulse shaping.
+    // The RRC works on half the input sample rate (e.g. 31.25 MHz at default Fs=62.5 MHz).
+    auto rrc_d = RaisedCosine::rrcFilter(11, m_sample_frequency / 2 / 16.2e6, 0.1,
+                                         RaisedCosine::Normalization::eUnityDcGain);
+    std::vector<float> rrc_filter_def(rrc_d.cbegin(), rrc_d.cend());
+    std::reverse(rrc_filter_def.begin(), rrc_filter_def.end()); // symmetric, but the shader correlates
     const int rrc_filter_size = (int)rrc_filter_def.size();
 
     shared_ptr<VulkanBuffer> rrc_filter =

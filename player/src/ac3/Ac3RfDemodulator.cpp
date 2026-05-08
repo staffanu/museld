@@ -42,8 +42,10 @@ Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, i
     // to the stage created previously.
     {
         std::string description = "RRC filter";
+        const double sps = mix_frequency / m_post_mix_decimation_factor / 288e3;
+        const int rrc_ntaps = (int)ceil(3 * sps) * 2 + 1;
         std::vector<double> filter_d = RaisedCosine::rrcFilter(
-            mix_frequency / m_post_mix_decimation_factor / 288e3, 3, 0.7);
+            rrc_ntaps, sps, 0.7, RaisedCosine::Normalization::eUnitEnergy);
         std::vector<float> filter(filter_d.cbegin(), filter_d.cend());
         m_post_mix_filter_stages[post_mix_log2_decimation] = new ComplexFirFilterStage(
             "Final lowpass filter",
