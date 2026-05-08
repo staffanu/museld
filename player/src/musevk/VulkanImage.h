@@ -36,10 +36,6 @@ namespace musevk {
             return eImage;
         }
 
-        void synchronizeForHostRead(CommandBuffer &command_buffer) final;
-
-        void synchronizeHostWrites(CommandBuffer &command_buffer) final;
-
         [[nodiscard]] uint32_t getWidth() const {
             return m_width;
         }
@@ -67,6 +63,15 @@ namespace musevk {
                     nullptr // Descriptor buffer info
             };
         }
+
+    protected:
+        void enqueueDeviceToHostVisibleCopy(CommandBuffer &command_buffer) final;
+        void enqueueHostVisibleToDeviceCopy(CommandBuffer &command_buffer) final;
+        void enqueueHostSyncBarrier(CommandBuffer &command_buffer,
+                                    vk::AccessFlagBits src_access,
+                                    vk::AccessFlagBits dst_access,
+                                    vk::PipelineStageFlagBits src_stage,
+                                    vk::PipelineStageFlagBits dst_stage) final;
 
     private:
         VulkanManager &m_vulkan_manager;

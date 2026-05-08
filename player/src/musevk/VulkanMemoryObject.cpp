@@ -6,7 +6,50 @@
 #include <sstream>
 #include "VulkanMemoryObject.h"
 #include "VulkanManager.h"
+#include "CommandBuffer.h"
 #include "logging/Logger.h"
+
+void musevk::VulkanMemoryObject::synchronizeForHostRead(CommandBuffer &command_buffer) {
+    assert(m_host_access == eHostRead || m_host_access == eHostReadWrite);
+    if (m_host_visible_buffer) {
+        enqueueDeviceToHostVisibleCopy(command_buffer);
+        assert(m_host_memory_properties &&
+               (m_host_memory_properties.value() & vk::MemoryPropertyFlagBits::eHostCoherent));
+    } else {
+        enqueueHostSyncBarrier(command_buffer,
+                               vk::AccessFlagBits::eShaderWrite,
+                               vk::AccessFlagBits::eHostRead,
+                               vk::PipelineStageFlagBits::eComputeShader,
+                               vk::PipelineStageFlagBits::eHost);
+        if (!(m_device_memory_properties & vk::MemoryPropertyFlagBits::eHostCoherent)) {
+            auto mappedRange = vk::MappedMemoryRange(m_allocated_device_memory.device_memory,
+                                                     m_allocated_device_memory.offset,
+                                                     m_allocated_device_memory.size);
+            command_buffer.invalidateMappedMemoryRangeLater(mappedRange);
+        }
+    }
+}
+
+void musevk::VulkanMemoryObject::synchronizeHostWrites(CommandBuffer &command_buffer) {
+    assert(m_host_access == eHostWrite || m_host_access == eHostWriteRarely || m_host_access == eHostReadWrite);
+    if (m_host_visible_buffer) {
+        enqueueHostVisibleToDeviceCopy(command_buffer);
+        assert(m_host_memory_properties &&
+               (m_host_memory_properties.value() & vk::MemoryPropertyFlagBits::eHostCoherent));
+    } else {
+        if (!(m_device_memory_properties & vk::MemoryPropertyFlagBits::eHostCoherent)) {
+            auto mappedRange = vk::MappedMemoryRange(m_allocated_device_memory.device_memory,
+                                                     m_allocated_device_memory.offset,
+                                                     m_allocated_device_memory.size);
+            command_buffer.flushMappedMemoryRangeLater(mappedRange);
+        }
+        enqueueHostSyncBarrier(command_buffer,
+                               vk::AccessFlagBits::eHostWrite,
+                               vk::AccessFlagBits::eShaderRead,
+                               vk::PipelineStageFlagBits::eHost,
+                               vk::PipelineStageFlagBits::eComputeShader);
+    }
+}
 
 musevk::VulkanMemoryObject::~VulkanMemoryObject() {
     if (m_host_visible_buffer)

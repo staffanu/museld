@@ -60,14 +60,30 @@ namespace musevk {
             return (T*)m_raw_data;
         }
 
-        virtual void synchronizeForHostRead(CommandBuffer &command_buffer) = 0;
-        virtual void synchronizeHostWrites(CommandBuffer &command_buffer) = 0;
+        void synchronizeForHostRead(CommandBuffer &command_buffer);
+        void synchronizeHostWrites(CommandBuffer &command_buffer);
 
         virtual vk::WriteDescriptorSet
         makeWriteDescriptorSet(vk::DescriptorSet &descriptor_set, uint32_t binding_index) const = 0;
 
     protected:
         ~VulkanMemoryObject();
+
+        // Used only when m_host_visible_buffer is set
+        // Implementations enqueue the resource-specific copy plus any accompanying barriers/layout transitions.
+        virtual void enqueueDeviceToHostVisibleCopy(CommandBuffer &command_buffer) = 0;
+        virtual void enqueueHostVisibleToDeviceCopy(CommandBuffer &command_buffer) = 0;
+
+        // Enqueue a synchronization barrier scoped to this resource (buffer- or image-specific).
+        // Used in the unified (no separate host-visible buffer) path of synchronizeForHostRead /
+        // synchronizeHostWrites.  Empirically a per-resource barrier behaves differently from a
+        // global memory barrier with the same access/stage masks; do not replace with enqueueBarrier
+        // without re-testing on hardware where this path is exercised.
+        virtual void enqueueHostSyncBarrier(CommandBuffer &command_buffer,
+                                            vk::AccessFlagBits src_access,
+                                            vk::AccessFlagBits dst_access,
+                                            vk::PipelineStageFlagBits src_stage,
+                                            vk::PipelineStageFlagBits dst_stage) = 0;
 
         // For a given host_access type, we return a list of possible memory property options.
         // The options are listed in preferred order, with the most preferred first.
