@@ -6,7 +6,7 @@
 #include <numeric>
 #include <unistd.h>
 #include <format>
-#include "../filter/FirPM.h"
+#include "../filter/HalfBand.h"
 #include "../filter/RaisedCosine.h"
 #include "Ac3RfDemodulator.h"
 
@@ -61,10 +61,12 @@ Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, i
 
     for (int i = post_mix_log2_decimation - 1; i >= 0; i--) {
         double stage_sample_freq = input_sample_frequency / (1 << (pre_mix_log2_decimation + i));
-        // These are all half-band filters, and they could all be the same, since the requirement is very easy to meet,
-        // but if designing them this way we do not have to think at all:)
-        // Also, some coefficients are zero, so we could use a specialized filter that if more efficient
-        auto [description, filter] = FirPM::low_pass<float>(i == post_mix_log2_decimation - 1 ? 22 : 14, stage_sample_freq, 300e3, stage_sample_freq / 2 - 300e3);
+        // Kaiser-windowed half-band lowpass at Fs/4. beta ≈ 7.857 → ~80 dB stopband.
+        const int ntaps = (i == post_mix_log2_decimation - 1) ? 23 : 19;
+        std::vector<float> filter = HalfBand::kaiser<float>(ntaps, HalfBand::kBeta80dB);
+        std::string description = std::format(
+            "Half-band Kaiser low-pass Fs={}, ntaps={}, beta={}",
+            stage_sample_freq, ntaps, HalfBand::kBeta80dB);
         m_post_mix_filter_stages[i] = new ComplexFirFilterStage(
             std::format("Post mix decimate by 2 stage {}", i + 1),
             description,
@@ -79,7 +81,11 @@ Ac3RfDemodulator::Ac3RfDemodulator(Logger &log, double input_sample_frequency, i
 
     for (int i = pre_mix_log2_decimation - 1; i >= 0; i--) {
         double stage_sample_freq = input_sample_frequency / (1 << i);
-        auto [description, filter] = FirPM::low_pass<float>(14, stage_sample_freq, 3.2e6, stage_sample_freq / 2 - 3.2e6);
+        const int ntaps = 19;
+        std::vector<float> filter = HalfBand::kaiser<float>(ntaps, HalfBand::kBeta80dB);
+        std::string description = std::format(
+            "Half-band Kaiser low-pass Fs={}, ntaps={}, beta={}",
+            stage_sample_freq, ntaps, HalfBand::kBeta80dB);
         m_pre_mix_filter_stages[i] = new FirFilterStage(
             std::format("Pre mix decimate by 2 stage {}", i + 1),
             description,

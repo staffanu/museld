@@ -46,15 +46,11 @@ Used to capture MUSE RF in real time for piping directly into museld.
 
 ## Building
 
-All components require CMake 3.22+, a C++23 compiler, and the vendored firpm submodule.
-
-```bash
-git submodule update --init --recursive
-```
+All components require CMake 3.22+ and a C++23 compiler.
 
 ### museld + ac3rf-efm-decode + Python bindings (default)
 
-All three are built by default. Dependencies: Vulkan, GLFW, PortAudio, GNURadio, FLAC++, Eigen3,
+All three are built by default. Dependencies: Vulkan, GLFW, PortAudio, FLAC++,
 Python 3.8+, pkg-config.
 
 Ubuntu packages:
@@ -76,7 +72,7 @@ nanobind (for the Python bindings) is fetched automatically by CMake.
 
 ### ac3rf-efm-decode only (minimal dependencies)
 
-Dependencies: FLAC++ (`libflac++`), Eigen3, pkg-config.
+Dependencies: FLAC++ (`libflac++`), pkg-config.
 
 ```bash
 cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF \

@@ -36,7 +36,6 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
     museld.cpp
     ac3rf-efm-decode.cpp
   tests/           — Catch2 unit tests (ReedSolomonTest, BchDecoderTest)
-  external/firpm/  — Vendored Parks-McClellan FIR design library (git submodule)
   cmake/           — CMake helpers (ac3rfConfig.cmake.in, modules/FindPORTAUDIO.cmake, etc.)
   python/          — nanobind Python bindings source
 fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device
@@ -63,9 +62,6 @@ All C++ components use CMake 3.22+ with out-of-source builds.
 ### Main build (all components — default)
 
 ```bash
-# First time: initialize vendored firpm submodule
-git submodule update --init --recursive
-
 # Release build (museld + ac3rf-efm-decode + Python bindings)
 cmake -DCMAKE_BUILD_TYPE=Release -S player -B player/build-release
 cmake --build player/build-release

@@ -1,23 +1,3 @@
-find_package(Eigen3 REQUIRED)
-
-# ============================================================================
-# firpm — Parks-McClellan FIR filter design (vendored, Eigen3-based)
-# BSD 3 Licence
-# ============================================================================
-
-add_library(firpm STATIC
-    ${CMAKE_SOURCE_DIR}/external/firpm/src/pm.cpp
-    ${CMAKE_SOURCE_DIR}/external/firpm/src/band.cpp
-    ${CMAKE_SOURCE_DIR}/external/firpm/src/barycentric.cpp
-    ${CMAKE_SOURCE_DIR}/external/firpm/src/cheby.cpp
-)
-
-target_include_directories(firpm PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/external/firpm/include>
-    $<INSTALL_INTERFACE:include/ac3rf>
-)
-target_link_libraries(firpm PUBLIC Eigen3::Eigen)
-
 # ============================================================================
 # ac3rf — reusable library (no CLI, no FLAC, no input readers)
 # ============================================================================
@@ -26,7 +6,7 @@ add_library(ac3rf STATIC
     logging/Logger.h logging/StreamLogger.h logging/StreamLogger.cpp
     filter/FirFilterStage.cpp filter/FirFilterStage.h
     filter/ComplexFirFilterStage.cpp filter/ComplexFirFilterStage.h
-    filter/FirPM.h
+    filter/HalfBand.h
     filter/FFT.h
     filter/Window.h
     filter/RaisedCosine.h
@@ -68,8 +48,6 @@ target_include_directories(ac3rf
         $<INSTALL_INTERFACE:include/ac3rf>
 )
 
-target_link_libraries(ac3rf PUBLIC firpm)
-
 # ============================================================================
 # Install — allows the library to be found using find_package(ac3rf)
 # ============================================================================
@@ -77,7 +55,7 @@ target_link_libraries(ac3rf PUBLIC firpm)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-install(TARGETS ac3rf firpm
+install(TARGETS ac3rf
     EXPORT ac3rfTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
@@ -86,9 +64,6 @@ install(FILES logging/Logger.h logging/StreamLogger.h DESTINATION ${CMAKE_INSTAL
 install(DIRECTORY ac3 efm filter rs
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ac3rf
     FILES_MATCHING PATTERN "*.h"
-)
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/external/firpm/include/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ac3rf
 )
 
 install(EXPORT ac3rfTargets

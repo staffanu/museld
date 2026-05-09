@@ -7,7 +7,7 @@
 #include <complex.h>
 #include <sys/fcntl.h>
 #include <chrono>
-#include "../filter/FirPM.h"
+#include "../filter/HalfBand.h"
 #include "../filter/FFT.h"
 #include "../filter/Window.h"
 #include "EfmDemodulator.h"
@@ -42,7 +42,11 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
 
         for (int i = m_log2_decimation - 1; i >= 0; i--) {
             double stage_sample_freq = input_sample_frequency / (1 << i);
-            auto [description, filter] = FirPM::low_pass<float>(15, stage_sample_freq, 3e6, stage_sample_freq / 2 - 3e6);
+            const int ntaps = 31;
+            std::vector<float> filter = HalfBand::kaiser<float>(ntaps, HalfBand::kBeta80dB);
+            std::string description = std::format(
+                "Half-band Kaiser low-pass Fs={}, ntaps={}, beta={}",
+                stage_sample_freq, ntaps, HalfBand::kBeta80dB);
             m_decimation_filter_stages[i] = new FirFilterStage(
                 std::format("Decimate by 2 stage {}", i + 1),
                 description,
