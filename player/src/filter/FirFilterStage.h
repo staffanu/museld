@@ -7,6 +7,21 @@
 #include <memory>
 #include <vector>
 
+// Generic FIR filter stage with optional SIMD acceleration.
+//
+// CAVEAT — SIMD-vs-scalar fractional shift: when use_simd is true, the
+// constructor pads the reversed filter with trailing zeros so its length
+// becomes a multiple of the SIMD chunk width (8 for AVX, 4 for NEON).  Those
+// zero taps live at the *low-index* end of the stored (reversed) buffer,
+// which corresponds to extra delay at the *front* of the original impulse
+// response.  The result is that the SIMD path computes a fractionally-shifted
+// convolution compared to the scalar path whenever the original filter
+// length is not already a multiple of the chunk width.  In practice this
+// does not break the decoders (the DPLLs / timing recovery absorb the
+// sub-sample shift), but mixing SIMD and scalar paths in the same chain
+// will produce different output sample positions.  For a half-band filter,
+// prefer HalfBandFirFilterStage which has no padding and exact scalar/SIMD
+// parity.
 class FirFilterStage {
 public:
     FirFilterStage(

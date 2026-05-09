@@ -3,6 +3,7 @@ find_package(Catch2 3 REQUIRED)
 add_executable(museld-tests
     ReedSolomonTest.cpp
     BchDecoderTest.cpp
+    FilterSimdParityTest.cpp
     ../src/bch/BchDecoder.cpp
 
 )
