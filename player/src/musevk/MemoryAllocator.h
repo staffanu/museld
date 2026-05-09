@@ -17,7 +17,7 @@ namespace musevk {
         vk::DeviceMemory device_memory;
         vk::DeviceSize offset;
         vk::DeviceSize size;
-        std::pair<int32_t, bool> allocation_key;
+        std::tuple<int32_t, bool, int> allocation_key;
         void *host_memory; // non-null if host visible
     };
 
@@ -52,11 +52,16 @@ namespace musevk {
         MemoryAllocator(MemoryAllocator &other) = delete;
         MemoryAllocator &operator=(MemoryAllocator &other) = delete;
 
-        // The reason that we need to specify host_visible here is that we use different chunks of memory for host visible and
-        // non-host visible memory even if they have the same memory type index.  It could very well be that some different
-        // HostAccess enumeration members map tp the same memory index, but that some do not require host visible memory, and
-        // then we do not need to map memory for the ones that do not need it.
-        AllocatedMemory allocate(vk::MemoryRequirements memory_requirements, int32_t memory_type_index, bool host_visible);
+        // host_visible: distinct from memory_type_index because some HostAccess kinds map to the same memory type
+        // but do not require the memory to be mapped; we keep those in a separate pool so we don't waste a mapping.
+        //
+        // pool_tag: a caller-chosen tag (typically the HostAccess enum value) that further partitions pools sharing
+        // the same memory_type_index and host_visible flag.  This was added due to problems on hardware without
+        // any DEVICE_LOCAL+HOST_COHERENT memory type, where both eHostWrite and eHostRead VulkanBuffers use
+        // the same memory_type_index.  Specifically, on AMD Vega on an Intel Mac 2017, it seems that performing a flush of
+        // one sub-range and an invalidation of another sub-range between submit/waits does not work correctly.
+        // Separating the HostAccess types in different memory blocks avoids this problem.
+        AllocatedMemory allocate(vk::MemoryRequirements memory_requirements, int32_t memory_type_index, bool host_visible, int pool_tag);
 
         void free(AllocatedMemory memory);
 
@@ -65,7 +70,7 @@ namespace musevk {
     private:
         struct MemoryBlock {
             vk::Device device;
-            std::pair<int32_t, bool> allocation_key;
+            std::tuple<int32_t, bool, int> allocation_key;
             vk::DeviceMemory device_memory;
             size_t block_size;
             size_t free_offset;
@@ -80,7 +85,7 @@ namespace musevk {
 
         struct AllocationPool {
             vk::Device device;
-            std::pair<int32_t, bool> allocation_key;
+            std::tuple<int32_t, bool, int> allocation_key;
             std::vector<MemoryBlock> blocks;
             vk::DeviceSize m_non_coherent_atom_size;
 
@@ -91,7 +96,7 @@ namespace musevk {
         vk::PhysicalDevice &m_physical_device;
         vk::Device &m_device;
         vk::DeviceSize m_non_coherent_atom_size;
-        std::map<std::pair<int32_t, bool>, AllocationPool> m_memory_pools;
+        std::map<std::tuple<int32_t, bool, int>, AllocationPool> m_memory_pools;
         std::mutex m_mutex;
     };
 }

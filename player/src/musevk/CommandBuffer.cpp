@@ -150,6 +150,10 @@ namespace musevk {
         m_memory_ranges_to_invalidate.push_back(range);
     }
 
+    void CommandBuffer::flushMappedMemoryRangeLater(vk::MappedMemoryRange range) {
+        m_memory_ranges_to_flush.push_back(range);
+    }
+
     void CommandBuffer::enqueueResetQueryPool(vk::QueryPool const &pool, unsigned int first_query, unsigned int query_count) {
         assert(m_recording);
         m_command_buffer.resetQueryPool(pool, first_query, query_count);
@@ -180,6 +184,11 @@ namespace musevk {
         m_command_buffer.end();
         m_recording = false;
         m_is_running = true;
+
+        if (!m_memory_ranges_to_flush.empty()) {
+            m_device.flushMappedMemoryRanges({m_memory_ranges_to_flush});
+            m_memory_ranges_to_flush.clear();
+        }
 
         vk::SubmitInfo submitInfo(wait_semaphores, wait_dst_stage_masks, m_command_buffer, signal_semaphores);
         m_queue.submit(submitInfo, m_fence);

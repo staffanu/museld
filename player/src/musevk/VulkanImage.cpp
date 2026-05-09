@@ -61,50 +61,37 @@ namespace musevk {
         m_vulkan_manager.getDevice().destroy(m_image);
     }
 
-    void VulkanImage::synchronizeForHostRead(CommandBuffer &command_buffer) {
-        assert(m_host_access == eHostRead || m_host_access == eHostReadWrite);
-        if (m_host_visible_buffer) {
-            command_buffer.enqueueTransitionMemoryLayout(m_image,
-                                                         m_layout, m_layout,
-                                                         vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer,
-                                                         vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead);
-
-            vk::BufferImageCopy region(0, m_width, m_height,
-                                       vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
-                                       vk::Offset3D(0, 0, 0), vk::Extent3D(m_width, m_height, 1));
-            command_buffer.enqueueCopyImageToBuffer(m_image, m_layout, m_host_visible_buffer.value(), region);
-
-            assert(m_host_memory_properties &&
-                   (m_host_memory_properties.value() & vk::MemoryPropertyFlagBits::eHostCoherent));
-        } else {
-            assert(m_device_memory_properties & vk::MemoryPropertyFlagBits::eHostCoherent);
-            // If not, we could do something like this, but there were problems...
-            // auto mappedRange = vk::MappedMemoryRange(m_allocated_device_memory.device_memory, m_allocated_device_memory.offset, m_allocated_device_memory.size);
-            // command_buffer.invalidateMappedMemoryRangeLater(mappedRange);
-        }
+    void VulkanImage::enqueueDeviceToHostVisibleCopy(CommandBuffer &command_buffer) {
+        command_buffer.enqueueTransitionMemoryLayout(m_image,
+                                                     m_layout, m_layout,
+                                                     vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer,
+                                                     vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead);
+        vk::BufferImageCopy region(0, m_width, m_height,
+                                   vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
+                                   vk::Offset3D(0, 0, 0), vk::Extent3D(m_width, m_height, 1));
+        command_buffer.enqueueCopyImageToBuffer(m_image, m_layout, m_host_visible_buffer.value(), region);
     }
 
-    void VulkanImage::synchronizeHostWrites(CommandBuffer &command_buffer) {
-        assert(m_host_access == eHostWrite || m_host_access == eHostWriteRarely || m_host_access == eHostReadWrite);
-        if (m_host_visible_buffer) {
-            // Notice: this has never been tested so could be wrong!
-            vk::BufferImageCopy region(0, m_width, m_height,
-                                       vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
-                                       vk::Offset3D(0, 0, 0), vk::Extent3D(m_width, m_height, 1));
-            command_buffer.enqueueCopyBufferToImage(m_host_visible_buffer.value(), m_image, m_layout, region);
+    void VulkanImage::enqueueHostSyncBarrier(CommandBuffer &command_buffer,
+                                             vk::AccessFlagBits src_access,
+                                             vk::AccessFlagBits dst_access,
+                                             vk::PipelineStageFlagBits src_stage,
+                                             vk::PipelineStageFlagBits dst_stage) {
+        // For images we use a global memory barrier; the unified path is not exercised in practice
+        // because images use eOptimal tiling and fall through to the separate-host-visible-buffer path.
+        command_buffer.enqueueBarrier(src_access, dst_access, src_stage, dst_stage);
+    }
 
-            command_buffer.enqueueTransitionMemoryLayout(m_image,
-                                                         m_layout, m_layout,
-                                                         vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader,
-                                                         vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eShaderRead);
-            assert(m_host_memory_properties &&
-                   (m_host_memory_properties.value() & vk::MemoryPropertyFlagBits::eHostCoherent));
-        } else {
-            assert(m_device_memory_properties & vk::MemoryPropertyFlagBits::eHostCoherent);
-            // If not, we could do something like this, but there were problems...
-            // auto mappedRange = vk::MappedMemoryRange(m_allocated_device_memory.device_memory, m_allocated_device_memory.offset, m_allocated_device_memory.size);
-            // m_vulkan_manager.getDevice().flushMappedMemoryRanges({mappedRange});
-        }
+    void VulkanImage::enqueueHostVisibleToDeviceCopy(CommandBuffer &command_buffer) {
+        // Notice: this has never been tested so could be wrong!
+        vk::BufferImageCopy region(0, m_width, m_height,
+                                   vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
+                                   vk::Offset3D(0, 0, 0), vk::Extent3D(m_width, m_height, 1));
+        command_buffer.enqueueCopyBufferToImage(m_host_visible_buffer.value(), m_image, m_layout, region);
+        command_buffer.enqueueTransitionMemoryLayout(m_image,
+                                                     m_layout, m_layout,
+                                                     vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader,
+                                                     vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eShaderRead);
     }
 
     void VulkanImage::enqueueTransitionLayout(CommandBuffer &command_buffer, vk::ImageLayout new_layout,

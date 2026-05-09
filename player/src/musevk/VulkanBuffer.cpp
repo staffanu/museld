@@ -39,45 +39,31 @@ namespace musevk {
     }
 
 
-    void VulkanBuffer::synchronizeForHostRead(CommandBuffer &command_buffer) {
-        assert(m_host_access == eHostRead || m_host_access == eHostReadWrite);
-        if (m_host_visible_buffer) {
-            command_buffer.enqueueBufferBarrier(*this,
-                                                vk::AccessFlagBits::eShaderWrite,
-                                                vk::AccessFlagBits::eTransferRead,
-                                                vk::PipelineStageFlagBits::eComputeShader,
-                                                vk::PipelineStageFlagBits::eTransfer);
-
-            command_buffer.enqueueCopyRawBuffer(m_device_buffer, m_host_visible_buffer.value(), 0, 0,
-                                                m_memory_size);
-            assert(m_host_memory_properties &&
-                   (m_host_memory_properties.value() & vk::MemoryPropertyFlagBits::eHostCoherent));
-        } else {
-            assert(m_device_memory_properties & vk::MemoryPropertyFlagBits::eHostCoherent);
-            // If not, we could do something like this, but there were problems...
-            // auto mappedRange = vk::MappedMemoryRange(m_allocated_device_memory.device_memory, m_allocated_device_memory.offset, m_allocated_device_memory.size);
-            // command_buffer.invalidateMappedMemoryRangeLater(mappedRange);
-        }
+    void VulkanBuffer::enqueueDeviceToHostVisibleCopy(CommandBuffer &command_buffer) {
+        command_buffer.enqueueBufferBarrier(*this,
+                                            vk::AccessFlagBits::eShaderWrite,
+                                            vk::AccessFlagBits::eTransferRead,
+                                            vk::PipelineStageFlagBits::eComputeShader,
+                                            vk::PipelineStageFlagBits::eTransfer);
+        command_buffer.enqueueCopyRawBuffer(m_device_buffer, m_host_visible_buffer.value(), 0, 0,
+                                            m_memory_size);
     }
 
-    void VulkanBuffer::synchronizeHostWrites(CommandBuffer &command_buffer) {
-        assert(m_host_access == eHostWrite || m_host_access == eHostWriteRarely || m_host_access == eHostReadWrite);
-        if (m_host_visible_buffer) {
-            command_buffer.enqueueCopyRawBuffer(m_host_visible_buffer.value(), m_device_buffer, 0, 0,
-                                                m_memory_size);
+    void VulkanBuffer::enqueueHostSyncBarrier(CommandBuffer &command_buffer,
+                                              vk::AccessFlagBits src_access,
+                                              vk::AccessFlagBits dst_access,
+                                              vk::PipelineStageFlagBits src_stage,
+                                              vk::PipelineStageFlagBits dst_stage) {
+        command_buffer.enqueueBufferBarrier(*this, src_access, dst_access, src_stage, dst_stage);
+    }
 
-            command_buffer.enqueueBufferBarrier(*this,
-                                                vk::AccessFlagBits::eTransferWrite,
-                                                vk::AccessFlagBits::eShaderRead,
-                                                vk::PipelineStageFlagBits::eTransfer,
-                                                vk::PipelineStageFlagBits::eComputeShader);
-            assert(m_host_memory_properties &&
-                   (m_host_memory_properties.value() & vk::MemoryPropertyFlagBits::eHostCoherent));
-        } else {
-            assert(m_device_memory_properties & vk::MemoryPropertyFlagBits::eHostCoherent);
-            // If not, we could do something like this, but there were problems...
-            //  auto mappedRange = vk::MappedMemoryRange(m_allocated_device_memory.device_memory, m_allocated_device_memory.offset, m_allocated_device_memory.size);
-            // m_vulkan_manager.getDevice().flushMappedMemoryRanges({mappedRange});
-        }
+    void VulkanBuffer::enqueueHostVisibleToDeviceCopy(CommandBuffer &command_buffer) {
+        command_buffer.enqueueCopyRawBuffer(m_host_visible_buffer.value(), m_device_buffer, 0, 0,
+                                            m_memory_size);
+        command_buffer.enqueueBufferBarrier(*this,
+                                            vk::AccessFlagBits::eTransferWrite,
+                                            vk::AccessFlagBits::eShaderRead,
+                                            vk::PipelineStageFlagBits::eTransfer,
+                                            vk::PipelineStageFlagBits::eComputeShader);
     }
 }

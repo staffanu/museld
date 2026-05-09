@@ -36,9 +36,6 @@ namespace musevk {
             return eBuffer;
         }
 
-        void synchronizeForHostRead(CommandBuffer &command_buffer) final;
-        void synchronizeHostWrites(CommandBuffer &command_buffer) final;
-
         vk::WriteDescriptorSet
         makeWriteDescriptorSet(vk::DescriptorSet &descriptor_set, uint32_t binding_index) const final {
             return {
@@ -54,6 +51,15 @@ namespace musevk {
         [[nodiscard]] Size size() const {
             return m_size;
         }
+
+    protected:
+        void enqueueDeviceToHostVisibleCopy(CommandBuffer &command_buffer) final;
+        void enqueueHostVisibleToDeviceCopy(CommandBuffer &command_buffer) final;
+        void enqueueHostSyncBarrier(CommandBuffer &command_buffer,
+                                    vk::AccessFlagBits src_access,
+                                    vk::AccessFlagBits dst_access,
+                                    vk::PipelineStageFlagBits src_stage,
+                                    vk::PipelineStageFlagBits dst_stage) final;
 
     private:
         VulkanManager &m_vulkan_manager;
