@@ -77,6 +77,13 @@ class Viewer(QtWidgets.QMainWindow):
         self.ymax.setMaximumWidth(80)
         controls.addWidget(self.ymax)
 
+        controls.addSpacing(20)
+        self.select_region = QtWidgets.QCheckBox("select region")
+        controls.addWidget(self.select_region)
+        self.zoom_btn = QtWidgets.QPushButton("Zoom to selection")
+        self.zoom_btn.setEnabled(False)
+        controls.addWidget(self.zoom_btn)
+
         controls.addStretch(1)
 
         # --- Plot -------------------------------------------------------
@@ -89,6 +96,13 @@ class Viewer(QtWidgets.QMainWindow):
         # vertical bar with no inter-bucket drop lines (which otherwise alias visually
         # at extreme zoom-out and produce a fake every-other-column pattern).
         self.curve = self.plot.plot([], [], pen=pg.mkPen("b", width=1), connect="pairs")
+        # Hidden until "select region" is checked. User drags edges/middle to set the
+        # x-range, then clicks "Zoom to selection" to commit a single setXRange (one
+        # redraw instead of many during wheel-scroll zoom).
+        self.region = pg.LinearRegionItem(brush=(80, 120, 200, 40))
+        self.region.setZValue(10)
+        self.region.hide()
+        self.plot.addItem(self.region)
         layout.addWidget(self.plot, 1)
 
         # Status bar
@@ -107,6 +121,8 @@ class Viewer(QtWidgets.QMainWindow):
         self._resize_timer.setInterval(60)
         self._resize_timer.timeout.connect(self.redraw)
         self.plot.getViewBox().sigResized.connect(lambda *_: self._resize_timer.start())
+        self.select_region.toggled.connect(self.on_select_region_toggled)
+        self.zoom_btn.clicked.connect(self.on_zoom_clicked)
 
         # Initial view shows whole file (downsampled)
         self.full_view = True
@@ -181,6 +197,23 @@ class Viewer(QtWidgets.QMainWindow):
         self.full_view = False
         self.redraw()
 
+    def on_select_region_toggled(self, checked: bool):
+        if checked:
+            (x0, x1), _ = self.plot.viewRange()
+            mid = 0.5 * (x0 + x1)
+            half = 0.25 * (x1 - x0)
+            self.region.setRegion((mid - half, mid + half))
+            self.region.show()
+        else:
+            self.region.hide()
+        self.zoom_btn.setEnabled(checked)
+
+    def on_zoom_clicked(self):
+        x0, x1 = self.region.getRegion()
+        if x1 > x0:
+            self.plot.setXRange(x0, x1, padding=0)
+        self.select_region.setChecked(False)
+
     def on_auto_y_toggled(self, checked: bool):
         """When the user turns auto-Y off, lock the current visible y-range into the fields."""
         if not checked:
@@ -244,41 +277,34 @@ class Viewer(QtWidgets.QMainWindow):
             xs[1::2] = centers
             connect_mode = "pairs"
         else:
-            # Span exceeds the read cap (very zoomed out). Bucket size is huge here, so
-            # the integer-rounding error is negligible. Use the reshape + random in-bucket
-            # subsample path with file-aligned bucket starts (so panning by < 1 pixel
-            # doesn't shimmer the moiré).
-            bucket_size = max(1, span // px_width)
-            read_start = (x0 // bucket_size) * bucket_size
-            read_end = ((x1 + bucket_size - 1) // bucket_size) * bucket_size
-            read_end = min(read_end, n)
-            count = read_end - read_start
-            buckets_full = count // bucket_size
-            inner = max(2, max_read // max(1, buckets_full))
+            # Span exceeds the read cap (very zoomed out). Reading every byte of the
+            # span is hopeless for multi-GB files, so sample sparsely: at each of
+            # `buckets` evenly-spaced bucket starts, read `inner` samples at fixed
+            # sub-positions within the bucket and take min/max. Total bytes touched
+            # ≈ buckets * inner * bps regardless of file size.
+            dtype, bps = self.current_dtype()
+            buckets = min(px_width, span)
+            bucket_size = max(1, span // buckets)
+            inner = min(bucket_size, 64)
 
-            samples, base = self.get_samples(read_start, count)
-            usable = (len(samples) // bucket_size) * bucket_size
-            buckets = usable // bucket_size if bucket_size else 0
-            samples = samples[:usable]
-            if buckets == 0:
-                self.curve.setData([], [])
-                return
+            sub_pos = (np.arange(inner, dtype=np.int64) * bucket_size) // inner
+            bucket_starts = x0 + np.arange(buckets, dtype=np.int64) * bucket_size
+            sample_idx = bucket_starts[:, None] + sub_pos[None, :]
+            np.clip(sample_idx, 0, n - 1, out=sample_idx)
 
-            view = samples.reshape(buckets, bucket_size)
-            if inner < bucket_size:
-                # Random subset of in-bucket positions, shared across all buckets.
-                # Fixed seed → stable picture as you pan (no flicker).
-                rng = np.random.default_rng(0xC0FFEE)
-                offsets = np.sort(rng.choice(bucket_size, size=inner, replace=False))
-                view = view[:, offsets]
+            # Gather raw bytes via fancy indexing into the uint8 memmap, then view
+            # as the target dtype (handles endianness).
+            byte_idx = (sample_idx[:, :, None] * bps
+                        + np.arange(bps, dtype=np.int64)[None, None, :])
+            buf = np.ascontiguousarray(self.raw[byte_idx.ravel()])
+            samples = buf.view(dtype).reshape(buckets, inner)
 
-            xs_base = base + np.arange(buckets) * bucket_size
-            mins = view.min(axis=1)
-            maxs = view.max(axis=1)
+            mins = samples.min(axis=1)
+            maxs = samples.max(axis=1)
             ys = np.empty(buckets * 2, dtype=np.float32)
             ys[0::2] = mins
             ys[1::2] = maxs
-            centers = xs_base + bucket_size // 2
+            centers = bucket_starts + bucket_size // 2
             xs = np.empty(buckets * 2, dtype=np.int64)
             xs[0::2] = centers
             xs[1::2] = centers
