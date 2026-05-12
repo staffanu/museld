@@ -55,7 +55,7 @@ std::pair<float, float> FrameBuffer::EstimateRescale(float const *data) {
     float avg_high = (float)line_1_high_sum / 240.0f;
     float avg_low = (float)line_2_low_sum / 240.0f;
     float avg_blanking = (float)blanking_sum / 512.0f;
-    vector<pair<float, float>> v = {{0.0f , avg_low}, {128.0f, avg_blanking }, {255.0f, avg_high }};
+    vector<pair<float, float>> v = {{16.0f , avg_low}, {128.0f, avg_blanking }, {239.0f, avg_high }};
     // This is according to the documentation available, but it seems in reality the levels are 0 and 255?
     // vector<pair<float, float>> v = {{16.0f , avg_low}, {128.0f, avg_blanking }, {239.0f, avg_high }};
     auto rescale = LinearRegression::linearRegression(v);
