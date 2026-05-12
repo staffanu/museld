@@ -59,7 +59,7 @@ float16_t non_linear(float16_t x_unscaled) {
     } else if (x < -nl_x1) {
         y = -nl_k + sqrt(nl_b_sq * (1 - (-x - nl_h) * (-x - nl_h) / nl_a_sq));
     } else {
-        y = x / 2;
+        y = x / 2.hf;
     }
     return float16_t(y) + 128.hf;
 }
