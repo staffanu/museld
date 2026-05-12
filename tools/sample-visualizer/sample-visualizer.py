@@ -23,7 +23,7 @@ import argparse
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6 import QtWidgets, QtCore
+from PyQt6 import QtWidgets, QtCore, QtGui
 
 
 class Viewer(QtWidgets.QMainWindow):
@@ -48,11 +48,14 @@ class Viewer(QtWidgets.QMainWindow):
         self.bits_group = QtWidgets.QButtonGroup(self)
         self.r8 = QtWidgets.QRadioButton("8-bit")
         self.r16 = QtWidgets.QRadioButton("16-bit")
+        self.rf32 = QtWidgets.QRadioButton("float32")
         self.r16.setChecked(True)
         self.bits_group.addButton(self.r8)
         self.bits_group.addButton(self.r16)
+        self.bits_group.addButton(self.rf32)
         controls.addWidget(self.r8)
         controls.addWidget(self.r16)
+        controls.addWidget(self.rf32)
 
         controls.addSpacing(12)
         self.signed = QtWidgets.QCheckBox("signed")
@@ -109,8 +112,9 @@ class Viewer(QtWidgets.QMainWindow):
         self.status = self.statusBar()
 
         # --- Signals ----------------------------------------------------
-        for w in (self.r8, self.r16, self.signed, self.big_endian):
+        for w in (self.r8, self.r16, self.rf32, self.signed, self.big_endian):
             w.toggled.connect(self.refresh)
+        self.bits_group.buttonToggled.connect(self.on_bits_changed)
         self.auto_y.toggled.connect(self.on_auto_y_toggled)
         self.ymin.editingFinished.connect(self.refresh)
         self.ymax.editingFinished.connect(self.refresh)
@@ -123,6 +127,15 @@ class Viewer(QtWidgets.QMainWindow):
         self.plot.getViewBox().sigResized.connect(lambda *_: self._resize_timer.start())
         self.select_region.toggled.connect(self.on_select_region_toggled)
         self.zoom_btn.clicked.connect(self.on_zoom_clicked)
+        self.plot.scene().sigMouseMoved.connect(self.on_mouse_moved)
+
+        # Quit shortcuts (Q / Esc)
+        for key in (QtCore.Qt.Key.Key_Q, QtCore.Qt.Key.Key_Escape):
+            sc = QtGui.QShortcut(QtGui.QKeySequence(key), self)
+            sc.activated.connect(self.close)
+
+        # Last computed status (without cursor info) so we can append cursor readout.
+        self._status_base = ""
 
         # Initial view shows whole file (downsampled)
         self.full_view = True
@@ -131,14 +144,21 @@ class Viewer(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
     def current_dtype(self):
         """Return numpy dtype for current settings, plus the bytes-per-sample."""
-        bits = 8 if self.r8.isChecked() else 16
+        if self.rf32.isChecked():
+            # Native-endian float32. signed/big-endian checkboxes do not apply.
+            return np.dtype("f4"), 4
         signed = self.signed.isChecked()
         be = self.big_endian.isChecked()
-        if bits == 8:
+        if self.r8.isChecked():
             return (np.dtype("i1") if signed else np.dtype("u1")), 1
         endian = ">" if be else "<"
         kind = "i" if signed else "u"
         return np.dtype(f"{endian}{kind}2"), 2
+
+    def on_bits_changed(self, *_):
+        is_float = self.rf32.isChecked()
+        self.signed.setEnabled(not is_float)
+        self.big_endian.setEnabled(not is_float)
 
     def total_samples(self):
         _, bps = self.current_dtype()
@@ -325,9 +345,35 @@ class Viewer(QtWidgets.QMainWindow):
                 pass
 
         dtype, bps = self.current_dtype()
-        self.status.showMessage(
+        self._status_base = (
             f"dtype={dtype.str}  bps={bps}  samples={n:,}  view=[{x0:,}..{x1:,}]  "
             f"span={span:,}  px={px_width}  drawn={len(xs):,}"
+        )
+        self.status.showMessage(self._status_base)
+
+    def on_mouse_moved(self, scene_pos):
+        vb = self.plot.getViewBox()
+        if not self.plot.sceneBoundingRect().contains(scene_pos):
+            self.status.showMessage(self._status_base)
+            return
+        pt = vb.mapSceneToView(scene_pos)
+        idx = int(round(pt.x()))
+        y_cursor = float(pt.y())
+        n = self.total_samples()
+        if idx < 0 or idx >= n:
+            self.status.showMessage(f"{self._status_base}  |  y={y_cursor:.6g}")
+            return
+        samples, _ = self.get_samples(idx, 1)
+        if len(samples) == 0:
+            self.status.showMessage(f"{self._status_base}  |  y={y_cursor:.6g}")
+            return
+        v = samples[0]
+        if np.issubdtype(samples.dtype, np.floating):
+            vstr = f"{float(v):.6g}"
+        else:
+            vstr = f"{int(v)}"
+        self.status.showMessage(
+            f"{self._status_base}  |  @{idx:,} = {vstr}  |  y={y_cursor:.6g}"
         )
 
 
