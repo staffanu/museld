@@ -4,6 +4,11 @@ from scipy.optimize import fsolve
 import matplotlib.pyplot as plt
 from math import cos, sin
 
+# This script computes the coefficients to make an explicit function
+# for the MUSE specification of the non-linear de-emphasis filter.
+# It is specified by the derivatives and values at a few points,
+# and that the curve is part of an ellipse.
+
 x1 = 224
 y1 = 112
 x2 = 512
