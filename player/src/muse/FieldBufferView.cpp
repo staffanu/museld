@@ -32,6 +32,10 @@ shared_ptr<musevk::VulkanBuffer> FieldBufferView::getVulkanBuffer() {
     return m_data;
 }
 
-optional<ControlSignalDecoder> const &FieldBufferView::control_data() {
+optional<ControlSignalDecoder> const &FieldBufferView::control_data() const {
     return m_prev_field->m_control;
+}
+
+std::optional<ControlSignalDecoder> const &FieldBufferView::own_control_data() const {
+    return m_control;
 }

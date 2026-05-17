@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <set>
+#include <string>
 
 #include "DropoutMode.h"
 
@@ -13,6 +14,11 @@ class Logger;
 struct ReaderControls {
     std::function<void(double)> seek;
     std::function<void(bool)> setEfmEnabled;
+    // Adaptive equalizer controls (MUSE only).  cycleEqMode returns a short label
+    // for the new mode ("OFF"/"ADAPT"/"FROZEN") for OSD display.  Empty when the
+    // decoder doesn't support adaptive equalization (NTSC).
+    std::function<std::string()> cycleEqMode;
+    std::function<void()> resetEqTaps;
 };
 
 class InputController {

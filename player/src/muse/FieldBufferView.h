@@ -26,7 +26,12 @@ public:
     void ProcessControlData(float const *control_data, std::pair<float, float> const &rescale);
 
     std::shared_ptr<musevk::VulkanBuffer> getVulkanBuffer();
-    std::optional<ControlSignalDecoder> const &control_data();
+
+    // Returns the previous field's decoded control data used for inter-field decisions.
+    std::optional<ControlSignalDecoder> const &control_data() const;
+
+    // Returns this field's decoded control data used to determine VITS phase for equalization.
+    std::optional<ControlSignalDecoder> const &own_control_data() const;
 
     int m_frame_no;
     int m_field_parity;

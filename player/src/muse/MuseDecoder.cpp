@@ -22,6 +22,7 @@ MuseDecoder::MuseDecoder(
         Logger &log, FrameReader<MuseInputBlock> &reader, musevk::VulkanManager &manager,
         musevk::CommandPool &command_pool, std::string const &executable_dir,
         bool decode_video, bool decode_all_fields, bool decode_audio,
+        MuseAdaptiveEqualizer::Mode eq_mode, float eq_alpha,
         musevk::TimestampQueryPool *timestamp_query_pool)
 : Decoder(),
   m_log(log),
@@ -43,6 +44,7 @@ MuseDecoder::MuseDecoder(
   m_audio_decoder(log),
   m_efm_decoder(log),
   m_efm_pcm_processor(log),
+  m_equalizer(log, eq_mode, eq_alpha),
   m_frame_buffers() {
 }
 
@@ -119,13 +121,53 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
         frame_buffer->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_muse_sample);
         shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
 
-        auto rescale_estimate = FrameBuffer::EstimateRescale(input_vulkan_buffer->data<float>());
+        // Decode the control signal on the *raw* frame so the equaliser can pick the
+        // right VITS interleave phase.  Done unconditionally (regardless of
+        // m_decode_video) because the equaliser depends on it.  Uses the running
+        // rescale from previous frames; on the very first frame m_rescale is the
+        // sentinel {-1,-1} and phase decode will likely fail — that is fine because
+        // the equaliser also needs a previous frame and skips on frame 0 anyway.
+        float *input_float = input_vulkan_buffer->data<float>();
+        frame_buffer->ProcessControlData(input_float, m_rescale);
+        int phase_c = -1;
+        if (auto const &cd = frame_buffer->get_field(0).own_control_data())
+            phase_c = cd->frame_subsampling_phase_C.value_or(-1);
+        if (phase_c < 0)
+            if (auto const &cd = frame_buffer->get_field(1).own_control_data())
+                phase_c = cd->frame_subsampling_phase_C.value_or(-1);
+
+        // Adaptive equaliser: train from the raw VITS, then filter the frame in
+        // place at 16.2 MHz before the rescale shader runs.  The filter has unit
+        // DC gain by construction, so EstimateRescale's flat-region anchors are
+        // unaffected.
+        m_equalizer.updateFromFrame(input_float, m_frame_no, phase_c);
+        m_equalizer.apply(input_float, MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT);
+
+        auto rescale_estimate = FrameBuffer::EstimateRescale(input_float);
         if (m_rescale.first == -1 && m_rescale.second == -1)
             m_rescale = rescale_estimate;
         else
             m_rescale = {m_rescale.first * 0.9 + rescale_estimate.first * 0.1, m_rescale.second * 0.9 + rescale_estimate.second * 0.1};
-        if (m_frame_no % 30 == 0)
+        if (m_frame_no % 30 == 0) {
             m_log.info(eDecoder, std::format("rescale: {}, {}", m_rescale.first, m_rescale.second));
+            const char *mode_str = m_equalizer.mode() == MuseAdaptiveEqualizer::Mode::eOff    ? "off"
+                                 : m_equalizer.mode() == MuseAdaptiveEqualizer::Mode::eAdapt  ? "adapt"
+                                                                                              : "frozen";
+            m_log.info(eDecoder,
+                       std::format("eq[{}]: updates={} phase_c={} err_e={:.4g} obs_pk={:.3f} dev_from_delta={:.4g}",
+                                   mode_str,
+                                   m_equalizer.updates(),
+                                   phase_c,
+                                   m_equalizer.lastErrorEnergy(),
+                                   m_equalizer.lastObsPeak(),
+                                   m_equalizer.deviationFromIdentity()));
+            if (m_log.isEnabled(eDebug, eDecoder)) {
+                std::string taps_str;
+                for (float t : m_equalizer.taps())
+                    taps_str += std::format(" {:+.5f}", t);
+                m_log.debug(eDecoder, std::format("eq taps:{}", taps_str));
+            }
+        }
 
 
         // The input block data was written by the host, so make sure it is visible on the GPU
@@ -139,10 +181,6 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
         frame_buffer->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
         m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame_buffer->data());
 
-        // The control signal is decoded from the input directly so that we do not have to wait for the completion
-        // of applyEqAndDeemphasisAndGamma
-        if (m_decode_video)
-            frame_buffer->ProcessControlData(input_vulkan_buffer->data<float>(), m_rescale);
     }
     m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 

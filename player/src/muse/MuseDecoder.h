@@ -12,6 +12,7 @@
 #include "AudioDecoder.h"
 #include "Shaders.h"
 #include "FrameBuffer.h"
+#include "MuseAdaptiveEqualizer.h"
 #include "musevk/CommandPool.h"
 #include "MuseInputBlock.h"
 #include "Decoder.h"
@@ -37,7 +38,13 @@ public:
                 bool decode_video,
                 bool decode_all_fields,
                 bool decode_audio,
+                MuseAdaptiveEqualizer::Mode eq_mode,
+                float eq_alpha,
                 musevk::TimestampQueryPool *timestamp_query_pool);
+
+    // Interactive controls (key bindings in InputController).
+    MuseAdaptiveEqualizer::Mode cycleEqMode() { return m_equalizer.cycleMode(); }
+    void resetEqTaps() { m_equalizer.resetTaps(); }
     ~MuseDecoder();
     MuseDecoder(const MuseDecoder&) = delete;
     void operator=(const MuseDecoder&) = delete;
@@ -76,6 +83,7 @@ private:
     AudioDecoder m_audio_decoder;
     EfmDecoder m_efm_decoder;
     EfmPcmProcessor m_efm_pcm_processor;
+    MuseAdaptiveEqualizer m_equalizer;
     std::deque<FrameBuffer *> m_frame_buffers; // The front (index 0) is the newest received frame
 };
 

@@ -138,6 +138,16 @@ bool InputController::poll(GLFWwindow *window,
     if (checkKey(window, GLFW_KEY_PRINT_SCREEN)) {
         glfwSetClipboardString(window, state.last_cursor_string.c_str());
     }
+    if (checkKey(window, GLFW_KEY_7) && reader.cycleEqMode) {
+        std::string mode = reader.cycleEqMode();
+        state.osd_text = std::format("EQ {}", mode);
+        m_log.info(eApplication | eVideo, std::format("Adaptive equaliser mode: {}", mode));
+    }
+    if (checkKey(window, GLFW_KEY_8) && reader.resetEqTaps) {
+        reader.resetEqTaps();
+        state.osd_text = "EQ RESET";
+        m_log.info(eApplication | eVideo, "Adaptive equaliser taps reset to identity");
+    }
     if (checkKey(window, GLFW_KEY_Z)) {
         state.zoom_factor = (state.zoom_factor * 2) % 7;
         state.zoom_center.first = std::max(0.5 / state.zoom_factor,

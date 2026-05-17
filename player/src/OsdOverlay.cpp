@@ -18,16 +18,19 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
                                GLFWwindow *window,
                                TextRenderer &text_renderer) {
     std::string cursor_string;
-    if (state.osd_text != state.prev_osd_text) {
+    if (!state.osd_text.empty()) {
         if (state.paused && state.osd_text_remaining_frames)
             state.redo_last_field = true;
         state.osd_text_remaining_frames = 100;
-        state.prev_osd_text = state.osd_text;
+        state.displayed_osd_text = state.osd_text;
+        state.osd_text.clear();
     }
     if (state.osd_text_remaining_frames) {
-        text_renderer.drawText(images.out_image, 90, 50, state.osd_text, 4, command_buffer);
-        if (!--state.osd_text_remaining_frames)
+        text_renderer.drawText(images.out_image, 90, 50, state.displayed_osd_text, 4, command_buffer);
+        if (!--state.osd_text_remaining_frames) {
             state.redo_last_field = true;
+            state.displayed_osd_text.clear();
+        }
     }
 
     if (state.enable_cursor) {

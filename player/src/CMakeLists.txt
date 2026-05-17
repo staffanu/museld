@@ -185,6 +185,8 @@ if(BUILD_MUSE)
         muse/ControlSignalDecoder.cpp muse/ControlSignalDecoder.h
         muse/Shaders.cpp muse/Shaders.h
         muse/MuseDecoder.cpp muse/MuseDecoder.h
+        muse/MuseAdaptiveEqualizer.cpp muse/MuseAdaptiveEqualizer.h
+        muse/MuseEqReference.h
         muse/ResamplingFrameReader.cpp muse/ResamplingFrameReader.h
         muse/PhaseCorrect16MHzFrameReader.cpp muse/PhaseCorrect16MHzFrameReader.h
         muse/MuseRfDemodulator.cpp muse/MuseRfDemodulator.h

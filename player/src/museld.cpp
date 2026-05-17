@@ -151,6 +151,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   bool decode_all_fields, bool full_screen, bool no_sync,
                   bool start_paused, bool decode_video, DropoutMode dropout_mode,
                   bool decode_audio, bool efm_audio, bool benchmark_shaders,
+                  MuseAdaptiveEqualizer::Mode eq_mode, float eq_alpha,
                   optional<string> const &output_filename) {
     glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
@@ -204,12 +205,30 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 ? std::make_unique<musevk::TimestampQueryPool>(manager.getPhysicalDevice(), manager.getDevice(), 40)
                 : nullptr;
 
+        ReaderControls reader_controls{
+                [&reader](double seconds) { reader.seek(seconds); },
+                [&reader](bool enabled) { reader.setEfmEnabled(enabled); },
+        };
+
         std::unique_ptr<Decoder> decoder;
         if constexpr (std::is_same<InputBlock, MuseInputBlock>::value) {
-            decoder = std::make_unique<MuseDecoder>(log, (FrameReader<MuseInputBlock> &)reader,
+            auto mp = std::make_unique<MuseDecoder>(log, (FrameReader<MuseInputBlock> &)reader,
                                                     manager, command_pool, executable_dir,
                                                     decode_video, decode_all_fields, decode_audio,
+                                                    eq_mode, eq_alpha,
                                                     timestamp_query_pool.get());
+            // This isn't a great use of unique_ptr
+            MuseDecoder *muse_decoder = mp.get();
+            reader_controls.cycleEqMode = [muse_decoder]() -> std::string {
+                switch (muse_decoder->cycleEqMode()) {
+                    case MuseAdaptiveEqualizer::Mode::eOff:    return "OFF";
+                    case MuseAdaptiveEqualizer::Mode::eAdapt:  return "ADAPT";
+                    case MuseAdaptiveEqualizer::Mode::eFrozen: return "FROZEN";
+                }
+                return "?";
+            };
+            reader_controls.resetEqTaps = [muse_decoder]() { muse_decoder->resetEqTaps(); };
+            decoder = std::move(mp);
         } else {
             decoder = std::make_unique<NtscDecoder>(log, (FrameReader<NtscInputBlock> &)reader,
                                                     manager, command_pool, executable_dir,
@@ -219,11 +238,6 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
 
         if (!decoder->initialize())
             throw runtime_error("Decoder initialization failed");
-
-        ReaderControls reader_controls{
-                [&reader](double seconds) { reader.seek(seconds); },
-                [&reader](bool enabled) { reader.setEfmEnabled(enabled); },
-        };
 
         runPlayer(log, manager, *decoder, reader_controls, window, full_screen, start_paused,
                   dropout_mode, efm_audio, benchmark_shaders,
@@ -272,6 +286,8 @@ int main(int argc, char *argv[]) {
     bool decode_audio = true;
     bool efm_audio = false;
     bool benchmark_shaders = false;
+    MuseAdaptiveEqualizer::Mode eq_mode = MuseAdaptiveEqualizer::Mode::eAdapt;
+    constexpr float eq_alpha = 0.005f;
 
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -374,6 +390,13 @@ int main(int argc, char *argv[]) {
     options.emplace_back("--benchmark-shaders", [&] () mutable -> void {
         benchmark_shaders = true;
     });
+    options.emplace_back("--eq", [&] () mutable -> void {
+        const auto &name = *(it++);
+        if      (name == "off")    eq_mode = MuseAdaptiveEqualizer::Mode::eOff;
+        else if (name == "on")     eq_mode = MuseAdaptiveEqualizer::Mode::eAdapt;
+        else if (name == "frozen") eq_mode = MuseAdaptiveEqualizer::Mode::eFrozen;
+        else throw std::runtime_error(std::format("Unknown --eq mode {} (expected off|on|frozen)", name));
+    });
     options.emplace_back("--no-sync", [&] () mutable -> void {
         no_sync = true;
     });
@@ -427,7 +450,7 @@ int main(int argc, char *argv[]) {
                         process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
                                                      efm_audio,
-                                                     benchmark_shaders, output_filename);
+                                                     benchmark_shaders, eq_mode, eq_alpha, output_filename);
                         delete reader;
                         break;
                     }
@@ -436,7 +459,7 @@ int main(int argc, char *argv[]) {
                                 log, *it, input_format, initial_seek_seconds, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
-                                     efm_audio, benchmark_shaders, output_filename);
+                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename);
                         delete reader;
                         break;
                     }
@@ -448,7 +471,7 @@ int main(int argc, char *argv[]) {
                                 efm_audio, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
-                                     efm_audio, benchmark_shaders, output_filename);
+                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename);
                         delete reader;
                         break;
                     }

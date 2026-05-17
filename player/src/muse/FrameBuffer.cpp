@@ -62,6 +62,15 @@ std::pair<float, float> FrameBuffer::EstimateRescale(float const *data) {
     return rescale;
 }
 
+void FrameBuffer::ExtractVits(float const *data, float *out_line0, float *out_line1) {
+    float const *row0 = data + 0 * MUSE_TOTAL_WIDTH + c_vits_first_sample;
+    float const *row1 = data + 1 * MUSE_TOTAL_WIDTH + c_vits_first_sample;
+    for (int i = 0; i < c_vits_sample_count; i++) {
+        out_line0[i] = row0[i];
+        out_line1[i] = row1[i];
+    }
+}
+
 FieldBufferView &FrameBuffer::get_field(int parity) {
     return m_fields[parity];
 }
