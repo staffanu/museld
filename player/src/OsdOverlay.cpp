@@ -1,5 +1,6 @@
 #include "OsdOverlay.h"
 
+#include <algorithm>
 #include <format>
 #include <vector>
 #include <GLFW/glfw3.h>
@@ -18,6 +19,15 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
                                GLFWwindow *window,
                                TextRenderer &text_renderer) {
     std::string cursor_string;
+    const int zoom = state.zoom_factor;
+    const auto src = decoder.getSourceDimensions();
+    const int vis_left = (int)((state.zoom_center.first - 0.5 / zoom) * src.width);
+    const int vis_top = (int)((state.zoom_center.second - 0.5 / zoom) * src.height);
+    const int vis_height = (int)(src.height / zoom);
+    auto tl_x = [&](int x) { return vis_left + x / zoom; };
+    auto tl_y = [&](int y) { return vis_top + y / zoom; };
+    auto comp_scale = [&](int s) { return std::max(1, s / zoom); };
+
     if (!state.osd_text.empty()) {
         if (state.paused && state.osd_text_remaining_frames)
             state.redo_last_field = true;
@@ -26,7 +36,7 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         state.osd_text.clear();
     }
     if (state.osd_text_remaining_frames) {
-        text_renderer.drawText(images.out_image, 90, 50, state.displayed_osd_text, 4, command_buffer);
+        text_renderer.drawText(images.out_image, tl_x(90), tl_y(50), state.displayed_osd_text, comp_scale(4), command_buffer);
         if (!--state.osd_text_remaining_frames) {
             state.redo_last_field = true;
             state.displayed_osd_text.clear();
@@ -43,7 +53,6 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         double xpos, ypos;
         glfwGetCursorPos(window, &xpos, &ypos);
         if (xpos >= 0 && ypos >= 0 && xpos < xsize && ypos < ysize) {
-            const auto src = decoder.getSourceDimensions();
             double rel_x = (xpos / xsize - 0.5) / state.zoom_factor + state.zoom_center.first;
             double rel_y = (ypos / ysize - 0.5) / state.zoom_factor + state.zoom_center.second;
             int field_x = (int)(rel_x * src.field_width);
@@ -52,8 +61,8 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
                                             (int)(rel_x * src.width),
                                             (int)(rel_y * src.height),
                                             field_x, field_y);
-            text_renderer.drawText(images.out_image, 10, 8, cursor_string, 1, command_buffer);
-            if (state.field_interpolation_mode == Decoder::FieldInterpolationMode::eForceIntraField && state.paused) {
+            text_renderer.drawText(images.out_image, tl_x(10), vis_top + 8, cursor_string, 1, command_buffer);
+            if (state.field_interpolation_mode == Decoder::FieldInterpolationMode::eForceIntraField && state.paused && zoom < 4) {
                 if (auto offsets = decoder.computePixelFileOffsets(
                             field_x, field_y, state.last_decoded.field_parity,
                             state.last_decoded.last_frame_buffer_input_offset,
@@ -64,7 +73,7 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
                             state.last_decoded.field_parity ? "ODD" : "EVEN",
                             offsets->field_start,
                             offsets->y, offsets->cr, offsets->cb);
-                    text_renderer.drawText(images.out_image, 10, 34, offset_string, 1, command_buffer);
+                    text_renderer.drawText(images.out_image, tl_x(10), vis_top + 34, offset_string, 1, command_buffer);
                     cursor_string += " " + offset_string;
                 }
             }
@@ -77,8 +86,13 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         auto disc_info_strings = state.last_decoded.disc_info
                 ? state.last_decoded.disc_info->asStrings()
                 : std::vector<std::string>{"No disc info"};
-        for (int i = (int)disc_info_strings.size() - 1, y = 955; i >= 0; i--, y -= 55) {
-            text_renderer.drawText(images.out_image, 90, y, disc_info_strings[i], 2, command_buffer);
+        const int disc_scale = comp_scale(2);
+        const int glyph_h = 24;
+        const int bottom_margin = std::max(0, src.height - 955 - glyph_h * 2) / zoom;
+        const int last_y = vis_top + vis_height - bottom_margin - glyph_h * disc_scale;
+        const int line_step = glyph_h * disc_scale + 7;
+        for (int i = (int)disc_info_strings.size() - 1, k = 0; i >= 0; i--, k++) {
+            text_renderer.drawText(images.out_image, tl_x(90), last_y - k * line_step, disc_info_strings[i], disc_scale, command_buffer);
         }
         if (state.paused)
             state.redo_last_field = true;
