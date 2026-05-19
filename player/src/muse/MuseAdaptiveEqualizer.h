@@ -1,11 +1,10 @@
 //
 // Adaptive equaliser for MUSE input samples at 16.2 MHz.
 //
-// Trains a 33-tap symmetric FIR against the VITS mono-pulse on lines 0–1.  VITS
-// from two successive frames is interleaved to give an effective 32.4 MHz
-// observation of the channel impulse response, then LMS gradient descent is run
-// on the tap vector with a unit-DC-gain renormalisation so the existing rescale
-// path is undisturbed.
+// Trains a 33-tap FIR against the VITS mono-pulse on lines 0–1.  On every frame
+// the current frame's VITS is compared to the appropriate per-C-phase 16.2 MHz
+// reference (raised cosine, β=0.1) and one normalised-LMS step is run.  Taps are
+// renormalised to unit DC gain so the existing rescale path is undisturbed.
 //
 // First cut: CPU only.  The apply() step is a candidate for porting to a Vulkan
 // compute shader once the algorithm has been validated.
@@ -47,11 +46,11 @@ public:
     // L2 distance of current taps from the identity (delta) filter.
     [[nodiscard]] float deviationFromIdentity() const;
 
-    // Reads VITS from the (unfiltered) input frame and, if in eAdapt mode and a
-    // previous frame with a *different* C sub-sampling phase is buffered, runs one
-    // LMS step.  phase_c is the value of frame_subsampling_phase_C from the decoded
-    // control signal (0 or 1); pass -1 if the control signal could not be decoded.
-    // Always caches this frame's VITS / phase for use by the next call.
+    // Reads VITS from the (unfiltered) input frame and, if in eAdapt mode, runs
+    // one LMS step against the per-C-phase reference.  phase_c is the value of
+    // frame_subsampling_phase_C from the decoded control signal (0 or 1); pass -1
+    // if the control signal could not be decoded, in which case the step is
+    // skipped.  frame_no is unused but kept for log/diagnostic continuity.
     void updateFromFrame(float const *frame_data, int frame_no, int phase_c);
 
     // Filters the input frame in-place at 16.2 MHz using the current taps.
@@ -65,11 +64,6 @@ private:
     std::array<float, c_num_taps> m_taps{};
 
     static constexpr int c_vits_len = FrameBuffer::c_vits_sample_count;
-    std::array<float, c_vits_len> m_prev_vits_line0{};
-    std::array<float, c_vits_len> m_prev_vits_line1{};
-    bool m_have_prev_vits = false;
-    int m_last_frame_no = -1;
-    int m_prev_phase_c = -1;
     int m_updates = 0;
     float m_last_err_energy = 0.0f;
     float m_last_obs_peak = 0.0f;

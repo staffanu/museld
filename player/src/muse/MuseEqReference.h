@@ -1,9 +1,16 @@
 // Reference VIT mono-pulse for the MUSE adaptive equalizer.
 //
 // The target end-to-end response is a raised-cosine pulse with roll-off factor β = 0.1
-// and the −6 dB point at 8.1 MHz (= 16.2 MHz / 2).  Sampled at 32.4 MHz this gives
-// two samples per MUSE pixel — the rate at which we observe the channel by combining
-// VITS from two consecutive frames.
+// and the −6 dB point at 8.1 MHz (= 16.2 MHz / 2).  Two 16.2 MHz per-C-phase references
+// are exposed:
+//
+//   • onSamplePulse() for frames whose underlying continuous-time pulse peak coincides
+//     with the 16.2 MHz sample raster (= a Kronecker delta at c_center, since the
+//     raised cosine satisfies the Nyquist criterion at the symbol rate).
+//   • offSamplePulse() for frames where the pulse is shifted half a sample to the
+//     left, so the raster captures the impulse response at half-integer T offsets
+//     (= a spread shape with ~±0.635·peak at the two samples bracketing the
+//     between-sample peak).
 
 #ifndef MUSECPP_MUSEEQREFERENCE_H
 #define MUSECPP_MUSEEQREFERENCE_H
@@ -15,43 +22,44 @@
 
 class MuseEqReference {
 public:
-    // 32.4 MHz reference: 100 slots covering 50 useful 16.2 MHz samples from each phase.
-    // (We extract 51 16.2 MHz samples per frame; phase-0 uses offsets 1..50 and phase-1
-    // uses offsets 0..49 — see MuseAdaptiveEqualizer::runLmsStep.)
-    static constexpr int c_length = 2 * (FrameBuffer::c_vits_sample_count - 1);
-    // Phase-0 frame samples occupy odd 32.4 MHz slots; phase-1 occupies even slots one
-    // 32.4 MHz cycle earlier in phase-0's reference grid.  The phase-0 pulse peak (at
-    // extracted offset c_vits_pulse_offset = 25) lands at 32.4 MHz slot 2*(25-1)+1 = 49.
-    static constexpr int c_center = 2 * (FrameBuffer::c_vits_pulse_offset - 1) + 1;
-
-    // Roll-off parameters (raised cosine with β=0.1, −6 dB at 8.1 MHz).
-    // t is measured in MUSE sample periods (1 / 16.2 MHz); at 32.4 MHz sampling
-    // each step is 0.5 MUSE sample periods.
     static constexpr float c_beta = 0.1f;
+    static constexpr int c_length = FrameBuffer::c_vits_sample_count;
+    static constexpr int c_center = FrameBuffer::c_vits_pulse_offset;
 
-    // Returns the reference pulse h[n] centered at n = c_center.  Lazily built on
-    // first call; subsequent calls return the same buffer.
-    static const std::array<float, c_length> &pulse() {
-        static const std::array<float, c_length> table = build();
+    static const std::array<float, c_length> &onSamplePulse() {
+        static const std::array<float, c_length> table = build(0.0f);
+        return table;
+    }
+    static const std::array<float, c_length> &offSamplePulse() {
+        // The phase-1 underlying pulse is half a sample earlier than phase-0's peak; in
+        // the sampling grid centred on c_center our sample at offset n is therefore at
+        // (n − c_center + 0.5) sample periods from the actual pulse peak.
+        static const std::array<float, c_length> table = build(0.5f);
         return table;
     }
 
 private:
-    static std::array<float, c_length> build() {
-        std::array<float, c_length> h{};
+    // Raised-cosine impulse response sampled at t (in MUSE sample periods).
+    static float raisedCosine(float t) {
         const float pi = 3.14159265358979323846f;
+        float sinc = (t == 0.0f) ? 1.0f : std::sin(pi * t) / (pi * t);
+        float denom = 1.0f - 4.0f * c_beta * c_beta * t * t;
+        float cos_term;
+        if (std::abs(denom) < 1e-6f) {
+            // Removable singularity at t = ±1/(2β); L'Hôpital gives (π/4) sin(π/(2β))
+            cos_term = (pi / 4.0f) * std::sin(pi / (2.0f * c_beta));
+        } else {
+            cos_term = std::cos(pi * c_beta * t) / denom;
+        }
+        return sinc * cos_term;
+    }
+
+    static std::array<float, c_length> build(float pulse_shift) {
+        std::array<float, c_length> h{};
         for (int n = 0; n < c_length; n++) {
-            float t = (float)(n - c_center) * 0.5f; // in MUSE sample periods
-            float sinc = (t == 0.0f) ? 1.0f : std::sin(pi * t) / (pi * t);
-            float denom = 1.0f - 4.0f * c_beta * c_beta * t * t;
-            float cos_term;
-            if (std::abs(denom) < 1e-6f) {
-                // Removable singularity at t = ±1/(2β); L'Hôpital gives (π/4) sin(π/(2β))
-                cos_term = (pi / 4.0f) * std::sin(pi / (2.0f * c_beta));
-            } else {
-                cos_term = std::cos(pi * c_beta * t) / denom;
-            }
-            h[n] = sinc * cos_term;
+            // pulse_shift = 0 for on-sample, 0.5 for off-sample (half-sample left).
+            float t = (float)(n - c_center) + pulse_shift;
+            h[n] = raisedCosine(t);
         }
         return h;
     }
