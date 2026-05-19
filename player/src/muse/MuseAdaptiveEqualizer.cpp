@@ -167,23 +167,3 @@ float MuseAdaptiveEqualizer::deviationFromIdentity() const {
     return std::sqrt(dev);
 }
 
-void MuseAdaptiveEqualizer::apply(float *frame_data, int frame_sample_count) {
-    if (m_mode == Mode::eOff) return;
-
-    if ((int)m_scratch.size() < frame_sample_count)
-        m_scratch.resize(frame_sample_count);
-
-    // Direct-form FIR; ends are zero-padded.  Convention matches runLmsStep():
-    //   y[i] = Σ_n h[n] · x[i − (n − center)] = Σ_n h[n] · x[i + center − n]
-    // The frame buffer is a time-ordered 16.2 MHz sequence (line boundaries are
-    // contiguous in time), so filtering across the whole buffer is correct.
-    for (int i = 0; i < frame_sample_count; i++) {
-        float acc = 0;
-        for (int n = 0; n < c_num_taps; n++) {
-            int idx = i + c_center_tap - n;
-            if (idx >= 0 && idx < frame_sample_count) acc += m_taps[n] * frame_data[idx];
-        }
-        m_scratch[i] = acc;
-    }
-    std::copy_n(m_scratch.data(), frame_sample_count, frame_data);
-}

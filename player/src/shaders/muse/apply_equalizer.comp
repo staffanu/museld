@@ -1,0 +1,89 @@
+#version 450
+
+// Adaptive equaliser FIR + float-to-fp16 input adapter.
+//
+// Reads the float input frame from the resampler/FM-demod chain, applies a
+// FIR (whose coefficients are uploaded reversed so the loop can do a forward
+// correlation), and writes the result as fp16 — the format the rest of the
+// muse compute chain consumes.  The adapted taps tend toward symmetry around
+// the centre tap but aren't guaranteed to be symmetric, so the tap reversal
+// matters.
+//
+// When the adaptive equaliser is disabled, the caller passes a single 1.0 tap
+// (filter_size = 1).  This shader still runs but degenerates to a pure
+// float→fp16 conversion.
+//
+// Convention: with taps reversed,
+//   out[g] = Σ_i taps[i] · in[g + i − center],   i = 0 .. filter_size − 1
+// where center = filter_size / 2.  Outputs in the first/last (filter_size/2)
+// positions are pass-through (= in[g] cast to fp16) — those fall in horizontal
+// blanking and aren't worth special-casing the filter for.
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint filter_size;
+};
+
+layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
+    float frame_in[];
+};
+
+layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
+    float16_t frame_out[];
+};
+
+layout(set = 0, binding = 2) buffer readonly taps_buffer {
+    float taps[];
+};
+
+#define MAX_LOCAL_SIZE 1024
+#define MAX_FILTER_SIZE 64
+
+shared float shared_input[MAX_LOCAL_SIZE + MAX_FILTER_SIZE];
+shared float shared_taps[MAX_FILTER_SIZE];
+
+void main() {
+    uint global_ix = gl_GlobalInvocationID.x;
+    uint local_ix  = gl_LocalInvocationID.x;
+    uint local_size = gl_WorkGroupSize.x;
+    uint base_ix = global_ix - local_ix;
+
+    uint total = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
+    uint center = filter_size / 2u;
+
+    // Load taps once per workgroup.
+    if (local_ix < filter_size)
+        shared_taps[local_ix] = taps[local_ix];
+
+    // Load the input window covering this workgroup's output range.
+    // shared_input[i] holds frame_in[base_ix − center + i] for
+    //   i = 0 .. local_size + filter_size − 1
+    // so that each thread can read shared_input[local_ix .. local_ix+filter_size-1].
+    int load_base = int(base_ix) - int(center);
+    int load_ix1  = load_base + int(local_ix);
+    shared_input[local_ix] = (load_ix1 >= 0 && load_ix1 < int(total)) ? frame_in[load_ix1] : 0.0;
+    if (local_ix < filter_size - 1u) {
+        int load_ix2 = load_base + int(local_ix) + int(local_size);
+        shared_input[local_ix + local_size] = (load_ix2 >= 0 && load_ix2 < int(total)) ? frame_in[load_ix2] : 0.0;
+    }
+
+    barrier();
+
+    if (global_ix >= total)
+        return;
+
+    float acc;
+    if (global_ix < center || global_ix + center >= total) {
+        // Edge: pass through unfiltered.  shared_input[local_ix + center] is the
+        // current sample (= frame_in[global_ix]) — already in shared memory.
+        acc = shared_input[local_ix + center];
+    } else {
+        acc = 0.0;
+        for (uint i = 0u; i < filter_size; i++) {
+            acc += shared_taps[i] * shared_input[local_ix + i];
+        }
+    }
+
+    frame_out[global_ix] = float16_t(acc);
+}

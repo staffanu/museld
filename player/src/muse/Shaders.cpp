@@ -2,6 +2,7 @@
 // Created by staffanu on 5/6/23.
 //
 
+#include <cstring>
 #include <stdexcept>
 #include <memory>
 #include "MuseConstants.h"
@@ -16,6 +17,9 @@ using namespace musevk;
 Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &manager, CommandPool &command_pool)
 : m_log(log),
   m_vulkan_manager(manager),
+  m_equalizer_taps_buffer(make_shared<VulkanBuffer>(manager, Size(c_equalizer_num_taps, 1), sizeof(float),
+                                                    vk::BufferUsageFlagBits::eStorageBuffer, eHostWrite)),
+  m_equalized_input_buffer(createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)),
   m_non_linear_processed_buffer(createMuseBuffer(MUSE_TOTAL_HEIGHT, MUSE_TOTAL_WIDTH)),
   m_interpolated32_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 2)),
   m_field_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 3)),
@@ -97,6 +101,11 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
           })),
   m_audio_data(createMuseBuffer(88, MUSE_TOTAL_WIDTH * 3 / 4, eHostRead))
 {
+    m_apply_equalizer_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+            "apply_equalizer",
+            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t),
+            VulkanUtil::loadSpirv(executable_dir, "apply_equalizer.comp"),
+            Size(MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT, 1, 1)));
     m_apply_rescale_and_non_linear_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "apply_rescale_and_non_linear",
             {eBuffer, eBuffer}, sizeof(float) * 3,
@@ -151,6 +160,33 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
 
 std::shared_ptr<musevk::VulkanBuffer> Shaders::createMuseBuffer(unsigned int height, unsigned int width, HostAccess host_access) {
     return make_unique<VulkanBuffer>(m_vulkan_manager, Size(width, height), 2 /* sizeof(float16) */, vk::BufferUsageFlagBits::eStorageBuffer, host_access);
+}
+
+void Shaders::applyEqualizer(CommandBuffer &sq,
+                              shared_ptr<musevk::VulkanBuffer> const &video_input,
+                              std::array<float, c_equalizer_num_taps> const &taps,
+                              bool active) {
+    // The shader uses forward correlation `out[g] = Σ taps[i] · in[g + i − center]`,
+    // so the CPU-side centered taps must be uploaded reversed.
+    // When the equaliser is inactive we upload a single 1.0 tap with filter_size = 1,
+    // which collapses the shader to a pure float→fp16 conversion of the input.
+    float *dst = m_equalizer_taps_buffer->data<float>();
+    uint32_t filter_size;
+    if (active) {
+        for (int i = 0; i < c_equalizer_num_taps; i++)
+            dst[i] = taps[c_equalizer_num_taps - 1 - i];
+        filter_size = c_equalizer_num_taps;
+    } else {
+        dst[0] = 1.0f;
+        filter_size = 1;
+    }
+    m_equalizer_taps_buffer->synchronizeHostWrites(sq);
+    m_apply_equalizer_algo->updateBufferDescriptorsInSet(0, {video_input, m_equalized_input_buffer, m_equalizer_taps_buffer});
+    sq.enqueueComputeShader<uint32_t>(m_apply_equalizer_algo, {filter_size});
+}
+
+shared_ptr<musevk::VulkanBuffer> Shaders::getEqualizedInputBuffer() const {
+    return m_equalized_input_buffer;
 }
 
 void Shaders::applyRescaleAndDeemphasisAndGamma(

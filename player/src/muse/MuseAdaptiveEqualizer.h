@@ -6,15 +6,14 @@
 // reference (raised cosine, β=0.1) and one normalised-LMS step is run.  Taps are
 // renormalised to unit DC gain so the existing rescale path is undisturbed.
 //
-// First cut: CPU only.  The apply() step is a candidate for porting to a Vulkan
-// compute shader once the algorithm has been validated.
+// The actual filter application runs on the GPU — see Shaders::applyEqualizer.
+// This class only owns the tap vector and the adaptation logic.
 //
 
 #ifndef MUSECPP_MUSEADAPTIVEEQUALIZER_H
 #define MUSECPP_MUSEADAPTIVEEQUALIZER_H
 
 #include <array>
-#include <vector>
 
 #include "FrameBuffer.h"
 
@@ -51,11 +50,10 @@ public:
     // frame_subsampling_phase_C from the decoded control signal (0 or 1); pass -1
     // if the control signal could not be decoded, in which case the step is
     // skipped.  frame_no is unused but kept for log/diagnostic continuity.
+    //
+    // The taps themselves are exposed via taps(); the actual filtering happens on
+    // the GPU in Shaders::applyEqualizer.
     void updateFromFrame(float const *frame_data, int frame_no, int phase_c);
-
-    // Filters the input frame in-place at 16.2 MHz using the current taps.
-    // No-op if mode is eOff.
-    void apply(float *frame_data, int frame_sample_count);
 
 private:
     Logger &m_log;
@@ -67,8 +65,6 @@ private:
     int m_updates = 0;
     float m_last_err_energy = 0.0f;
     float m_last_obs_peak = 0.0f;
-
-    std::vector<float> m_scratch; // scratch buffer for in-place filtering
 
     void runLmsStep(const std::array<float, c_vits_len> &curr_line0,
                     const std::array<float, c_vits_len> &curr_line1,

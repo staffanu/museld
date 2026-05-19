@@ -136,12 +136,11 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
             if (auto const &cd = frame_buffer->get_field(1).own_control_data())
                 phase_c = cd->frame_subsampling_phase_C.value_or(-1);
 
-        // Adaptive equaliser: train from the raw VITS, then filter the frame in
-        // place at 16.2 MHz before the rescale shader runs.  The filter has unit
-        // DC gain by construction, so EstimateRescale's flat-region anchors are
-        // unaffected.
+        // Adaptive equaliser: train (CPU) from the raw VITS.  The actual filter is
+        // applied on the GPU below in the m_shaders pipeline.  The filter has unit
+        // DC gain by construction, so estimating rescale on the raw (pre-EQ) buffer
+        // gives the same flat-region anchors as estimating it on the EQ'd buffer.
         m_equalizer.updateFromFrame(input_float, m_frame_no, phase_c);
-        m_equalizer.apply(input_float, MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT);
 
         auto rescale_estimate = FrameBuffer::EstimateRescale(input_float);
         if (m_rescale.first == -1 && m_rescale.second == -1)
@@ -174,8 +173,17 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
         input_block->video_data->synchronizeHostWrites(*m_first_stage_command_buffer);
         input_block->dropout_data->synchronizeHostWrites(*m_first_stage_command_buffer);
 
+        // Run the EQ shader unconditionally — it is the float-to-fp16 input adapter,
+        // and when the adaptive equaliser is off it degenerates to a 1-tap identity
+        // (= a plain float→fp16 conversion of input_vulkan_buffer).  The rest of the
+        // muse compute chain consumes fp16, so this is always the first shader stage.
+        m_shaders.applyEqualizer(*m_first_stage_command_buffer, input_vulkan_buffer,
+                                 m_equalizer.taps(),
+                                 m_equalizer.mode() != MuseAdaptiveEqualizer::Mode::eOff);
+
         m_shaders.applyRescaleAndDeemphasisAndGamma(*m_first_stage_command_buffer,
-                                                    input_vulkan_buffer, input_block->dropout_data,
+                                                    m_shaders.getEqualizedInputBuffer(),
+                                                    input_block->dropout_data,
                                                     frame_buffer->data(),
                                                     m_rescale, enable_non_linear, dropout_mode);
         frame_buffer->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing

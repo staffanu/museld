@@ -5,6 +5,7 @@
 #ifndef MUSECPP_SHADERS_H
 #define MUSECPP_SHADERS_H
 
+#include <array>
 #include <string>
 #include <vector>
 #include <csignal>
@@ -38,6 +39,23 @@ public:
                                            std::shared_ptr <musevk::VulkanBuffer> const &buffer,
                                            const std::pair<float, float> &rescale,
                                            bool enable_non_linear, DropoutMode dropout_mode);
+
+    // Adaptive equaliser FIR + float→fp16 input adapter.  Reads float video_input,
+    // writes fp16 into the internal equalised buffer (accessible via
+    // getEqualizedInputBuffer()).  Must be called before
+    // applyRescaleAndDeemphasisAndGamma, which takes getEqualizedInputBuffer() as
+    // its video_input.
+    //
+    // When active is false the shader runs with a 1-tap identity filter — just a
+    // float→fp16 conversion with no convolution work — so this method is always
+    // called regardless of equaliser mode, and the rescale shader always sees fp16
+    // input.
+    static constexpr int c_equalizer_num_taps = 33;
+    void applyEqualizer(musevk::CommandBuffer &sq,
+                        std::shared_ptr<musevk::VulkanBuffer> const &video_input,
+                        std::array<float, c_equalizer_num_taps> const &taps,
+                        bool active);
+    [[nodiscard]] std::shared_ptr<musevk::VulkanBuffer> getEqualizedInputBuffer() const;
 
     void decodeIntraField(musevk::CommandBuffer &sq, FieldBufferView &field);
 
@@ -74,6 +92,7 @@ private:
     Logger &m_log;
     musevk::VulkanManager &m_vulkan_manager;
 
+    std::shared_ptr<musevk::ComputeShader> m_apply_equalizer_algo;
     std::shared_ptr<musevk::ComputeShader> m_apply_rescale_and_non_linear_algo;
     std::shared_ptr<musevk::ComputeShader> m_apply_dropout_compensation_algo;
     std::shared_ptr<musevk::ComputeShader> m_apply_deemphasis_and_gamma_algo;
@@ -85,6 +104,11 @@ private:
     std::shared_ptr<musevk::ComputeShader> m_decode_c_single_field_algo;
     std::shared_ptr<musevk::ComputeShader> m_detect_motion_algo;
     std::shared_ptr<musevk::ComputeShader> m_combine_still_and_moving_algo;
+
+    // adaptive equaliser: small host-writable buffer for taps (updated each frame),
+    // and a full-frame device buffer for the EQ output
+    std::shared_ptr<musevk::VulkanBuffer> m_equalizer_taps_buffer;     // c_equalizer_num_taps × float
+    std::shared_ptr<musevk::VulkanBuffer> m_equalized_input_buffer;    // MUSE_TOTAL_HEIGHT × MUSE_TOTAL_WIDTH × fp16
 
     // temporary data used for the output of non-linear processing to the de-emphasis filter
     std::shared_ptr<musevk::VulkanBuffer> m_non_linear_processed_buffer; // MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH

@@ -2,8 +2,9 @@
 
 // This shader should be invoked with global invocation ids
 // ranging from (0, 0) to (MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT).
-// The input are floats, but outputs are float16_t, since all
-// further processing is performed on half floats.
+// Both input and output are float16_t — the float→fp16 conversion of the
+// FM-demod output happens in apply_equalizer.comp, which always runs before
+// this shader (with a 1-tap identity filter when adaptive EQ is disabled).
 
 /*
  * The rescale step maps raw input sample values into the standard [0, 255] range
@@ -27,7 +28,7 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
-    float frame_in[][MUSE_TOTAL_WIDTH];
+    float16_t frame_in[][MUSE_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
@@ -71,7 +72,7 @@ void main() {
     if (row >= MUSE_TOTAL_HEIGHT || col >= MUSE_TOTAL_WIDTH)
         return;
 
-    float16_t v = float16_t(frame_in[row][col]);
+    float16_t v = frame_in[row][col];
 
     // Apply rescale: map raw input values to the [0, 255] range
     float16_t rescale1 = float16_t(rescale1_f);
