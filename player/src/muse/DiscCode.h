@@ -13,7 +13,8 @@ class DiscCode : public DiscInfo {
 public:
     DiscCode(int mode, int cadr, int fadr1, int fadr2);
 
-    std::vector<std::string> asStrings() const;
+    std::vector<std::string> asStrings() const override;
+    std::optional<double> playbackTimeSeconds() const override;
 
 private:
     int m_mode;

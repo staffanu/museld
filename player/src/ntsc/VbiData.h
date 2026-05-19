@@ -18,7 +18,8 @@ public:
     std::optional<int> cav_picture_number,
     std::optional<bool> cx_enabled);
 
-    std::vector<std::string> asStrings() const;
+    std::vector<std::string> asStrings() const override;
+    std::optional<double> playbackTimeSeconds() const override;
 
 private:
     bool m_is_lead_in;

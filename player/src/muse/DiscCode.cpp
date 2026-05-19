@@ -20,3 +20,12 @@ std::vector<std::string> DiscCode::asStrings() const {
 
     return {disc_code_string1, disc_code_string2};
 }
+
+std::optional<double> DiscCode::playbackTimeSeconds() const {
+    // MUSE is 60 fields/30 progressive frames per second. The disc-code frame
+    // counter starts at 1.
+    if (pf()) return std::nullopt; // lead-in / TOC has no playback time
+    const int f = frame();
+    if (f <= 0) return std::nullopt;
+    return (f - 1) / 30.0;
+}

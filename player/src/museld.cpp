@@ -14,6 +14,9 @@
 #include "OsdOverlay.h"
 #include "FrameBlitter.h"
 #include "InputController.h"
+#include "subtitles/SrtParser.h"
+#include "subtitles/SubtitleFont.h"
+#include "subtitles/SubtitleOverlay.h"
 #include "input/InputReader.h"
 #include "input/InputReaderFactory.h"
 #include "muse/ResamplingFrameReader.h"
@@ -51,7 +54,9 @@ static void runPlayer(Logger &log,
                       bool output_yuv,
                       const std::unique_ptr<VideoFileWriter> &vfw,
                       AudioPlayback *audio_playback,
-                      const std::string &executable_dir) {
+                      const std::string &executable_dir,
+                      const std::optional<std::string> &subtitles_path,
+                      const std::optional<std::string> &subtitle_font_path) {
     vk::Device &device = manager.getDevice();
 
     vk::SemaphoreCreateInfo semaphoreInfo{};
@@ -72,6 +77,28 @@ static void runPlayer(Logger &log,
         OsdOverlay osd;
         FrameBlitter blitter;
         InputController input(log);
+
+        std::unique_ptr<SubtitleOverlay> subtitle_overlay;
+        if (subtitles_path) {
+            try {
+                auto entries = parseSrt(*subtitles_path);
+                log.info(eApplication, std::format("Loaded {} subtitle entries from {}", entries.size(), *subtitles_path));
+                std::filesystem::path font_path = subtitle_font_path
+                    ? std::filesystem::path(*subtitle_font_path)
+                    : std::filesystem::path(executable_dir) / "fonts" / "NotoSansJP-Regular.ttf";
+                const int frame_h = (int)decoder.getResultImages().out_image->getHeight();
+                const int pixel_height = std::max(20, frame_h / 18);
+                auto font = std::make_unique<SubtitleFont>(font_path, pixel_height, manager, command_pool);
+                for (const auto &e : entries)
+                    for (const auto &line : e.lines)
+                        font->warmUpLine(utf8ToCodepoints(line));
+                font->finalizeAtlas(command_pool);
+                subtitle_overlay = std::make_unique<SubtitleOverlay>(
+                    std::move(entries), std::move(font), executable_dir, manager, command_pool);
+            } catch (const std::exception &x) {
+                log.error(eApplication, std::format("Subtitles disabled: {}", x.what()));
+            }
+        }
 
         auto t0 = chrono::high_resolution_clock::now();
 
@@ -112,6 +139,8 @@ static void runPlayer(Logger &log,
 
             command_buffer->begin();
             state.last_cursor_string = osd.render(*command_buffer, images, state, decoder, window, text_renderer);
+            if (subtitle_overlay)
+                subtitle_overlay->render(*command_buffer, images, state, decoder);
             blitter.present(*command_buffer, images, state, src_dims,
                             swap_chain_image, manager.getSwapChainExtent(), manager,
                             image_available_semaphore);
@@ -152,7 +181,9 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   bool start_paused, bool decode_video, DropoutMode dropout_mode,
                   bool decode_audio, bool efm_audio, bool benchmark_shaders,
                   MuseAdaptiveEqualizer::Mode eq_mode, float eq_alpha,
-                  optional<string> const &output_filename) {
+                  optional<string> const &output_filename,
+                  optional<string> const &subtitles_path,
+                  optional<string> const &subtitle_font_path) {
     glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -242,7 +273,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         runPlayer(log, manager, *decoder, reader_controls, window, full_screen, start_paused,
                   dropout_mode, efm_audio, benchmark_shaders,
                   output_filename.has_value(),
-                  vfw, audio_playback.get(), executable_dir);
+                  vfw, audio_playback.get(), executable_dir,
+                  subtitles_path, subtitle_font_path);
     }
 
 #ifdef HAVE_LIBAV
@@ -288,6 +320,8 @@ int main(int argc, char *argv[]) {
     bool benchmark_shaders = false;
     MuseAdaptiveEqualizer::Mode eq_mode = MuseAdaptiveEqualizer::Mode::eAdapt;
     constexpr float eq_alpha = 0.005f;
+    optional<string> subtitles_path;
+    optional<string> subtitle_font_path;
 
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -400,6 +434,20 @@ int main(int argc, char *argv[]) {
     options.emplace_back("--no-sync", [&] () mutable -> void {
         no_sync = true;
     });
+    options.emplace_back("--subtitles", [&] () mutable -> void {
+        subtitles_path = *(it++);
+        if (!filesystem::exists(*subtitles_path)) {
+            cerr << "Subtitle file not found: " << *subtitles_path << endl;
+            exit(EXIT_FAILURE);
+        }
+    });
+    options.emplace_back("--subtitle-font", [&] () mutable -> void {
+        subtitle_font_path = *(it++);
+        if (!filesystem::exists(*subtitle_font_path)) {
+            cerr << "Subtitle font not found: " << *subtitle_font_path << endl;
+            exit(EXIT_FAILURE);
+        }
+    });
     options.emplace_back("--help", [&] () mutable -> void {
         usage();
     });
@@ -450,7 +498,8 @@ int main(int argc, char *argv[]) {
                         process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
                                                      efm_audio,
-                                                     benchmark_shaders, eq_mode, eq_alpha, output_filename);
+                                                     benchmark_shaders, eq_mode, eq_alpha, output_filename,
+                                     subtitles_path, subtitle_font_path);
                         delete reader;
                         break;
                     }
@@ -459,7 +508,8 @@ int main(int argc, char *argv[]) {
                                 log, *it, input_format, initial_seek_seconds, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
-                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename);
+                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename,
+                                     subtitles_path, subtitle_font_path);
                         delete reader;
                         break;
                     }
@@ -471,7 +521,8 @@ int main(int argc, char *argv[]) {
                                 efm_audio, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
-                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename);
+                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename,
+                                     subtitles_path, subtitle_font_path);
                         delete reader;
                         break;
                     }

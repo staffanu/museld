@@ -170,6 +170,9 @@ if(BUILD_MUSE)
         TextRenderer.cpp TextRenderer.h
         PlayerState.h
         OsdOverlay.cpp OsdOverlay.h
+        subtitles/SrtParser.cpp subtitles/SrtParser.h
+        subtitles/SubtitleFont.cpp subtitles/SubtitleFont.h
+        subtitles/SubtitleOverlay.cpp subtitles/SubtitleOverlay.h
         FrameBlitter.cpp FrameBlitter.h
         InputController.cpp InputController.h
 
@@ -226,6 +229,7 @@ if(BUILD_MUSE)
         ${PORTAUDIO_INCLUDE_DIRS}
         ${Vulkan_INCLUDE_DIRS}
         ${FLAC_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/stb
     )
     if(HAVE_LIBAV)
         target_include_directories(museld PRIVATE ${LIBAV_INCLUDE_DIR})
@@ -262,4 +266,17 @@ if(BUILD_MUSE)
     endforeach()
     add_custom_target(Shaders DEPENDS ${SPIRV_BINARY_FILES})
     add_dependencies(museld Shaders)
+
+    # Copy the bundled subtitle font next to the binary so museld can find it at
+    # "${executable_dir}/fonts/NotoSansJP-Regular.ttf" by default.
+    set(MUSELD_FONT_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/noto/NotoSansJP-Regular.ttf)
+    set(MUSELD_FONT_DST ${CMAKE_CURRENT_BINARY_DIR}/fonts/NotoSansJP-Regular.ttf)
+    add_custom_command(
+        OUTPUT ${MUSELD_FONT_DST}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/fonts
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${MUSELD_FONT_SRC} ${MUSELD_FONT_DST}
+        DEPENDS ${MUSELD_FONT_SRC}
+    )
+    add_custom_target(SubtitleFontAsset DEPENDS ${MUSELD_FONT_DST})
+    add_dependencies(museld SubtitleFontAsset)
 endif()

@@ -4,9 +4,12 @@ add_executable(museld-tests
     ReedSolomonTest.cpp
     BchDecoderTest.cpp
     FilterSimdParityTest.cpp
+    SrtParserTest.cpp
     ../src/bch/BchDecoder.cpp
-
+    ../src/subtitles/SrtParser.cpp
 )
+
+target_include_directories(museld-tests PRIVATE ../src)
 
 target_link_libraries(museld-tests
     PRIVATE Catch2::Catch2WithMain

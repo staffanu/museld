@@ -50,6 +50,9 @@ Machines tested and found too slow: NVIDIA Jetson Nano, Raspberry Pi 5 (1–5 fp
 | `--write <file>` | Write decoded video to media file (FFmpeg, experimental) |
 | `--log <spec>` | Log level per category, e.g. `A3V4` (Audio=Info, Video=Debug). Categories: M P A V D I O; levels 0–4 = Off Error Warn Info Debug |
 | `--benchmark-shaders` | Print GPU shader timing statistics |
+| `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |
+| `--subtitles <file.srt>` | Display SRT subtitles synced to the disc's own time code |
+| `--subtitle-font <file.ttf>` | Override the default subtitle font (bundled Noto Sans JP) |
 
 ## Keyboard shortcuts during playback
 

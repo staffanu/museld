@@ -31,11 +31,13 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
     muse/          — MUSE frame buffers, audio/video decoders, GPU shaders interface
     ntsc/          — NTSC frame buffers, sync detection, field decoder
     musevk/        — Vulkan abstraction layer (buffers, images, command pools, compute)
+    subtitles/     — SRT parser, stb_truetype-based glyph atlas, GPU subtitle overlay
     util/          — PercentileFilter, LinearRegression, ConstExprHelpers, FmtAddons
     shaders/       — GLSL compute shaders (compiled to SPIR-V at build time)
     museld.cpp
     ac3rf-efm-decode.cpp
-  tests/           — Catch2 unit tests (ReedSolomonTest, BchDecoderTest)
+  tests/           — Catch2 unit tests (ReedSolomonTest, BchDecoderTest, SrtParserTest)
+  third_party/     — Vendored single-header libs (stb_truetype.h) and the bundled subtitle font (Noto Sans JP, SIL OFL)
   cmake/           — CMake helpers (ac3rfConfig.cmake.in, modules/FindPORTAUDIO.cmake, etc.)
   python/          — nanobind Python bindings source
 fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device

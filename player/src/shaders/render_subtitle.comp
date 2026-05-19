@@ -1,0 +1,87 @@
+#version 450
+
+#include "muse.h"
+
+// Subtitle overlay compositor. A single dispatch handles two kinds of quads
+// stored consecutively in `quads`:
+//   indices [0, n_rect)              => translucent grey rectangles (per-line
+//                                       background plates)
+//   indices [n_rect, n_rect+n_glyph) => glyph blits from the coverage atlas
+//
+// The dispatch is sized to the union bounding box of all quads. Each invocation
+// scans the quad list and emits at most one rect contribution followed by at most
+// one glyph contribution for its pixel.
+
+layout(push_constant) uniform PushConstants {
+    uint n_rect;
+    uint n_glyph;
+    uint atlas_width;
+    uint atlas_height;
+    float bg_r;
+    float bg_g;
+    float bg_b;
+    float bg_a;
+};
+
+struct Quad {
+    uint dst_x;
+    uint dst_y;
+    uint width;
+    uint height;
+    uint atlas_x;
+    uint atlas_y;
+    uint _pad0;
+    uint _pad1;
+};
+
+layout(set = 0, binding = 0) buffer readonly QuadBuffer {
+    Quad quads[];
+};
+
+layout(set = 0, binding = 1) buffer readonly AtlasBuffer {
+    uint atlas[];
+};
+
+layout(set = 0, binding = 2, rgba32f) uniform image2D frame_out_image;
+
+void main() {
+    uint x = gl_GlobalInvocationID.x;
+    uint y = gl_GlobalInvocationID.y;
+
+    vec4 cur = imageLoad(frame_out_image, ivec2(x, y));
+    vec3 c = cur.rgb;
+    bool touched = false;
+
+    // Pass 1: backgrounds.
+    for (uint i = 0u; i < n_rect; ++i) {
+        Quad q = quads[i];
+        if (x >= q.dst_x && y >= q.dst_y
+            && x < q.dst_x + q.width && y < q.dst_y + q.height) {
+            c = mix(c, vec3(bg_r, bg_g, bg_b), bg_a);
+            touched = true;
+            break;
+        }
+    }
+
+    // Pass 2: glyphs (composited on top of any background).
+    for (uint i = 0u; i < n_glyph; ++i) {
+        Quad q = quads[n_rect + i];
+        if (x < q.dst_x || y < q.dst_y) continue;
+        uint lx = x - q.dst_x;
+        uint ly = y - q.dst_y;
+        if (lx >= q.width || ly >= q.height) continue;
+        uint ax = q.atlas_x + lx;
+        uint ay = q.atlas_y + ly;
+        uint idx = ay * atlas_width + ax;
+        float cov = float(atlas[idx] & 0xffu) / 255.0;
+        if (cov > 0.0) {
+            c = mix(c, vec3(1.0, 1.0, 1.0), cov);
+            touched = true;
+        }
+        break;
+    }
+
+    if (touched) {
+        imageStore(frame_out_image, ivec2(x, y), vec4(c, 1.0));
+    }
+}

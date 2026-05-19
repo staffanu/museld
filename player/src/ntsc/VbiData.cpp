@@ -45,3 +45,17 @@ std::vector<std::string> VbiData::asStrings() const {
 
   return {string1, string2};
 }
+
+std::optional<double> VbiData::playbackTimeSeconds() const {
+  constexpr double ntsc_fps = 30000.0 / 1001.0; // 29.97
+  if (m_is_clv) {
+    if (!m_clv_time_seconds.has_value()) return std::nullopt;
+    double t = static_cast<double>(m_clv_time_seconds.value());
+    if (m_clv_picture_number.has_value())
+      t += (m_clv_picture_number.value() - 1) / ntsc_fps;
+    return t;
+  }
+  if (m_cav_picture_number.has_value())
+    return (m_cav_picture_number.value() - 1) / ntsc_fps;
+  return std::nullopt;
+}
