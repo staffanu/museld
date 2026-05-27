@@ -12,8 +12,10 @@ option(BUILD_MUSE         "Build the MUSE/NTSC decoder (needs Vulkan/GLFW/PortAu
 option(BUILD_PYTHON       "Build the nanobind Python bindings"                                  ON)
 
 add_subdirectory(src)
-enable_testing()
-add_subdirectory(tests)
+if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 if(BUILD_PYTHON)
     add_subdirectory(python)
 endif()
