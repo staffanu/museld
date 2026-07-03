@@ -106,5 +106,14 @@ void main() {
     imageStore(frame_out_image, ivec2(col, row), vec4(float(r), float(g), float(b), 1.f));
 
     if (output_yuv != 0) {
+        frame_out_Y[row][col] = uint16_t(clamp(Y * 256.hf, 0.hf, 255.hf) * 256.hf);
+        if ((row & 1) == 0 && (col & 1) == 0) {
+            // U and V carry modulation-scaled color differences (B-Y = 2.032062 U,
+            // R-Y = 1.139883 V); rescale to full-range Cb = (B-Y)/1.772, Cr = (R-Y)/1.402
+            float16_t Cb = U * 1.146757hf;
+            float16_t Cr = V * 0.813040hf;
+            frame_out_U[row / 2][col / 2] = uint16_t(clamp(Cb * 256.hf + 128.hf, 0.hf, 255.hf) * 256.hf);
+            frame_out_V[row / 2][col / 2] = uint16_t(clamp(Cr * 256.hf + 128.hf, 0.hf, 255.hf) * 256.hf);
+        }
     }
 }
