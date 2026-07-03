@@ -61,6 +61,29 @@ const float16_t fc0 = 0.083333hf;
 const float16_t fc1 = 0.25hf;
 const float16_t fc2 = 0.333333hf;
 
+// Constants for the RGB inverse-gamma curve of ITU-R BO.786 §3.2.8.1:
+//   y = A(x - B)^2.2 + C
+// The spec determines them by: the curve passes through (0,0) and (1,1), and the
+// ratio of gradients at those points is 1:5.
+// => [1 (0,0)]: A(-B)^2.2 + C = 0
+//    [2 (1,1)]: A(1 - B)^2.2 + C = 1
+//    [3 (derivative)]: 5 * 2.2 A(-B)^1.2 = 2.2 A(1 - B)^1.2
+// Numerical solution yields A=0.541579, B=-0.354155, C=-0.055193
+// These correspond well to the values given in Figure 4.50 in MUSE－ハイビジョン伝送方式 (from NHK).
+const float16_t inv_gamma_A = 0.541579hf;
+const float16_t inv_gamma_B = -0.354155hf;
+const float16_t inv_gamma_C = -0.055193hf;
+
+// The encoder applies the §3.2.8.1 curve to R, G, B before the matrix, so the
+// matrix output here is in that "pseudo-linear" domain, not linear light.
+// Invert the curve to recover the studio gamma-corrected signal (R'), then apply
+// the CRT EOTF (gamma 2.2) to get linear light for the sRGB swapchain.
+// Verified against analog component output levels of a reference (Sony) decoder.
+float16_t display_linear(float16_t p) {
+    float16_t rp = pow((p - inv_gamma_C) / inv_gamma_A, 1.0hf / 2.2hf) + inv_gamma_B;
+    return pow(clamp(rp, 0.0hf, 1.0hf), 2.2hf);
+}
+
 // Unfortunately having two versions of the color interpolation functions is necessary since we cannot pass the buffer itself
 // to the function -- tried that and it seems that it is copied despite being read-only!
 float16_t resample_inter_frame_r(uint row, uint col) {
@@ -191,12 +214,22 @@ void main() {
     float16_t BmYM = BmYM_field * movement + BmYM_inter_frame * (1.0hf - movement);
     float16_t RmYM = RmYM_field * movement + RmYM_inter_frame * (1.0hf - movement);
 
-    const float16_t min_value = 16.hf;
-    const float16_t range = (239.hf * 0.89125hf) - min_value; // According to one source, the white point is at 1 dB lower than 239
-    //const float16_t range = 239.hf - min_value;
+    // Picture black/white levels in the pseudo-linear (post-inverse-transmission-gamma)
+    // domain.  Measured on the Sony test disc: picture content spans 35..218 pre-gamma,
+    // i.e. 24.6..206.6 after the inverse transmission gamma, and the reference decoder
+    // maps exactly these levels to 0 mV (picture black) and 700 mV (peak white) on its
+    // analog component output.  The spec levels 16/239 are headroom references, not
+    // picture extremes.
+    const float16_t min_value = 24.6hf;
+    const float16_t range = 206.6hf - min_value;
     float16_t g = clamp((YM - BmYM / 4.0hf - RmYM / 2.0hf - min_value) / range, 0.hf, 1.hf);
     float16_t b = clamp((YM + BmYM + BmYM / 4.0hf - min_value) / range, 0.hf, 1.hf);
     float16_t r = clamp((YM + RmYM - min_value) / range, 0.hf, 1.hf);
+
+    // The matrix output is pseudo-linear (see display_linear); convert to linear light
+    r = display_linear(r);
+    g = display_linear(g);
+    b = display_linear(b);
 
     // r g b are in linear space, but using SMPTE C color primaries.
     // Convert to sRGB colors used by Vulkan
@@ -208,18 +241,8 @@ void main() {
     imageStore(frame_out_image, ivec2(col, row), vec4(float(r2), float(g2), float(b2), 1.f));
 
     if (output_yuv != 0) {
-        // A(x - B)^2.2 + C  Ratio of derivative in (0, 0) and (1, 1) should be 1:5.
-        // => [1 (0,0)]: A(-B)^2.2 + C = 0
-        //    [2 (1,1)]: A(1 - B)^2.2 + C = 1
-        //    [3 (derivative)]: 5 * 2.2 A(-B)^1.2 = 2.2 A(1 - B)^1.2
-        // Numerical solution yields A=0.541579, B=-0.354155, C=-0.055193
-        // These correspond well to the values given in Figure 4.50 in MUSE－ハイビジョン伝送方式 (from NHK).
-        const float16_t A = 0.541579hf;
-        const float16_t B = -0.354155hf;
-        const float16_t C = -0.055193hf;
-
         float16_t YM01 = (YM - min_value) / range;
-        float16_t YM01postGamma = pow((YM01 - C) / A, 1.0hf / 2.2hf) + B;
+        float16_t YM01postGamma = pow((YM01 - inv_gamma_C) / inv_gamma_A, 1.0hf / 2.2hf) + inv_gamma_B;
 
         frame_out_y[row][col] = uint16_t(clamp(YM01postGamma * 256.hf, 0.hf, 255.hf) * 256.hf);
         if ((row & 1) == 0 && (col & 1) == 0) {
