@@ -384,7 +384,7 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
 }
 
 ResultImages Shaders::getResultImages() {
-    return ResultImages { m_image_out, m_image_Y_out, m_image_V_out, m_image_U_out};
+    return ResultImages { m_image_out, m_image_Y_out, m_image_U_out, m_image_V_out};
 }
 
 void Shaders::convertAudioSampleRate(musevk::CommandBuffer &sq, shared_ptr<VulkanBuffer> const &frame) {

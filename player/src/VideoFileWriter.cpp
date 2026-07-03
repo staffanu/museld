@@ -2,31 +2,46 @@
 // Created by staffanu on 3/7/24.
 //
 
+#include <climits>
 #include "VideoFileWriter.h"
 #include "musevk/VulkanBuffer.h"
 
+VideoFileWriter::PresetSpec VideoFileWriter::presetSpec(VideoWriterPreset preset) {
+    switch (preset) {
+        case VideoWriterPreset::eStandard:
+            return {"mp4", "libx264", "aac", AV_PIX_FMT_YUV420P};
+        case VideoWriterPreset::eArchival:
+            return {"matroska", "ffv1", "pcm_s16le", AV_PIX_FMT_YUV420P16LE};
+    }
+    throw std::runtime_error("Unknown video writer preset");
+}
+
+static int audioModeSampleRate(AudioMode mode) {
+    switch (mode) {
+        case MODE_A:   return 32000;
+        case MODE_B:   return 48000;
+        case MODE_EFM: return 44100;
+        default:       return 0;
+    }
+}
+
 bool VideoFileWriter::init() {
-    avformat_alloc_output_context2(&m_format_context, nullptr, nullptr, m_filename.c_str());
+    const PresetSpec spec = presetSpec(m_preset);
+
+    // The muxer is chosen by the preset, not deduced from the filename extension
+    avformat_alloc_output_context2(&m_format_context, nullptr, spec.format_name, m_filename.c_str());
     if (!m_format_context) {
-        m_log.info(eVideo, "Could not deduce output format from filename extension");
+        m_log.error(eOutput, std::format("Could not allocate output context for format '{}'", spec.format_name));
         return false;
     }
 
-    AVDictionary *opt = nullptr;
-//        av_dict_set(&opt, "flags", "???", 0);
-//        av_dict_set(&opt, "fflags", "???", 0);
+    initVideo(spec);
+    m_have_video = true;
+    m_encode_video = true;
 
-    if (m_format_context->oformat->video_codec != AV_CODEC_ID_NONE) {
-        initVideo(opt);
-        m_have_video = true;
-        m_encode_video = true;
-    }
-
-    if (m_format_context->oformat->audio_codec != AV_CODEC_ID_NONE) {
-        initAudio(opt);
-        m_have_audio = true;
-        m_encode_audio = true;
-    }
+    initAudio(spec);
+    m_have_audio = true;
+    m_encode_audio = true;
 
     av_dump_format(m_format_context, 0, m_filename.c_str(), 1);
 
@@ -38,7 +53,7 @@ bool VideoFileWriter::init() {
     }
 
     // Write the stream header, if any
-    int ret = avformat_write_header(m_format_context, &opt);
+    int ret = avformat_write_header(m_format_context, nullptr);
     if (ret < 0)
         throw std::runtime_error(std::format("Error occurred when opening output file: {}", av_err2string(ret)));
 
@@ -60,57 +75,82 @@ void VideoFileWriter::addVideoFrameWithAudio(
         m_encode_video = !writeFrame(m_video_stream.codec_context, m_video_stream.stream, frame, m_video_stream.tmp_pkt);
     }
 
-    if (number_of_samples != 0 && m_encode_audio) {
-
-        int ret = av_frame_make_writable(m_audio_stream.frame);
-        if (ret < 0)
-            throw std::runtime_error("Failed to make audio frame writable");
+    if (number_of_samples != 0 && audio_mode != MODE_UNKNOWN && m_encode_audio) {
+        initResampler(audio_mode);
 
         auto *q = (int16_t *) m_audio_tmp_buffer;
         for (int i = 0; i < number_of_samples; i++)
             for (int j = 0; j < m_audio_stream.codec_context->ch_layout.nb_channels; j++)
                 *q++ = audio_samples[i].samples[j];
 
-        int bytes_per_sample = av_get_bytes_per_sample((AVSampleFormat)m_audio_stream.frame->format);
-
-        bool filled_frame;
-        do {
-            uint8_t *out[8];
-            if (av_sample_fmt_is_planar((AVSampleFormat)m_audio_stream.frame->format)) {
-                for (int i = 0; i < m_audio_stream.codec_context->ch_layout.nb_channels; i++)
-                    out[i] = {m_audio_stream.frame->data[i] + m_samples_in_frame * bytes_per_sample};
-            } else {
-                assert(false); // easy to add support if needed
-            }
-            const uint8_t *in[8] = {m_audio_tmp_buffer};
-
-            ret = swr_convert(m_swr_ctx, out,
-                              m_audio_stream.frame->nb_samples - m_samples_in_frame,
-                              in, number_of_samples);
-            number_of_samples = 0;
-            if (ret < 0)
-                throw std::runtime_error("Error while converting audio");
-
-            m_samples_in_frame += ret;
-
-            assert (m_samples_in_frame <= m_audio_stream.frame->nb_samples);
-            filled_frame =  m_samples_in_frame == m_audio_stream.frame->nb_samples;
-            if (filled_frame) {
-
-                m_encode_audio = !writeFrame(m_audio_stream.codec_context, m_audio_stream.stream, m_audio_stream.frame,
-                                             m_audio_stream.tmp_pkt);
-
-                assert(av_frame_is_writable(m_audio_stream.frame)); // it seems like audio frames are always writable after making writable the first time?
-
-                m_audio_stream.frame->pts = m_audio_stream.next_pts;
-                m_audio_stream.next_pts += m_audio_stream.frame->nb_samples;
-                m_samples_in_frame = 0;
-            }
-        } while (filled_frame);
+        const uint8_t *in[8] = {m_audio_tmp_buffer};
+        convertAndWriteAudio(in, number_of_samples);
     }
 }
 
+// Feed samples into the resampler and hand completed frames to the encoder.
+// Called with in == nullptr (and in_samples == 0) to flush the resampler at end of stream.
+void VideoFileWriter::convertAndWriteAudio(const uint8_t **in, int in_samples) {
+    int ret = av_frame_make_writable(m_audio_stream.frame);
+    if (ret < 0)
+        throw std::runtime_error("Failed to make audio frame writable");
+
+    int bytes_per_sample = av_get_bytes_per_sample((AVSampleFormat)m_audio_stream.frame->format);
+
+    bool filled_frame;
+    do {
+        uint8_t *out[8];
+        if (av_sample_fmt_is_planar((AVSampleFormat)m_audio_stream.frame->format)) {
+            for (int i = 0; i < m_audio_stream.codec_context->ch_layout.nb_channels; i++)
+                out[i] = {m_audio_stream.frame->data[i] + m_samples_in_frame * bytes_per_sample};
+        } else {
+            out[0] = {m_audio_stream.frame->data[0]
+                      + m_samples_in_frame * bytes_per_sample * m_audio_stream.codec_context->ch_layout.nb_channels};
+        }
+
+        ret = swr_convert(m_swr_ctx, out,
+                          m_audio_stream.frame->nb_samples - m_samples_in_frame,
+                          in, in_samples);
+        in_samples = 0;
+        if (ret < 0)
+            throw std::runtime_error("Error while converting audio");
+
+        m_samples_in_frame += ret;
+
+        assert (m_samples_in_frame <= m_audio_stream.frame->nb_samples);
+        filled_frame = m_samples_in_frame == m_audio_stream.frame->nb_samples;
+        if (filled_frame) {
+
+            m_encode_audio = !writeFrame(m_audio_stream.codec_context, m_audio_stream.stream, m_audio_stream.frame,
+                                         m_audio_stream.tmp_pkt);
+
+            assert(av_frame_is_writable(m_audio_stream.frame)); // it seems like audio frames are always writable after making writable the first time?
+
+            m_audio_stream.frame->pts = m_audio_stream.next_pts;
+            m_audio_stream.next_pts += m_audio_stream.frame->nb_samples;
+            m_samples_in_frame = 0;
+        }
+    } while (filled_frame && m_encode_audio);
+}
+
 void VideoFileWriter::cleanup() {
+    // Flush pending audio: drain the resampler, then send the final (shorter) frame
+    if (m_encode_audio && m_swr_ctx) {
+        convertAndWriteAudio(nullptr, 0);
+        if (m_samples_in_frame > 0 && m_encode_audio) {
+            m_audio_stream.frame->nb_samples = m_samples_in_frame;
+            m_encode_audio = !writeFrame(m_audio_stream.codec_context, m_audio_stream.stream, m_audio_stream.frame,
+                                         m_audio_stream.tmp_pkt);
+        }
+    }
+
+    // Drain the encoders; without this, frames still buffered inside the
+    // encoder (e.g. x264 lookahead and B frames) are lost
+    if (m_encode_video)
+        writeFrame(m_video_stream.codec_context, m_video_stream.stream, nullptr, m_video_stream.tmp_pkt);
+    if (m_encode_audio)
+        writeFrame(m_audio_stream.codec_context, m_audio_stream.stream, nullptr, m_audio_stream.tmp_pkt);
+
     av_write_trailer(m_format_context);
 
     if (m_have_video)
@@ -126,7 +166,7 @@ void VideoFileWriter::cleanup() {
     avformat_free_context(m_format_context);
 }
 
-void VideoFileWriter::initStream(OutputStream *ost, enum AVCodecID codec_id) {
+void VideoFileWriter::initStream(OutputStream *ost, const char *codec_name) {
     ost->tmp_pkt = av_packet_alloc();
     if (!ost->tmp_pkt)
         throw std::runtime_error("Could not allocate AVPacket");
@@ -136,9 +176,15 @@ void VideoFileWriter::initStream(OutputStream *ost, enum AVCodecID codec_id) {
         throw std::runtime_error("Could not allocate stream");
     ost->stream->id = m_format_context->nb_streams - 1;
 
-    ost->codec = avcodec_find_encoder(codec_id);
+    // Look up the specific encoder by name (several encoders can implement one
+    // codec id, e.g. libx264 vs h264_videotoolbox)
+    ost->codec = avcodec_find_encoder_by_name(codec_name);
     if (!ost->codec)
-        throw std::runtime_error(std::format("Could not find encoder for {}", avcodec_get_name(codec_id)));
+        throw std::runtime_error(std::format("Could not find encoder '{}'", codec_name));
+
+    if (avformat_query_codec(m_format_context->oformat, ost->codec->id, FF_COMPLIANCE_NORMAL) != 1)
+        throw std::runtime_error(std::format("Codec {} cannot be stored in format {}",
+                                             codec_name, m_format_context->oformat->name));
 
     AVCodecContext *c = avcodec_alloc_context3(ost->codec);
     if (!c)
@@ -150,24 +196,61 @@ void VideoFileWriter::initStream(OutputStream *ost, enum AVCodecID codec_id) {
         c->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 }
 
-void VideoFileWriter::initVideo(AVDictionary *opt_arg) {
-    initStream(&m_video_stream, m_format_context->oformat->video_codec);
-
-    m_video_stream.stream->sample_aspect_ratio = { 16 * 1032, 9 * 1122 };
+void VideoFileWriter::initVideo(const PresetSpec &spec) {
+    initStream(&m_video_stream, spec.video_codec);
 
     AVCodecContext *c = m_video_stream.codec_context;
-    c->bit_rate = c_video_output_bit_rate;
     c->width = m_video_width;   // Resolution must be a multiple of two.
     c->height = m_video_height;
     m_video_stream.stream->time_base = (AVRational) {1, m_video_frame_rate};
     c->time_base = m_video_stream.stream->time_base;
-    c->gop_size = 12; // emit one intra frame every twelve frames at most
-    c->pix_fmt = AV_PIX_FMT_YUV420P;
+    c->pix_fmt = spec.pix_fmt;
+    c->thread_count = 0; // auto
 
-    AVDictionary *opt = nullptr;
-    av_dict_copy(&opt, opt_arg, 0);
-    int ret = avcodec_open2(c, m_video_stream.codec, &opt);
-    av_dict_free(&opt);
+    // Sample (pixel) aspect ratio derived from the intended display aspect ratio
+    AVRational sar;
+    av_reduce(&sar.num, &sar.den,
+              (int64_t)m_display_aspect.num * m_video_height,
+              (int64_t)m_display_aspect.den * m_video_width, INT_MAX);
+    c->sample_aspect_ratio = sar;
+    m_video_stream.stream->sample_aspect_ratio = sar;
+
+    // Color description.  These are pure metadata: they tell the player how to
+    // interpret the samples; no conversion is performed by the encoder.
+    switch (m_color_standard) {
+        case VideoColorStandard::eBt709:
+            // MUSE colorimetry is nominally SMPTE 240M, but 240M and BT.709
+            // primaries are near identical and player support for the BT.709
+            // tags is far better.  Note that the shader encodes Y with a pure
+            // 2.2 power function; BT.709 is the closest widely supported tag.
+            c->colorspace = AVCOL_SPC_BT709;
+            c->color_primaries = AVCOL_PRI_BT709;
+            c->color_trc = AVCOL_TRC_BT709;
+            break;
+        case VideoColorStandard::eSmpte170m:
+            c->colorspace = AVCOL_SPC_SMPTE170M;
+            c->color_primaries = AVCOL_PRI_SMPTE170M;
+            c->color_trc = AVCOL_TRC_SMPTE170M;
+            break;
+    }
+    c->color_range = AVCOL_RANGE_JPEG; // the shaders output full swing 0..255 (<<8), not studio 16..235
+    c->chroma_sample_location = AVCHROMA_LOC_TOPLEFT; // the shaders subsample by taking the even row/col sample
+
+    switch (m_preset) {
+        case VideoWriterPreset::eStandard:
+            // Constant quality (CRF) gives better quality per bit than a fixed
+            // bit rate; these are libx264 private options
+            av_opt_set(c->priv_data, "crf", "18", 0);
+            av_opt_set(c->priv_data, "preset", "medium", 0);
+            break;
+        case VideoWriterPreset::eArchival:
+            c->level = 3;     // FFV1 version 3: multithreaded, per-slice CRCs
+            c->gop_size = 1;  // intra only
+            av_opt_set_int(c->priv_data, "slicecrc", 1, 0);
+            break;
+    }
+
+    int ret = avcodec_open2(c, m_video_stream.codec, nullptr);
     if (ret < 0)
         throw std::runtime_error(std::format("Could not open video codec: {}", av_err2string(ret)));
 
@@ -177,6 +260,12 @@ void VideoFileWriter::initVideo(AVDictionary *opt_arg) {
     m_video_stream.frame->format = c->pix_fmt;
     m_video_stream.frame->width = c->width;
     m_video_stream.frame->height = c->height;
+    m_video_stream.frame->sample_aspect_ratio = sar;
+    m_video_stream.frame->colorspace = c->colorspace;
+    m_video_stream.frame->color_primaries = c->color_primaries;
+    m_video_stream.frame->color_trc = c->color_trc;
+    m_video_stream.frame->color_range = c->color_range;
+    m_video_stream.frame->chroma_location = c->chroma_sample_location;
     ret = av_frame_get_buffer(m_video_stream.frame, 0);
     if (ret < 0)
         throw std::runtime_error("Could not allocate video frame buffer");
@@ -187,29 +276,27 @@ void VideoFileWriter::initVideo(AVDictionary *opt_arg) {
         throw std::runtime_error("Could not copy the stream parameters");
 }
 
-void VideoFileWriter::initAudio(AVDictionary *opt_arg) {
-    initStream(&m_audio_stream, m_format_context->oformat->audio_codec);
+void VideoFileWriter::initAudio(const PresetSpec &spec) {
+    initStream(&m_audio_stream, spec.audio_codec);
 
     AVCodecContext *c = m_audio_stream.codec_context;
 
-    AVSampleFormat *sample_formats;
+    const AVSampleFormat *sample_formats;
     int no_sample_formats;
     int ret = avcodec_get_supported_config(
         c, m_audio_stream.codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, (const void **)&sample_formats, &no_sample_formats);
     if (ret < 0)
         throw std::runtime_error("Could not get sample formats");
     c->sample_fmt = no_sample_formats > 0 ? sample_formats[0] : AV_SAMPLE_FMT_FLTP;
-    // ERROR on zero formats?
-    // WAS: c->sample_fmt = m_audio_stream.codec->sample_fmts ? m_audio_stream.codec->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
 
-    int *samplerates;
+    const int *samplerates;
     int no_samplerates;
     ret = avcodec_get_supported_config(
         c, m_audio_stream.codec, AV_CODEC_CONFIG_SAMPLE_RATE, 0, (const void **)&samplerates, &no_samplerates);
     if (ret < 0)
         throw std::runtime_error("Could not get sample rates");
 
-    c->bit_rate = 64000;
+    c->bit_rate = 192000; // only meaningful for lossy codecs; ignored by PCM
     c->sample_rate = 44100;
     if (no_samplerates > 0) // ERROR on zero?
         c->sample_rate = samplerates[0];
@@ -218,23 +305,12 @@ void VideoFileWriter::initAudio(AVDictionary *opt_arg) {
             c->sample_rate = 44100;
     }
 
-    // WAS:
-    // if (m_audio_stream.codec->supported_samplerates) {
-    //     c->sample_rate = m_audio_stream.codec->supported_samplerates[0];
-    //     for (int i = 0; m_audio_stream.codec->supported_samplerates[i]; i++) {
-    //         if (m_audio_stream.codec->supported_samplerates[i] == 44100)
-    //             c->sample_rate = 44100;
-    //     }
-    // }
-
+    // MODE_A carries 4 channels; we currently write the first two only
     auto layout = (AVChannelLayout) AV_CHANNEL_LAYOUT_STEREO;
     av_channel_layout_copy(&c->ch_layout, &layout);
     m_audio_stream.stream->time_base = (AVRational) {1, c->sample_rate};
 
-    AVDictionary *opt = nullptr;
-    av_dict_copy(&opt, opt_arg, 0);
-    ret = avcodec_open2(c, m_audio_stream.codec, &opt);
-    av_dict_free(&opt);
+    ret = avcodec_open2(c, m_audio_stream.codec, nullptr);
     if (ret < 0)
         throw std::runtime_error(std::format("Could not open audio codec: {}", av_err2string(ret)));
 
@@ -258,21 +334,42 @@ void VideoFileWriter::initAudio(AVDictionary *opt_arg) {
     if (ret < 0)
         throw std::runtime_error("Could not copy the stream parameters");
 
-    // create and initialize resampler context
+    // The resampler is created lazily (initResampler) once the first audio
+    // arrives, since the input sample rate depends on the audio mode
+}
+
+void VideoFileWriter::initResampler(AudioMode mode) {
+    if (mode == m_audio_input_mode)
+        return;
+
+    AVCodecContext *c = m_audio_stream.codec_context;
+    int in_sample_rate = audioModeSampleRate(mode);
+
+    if (m_swr_ctx) {
+        m_log.warn(eOutput, std::format("Audio mode changed mid-recording (input now {} Hz); "
+                                        "samples pending in the resampler are dropped", in_sample_rate));
+        swr_free(&m_swr_ctx);
+    }
+
     m_swr_ctx = swr_alloc();
     if (!m_swr_ctx)
         throw std::runtime_error("Could not allocate resampler context");
 
-    assert(av_opt_set_chlayout(m_swr_ctx, "in_chlayout", &c->ch_layout, 0) == 0);
-    assert(av_opt_set_int(m_swr_ctx, "in_sample_rate", 32000, 0) == 0);
-    assert(av_opt_set_sample_fmt(m_swr_ctx, "in_sample_fmt", AV_SAMPLE_FMT_S16, 0) == 0);
-    assert(av_opt_set_chlayout(m_swr_ctx, "out_chlayout", &c->ch_layout, 0) == 0);
-    assert(av_opt_set_int(m_swr_ctx, "out_sample_rate", c->sample_rate, 0) == 0);
-    assert(av_opt_set_sample_fmt(m_swr_ctx, "out_sample_fmt", c->sample_fmt, 0) == 0);
+    // No asserts here: side effects in assert() disappear in NDEBUG builds
+    int ret = av_opt_set_chlayout(m_swr_ctx, "in_chlayout", &c->ch_layout, 0);
+    ret |= av_opt_set_int(m_swr_ctx, "in_sample_rate", in_sample_rate, 0);
+    ret |= av_opt_set_sample_fmt(m_swr_ctx, "in_sample_fmt", AV_SAMPLE_FMT_S16, 0);
+    ret |= av_opt_set_chlayout(m_swr_ctx, "out_chlayout", &c->ch_layout, 0);
+    ret |= av_opt_set_int(m_swr_ctx, "out_sample_rate", c->sample_rate, 0);
+    ret |= av_opt_set_sample_fmt(m_swr_ctx, "out_sample_fmt", c->sample_fmt, 0);
+    if (ret != 0)
+        throw std::runtime_error("Failed to configure the resampling context");
 
     ret = swr_init(m_swr_ctx);
     if (ret < 0)
         throw std::runtime_error("Failed to initialize the resampling context");
+
+    m_audio_input_mode = mode;
 }
 
 void VideoFileWriter::close_stream(AVFormatContext *oc, OutputStream *ost) {
@@ -295,16 +392,29 @@ AVFrame *VideoFileWriter::makeVideoFrame(OutputStream *ost, std::shared_ptr<muse
     assert(sizeY.x_size == sizeU.x_size * 2);
     assert(sizeY.y_size == sizeU.y_size * 2);
 
-    // TODO: figure out what formats are supported by the codecs that use more than 8 bits -- our output is 16 bpp
-    for (int y = 0; y < sizeY.y_size; y++)
-        for (int x = 0; x < sizeY.x_size; x++)
-            ost->frame->data[0][y * ost->frame->linesize[0] + x] = image_Y->data<uint16_t>()[y * sizeY.x_size + x] >> 8;
+    // Plane order: data[0] = Y, data[1] = Cb (out_U carries B-Y), data[2] = Cr (out_V carries R-Y)
+    if (ost->codec_context->pix_fmt == AV_PIX_FMT_YUV420P16LE) {
+        for (int y = 0; y < sizeY.y_size; y++)
+            memcpy(ost->frame->data[0] + y * ost->frame->linesize[0],
+                   image_Y->data<uint16_t>() + y * sizeY.x_size, sizeY.x_size * sizeof(uint16_t));
 
-    for (int y = 0; y < sizeU.y_size; y++)
-        for (int x = 0; x < sizeU.x_size; x++) {
-            ost->frame->data[2][y * ost->frame->linesize[2] + x] = image_U->data<uint16_t>()[y * sizeU.x_size + x] >> 8;
-            ost->frame->data[1][y * ost->frame->linesize[1] + x] = image_V->data<uint16_t>()[y * sizeU.x_size + x] >> 8;
+        for (int y = 0; y < sizeU.y_size; y++) {
+            memcpy(ost->frame->data[1] + y * ost->frame->linesize[1],
+                   image_U->data<uint16_t>() + y * sizeU.x_size, sizeU.x_size * sizeof(uint16_t));
+            memcpy(ost->frame->data[2] + y * ost->frame->linesize[2],
+                   image_V->data<uint16_t>() + y * sizeU.x_size, sizeU.x_size * sizeof(uint16_t));
         }
+    } else {
+        for (int y = 0; y < sizeY.y_size; y++)
+            for (int x = 0; x < sizeY.x_size; x++)
+                ost->frame->data[0][y * ost->frame->linesize[0] + x] = image_Y->data<uint16_t>()[y * sizeY.x_size + x] >> 8;
+
+        for (int y = 0; y < sizeU.y_size; y++)
+            for (int x = 0; x < sizeU.x_size; x++) {
+                ost->frame->data[1][y * ost->frame->linesize[1] + x] = image_U->data<uint16_t>()[y * sizeU.x_size + x] >> 8;
+                ost->frame->data[2][y * ost->frame->linesize[2] + x] = image_V->data<uint16_t>()[y * sizeU.x_size + x] >> 8;
+            }
+    }
 
     ost->frame->pts = ost->next_pts++;
 
@@ -312,7 +422,8 @@ AVFrame *VideoFileWriter::makeVideoFrame(OutputStream *ost, std::shared_ptr<muse
 }
 
 bool VideoFileWriter::writeFrame(AVCodecContext *c, AVStream *st, AVFrame *frame, AVPacket *pkt) {
-    // send the frame to the encoder
+    // send the frame to the encoder; a null frame enters drain mode and
+    // flushes the packets still buffered inside the encoder
     int ret = avcodec_send_frame(c, frame);
     if (ret < 0)
         throw std::runtime_error(std::format("Error sending a frame to the encoder: {}", av_err2string(ret)));

@@ -26,6 +26,7 @@
 #include "ntsc/NtscConstants.h"
 #include "ntsc/NtscFrameReader.h"
 #include "ntsc/NtscDecoder.h"
+#include "VideoWriterOptions.h"
 
 #ifdef HAVE_LIBAV
 # include "VideoFileWriter.h"
@@ -182,6 +183,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   bool decode_audio, bool efm_audio, bool benchmark_shaders,
                   MuseAdaptiveEqualizer::Mode eq_mode, float eq_alpha,
                   optional<string> const &output_filename,
+                  [[maybe_unused]] VideoWriterPreset write_preset,
                   optional<string> const &subtitles_path,
                   optional<string> const &subtitle_font_path) {
     glfwSetErrorCallback(glfw_error_callback);
@@ -218,8 +220,18 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     unique_ptr<VideoFileWriter> vfw;
 #ifdef HAVE_LIBAV
     if (output_filename) {
+        VideoColorStandard color_standard;
+        int dar_num, dar_den; // display aspect ratio
+        if constexpr (std::is_same<InputBlock, MuseInputBlock>::value) {
+            color_standard = VideoColorStandard::eBt709;
+            dar_num = 16; dar_den = 9;
+        } else {
+            color_standard = VideoColorStandard::eSmpte170m;
+            dar_num = 4; dar_den = 3;
+        }
         vfw = make_unique<VideoFileWriter>(output_filename.value(), log,
-                                           initial_w, initial_h, decode_all_fields ? 60 : 30);
+                                           initial_w, initial_h, decode_all_fields ? 60 : 30,
+                                           write_preset, color_standard, dar_num, dar_den);
         if (!vfw->init())
             throw runtime_error("Cannot initialize output encoder");
     }
@@ -312,7 +324,8 @@ int main(int argc, char *argv[]) {
     double initial_seek_seconds = 0;
     bool start_paused = false;
     optional<string> muse_output_filename; // always written as little endian unsigned short values
-    optional<string> output_filename; // format selected automatically from filename
+    optional<string> output_filename; // container/codec selected by --write-preset
+    VideoWriterPreset write_preset = VideoWriterPreset::eStandard;
     bool decode_video = true;
     DropoutMode dropout_mode = DropoutMode::eNormal;
     bool decode_audio = true;
@@ -374,6 +387,12 @@ int main(int argc, char *argv[]) {
 #else
         throw std::runtime_error("FFMPEG is not available");
 #endif
+    });
+    options.emplace_back("--write-preset", [&] () mutable -> void {
+        const auto &name = *(it++);
+        if      (name == "standard") write_preset = VideoWriterPreset::eStandard;
+        else if (name == "archival") write_preset = VideoWriterPreset::eArchival;
+        else throw std::runtime_error(std::format("Unknown --write-preset {} (expected standard|archival)", name));
     });
     options.emplace_back("--no-video", [&] () mutable -> void {
         decode_video = false;
@@ -498,7 +517,7 @@ int main(int argc, char *argv[]) {
                         process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
                                                      efm_audio,
-                                                     benchmark_shaders, eq_mode, eq_alpha, output_filename,
+                                                     benchmark_shaders, eq_mode, eq_alpha, output_filename, write_preset,
                                      subtitles_path, subtitle_font_path);
                         delete reader;
                         break;
@@ -508,7 +527,7 @@ int main(int argc, char *argv[]) {
                                 log, *it, input_format, initial_seek_seconds, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
-                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename,
+                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename, write_preset,
                                      subtitles_path, subtitle_font_path);
                         delete reader;
                         break;
@@ -521,7 +540,7 @@ int main(int argc, char *argv[]) {
                                 efm_audio, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
-                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename,
+                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename, write_preset,
                                      subtitles_path, subtitle_font_path);
                         delete reader;
                         break;

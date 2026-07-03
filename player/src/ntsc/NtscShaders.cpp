@@ -149,5 +149,5 @@ void NtscShaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field
 }
 
 ResultImages NtscShaders::getResultImages() {
-    return ResultImages { m_image_out, m_image_Y_out, m_image_V_out, m_image_U_out};
+    return ResultImages { m_image_out, m_image_Y_out, m_image_U_out, m_image_V_out};
 }

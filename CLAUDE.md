@@ -126,6 +126,8 @@ The `src/` directory is the include root for both binaries. The `ac3rf` CMake ta
 
 **SIMD-aware FIR filtering**: `FirFilterStage.h` has AVX, NEON, and scalar paths with runtime selection via `--simd`/`--no-simd`.
 
+**Video file output presets**: `museld --write <file> --write-preset standard|archival` (`VideoFileWriter`, `VideoWriterOptions.h`). `standard` = H.264 (libx264, CRF) + AAC in MP4; `archival` = lossless FFV1 16-bit + PCM in Matroska. Container/codecs come from the preset, not the filename extension. Color metadata (BT.709 for MUSE, SMPTE 170M for NTSC, full range) is tagged per input type. For batch rendering add `--no-sync`, otherwise the display loop caps decoding at 1.0x realtime. Raw captures without a recognized extension need `--input-format` (e.g. `s16`).
+
 ### Data Flow
 
 **AC3RF path:**
