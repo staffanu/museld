@@ -6,6 +6,7 @@
 #include <map>
 #include <chrono>
 #include <format>
+#include <fstream>
 #include "musevk/VulkanManager.h"
 #include "musevk/TimestampQueryPool.h"
 #include "MuseConstants.h"
@@ -228,6 +229,24 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
     m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});
 
     m_first_stage_command_buffer->wait();
+
+    // DEBUG: dump level-pipeline snapshots (every frame, overwriting). Remove when done.
+    if (input_block != nullptr) {
+        auto dbg = m_shaders.getDebugLevelBuffers();
+        const size_t bytes = (size_t)MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT * sizeof(float);
+        auto dump = [&](char const *path, std::shared_ptr<musevk::VulkanBuffer> const &buf) {
+            std::ofstream f(path, std::ios::binary | std::ios::trunc);
+            f.write(reinterpret_cast<const char *>(buf->data<float>()), bytes);
+        };
+        {
+            std::ofstream f("/tmp/muse_dbg_raw_input.f32", std::ios::binary | std::ios::trunc);
+            f.write(reinterpret_cast<const char *>(input_block->video_data->data<float>()), bytes);
+        }
+        dump("/tmp/muse_dbg_after_rescale.f32",     dbg.after_rescale);
+        dump("/tmp/muse_dbg_after_nonlinear.f32",   dbg.after_nonlinear);
+        dump("/tmp/muse_dbg_after_deemphasis.f32", dbg.after_deemphasis);
+        dump("/tmp/muse_dbg_after_gamma.f32",      dbg.after_gamma);
+    }
 
     if (input_block != nullptr) {
         m_frame_buffers[0]->processDiscCode();

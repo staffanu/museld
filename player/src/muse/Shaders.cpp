@@ -99,7 +99,15 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   -0.002966663724125349, -0.001308443981552586, 0.000668722629665747, 0.001650118464922407,
                   0.001329657725712021
           })),
-  m_audio_data(createMuseBuffer(88, MUSE_TOTAL_WIDTH * 3 / 4, eHostRead))
+  m_audio_data(createMuseBuffer(88, MUSE_TOTAL_WIDTH * 3 / 4, eHostRead)),
+  m_dbg_after_rescale(make_shared<VulkanBuffer>(m_vulkan_manager, Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT), 4,
+                                                vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
+  m_dbg_after_nonlinear(make_shared<VulkanBuffer>(m_vulkan_manager, Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT), 4,
+                                                  vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
+  m_dbg_after_deemphasis(make_shared<VulkanBuffer>(m_vulkan_manager, Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT), 4,
+                                                   vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
+  m_dbg_after_gamma(make_shared<VulkanBuffer>(m_vulkan_manager, Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT), 4,
+                                              vk::BufferUsageFlagBits::eStorageBuffer, eHostRead))
 {
     m_apply_equalizer_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "apply_equalizer",
@@ -108,7 +116,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             Size(MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT, 1, 1)));
     m_apply_rescale_and_non_linear_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "apply_rescale_and_non_linear",
-            {eBuffer, eBuffer}, sizeof(float) * 3,
+            {eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(float) * 3,
             VulkanUtil::loadSpirv(executable_dir, "apply_rescale_and_non_linear.comp"), Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)));
     m_apply_dropout_compensation_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "apply_dropout_compensation",
@@ -116,7 +124,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             VulkanUtil::loadSpirv(executable_dir, "apply_dropout_compensation.comp"), Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)));
     m_apply_deemphasis_and_gamma_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "apply_deemphasis_and_gamma",
-            {eBuffer, eBuffer}, 0,
+            {eBuffer, eBuffer, eBuffer, eBuffer}, 0,
             VulkanUtil::loadSpirv(executable_dir, "apply_deemphasis_and_gamma.comp"), Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)));
     m_copy_y_for_interpolation_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
             "copy_y_for_interpolation",
@@ -195,7 +203,8 @@ void Shaders::applyRescaleAndDeemphasisAndGamma(
         shared_ptr<musevk::VulkanBuffer> const &dropout_input,
         shared_ptr<musevk::VulkanBuffer> const &buffer,
         pair<float, float> const &rescale, bool enable_non_linear,  DropoutMode dropout_mode) {
-    m_apply_rescale_and_non_linear_algo->updateBufferDescriptorsInSet(0, {video_input, m_non_linear_processed_buffer});
+    m_apply_rescale_and_non_linear_algo->updateBufferDescriptorsInSet(0, {video_input, m_non_linear_processed_buffer,
+                                                                          m_dbg_after_rescale, m_dbg_after_nonlinear});
     sq.enqueueComputeShader<float>(m_apply_rescale_and_non_linear_algo,
                             {rescale.first, rescale.second, enable_non_linear ? 1.0f : 0.0f});
 
@@ -205,8 +214,14 @@ void Shaders::applyRescaleAndDeemphasisAndGamma(
         sq.enqueueComputeShader<uint32_t>(m_apply_dropout_compensation_algo, { dropout_mode == DropoutMode::eHighlight ? 2u : 0u });
     }
 
-    m_apply_deemphasis_and_gamma_algo->updateBufferDescriptorsInSet(0, {m_non_linear_processed_buffer, buffer});
+    m_apply_deemphasis_and_gamma_algo->updateBufferDescriptorsInSet(0, {m_non_linear_processed_buffer, buffer,
+                                                                        m_dbg_after_deemphasis, m_dbg_after_gamma});
     sq.enqueueComputeShader<float>(m_apply_deemphasis_and_gamma_algo, {});
+
+    m_dbg_after_rescale->synchronizeForHostRead(sq);
+    m_dbg_after_nonlinear->synchronizeForHostRead(sq);
+    m_dbg_after_deemphasis->synchronizeForHostRead(sq);
+    m_dbg_after_gamma->synchronizeForHostRead(sq);
 }
 
 void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {

@@ -72,6 +72,17 @@ public:
 
     [[nodiscard]] std::shared_ptr<musevk::VulkanBuffer> getAudioData() const;
 
+    // DEBUG: host-readable float32 snapshots of intermediate level-pipeline stages.
+    struct DebugLevelBuffers {
+        std::shared_ptr<musevk::VulkanBuffer> after_rescale;
+        std::shared_ptr<musevk::VulkanBuffer> after_nonlinear;
+        std::shared_ptr<musevk::VulkanBuffer> after_deemphasis;
+        std::shared_ptr<musevk::VulkanBuffer> after_gamma;
+    };
+    DebugLevelBuffers getDebugLevelBuffers() const {
+        return { m_dbg_after_rescale, m_dbg_after_nonlinear, m_dbg_after_deemphasis, m_dbg_after_gamma };
+    }
+
 private:
     // phase is 0 if even rows should have even columns computed, 1 if odd rows should have even columns computed
     void copyYForInterpolation(musevk::CommandBuffer &sq, int descriptor_set_index,
@@ -140,6 +151,12 @@ private:
 
     // sample rate converted audio data
     std::shared_ptr<musevk::VulkanBuffer> m_audio_data;
+
+    // DEBUG: host-readable float32 buffers for level-pipeline inspection
+    std::shared_ptr<musevk::VulkanBuffer> m_dbg_after_rescale;
+    std::shared_ptr<musevk::VulkanBuffer> m_dbg_after_nonlinear;
+    std::shared_ptr<musevk::VulkanBuffer> m_dbg_after_deemphasis;
+    std::shared_ptr<musevk::VulkanBuffer> m_dbg_after_gamma;
 
     // filter definitions
     std::shared_ptr<musevk::VulkanBuffer> m_diamond_filter_buffer;

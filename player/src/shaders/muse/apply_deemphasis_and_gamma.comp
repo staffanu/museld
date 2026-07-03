@@ -15,6 +15,16 @@ layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
     float16_t frame_out[][MUSE_TOTAL_WIDTH];
 };
 
+// DEBUG: after FIR de-emphasis, before inverse gamma
+layout(set = 0, binding = 2) buffer writeonly dbg_deemphasis_buffer {
+    float dbg_after_deemphasis[][MUSE_TOTAL_WIDTH];
+};
+
+// DEBUG: after inverse gamma (matches frame_out, but as float32)
+layout(set = 0, binding = 3) buffer writeonly dbg_gamma_buffer {
+    float dbg_after_gamma[][MUSE_TOTAL_WIDTH];
+};
+
 const float16_t min_value = 16.hf;
 const float16_t max_value = 239.hf;
 const float16_t value_range = max_value - min_value;
@@ -100,4 +110,6 @@ void main() {
     }
 
     frame_out[row][col] = gamma_adjusted;
+    dbg_after_deemphasis[row][col] = float(deemphasized);
+    dbg_after_gamma[row][col] = float(gamma_adjusted);
 }

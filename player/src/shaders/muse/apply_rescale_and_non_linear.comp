@@ -35,6 +35,16 @@ layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
     float16_t frame_out[][MUSE_TOTAL_WIDTH];
 };
 
+// DEBUG: after rescale, before non-linear
+layout(set = 0, binding = 2) buffer writeonly dbg_rescale_buffer {
+    float dbg_after_rescale[][MUSE_TOTAL_WIDTH];
+};
+
+// DEBUG: after non-linear (matches frame_out, but as float32)
+layout(set = 0, binding = 3) buffer writeonly dbg_nonlinear_buffer {
+    float dbg_after_nonlinear[][MUSE_TOTAL_WIDTH];
+};
+
 float nl_y1 = 112;
 float nl_x1 = 224;
 float nl_x2 = 512;
@@ -92,4 +102,6 @@ void main() {
     }
 
     frame_out[row][col] = processed;
+    dbg_after_rescale[row][col] = float(rescaled);
+    dbg_after_nonlinear[row][col] = float(processed);
 }
