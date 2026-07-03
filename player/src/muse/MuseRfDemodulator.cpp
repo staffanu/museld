@@ -3,6 +3,7 @@
 //
 
 #include <chrono>
+#include <cstring>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -98,12 +99,13 @@ void MuseRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> input_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(input_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostWrite);
 
-    // The EFM demodulator reads samples back from this mapped buffer on the CPU; without
-    // eHostCached those reads are uncached (write-combined memory) and can dominate the loop.
+    // The CPU only writes to this mapping (the EFM path stages its input separately), but log the
+    // memory properties since a non-host-cached (write-combined) mapping would make any future
+    // CPU read of it very slow.
     m_log.info(ePerformance, std::format("input_buffer host mapping memory properties: {}{}",
                                          vk::to_string(input_buffer->hostMappedMemoryProperties()),
                                          (input_buffer->hostMappedMemoryProperties() & vk::MemoryPropertyFlagBits::eHostCached)
-                                                 ? "" : " -- NOT host-cached: CPU reads (EFM) from this buffer are slow"));
+                                                 ? "" : " -- NOT host-cached: do not read from this mapping on the CPU"));
 
     shared_ptr<VulkanBuffer> analytic_buffer_re = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
@@ -211,10 +213,23 @@ void MuseRfDemodulator::demodulate() {
         return std::chrono::duration<double, std::milli>(b - a).count();
     };
 
+    // When EFM is enabled the input samples are read into this heap staging buffer and copied to
+    // the mapped Vulkan buffer, so that the EFM path never reads back from the mapping -- host
+    // reads of a non-host-cached (write-combined) mapping are very slow on some hardware.
+    std::vector<float> efm_staging;
+
     while (!m_stop_request) {
         auto t_loop_start = timing_clock::now();
-        if (!readFloats(input_buffer->data<float>() + bandpass_filter_size - 1, MuseDemodulatedBlock::c_sample_block_size))
+        const bool efm_enabled = m_efm_enabled;
+        float *input_samples = input_buffer->data<float>() + bandpass_filter_size - 1;
+        if (efm_enabled) {
+            efm_staging.resize(MuseDemodulatedBlock::c_sample_block_size);
+            if (!readFloats(efm_staging.data(), MuseDemodulatedBlock::c_sample_block_size))
+                break;
+            memcpy(input_samples, efm_staging.data(), MuseDemodulatedBlock::c_sample_block_size * sizeof(float));
+        } else if (!readFloats(input_samples, MuseDemodulatedBlock::c_sample_block_size)) {
             break;
+        }
         auto t_after_read = timing_clock::now();
 
         // First get a free output block to write to
@@ -314,14 +329,13 @@ void MuseRfDemodulator::demodulate() {
         command_buffer->submit({}, {}, {});
         auto t_after_submit = timing_clock::now();
 
-        // Stage the raw input samples for the EFM worker; the GPU only reads the input buffer,
-        // so this copy is safe to overlap with the GPU work submitted above.
-        if (m_efm_enabled) {
-            const float *input = input_buffer->data<float>() + bandpass_filter_size - 1;
-            block->efm_input.assign(input, input + MuseDemodulatedBlock::c_sample_block_size);
-        } else {
+        // Hand the staged input samples to the block for the EFM worker.  The swap gives the block
+        // this iteration's samples and reclaims the block's old buffer for the next read, so no
+        // data is copied and nothing is read back from the mapped input buffer.
+        if (efm_enabled)
+            std::swap(block->efm_input, efm_staging);
+        else
             block->efm_input.clear();
-        }
         auto t_after_efm = timing_clock::now();
 
         command_buffer->wait();
