@@ -2,6 +2,7 @@
 // Created by staffanu on 12/10/23.
 //
 
+#include <chrono>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -97,6 +98,13 @@ void MuseRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> input_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(input_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostWrite);
 
+    // The EFM demodulator reads samples back from this mapped buffer on the CPU; without
+    // eHostCached those reads are uncached (write-combined memory) and can dominate the loop.
+    m_log.info(ePerformance, std::format("input_buffer host mapping memory properties: {}{}",
+                                         vk::to_string(input_buffer->hostMappedMemoryProperties()),
+                                         (input_buffer->hostMappedMemoryProperties() & vk::MemoryPropertyFlagBits::eHostCached)
+                                                 ? "" : " -- NOT host-cached: CPU reads (EFM) from this buffer are slow"));
+
     shared_ptr<VulkanBuffer> analytic_buffer_re = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
@@ -154,16 +162,69 @@ void MuseRfDemodulator::demodulate() {
     command_buffer->submit({}, {}, {});
     command_buffer->wait();
 
-    while (!m_stop_request && readFloats(input_buffer->data<float>() + bandpass_filter_size - 1, MuseDemodulatedBlock::c_sample_block_size)) {
+    // The EFM demodulation is CPU work independent of the Vulkan pipeline, so it runs on its own
+    // worker thread and overlaps the next block's read/record/submit.  The demodulation loop stages
+    // the raw input samples in block->efm_input and hands the block over after the GPU has finished
+    // with it; the worker fills in efm_data and forwards the block to m_filled_blocks.  A single
+    // worker with a FIFO queue keeps the blocks in order, and the queue is bounded by the block
+    // pool: when all blocks are queued for EFM the loop waits on m_cv_vacant as before.
+    std::mutex efm_mutex;
+    std::condition_variable efm_cv;
+    std::deque<unique_ptr<MuseDemodulatedBlock>> efm_queue;
+    bool efm_stop = false;
+    std::thread efm_thread([&]() {
+#ifdef __APPLE__
+        pthread_setname_np("museld-efm");
+#elif defined(linux)
+        pthread_setname_np(pthread_self(), "museld-efm");
+#endif
+        while (true) {
+            unique_ptr<MuseDemodulatedBlock> block;
+            {
+                std::unique_lock<std::mutex> lock(efm_mutex);
+                efm_cv.wait(lock, [&] { return efm_stop || !efm_queue.empty(); });
+                if (efm_queue.empty())
+                    break; // stop requested and the queue is drained
+                block = std::move(efm_queue.front());
+                efm_queue.pop_front();
+            }
+            if (!block->efm_input.empty())
+                m_efm_demodulator.demodulate(block->efm_input.data(), block->efm_data);
+            else
+                block->efm_data.clear();
+
+            std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
+            m_cv_filled.notify_one();
+            m_filled_blocks.push_back(std::move(block));
+        }
+    });
+
+    // Per-section CPU timing of the demodulation loop, reported every c_timing_report_blocks
+    // blocks together with the real-time budget per block.  On a fifo the read time includes
+    // waiting for the capture device, so a large read share is expected there.
+    using timing_clock = std::chrono::steady_clock;
+    constexpr int c_timing_report_blocks = 256;
+    const double block_budget_ms = MuseDemodulatedBlock::c_sample_block_size / (double)m_sample_frequency * 1e3;
+    double read_ms = 0, acquire_ms = 0, record_ms = 0, submit_ms = 0, efm_ms = 0, gpu_wait_ms = 0;
+    int timed_blocks = 0;
+    auto ms_between = [](timing_clock::time_point a, timing_clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+
+    while (!m_stop_request) {
+        auto t_loop_start = timing_clock::now();
+        if (!readFloats(input_buffer->data<float>() + bandpass_filter_size - 1, MuseDemodulatedBlock::c_sample_block_size))
+            break;
+        auto t_after_read = timing_clock::now();
 
         // First get a free output block to write to
         unique_ptr<MuseDemodulatedBlock> block = nullptr;
         {
             std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
-            if (m_input_is_fifo && m_vacant_blocks.empty()) {
+            if (m_input_is_fifo && m_vacant_blocks.empty() && !m_filled_blocks.empty()) {
                 // discard a filled buffer -- this is better than waiting since it means the reader cannot cope anyway
+                // (with all blocks in the EFM queue there is nothing to discard, so wait for the worker below)
                 m_log.warn(eInput, "Discarding demodulated block due to overrun");
-                assert(!m_filled_blocks.empty());
                 m_vacant_blocks.push_back(std::move(m_filled_blocks.back()));
                 m_filled_blocks.pop_back();
             }
@@ -175,6 +236,7 @@ void MuseRfDemodulator::demodulate() {
             block = std::move(m_vacant_blocks.front());
             m_vacant_blocks.pop_front();
         }
+        auto t_after_acquire = timing_clock::now();
         // The first byte of the output lags the actual input due to three filters being applied
         block->input_offset = m_total_samples_read - (bandpass_filter_size + lowpass_filter_size + rrc_filter_size) / 2;
         m_total_samples_read += MuseDemodulatedBlock::c_sample_block_size;
@@ -248,23 +310,60 @@ void MuseRfDemodulator::demodulate() {
         enqueue_float_copy(*rrc_in_buffer, rrc_in_buffer_size, rrc_filter_size - 1);
         command_buffer->enqueueCopyBuffer(*dropout_buffer, *dropout_buffer, (c_dropout_buffer_size - c_dropout_delay) * sizeof(uint8_t), 0, c_dropout_delay * sizeof(uint8_t));
 
+        auto t_after_record = timing_clock::now();
         command_buffer->submit({}, {}, {});
+        auto t_after_submit = timing_clock::now();
 
-        if (m_efm_enabled)
-            m_efm_demodulator.demodulate(input_buffer->data<float>() + bandpass_filter_size - 1, block->efm_data);
-        else
-            block->efm_data.clear();
+        // Stage the raw input samples for the EFM worker; the GPU only reads the input buffer,
+        // so this copy is safe to overlap with the GPU work submitted above.
+        if (m_efm_enabled) {
+            const float *input = input_buffer->data<float>() + bandpass_filter_size - 1;
+            block->efm_input.assign(input, input + MuseDemodulatedBlock::c_sample_block_size);
+        } else {
+            block->efm_input.clear();
+        }
+        auto t_after_efm = timing_clock::now();
 
         command_buffer->wait();
+        auto t_after_gpu_wait = timing_clock::now();
+
+        read_ms += ms_between(t_loop_start, t_after_read);
+        acquire_ms += ms_between(t_after_read, t_after_acquire);
+        record_ms += ms_between(t_after_acquire, t_after_record);
+        submit_ms += ms_between(t_after_record, t_after_submit);
+        efm_ms += ms_between(t_after_submit, t_after_efm);
+        gpu_wait_ms += ms_between(t_after_efm, t_after_gpu_wait);
+        if (++timed_blocks == c_timing_report_blocks) {
+            m_log.info(ePerformance, std::format(
+                    "demodulate avg/block (budget {:.2f} ms): read {:.2f} ms, acquire {:.2f} ms, "
+                    "record {:.2f} ms, submit {:.2f} ms, efm copy {:.2f} ms, gpu wait {:.2f} ms, total {:.2f} ms",
+                    block_budget_ms, read_ms / timed_blocks, acquire_ms / timed_blocks,
+                    record_ms / timed_blocks, submit_ms / timed_blocks, efm_ms / timed_blocks,
+                    gpu_wait_ms / timed_blocks,
+                    (read_ms + acquire_ms + record_ms + submit_ms + efm_ms + gpu_wait_ms) / timed_blocks));
+            read_ms = acquire_ms = record_ms = submit_ms = efm_ms = gpu_wait_ms = 0;
+            timed_blocks = 0;
+        }
 
         if (timestamp_query_pool != nullptr)
             timestamp_statistics.add_timestamps(timestamp_query_pool->getTimestamps());
 
-        // Send away result
-        std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
-        m_cv_filled.notify_one();
-        m_filled_blocks.push_back(std::move(block));
+        // Hand the block to the EFM worker, which forwards it to m_filled_blocks.  This must not
+        // happen before command_buffer->wait() above, since the consumer reads video_data as soon
+        // as the block appears in m_filled_blocks.
+        std::unique_lock<std::mutex> lock(efm_mutex);
+        efm_cv.notify_one();
+        efm_queue.push_back(std::move(block));
     }
+
+    // Let the EFM worker drain its queue before signalling end of stream
+    {
+        std::unique_lock<std::mutex> lock(efm_mutex);
+        efm_stop = true;
+        efm_cv.notify_one();
+    }
+    efm_thread.join();
+
     m_reader_thread_finished = true;
     m_cv_filled.notify_one();
 

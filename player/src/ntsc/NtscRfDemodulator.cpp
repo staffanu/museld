@@ -152,16 +152,53 @@ void NtscRfDemodulator::demodulate() {
     command_buffer->submit({}, {}, {});
     command_buffer->wait();
 
+    // The EFM demodulation is CPU work independent of the Vulkan pipeline, so it runs on its own
+    // worker thread and overlaps the next block's read/record/submit.  The demodulation loop stages
+    // the raw input samples in block->efm_input and hands the block over after the GPU has finished
+    // with it; the worker fills in efm_data and forwards the block to m_filled_blocks.  A single
+    // worker with a FIFO queue keeps the blocks in order, and the queue is bounded by the block
+    // pool: when all blocks are queued for EFM the loop waits on m_cv_vacant as before.
+    std::mutex efm_mutex;
+    std::condition_variable efm_cv;
+    std::deque<unique_ptr<NtscDemodulatedBlock>> efm_queue;
+    bool efm_stop = false;
+    std::thread efm_thread([&]() {
+#ifdef __APPLE__
+        pthread_setname_np("museld-efm");
+#elif defined(linux)
+        pthread_setname_np(pthread_self(), "museld-efm");
+#endif
+        while (true) {
+            unique_ptr<NtscDemodulatedBlock> block;
+            {
+                std::unique_lock<std::mutex> lock(efm_mutex);
+                efm_cv.wait(lock, [&] { return efm_stop || !efm_queue.empty(); });
+                if (efm_queue.empty())
+                    break; // stop requested and the queue is drained
+                block = std::move(efm_queue.front());
+                efm_queue.pop_front();
+            }
+            if (!block->efm_input.empty())
+                m_efm_demodulator.demodulate(block->efm_input.data(), block->efm_data);
+            else
+                block->efm_data.clear();
+
+            std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
+            m_cv_filled.notify_one();
+            m_filled_blocks.push_back(std::move(block));
+        }
+    });
+
     while (!m_stop_request && readFloats(input_buffer->data<float>() + bandpass_filter_def.size() - 1, c_sample_block_size)) {
 
         // First get a free output block to write to
         unique_ptr<NtscDemodulatedBlock> block = nullptr;
         {
             std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
-            if (m_input_is_fifo && m_vacant_blocks.empty()) {
+            if (m_input_is_fifo && m_vacant_blocks.empty() && !m_filled_blocks.empty()) {
                 // discard a filled buffer -- this is better than waiting since it means the reader cannot cope anyway
+                // (with all blocks in the EFM queue there is nothing to discard, so wait for the worker below)
                 m_log.warn(eInput, "Discarding demodulated block due to overrun");
-                assert(!m_filled_blocks.empty());
                 m_vacant_blocks.push_back(std::move(m_filled_blocks.back()));
                 m_filled_blocks.pop_back();
             }
@@ -242,21 +279,35 @@ void NtscRfDemodulator::demodulate() {
 
         command_buffer->submit({}, {}, {});
 
-        if (m_efm_enabled)
-            m_efm_demodulator.demodulate(input_buffer->data<float>() + bandpass_filter_def.size() - 1, block->efm_data);
-        else
-            block->efm_data.clear();
+        // Stage the raw input samples for the EFM worker; the GPU only reads the input buffer,
+        // so this copy is safe to overlap with the GPU work submitted above.
+        if (m_efm_enabled) {
+            const float *input = input_buffer->data<float>() + bandpass_filter_def.size() - 1;
+            block->efm_input.assign(input, input + c_sample_block_size);
+        } else {
+            block->efm_input.clear();
+        }
 
         command_buffer->wait();
 
         if (timestamp_query_pool != nullptr)
             timestamp_statistics.add_timestamps(timestamp_query_pool->getTimestamps());
 
-        // Send away result
-        std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
-        m_cv_filled.notify_one();
-        m_filled_blocks.push_back(std::move(block));
+        // Hand the block to the EFM worker, which forwards it to m_filled_blocks.  This must not
+        // happen before command_buffer->wait() above, since the consumer reads video_data as soon
+        // as the block appears in m_filled_blocks.
+        std::unique_lock<std::mutex> lock(efm_mutex);
+        efm_cv.notify_one();
+        efm_queue.push_back(std::move(block));
     }
+
+    // Let the EFM worker drain its queue before signalling end of stream
+    {
+        std::unique_lock<std::mutex> lock(efm_mutex);
+        efm_stop = true;
+        efm_cv.notify_one();
+    }
+    efm_thread.join();
 
     m_reader_thread_finished = true;
     m_cv_filled.notify_one();

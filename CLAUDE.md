@@ -158,6 +158,8 @@ NTSC frame buffer → Vulkan GPU color decode → video output
 
 - Main thread: Vulkan command recording + GLFW event loop
 - Worker thread: Resampling DPLL (CPU bottleneck)
+- Demodulator thread (`museld-demod`): input read + RF demod GPU pipeline; logs per-section timing at info level (`ePerformance`)
+- EFM worker thread (`museld-efm`): EFM demodulation off the demodulator thread; blocks flow vacant → demod → EFM queue → filled, order preserved by the single FIFO worker
 - GPU: Async compute via SPIR-V shaders (`player/src/shaders/*.comp`)
 
 ### Compiler Flags

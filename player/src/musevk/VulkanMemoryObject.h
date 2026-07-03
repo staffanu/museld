@@ -63,6 +63,14 @@ namespace musevk {
         void synchronizeForHostRead(CommandBuffer &command_buffer);
         void synchronizeHostWrites(CommandBuffer &command_buffer);
 
+        // Properties of the memory backing the host mapping returned by data() -- the separate
+        // host-visible allocation if one exists, otherwise the device allocation.  Absence of
+        // eHostCached means CPU reads from the mapping are uncached (write-combined) and slow.
+        [[nodiscard]] vk::MemoryPropertyFlags hostMappedMemoryProperties() const {
+            return m_allocated_host_visible_memory ? m_host_memory_properties.value()
+                                                   : m_device_memory_properties;
+        }
+
         virtual vk::WriteDescriptorSet
         makeWriteDescriptorSet(vk::DescriptorSet &descriptor_set, uint32_t binding_index) const = 0;
 
