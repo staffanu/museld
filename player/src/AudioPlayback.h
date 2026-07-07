@@ -25,15 +25,19 @@ public:
 private:
     static constexpr int c_audio_buffer_size = 16384;
     static constexpr int c_audio_buffer_optimal_filled = 4096;
-    static constexpr double c_audio_buffer_speed_adjust_constant = 2e-6;
-    static constexpr double c_audio_buffer_max_speed_adjust = 0.01;
+    static constexpr double c_speed_adjust_p_gain = 2e-6;  // per frame of buffer level error
+    static constexpr double c_speed_adjust_i_gain = 1e-8;  // per frame of error, per add_samples call
+    static constexpr double c_max_speed_adjust = 0.01;
 
     Logger &m_log;
     AudioFrame m_audio_buffer[c_audio_buffer_size];
     std::atomic<int> m_next_audio_buffer_write_ix;
     std::atomic<int> m_next_audio_buffer_read_ix;
-    std::atomic<double> m_audio_speed_adjust; // m_audio_buffer to skip per sample -- 0.1 skips every 10th sample
-    double m_audio_speed_adjust_sum;
+    std::atomic<double> m_audio_speed_adjust; // consume-rate offset -- 0.1 consumes 1.1 frames per output frame
+    std::atomic<bool> m_prebuffering; // output silence until the buffer reaches the optimal fill level
+    std::atomic<int> m_underrun_count; // underrun events since last add_samples call
+    double m_speed_adjust_integral; // producer thread only
+    double m_read_frac; // fractional part of the read position, callback thread only
     AudioMode m_current_mode;
     int m_channels_used;
     ma_context *m_context;

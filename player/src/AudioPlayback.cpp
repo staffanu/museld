@@ -11,10 +11,13 @@
 #define MA_NO_NODE_GRAPH
 #include <miniaudio.h>
 
+#include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <format>
 #include "AudioPlayback.h"
 #include "logging/Logger.h"
+#include "util/Interpolate.h"
 
 using namespace std;
 
@@ -43,7 +46,10 @@ AudioPlayback::AudioPlayback(Logger &log)
   m_next_audio_buffer_write_ix(0),
   m_next_audio_buffer_read_ix(0),
   m_audio_speed_adjust(0),
-  m_audio_speed_adjust_sum(0),
+  m_prebuffering(true),
+  m_underrun_count(0),
+  m_speed_adjust_integral(0),
+  m_read_frac(0),
   m_current_mode(MODE_UNKNOWN),
   m_channels_used(0),
   m_context(nullptr),
@@ -81,28 +87,32 @@ void AudioPlayback::add_samples(AudioMode const &audio_mode, int const &sample_c
             closeStream();
         m_next_audio_buffer_write_ix = 0;
         m_next_audio_buffer_read_ix = 0;
+        m_audio_speed_adjust = 0;
+        m_speed_adjust_integral = 0;
+        m_read_frac = 0; // safe: the stream is closed, no callback is running
+        m_prebuffering = true;
         openStream();
     }
 
-    if (m_next_audio_buffer_write_ix == 0 && m_next_audio_buffer_read_ix == 0)
-        m_audio_speed_adjust = 0;
-    else { // do not adjust speed when starting
-        int audio_buffer_size = m_next_audio_buffer_write_ix >= m_next_audio_buffer_read_ix ?
-                                m_next_audio_buffer_write_ix - m_next_audio_buffer_read_ix :
-                                c_audio_buffer_size - m_next_audio_buffer_read_ix + m_next_audio_buffer_write_ix;
-        if (audio_buffer_size < c_audio_buffer_optimal_filled)
-            m_audio_speed_adjust = max(
-                    (audio_buffer_size - c_audio_buffer_optimal_filled) * c_audio_buffer_speed_adjust_constant,
-                    -c_audio_buffer_max_speed_adjust);
-        else if (audio_buffer_size > c_audio_buffer_optimal_filled)
-            m_audio_speed_adjust = min(
-                    (audio_buffer_size - c_audio_buffer_optimal_filled) * c_audio_buffer_speed_adjust_constant,
-                    c_audio_buffer_max_speed_adjust);
-        else
-            m_audio_speed_adjust = 0;
+    int underrun_count = m_underrun_count.exchange(0);
+    if (underrun_count != 0)
+        m_log.info(eAudio, std::format("Audio buffer underrun: playback paused to re-buffer ({} occurrences)",
+                                       underrun_count));
 
-        m_log.debug(eAudio, std::format("Audio buffer size: {}, adjustment: {:.5f}",
-                                        audio_buffer_size, (double)m_audio_speed_adjust));
+    int audio_buffer_size = m_next_audio_buffer_write_ix >= m_next_audio_buffer_read_ix ?
+                            m_next_audio_buffer_write_ix - m_next_audio_buffer_read_ix :
+                            c_audio_buffer_size - m_next_audio_buffer_read_ix + m_next_audio_buffer_write_ix;
+    if (m_prebuffering)
+        m_audio_speed_adjust = 0; // nothing is being consumed; avoid integrator windup
+    else {
+        double error = audio_buffer_size - c_audio_buffer_optimal_filled;
+        m_speed_adjust_integral = clamp(m_speed_adjust_integral + error * c_speed_adjust_i_gain,
+                                        -c_max_speed_adjust, c_max_speed_adjust);
+        m_audio_speed_adjust = clamp(error * c_speed_adjust_p_gain + m_speed_adjust_integral,
+                                     -c_max_speed_adjust, c_max_speed_adjust);
+
+        m_log.debug(eAudio, std::format("Audio buffer size: {}, adjustment: {:.5f} (integral {:.5f})",
+                                        audio_buffer_size, (double)m_audio_speed_adjust, m_speed_adjust_integral));
     }
 
     int discard_count = 0;
@@ -120,31 +130,60 @@ void AudioPlayback::add_samples(AudioMode const &audio_mode, int const &sample_c
         m_log.error(eAudio, std::format("Discarded {} samples", discard_count));
 }
 
+// Real-time audio thread: no locking, allocation or logging in here.
 void AudioPlayback::audioCallbackMember(void *output_buffer, unsigned long frames_per_buffer) {
     auto *out = (int16_t *)output_buffer;
-    unsigned int i;
-    int underrun_count = 0;
+    int read_ix = m_next_audio_buffer_read_ix;
+    double speed_adjust = m_audio_speed_adjust;
 
-    for (i = 0; i < frames_per_buffer; i++) {
-        if (m_next_audio_buffer_read_ix != m_next_audio_buffer_write_ix) {
-            auto frame = m_audio_buffer[m_next_audio_buffer_read_ix];
-            m_audio_speed_adjust_sum += m_audio_speed_adjust + 1.0;
-            while (m_audio_speed_adjust_sum >= 1.0) {
-                m_next_audio_buffer_read_ix++;
-                if (m_next_audio_buffer_read_ix == c_audio_buffer_size)
-                    m_next_audio_buffer_read_ix = 0;
-                m_audio_speed_adjust_sum -= 1.0;
+    for (unsigned long i = 0; i < frames_per_buffer; i++) {
+        int write_ix = m_next_audio_buffer_write_ix;
+        int available = write_ix >= read_ix ? write_ix - read_ix :
+                        c_audio_buffer_size - read_ix + write_ix;
+
+        if (m_prebuffering) {
+            if (available < c_audio_buffer_optimal_filled) {
+                for (int k = 0; k < m_channels_used; k++)
+                    *out++ = 0;
+                continue;
             }
-            for (int k = 0; k < m_channels_used; k++)
-                *out++ = frame.samples[k]; // in c_channel_map order
-        } else {
-            underrun_count++;
-            for (int k = 0; k < m_channels_used; k++)
-                *out++ = 0;
+            // Consume one frame as interpolation history; the producer never writes the
+            // slot just behind the read index, so it stays stable once we move past it.
+            read_ix = read_ix + 1 == c_audio_buffer_size ? 0 : read_ix + 1;
+            available--;
+            m_read_frac = 0;
+            m_prebuffering = false;
         }
+
+        // Cubic interpolation over the frames at read_ix - 1 .. read_ix + 2, with the
+        // fractional position between read_ix and read_ix + 1; available >= 3 is
+        // guaranteed by the prebuffering gate and the advance loop below.
+        int prev_ix = read_ix == 0 ? c_audio_buffer_size - 1 : read_ix - 1;
+        int next_ix = read_ix + 1 == c_audio_buffer_size ? 0 : read_ix + 1;
+        int next2_ix = next_ix + 1 == c_audio_buffer_size ? 0 : next_ix + 1;
+        for (int k = 0; k < m_channels_used; k++) { // in c_channel_map order
+            auto value = cubicInterpolate(m_audio_buffer[prev_ix].samples[k], m_audio_buffer[read_ix].samples[k],
+                                          m_audio_buffer[next_ix].samples[k], m_audio_buffer[next2_ix].samples[k],
+                                          (float)m_read_frac);
+            *out++ = (int16_t)clamp(lroundf(value), -32768l, 32767l); // cubic can overshoot the sample range
+        }
+
+        m_read_frac += 1.0 + speed_adjust;
+        while (m_read_frac >= 1.0) {
+            if (available == 3) { // keep three frames ahead so the interpolation window stays valid
+                m_underrun_count.fetch_add(1, std::memory_order_relaxed);
+                m_prebuffering = true;
+                m_read_frac = 0;
+                break;
+            }
+            read_ix = next_ix;
+            next_ix = next2_ix;
+            next2_ix = next2_ix + 1 == c_audio_buffer_size ? 0 : next2_ix + 1;
+            available--;
+            m_read_frac -= 1.0;
+        }
+        m_next_audio_buffer_read_ix = read_ix;
     }
-    if (underrun_count)
-        m_log.info(eAudio, std::format("Audio buffer underrun: {} missing samples", underrun_count));
 }
 
 void AudioPlayback::openStream() {
@@ -163,6 +202,7 @@ void AudioPlayback::openStream() {
     config.playback.channels = m_channels_used;
     config.playback.pChannelMap = const_cast<ma_channel *>(c_channel_map);
     config.sampleRate = m_current_mode == MODE_A ? 32000 : m_current_mode == MODE_B ? 48000 : 44100;
+    config.resampling.linear.lpfOrder = MA_MAX_FILTER_ORDER; // best quality for the conversion to the device rate
     config.periodSizeInFrames = 256;
     config.dataCallback = audio_callback;
     config.pUserData = this;
