@@ -365,15 +365,31 @@ bool ResamplingFrameReader::process(std::unique_ptr<MuseInputBlock> const &outpu
             float sample2 = output[output_index - 2];
             float sample4 = output[output_index];
 
-            bool m_sync_is_good = (sync_should_be_positive && sample0 < sample2 && sample2 < sample4) ||
-                                  (!sync_should_be_positive && sample0 > sample2 && sample2 > sample4);
+            // A demodulation glitch on the sync sampling pixels can pass the monotonicity test with
+            // wildly out-of-range values and slew the loop by thousands of ppm in a single line,
+            // pushing the sync edge out of the detection window and losing lock entirely.
+            // Samples flagged as dropouts by the demodulator must therefore not update the loop.
+            bool dropout_in_sync = dropout_output[output_index - 4] || dropout_output[output_index - 2] ||
+                                   dropout_output[output_index];
+
+            bool m_sync_is_good = !dropout_in_sync &&
+                                  ((sync_should_be_positive && sample0 < sample2 && sample2 < sample4) ||
+                                   (!sync_should_be_positive && sample0 > sample2 && sample2 > sample4));
 
             if (m_sync_is_good) {
                 double avgLevel = (sample0 + sample4) / 2;
-                double new_error = std::clamp(sync_should_be_positive ? sample2 - avgLevel : avgLevel - sample2, -10000.0, 10000.0); // negative means we sampled too early
-                m_error_sum = std::clamp(m_error_sum + new_error, -15000.0, 15000.0);
+                // A genuine sync edge keeps all three samples within the MUSE signal range, so the
+                // phase error can never legitimately exceed ~150; anything larger is a corrupted
+                // sample that slipped past the dropout detector.
+                double new_error = std::clamp(sync_should_be_positive ? sample2 - avgLevel : avgLevel - sample2, -150.0, 150.0); // negative means we sampled too early
+                m_error_sum = std::clamp(m_error_sum + new_error, -2000.0, 2000.0);
                 m_input_samples_per_sample =
                         m_input_samples_per_sample_ref - new_error * m_g1 - m_error_sum * m_g2;
+                // Disc/player speed error is on the order of 1000 ppm; never let the loop run
+                // further off than a phase drift the sync detector can still track.
+                m_input_samples_per_sample = std::clamp(m_input_samples_per_sample,
+                                                        m_input_samples_per_sample_ref * (1 - 5e-3),
+                                                        m_input_samples_per_sample_ref * (1 + 5e-3));
             }
             if (m_state == eSearching) {
                 m_consecutive_good_syncs = m_sync_is_good ? m_consecutive_good_syncs + 1 :
