@@ -130,7 +130,7 @@ if(BUILD_AC3RF_DECODE)
 endif()
 
 # ============================================================================
-# museld — real-time MUSE/NTSC laserdisc player (Vulkan + GLFW + PortAudio)
+# museld — real-time MUSE/NTSC laserdisc player (Vulkan + GLFW + miniaudio)
 # ============================================================================
 
 if(BUILD_MUSE)
@@ -138,7 +138,6 @@ if(BUILD_MUSE)
     find_package(Vulkan REQUIRED)
 
     set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules" ${CMAKE_MODULE_PATH})
-    find_package(PORTAUDIO REQUIRED)
 
     find_package(PkgConfig REQUIRED)
 
@@ -226,10 +225,10 @@ if(BUILD_MUSE)
     endif()
 
     target_include_directories(museld PRIVATE
-        ${PORTAUDIO_INCLUDE_DIRS}
         ${Vulkan_INCLUDE_DIRS}
         ${FLAC_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/stb
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/miniaudio
     )
     if(HAVE_LIBAV)
         target_include_directories(museld PRIVATE ${LIBAV_INCLUDE_DIR})
@@ -240,7 +239,7 @@ if(BUILD_MUSE)
         PRIVATE ac3rf
         PRIVATE glfw
         PRIVATE Vulkan::Vulkan
-        PRIVATE ${PORTAUDIO_LIBRARIES}
+        PRIVATE ${CMAKE_DL_LIBS}
         PRIVATE ${FLAC_LINK_LIBRARIES}
     )
     if(HAVE_LIBAV)

@@ -2,6 +2,15 @@
 // Created by staffanu on 6/21/23.
 //
 
+#define MINIAUDIO_IMPLEMENTATION
+#define MA_NO_DECODING
+#define MA_NO_ENCODING
+#define MA_NO_GENERATION
+#define MA_NO_RESOURCE_MANAGER
+#define MA_NO_ENGINE
+#define MA_NO_NODE_GRAPH
+#include <miniaudio.h>
+
 #include <cassert>
 #include <format>
 #include "AudioPlayback.h"
@@ -9,10 +18,23 @@
 
 using namespace std;
 
-int AudioPlayback::audio_callback(const void *input_buffer, void *output_buffer, unsigned long frames_per_buffer,
-                                  const PaStreamCallbackTimeInfo *time_info, PaStreamCallbackFlags status_flags,
-                                  void *userData) {
-    return ((AudioPlayback *)userData)->audioCallbackMember(output_buffer, frames_per_buffer, time_info, status_flags);
+namespace {
+
+// Semantic meaning of AudioFrame::samples[k]; miniaudio routes/mixes these to
+// whatever channel layout the output device actually has.
+constexpr ma_channel c_channel_map[4] = {
+    MA_CHANNEL_FRONT_LEFT,  // channel 1
+    MA_CHANNEL_FRONT_RIGHT, // channel 2
+    MA_CHANNEL_BACK_LEFT,   // channel 3
+    MA_CHANNEL_BACK_RIGHT,  // channel 4
+};
+
+} // namespace
+
+void AudioPlayback::audio_callback(ma_device *device, void *output_buffer, const void *input_buffer,
+                                   unsigned int frames_per_buffer) {
+    (void)input_buffer;
+    ((AudioPlayback *)device->pUserData)->audioCallbackMember(output_buffer, frames_per_buffer);
 }
 
 AudioPlayback::AudioPlayback(Logger &log)
@@ -24,26 +46,30 @@ AudioPlayback::AudioPlayback(Logger &log)
   m_audio_speed_adjust_sum(0),
   m_current_mode(MODE_UNKNOWN),
   m_channels_used(0),
-  m_audio_stream(nullptr) {
-    auto audio_status = Pa_Initialize();
-    if (audio_status != paNoError)
-        throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
-
-    PaHostApiIndex count = Pa_GetHostApiCount();
-    for (PaHostApiIndex i = 0; i < count; i++) {
-        auto *info = Pa_GetHostApiInfo(i);
-        m_log.debug(eAudio, std::format("Host API {}: type id={}, device count={}, default device={}",
-                                        info->name, (int)info->type, info->deviceCount, (int)info->defaultOutputDevice));
+  m_context(nullptr),
+  m_device(nullptr) {
+    m_context = new ma_context;
+    auto audio_status = ma_context_init(nullptr, 0, nullptr, m_context);
+    if (audio_status != MA_SUCCESS) {
+        delete m_context;
+        m_context = nullptr;
+        throw runtime_error(string("miniaudio: ") + ma_result_description(audio_status));
     }
+
+    m_log.debug(eAudio, std::format("Audio backend: {}", ma_get_backend_name(m_context->backend)));
 }
 
 void AudioPlayback::cleanup() {
-    if (m_audio_stream != nullptr)
+    if (m_device != nullptr)
         closeStream();
 
-    auto audio_status = Pa_Terminate();
-    if (audio_status != paNoError)
-        throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
+    if (m_context != nullptr) {
+        auto audio_status = ma_context_uninit(m_context);
+        delete m_context;
+        m_context = nullptr;
+        if (audio_status != MA_SUCCESS)
+            throw runtime_error(string("miniaudio: ") + ma_result_description(audio_status));
+    }
 }
 
 void AudioPlayback::add_samples(AudioMode const &audio_mode, int const &sample_count,
@@ -51,7 +77,7 @@ void AudioPlayback::add_samples(AudioMode const &audio_mode, int const &sample_c
     assert(audio_mode != MODE_UNKNOWN);
     if (audio_mode != m_current_mode) {
         m_current_mode = audio_mode;
-        if (m_audio_stream != nullptr)
+        if (m_device != nullptr)
             closeStream();
         m_next_audio_buffer_write_ix = 0;
         m_next_audio_buffer_read_ix = 0;
@@ -94,8 +120,7 @@ void AudioPlayback::add_samples(AudioMode const &audio_mode, int const &sample_c
         m_log.error(eAudio, std::format("Discarded {} samples", discard_count));
 }
 
-int AudioPlayback::audioCallbackMember(void *output_buffer, unsigned long frames_per_buffer,
-                                       const PaStreamCallbackTimeInfo *time_info, PaStreamCallbackFlags status_flags) {
+void AudioPlayback::audioCallbackMember(void *output_buffer, unsigned long frames_per_buffer) {
     auto *out = (int16_t *)output_buffer;
     unsigned int i;
     int underrun_count = 0;
@@ -111,7 +136,7 @@ int AudioPlayback::audioCallbackMember(void *output_buffer, unsigned long frames
                 m_audio_speed_adjust_sum -= 1.0;
             }
             for (int k = 0; k < m_channels_used; k++)
-                *out++ = frame.samples[k]; // TODO: figure out which channel is which
+                *out++ = frame.samples[k]; // in c_channel_map order
         } else {
             underrun_count++;
             for (int k = 0; k < m_channels_used; k++)
@@ -120,52 +145,50 @@ int AudioPlayback::audioCallbackMember(void *output_buffer, unsigned long frames
     }
     if (underrun_count)
         m_log.info(eAudio, std::format("Audio buffer underrun: {} missing samples", underrun_count));
-    return 0;
 }
 
 void AudioPlayback::openStream() {
-    PaDeviceIndex count = Pa_GetDeviceCount();
-    for (PaDeviceIndex i = 0; i < count; i++) {
-        auto *info = Pa_GetDeviceInfo(i);
-        m_log.debug(eAudio, std::format("Device {}: {}, maximum {} output channels",
-                                        i, info->name, info->maxOutputChannels));
+    ma_device_info *device_infos;
+    ma_uint32 device_count;
+    auto audio_status = ma_context_get_devices(m_context, &device_infos, &device_count, nullptr, nullptr);
+    if (audio_status == MA_SUCCESS)
+        for (ma_uint32 i = 0; i < device_count; i++)
+            m_log.debug(eAudio, std::format("Device {}: {}{}", i, device_infos[i].name,
+                                            device_infos[i].isDefault ? " (default)" : ""));
+
+    m_channels_used = m_current_mode == MODE_A ? 4 : 2;
+
+    ma_device_config config = ma_device_config_init(ma_device_type_playback);
+    config.playback.format = ma_format_s16;
+    config.playback.channels = m_channels_used;
+    config.playback.pChannelMap = const_cast<ma_channel *>(c_channel_map);
+    config.sampleRate = m_current_mode == MODE_A ? 32000 : m_current_mode == MODE_B ? 48000 : 44100;
+    config.periodSizeInFrames = 256;
+    config.dataCallback = audio_callback;
+    config.pUserData = this;
+
+    m_device = new ma_device;
+    audio_status = ma_device_init(m_context, &config, m_device);
+    if (audio_status != MA_SUCCESS) {
+        delete m_device;
+        m_device = nullptr;
+        throw runtime_error(string("miniaudio: ") + ma_result_description(audio_status));
     }
 
-    PaDeviceIndex device_index = Pa_GetDefaultOutputDevice();
-    auto *info = Pa_GetDeviceInfo(device_index);
-    m_channels_used = min(m_current_mode == MODE_A ? 4 : 2, info->maxOutputChannels);
-    m_log.info(eAudio, std::format("Using device {}: maximum {} output channels, {} used.",
-                                   info->name, info->maxOutputChannels, m_channels_used));
+    m_log.info(eAudio, std::format("Using device {}: {} channels at {} Hz (device native: {} channels at {} Hz)",
+                                   m_device->playback.name, m_channels_used, config.sampleRate,
+                                   m_device->playback.internalChannels, m_device->playback.internalSampleRate));
 
-    PaStreamParameters parameters {
-        device_index,
-        m_channels_used,
-        paInt16,
-        info->defaultLowOutputLatency,
-        nullptr};
-
-    auto audio_status = Pa_OpenStream(&m_audio_stream,
-                                      nullptr, // no input channels
-                                      &parameters,
-                                      m_current_mode == MODE_A ? 32000.0 : m_current_mode == MODE_B ? 48000.0 : 44100,
-                                      256ul, // frames per buffer, maybe use paFramesPerBufferUnspecified
-                                      paNoFlag, // stream flags
-                                      audio_callback,
-                                      this);
-    if (audio_status != paNoError)
-        throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
-
-    audio_status = Pa_StartStream(m_audio_stream);
-    if (audio_status != paNoError)
-        throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
+    audio_status = ma_device_start(m_device);
+    if (audio_status != MA_SUCCESS)
+        throw runtime_error(string("miniaudio: ") + ma_result_description(audio_status));
 }
 
 void AudioPlayback::closeStream() {
-    auto audio_status = Pa_AbortStream(m_audio_stream);
-    if (audio_status != paNoError)
-        throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
-
-    audio_status = Pa_CloseStream(m_audio_stream);
-    if (audio_status != paNoError)
-        throw runtime_error(string("Portaudio: ") + Pa_GetErrorText(audio_status));
+    auto audio_status = ma_device_stop(m_device);
+    ma_device_uninit(m_device);
+    delete m_device;
+    m_device = nullptr;
+    if (audio_status != MA_SUCCESS && audio_status != MA_DEVICE_NOT_STARTED)
+        throw runtime_error(string("miniaudio: ") + ma_result_description(audio_status));
 }

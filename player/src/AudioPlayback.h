@@ -6,11 +6,12 @@
 #define MUSECPP_AUDIOPLAYBACK_H
 
 #include <atomic>
-#include <portaudio.h>
 #include "AudioDefs.h"
 #include "muse/AudioDecoder.h"
 
 class Logger;
+struct ma_context;
+struct ma_device;
 
 class AudioPlayback {
 public:
@@ -35,14 +36,13 @@ private:
     double m_audio_speed_adjust_sum;
     AudioMode m_current_mode;
     int m_channels_used;
-    PaStream *m_audio_stream;
+    ma_context *m_context;
+    ma_device *m_device;
 
-    static int audio_callback(const void *input_buffer, void *output_buffer, unsigned long frames_per_buffer,
-                              const PaStreamCallbackTimeInfo *time_info, PaStreamCallbackFlags status_flags,
-                              void *userData);
+    static void audio_callback(ma_device *device, void *output_buffer, const void *input_buffer,
+                               unsigned int frames_per_buffer);
 
-    int audioCallbackMember(void *output_buffer, unsigned long frames_per_buffer,
-                            const PaStreamCallbackTimeInfo *time_info, PaStreamCallbackFlags status_flags);
+    void audioCallbackMember(void *output_buffer, unsigned long frames_per_buffer);
 
     void openStream();
     void closeStream();

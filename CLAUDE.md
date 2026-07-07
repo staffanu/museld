@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **museld** is a real-time MUSE/NTSC laserdisc player and audio decoder suite. Primary components:
 
-- **museld** — Real-time MUSE (Hi-Vision HD) and NTSC laserdisc decoder with Vulkan GPU compute, GLFW display, and PortAudio audio output
+- **museld** — Real-time MUSE (Hi-Vision HD) and NTSC laserdisc decoder with Vulkan GPU compute, GLFW display, and miniaudio audio output
 - **ac3rf-efm-decode** — CLI tool (and reusable library) for AC3-RF QPSK surround audio and EFM CD audio decoding from laserdisc RF captures
 
 Supported formats:
@@ -37,8 +37,8 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
     museld.cpp
     ac3rf-efm-decode.cpp
   tests/           — Catch2 unit tests (ReedSolomonTest, BchDecoderTest, SrtParserTest)
-  third_party/     — Vendored single-header libs (stb_truetype.h) and the bundled subtitle font (Noto Sans JP, SIL OFL)
-  cmake/           — CMake helpers (ac3rfConfig.cmake.in, modules/FindPORTAUDIO.cmake, etc.)
+  third_party/     — Vendored single-header libs (stb_truetype.h, miniaudio.h) and the bundled subtitle font (Noto Sans JP, SIL OFL)
+  cmake/           — CMake helpers (ac3rfConfig.cmake.in, modules/FindLIBAV.cmake, etc.)
   python/          — nanobind Python bindings source
 fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device
 picostream/        — Standalone: C wrapper for Picoscope oscilloscope capture
@@ -147,7 +147,7 @@ fractional resampler → EfmDecoder → CIRC C1/C2 → concealment → pop detec
 ```
 RF (62.5 MHz) → RF demod → ResamplingInputReader DPLL (16.2 MHz) →
 MUSE frame buffer → video/audio split → Vulkan GPU filters →
-HD video + PortAudio
+HD video + miniaudio
 ```
 
 **NTSC path:**
