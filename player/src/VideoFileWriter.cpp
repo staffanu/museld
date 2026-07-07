@@ -2,9 +2,19 @@
 // Created by staffanu on 3/7/24.
 //
 
+#include <algorithm>
 #include <climits>
 #include "VideoFileWriter.h"
 #include "musevk/VulkanBuffer.h"
+
+// Audio/video sync thresholds.  The audio pts is a contiguous sample count, so
+// the container cannot express gaps -- samples lost to stream errors would shift
+// all later audio earlier.  Offsets within the dead band are left alone (audio
+// arrives in per-frame chunks, so the measured offset jitters by up to a chunk);
+// deficits up to the stretch limit are concealed by interpolation, larger gaps
+// are filled with silence.
+static constexpr int SYNC_DEAD_BAND_MS = 25;
+static constexpr int SYNC_MAX_STRETCH_MS = 100;
 
 VideoFileWriter::PresetSpec VideoFileWriter::presetSpec(VideoWriterPreset preset) {
     switch (preset) {
@@ -78,13 +88,34 @@ void VideoFileWriter::addVideoFrameWithAudio(
     if (number_of_samples != 0 && audio_mode != MODE_UNKNOWN && m_encode_audio) {
         initResampler(audio_mode);
 
+        // Compare the samples delivered so far against the video clock and
+        // correct before writing, so decoding errors cannot desync the streams
+        const int in_rate = audioModeSampleRate(audio_mode);
+        const int64_t scheduled =
+                (m_video_stream.next_pts - m_audio_anchor_frame) * in_rate / m_video_frame_rate;
+        const int64_t deficit = scheduled - (m_audio_in_samples + number_of_samples);
+
+        int skip = 0;
+        if (deficit > in_rate * SYNC_MAX_STRETCH_MS / 1000) {
+            insertSilence(deficit, in_rate);
+        } else if (deficit > in_rate * SYNC_DEAD_BAND_MS / 1000) {
+            insertInterpolated(deficit, in_rate, audio_samples[0]);
+        } else if (deficit < -in_rate * SYNC_DEAD_BAND_MS / 1000) {
+            skip = (int) std::min<int64_t>(-deficit, number_of_samples);
+            m_log.warn(eOutput, std::format("Audio {} ms ahead of the video clock; dropping {} samples",
+                                            -deficit * 1000 / in_rate, skip));
+        }
+
         auto *q = (int16_t *) m_audio_tmp_buffer;
-        for (int i = 0; i < number_of_samples; i++)
+        for (int i = skip; i < number_of_samples; i++)
             for (int j = 0; j < m_audio_stream.codec_context->ch_layout.nb_channels; j++)
                 *q++ = audio_samples[i].samples[j];
 
         const uint8_t *in[8] = {m_audio_tmp_buffer};
-        convertAndWriteAudio(in, number_of_samples);
+        convertAndWriteAudio(in, number_of_samples - skip);
+        m_audio_in_samples += number_of_samples - skip;
+        m_last_sample[0] = audio_samples[number_of_samples - 1].samples[0];
+        m_last_sample[1] = audio_samples[number_of_samples - 1].samples[1];
     }
 }
 
@@ -133,7 +164,58 @@ void VideoFileWriter::convertAndWriteAudio(const uint8_t **in, int in_samples) {
     } while (filled_frame && m_encode_audio);
 }
 
+// Fill a gap of `count` input samples with silence, fading out from the last
+// written sample so the transition into the gap does not pop
+void VideoFileWriter::insertSilence(int64_t count, int in_rate) {
+    m_log.warn(eOutput, std::format("Audio {} ms behind the video clock; inserting silence", count * 1000 / in_rate));
+
+    const int channels = m_audio_stream.codec_context->ch_layout.nb_channels;
+    const int capacity = (int) (sizeof(m_audio_tmp_buffer) / (channels * sizeof(int16_t)));
+    const int64_t fade = std::min<int64_t>(64, count);
+
+    int64_t generated = 0;
+    while (generated < count) {
+        int n = (int) std::min<int64_t>(count - generated, capacity);
+        auto *q = (int16_t *) m_audio_tmp_buffer;
+        for (int i = 0; i < n; i++, generated++)
+            for (int j = 0; j < channels; j++)
+                *q++ = generated < fade ? (int16_t) (m_last_sample[j] * (fade - generated) / (fade + 1)) : 0;
+        const uint8_t *in[8] = {m_audio_tmp_buffer};
+        convertAndWriteAudio(in, n);
+    }
+    m_last_sample[0] = m_last_sample[1] = 0;
+    m_audio_in_samples += count;
+}
+
+// Conceal a small deficit by stretching: insert `count` samples interpolated
+// between the last written sample and the first sample about to be written
+void VideoFileWriter::insertInterpolated(int64_t count, int in_rate, const AudioFrame &next) {
+    m_log.info(eOutput, std::format("Audio {} ms behind the video clock; inserting {} interpolated samples",
+                                    count * 1000 / in_rate, count));
+
+    const int channels = m_audio_stream.codec_context->ch_layout.nb_channels;
+    count = std::min<int64_t>(count, (int64_t) (sizeof(m_audio_tmp_buffer) / (channels * sizeof(int16_t))));
+
+    auto *q = (int16_t *) m_audio_tmp_buffer;
+    for (int64_t i = 1; i <= count; i++)
+        for (int j = 0; j < channels; j++)
+            *q++ = (int16_t) (m_last_sample[j] + (next.samples[j] - m_last_sample[j]) * i / (count + 1));
+    const uint8_t *in[8] = {m_audio_tmp_buffer};
+    convertAndWriteAudio(in, (int) count);
+    m_audio_in_samples += count;
+}
+
 void VideoFileWriter::cleanup() {
+    // Pad the audio track with silence up to the video clock, so the streams
+    // end together even if audio was lost at the end of the recording
+    if (m_encode_audio && m_swr_ctx) {
+        int in_rate = audioModeSampleRate(m_audio_input_mode);
+        int64_t deficit = (m_video_stream.next_pts - m_audio_anchor_frame) * in_rate / m_video_frame_rate
+                          - m_audio_in_samples;
+        if (deficit > in_rate * SYNC_DEAD_BAND_MS / 1000)
+            insertSilence(deficit, in_rate);
+    }
+
     // Flush pending audio: drain the resampler, then send the final (shorter) frame
     if (m_encode_audio && m_swr_ctx) {
         convertAndWriteAudio(nullptr, 0);
@@ -368,6 +450,14 @@ void VideoFileWriter::initResampler(AudioMode mode) {
     ret = swr_init(m_swr_ctx);
     if (ret < 0)
         throw std::runtime_error("Failed to initialize the resampling context");
+
+    // Anchor the sync schedule.  At a mode change the sample counts are in
+    // different rates, so restart it at the current frame (the video frame was
+    // already written, hence the -1).  On the very first init the anchor stays
+    // at frame 0, so audio that starts late is padded with leading silence.
+    if (m_audio_input_mode != MODE_UNKNOWN)
+        m_audio_anchor_frame = m_video_stream.next_pts - 1;
+    m_audio_in_samples = 0;
 
     m_audio_input_mode = mode;
 }

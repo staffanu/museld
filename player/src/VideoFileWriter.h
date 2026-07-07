@@ -44,6 +44,9 @@ public:
             m_encode_audio(false),
             m_swr_ctx(nullptr),
             m_audio_input_mode(MODE_UNKNOWN),
+            m_audio_anchor_frame(0),
+            m_audio_in_samples(0),
+            m_last_sample{},
             m_samples_in_frame(0) {
     }
     VideoFileWriter(const VideoFileWriter &) = delete;
@@ -84,6 +87,8 @@ private:
     void initAudio(const PresetSpec &spec);
     void initResampler(AudioMode mode);
     void convertAndWriteAudio(const uint8_t **in, int in_samples);
+    void insertSilence(int64_t count, int in_rate);
+    void insertInterpolated(int64_t count, int in_rate, const AudioFrame &next);
     AVFrame *makeVideoFrame(OutputStream *ost, std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
                             std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V);
     bool writeFrame(AVCodecContext *c, AVStream *st, AVFrame *frame, AVPacket *pkt);
@@ -122,6 +127,10 @@ private:
 
     struct SwrContext *m_swr_ctx; // resampling; created lazily when the input sample rate is known
     AudioMode m_audio_input_mode; // audio mode the resampler was created for
+
+    int64_t m_audio_anchor_frame; // video frame where the audio sync schedule starts
+    int64_t m_audio_in_samples;   // input-rate samples fed to the resampler since the anchor
+    int16_t m_last_sample[2];     // last real sample written; start point for interpolation/fade-out
 
     uint8_t m_audio_tmp_buffer[20000];
     int m_samples_in_frame;
