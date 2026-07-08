@@ -329,9 +329,13 @@ bool ResamplingFrameReader::process(std::unique_ptr<MuseInputBlock> const &outpu
                         m_log.info(eInput, std::format("New state eLocked at line {}, diff={}, threshold={}",
                                                        m_line, m_line1_frame_pulse_sum - m_line2_frame_pulse_sum, threshold));
                         // copy the two last lines to lines 1 and 2 so that the first frame is complete -- ignore dropouts
-                        for (int i = 0; i < MUSE_TOTAL_WIDTH; i++) {
-                            output[i] = output[(m_line - 2) * MUSE_TOTAL_WIDTH + i];
-                            output[i + MUSE_TOTAL_WIDTH] = output[(m_line - 1) * MUSE_TOTAL_WIDTH + i];
+                        // (lock can be acquired at m_line <= 2 after the line counter wraps in eSearching,
+                        // in which case there is no line history to copy)
+                        if (m_line >= 3) {
+                            for (int i = 0; i < MUSE_TOTAL_WIDTH; i++) {
+                                output[i] = output[(m_line - 2) * MUSE_TOTAL_WIDTH + i];
+                                output[i + MUSE_TOTAL_WIDTH] = output[(m_line - 1) * MUSE_TOTAL_WIDTH + i];
+                            }
                         }
                         m_line = 2;
                         m_state = eLocked;
