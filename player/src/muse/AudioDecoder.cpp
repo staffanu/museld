@@ -104,7 +104,7 @@ void AudioDecoder::decodeFrame(int frame_no,
     int sample_count = 0;
     int no_not_updated_symbol_locations = 0;
 
-    auto *ptr = audio_converted_freq->data<ushort>();
+    auto *ptr = audio_converted_freq->data<uint16_t>();
     unsigned width = audio_converted_freq->size().x_size;
     for (int row = 0; row < 88; row++) {
         int start_col = 9 + (row >= 40 && row < 44 || row >= 84 ? 78 : 0);

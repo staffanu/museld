@@ -87,7 +87,7 @@ std::vector<float> makeArbitraryFilter(int ntaps, uint32_t seed) {
 
 // ---------- FirFilterStage SIMD vs scalar ----------
 
-TEST_CASE("FirFilterStage SIMD matches scalar — decim=1, length multiple of 8") {
+TEST_CASE("FirFilterStage SIMD matches scalar - decim=1, length multiple of 8") {
     if (!FirFilterStage::simdSupported()) {
         SUCCEED();
         return;
@@ -100,7 +100,7 @@ TEST_CASE("FirFilterStage SIMD matches scalar — decim=1, length multiple of 8"
     requireClose(out_simd, out_ref);
 }
 
-TEST_CASE("FirFilterStage SIMD matches scalar — decim=2, length multiple of 8") {
+TEST_CASE("FirFilterStage SIMD matches scalar - decim=2, length multiple of 8") {
     if (!FirFilterStage::simdSupported()) {
         SUCCEED();
         return;
