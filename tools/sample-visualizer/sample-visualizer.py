@@ -27,7 +27,7 @@ from PyQt6 import QtWidgets, QtCore, QtGui
 
 
 class Viewer(QtWidgets.QMainWindow):
-    def __init__(self, path: str):
+    def __init__(self, path: str, yscale: float = 1.0):
         super().__init__()
         self.path = path
         self.filesize = os.path.getsize(path)
@@ -80,6 +80,12 @@ class Viewer(QtWidgets.QMainWindow):
         self.ymax.setMaximumWidth(80)
         controls.addWidget(self.ymax)
 
+        controls.addSpacing(12)
+        controls.addWidget(QtWidgets.QLabel("scale"))
+        self.yscale_edit = QtWidgets.QLineEdit(f"{yscale:g}")
+        self.yscale_edit.setMaximumWidth(80)
+        controls.addWidget(self.yscale_edit)
+
         controls.addSpacing(20)
         self.select_region = QtWidgets.QCheckBox("select region")
         controls.addWidget(self.select_region)
@@ -114,6 +120,7 @@ class Viewer(QtWidgets.QMainWindow):
         # --- Signals ----------------------------------------------------
         for w in (self.r8, self.r16, self.rf32, self.signed, self.big_endian):
             w.toggled.connect(self.refresh)
+        self.yscale_edit.editingFinished.connect(self.refresh)
         self.bits_group.buttonToggled.connect(self.on_bits_changed)
         self.auto_y.toggled.connect(self.on_auto_y_toggled)
         self.ymin.editingFinished.connect(self.refresh)
@@ -140,6 +147,12 @@ class Viewer(QtWidgets.QMainWindow):
         # Initial view shows whole file (downsampled)
         self.full_view = True
         self.refresh()
+
+    def _yscale(self) -> float:
+        try:
+            return float(self.yscale_edit.text())
+        except ValueError:
+            return 1.0
 
     # ------------------------------------------------------------------
     def current_dtype(self):
@@ -330,6 +343,9 @@ class Viewer(QtWidgets.QMainWindow):
             xs[1::2] = centers
             connect_mode = "pairs"
 
+        scale = self._yscale()
+        if scale != 1.0:
+            ys = ys * scale
         self.curve.setData(xs, ys, connect=connect_mode)
 
         # Y-range
@@ -345,9 +361,10 @@ class Viewer(QtWidgets.QMainWindow):
                 pass
 
         dtype, bps = self.current_dtype()
+        scale_str = f"  scale={scale:g}" if scale != 1.0 else ""
         self._status_base = (
             f"dtype={dtype.str}  bps={bps}  samples={n:,}  view=[{x0:,}..{x1:,}]  "
-            f"span={span:,}  px={px_width}  drawn={len(xs):,}"
+            f"span={span:,}  px={px_width}  drawn={len(xs):,}{scale_str}"
         )
         self.status.showMessage(self._status_base)
 
@@ -368,7 +385,10 @@ class Viewer(QtWidgets.QMainWindow):
             self.status.showMessage(f"{self._status_base}  |  y={y_cursor:.6g}")
             return
         v = samples[0]
-        if np.issubdtype(samples.dtype, np.floating):
+        scale = self._yscale()
+        if scale != 1.0:
+            vstr = f"{float(v) * scale:.6g}"
+        elif np.issubdtype(samples.dtype, np.floating):
             vstr = f"{float(v):.6g}"
         else:
             vstr = f"{int(v)}"
@@ -380,11 +400,13 @@ class Viewer(QtWidgets.QMainWindow):
 def main():
     ap = argparse.ArgumentParser(description="Interactive viewer for raw binary sample files.")
     ap.add_argument("file", help="path to raw binary file")
+    ap.add_argument("--yscale", type=float, default=1.0, metavar="FACTOR",
+                    help="multiply all Y values by FACTOR (e.g. 0.003052 to map ±32768 → ±100 mV)")
     args = ap.parse_args()
 
     app = QtWidgets.QApplication(sys.argv)
     pg.setConfigOptions(useOpenGL=False, antialias=False)
-    w = Viewer(args.file)
+    w = Viewer(args.file, yscale=args.yscale)
     w.show()
     sys.exit(app.exec())
 
