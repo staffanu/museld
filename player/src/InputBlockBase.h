@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Staffan Ulfberg
+// This file is licensed under the provisions of the Gnu General Public License v3 (see gpl-3.0.txt)
+
 #ifndef MUSECPP_INPUTBLOCKBASE_H
 #define MUSECPP_INPUTBLOCKBASE_H
 

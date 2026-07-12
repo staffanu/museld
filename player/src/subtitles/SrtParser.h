@@ -1,3 +1,6 @@
+// Copyright 2026 Staffan Ulfberg
+// This file is licensed under the provisions of the Gnu General Public License v3 (see gpl-3.0.txt)
+
 #ifndef MUSELD_SRT_PARSER_H
 #define MUSELD_SRT_PARSER_H
 

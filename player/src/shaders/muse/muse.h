@@ -1,6 +1,5 @@
-//
-// Created by staffanu on 6/2/23.
-//
+// Copyright 2023-2026 Staffan Ulfberg
+// This file is licensed under the provisions of the Gnu General Public License v3 (see gpl-3.0.txt)
 
 #extension GL_EXT_shader_8bit_storage : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_int8: enable

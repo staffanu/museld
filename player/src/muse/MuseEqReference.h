@@ -1,3 +1,6 @@
+// Copyright 2026 Staffan Ulfberg
+// This file is licensed under the provisions of the Gnu General Public License v3 (see gpl-3.0.txt)
+
 // Reference VIT mono-pulse for the MUSE adaptive equalizer.
 //
 // The target end-to-end response is a raised-cosine pulse with roll-off factor β = 0.1

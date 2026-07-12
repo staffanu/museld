@@ -1,3 +1,6 @@
+// Copyright 2026 Staffan Ulfberg
+// This file is licensed under the provisions of the Gnu General Public License v3 (see gpl-3.0.txt)
+
 #ifndef MUSELD_SUBTITLE_FONT_H
 #define MUSELD_SUBTITLE_FONT_H
 

@@ -1,6 +1,5 @@
-//
-// Created by staffanu on 7/3/26.
-//
+// Copyright 2026 Staffan Ulfberg
+// This file is licensed under the provisions of the Gnu General Public License v3 (see gpl-3.0.txt)
 
 #ifndef MUSECPP_VIDEOWRITEROPTIONS_H
 #define MUSECPP_VIDEOWRITEROPTIONS_H

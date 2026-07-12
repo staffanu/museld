@@ -1,6 +1,5 @@
-//
-// Created by staffanu on 6/30/23.
-//
+// Copyright 2023-2026 Staffan Ulfberg
+// This file is licensed under the provisions of the Gnu General Public License v3 (see gpl-3.0.txt)
 
 #include <fcntl.h>
 #include <unistd.h>
