@@ -101,12 +101,13 @@ cmake --build picostream/build-release
 ## Running Tests
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Debug -S player -B player/build-debug
+cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -S player -B player/build-debug
 cmake --build player/build-debug
 cd player/build-debug && ctest -V
 ```
 
-Tests are in `player/tests/` (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`).
+Tests are only built when `-DBUILD_TESTING=ON` is passed. They are in `player/tests/`
+(`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`, `FilterSimdParityTest.cpp`, `SrtParserTest.cpp`).
 
 ## Architecture
 

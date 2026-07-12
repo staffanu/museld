@@ -1,5 +1,7 @@
 # museld — Real-time MUSE Laserdisc Player
 
+[![CI](https://github.com/staffanu/museld/actions/workflows/ci.yml/badge.svg)](https://github.com/staffanu/museld/actions/workflows/ci.yml)
+
 This repository contains a real-time decoder for Hi-Vision MUSE and NTSC (experimental support)
 laserdiscs, along with a reusable library and CLI for decoding AC3-RF surround audio and EFM CD
 audio from laserdisc RF captures.
@@ -17,7 +19,7 @@ toolchain, try that first.
 
 A real-time [MUSE](https://en.wikipedia.org/wiki/Multiple_sub-Nyquist_sampling_encoding)
 and NTSC (experimental support) laserdisc decoder. Video filtering runs on the GPU via Vulkan
-and GLSL compute shaders. Audio is output via PortAudio.
+and GLSL compute shaders. Audio is output via the bundled [miniaudio](https://miniaud.io/) library.
 
 See **[docs/museld.md](docs/museld.md)** for the full player reference.
 
@@ -50,17 +52,41 @@ All components require CMake 3.22+ and a C++23 compiler.
 
 ### museld + ac3rf-efm-decode + Python bindings (default)
 
-All three are built by default. Dependencies: Vulkan, GLFW, PortAudio, FLAC++,
-Python 3.8+, pkg-config.
+All three are built by default. Dependencies: Vulkan (a recent SDK, see below), GLFW, FLAC++,
+Python 3.8+, pkg-config. Audio output (miniaudio), font rendering (stb_truetype), and the
+subtitle font are bundled and need no packages. FFmpeg ≥ 7.1 is optional and enables video
+file output (`--write`); with older or no FFmpeg, museld builds without it.
 
 Ubuntu packages:
 ```bash
-sudo apt install cmake glslc libglfw3-dev portaudio19-dev libavformat-dev libavcodec-dev \
-    libswscale-dev catch2 vulkan-tools vulkan-validationlayers-dev gnuradio-dev \
-    libflac++-dev libeigen3-dev python3-dev
+sudo apt install cmake pkg-config libvulkan-dev glslc libglfw3-dev libflac++-dev \
+    libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
+    catch2 python3-dev
 ```
 
-macOS (Homebrew): packages have similar names; use Homebrew for dependencies.
+On Ubuntu 24.04 the distro Vulkan headers are too old for museld; instead of
+`libvulkan-dev glslc`, install the [LunarG Vulkan SDK](https://vulkan.lunarg.com/sdk/home):
+
+```bash
+wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
+sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan.list \
+    "https://packages.lunarg.com/vulkan/lunarg-vulkan-$(lsb_release -cs).list"
+sudo apt update && sudo apt install vulkan-sdk
+```
+
+macOS (Homebrew):
+
+```bash
+brew install glfw vulkan-headers vulkan-loader molten-vk shaderc flac catch2 ffmpeg
+```
+
+Windows (MSYS2, UCRT64 environment — museld builds, but runtime is not yet well tested):
+
+```bash
+pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,flac,catch,vulkan-headers,vulkan-loader,glfw,shaderc}
+```
+
+Then build with:
 
 ```bash
 cmake -DCMAKE_BUILD_TYPE=Release -S player -B player/build-release
@@ -102,7 +128,7 @@ cmake --build picostream/build-release
 ## Running tests
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF \
+cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF -DBUILD_TESTING=ON \
     -S player -B player/build-debug
 cmake --build player/build-debug
 cd player/build-debug && ctest -V

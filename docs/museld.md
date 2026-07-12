@@ -80,7 +80,7 @@ Machines tested and found too slow: NVIDIA Jetson Nano, Raspberry Pi 5 (1–5 fp
 ```
 RF capture (62.5 MHz) → MuseRfDemodulator → ResamplingInputReader (DPLL, 16.2 MHz)
   → FrameBuffer → Vulkan GPU shaders (de-emphasis, gamma, color decode, motion detection)
-  → GLFW window + PortAudio
+  → GLFW window + miniaudio
 ```
 
 The resampling DPLL runs in a dedicated CPU thread. Vulkan command recording and GLFW event handling
@@ -108,7 +108,7 @@ RF → TimingRecovery (Mueller-Müller PLL) → EfmDecoder → CIRC C1/C2 Reed-S
 - **RF sample rate**: EFM input filters are hard-coded for 62.5 MHz; other sample rates require filter recomputation.
 - **Non-linear de-emphasis**: Unclear whether it has already been applied on baseband (player output) input; use the L key to toggle.
 - **EFM de-emphasis**: Not yet implemented; needed for discs with emphasis flag set, if any exist.
-- **Audio channel mapping**: Four-channel MUSE audio channel assignment may vary across PortAudio configurations.
+- **Audio channel mapping**: Four-channel MUSE audio channel assignment may vary across audio backends and device configurations.
 - **Direct USB input**: Currently requires an external capture program writing to a FIFO (e.g., picostream).
 
 ## References
