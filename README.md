@@ -42,7 +42,10 @@ about MUSE encoding.
 
 ### picostream
 
-Standalone C wrapper for streaming data from a Picoscope 5000-series oscilloscope to a file or FIFO.
+Standalone tool for streaming data from a Picoscope 5000-series oscilloscope to a file or FIFO,
+from either an analog channel or the digital ports (MSO models). Sample rate, ADC resolution,
+voltage range, coupling, channel, and capture length are set with command line options
+(see `picostream --help`).
 Used to capture MUSE RF in real time for piping directly into museld.
 (The current tool I use to capture MUSE RF is [fx3usbadc](https://bitbucket.org/staffanulfberg/fx3usbadc).)
 
