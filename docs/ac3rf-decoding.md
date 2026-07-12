@@ -14,15 +14,29 @@ The AC3 bitstream is QPSK-modulated onto a 2.88 MHz carrier, Reed-Solomon encode
 layers (C1 and C2), and interleaved. The decoding pipeline reverses these steps:
 
 ```
-RF → bandpass FIR → decimation → IQ mixing (DPLL) → QPSK demodulation
-  → frame sync → de-interleave → Reed-Solomon C1/C2 → AC3 bitstream
+RF → half-band decimation → IQ mixing to baseband (2.88 MHz NCO)
+  → I/Q decimation → root-raised-cosine filter → differential QPSK detection
+  → symbol timing DPLL → frame sync → de-interleave → Reed-Solomon C1/C2 → AC3 bitstream
 ```
 
-## 1. Bandpass filtering
+All filter parameters and decimation depths are computed from the input sample rate at
+startup; any capture rate of at least 7 MHz works.
 
-The input RF signal is first passed through a bandpass FIR filter with a passband centred
-at 2.88 MHz, ±0.15 MHz. This removes out-of-band noise and the video carrier before
-further processing.
+## 1. Decimation and mixing to baseband
+
+The input signal is first decimated by a power of two using Kaiser-windowed half-band
+low-pass stages, keeping the sample rate above 7 MHz. The decimated signal is then
+multiplied by a complex exponential at the 2.88 MHz carrier frequency, shifting the AC3
+band to baseband as a complex I/Q signal. The mixer is a free-running numerically
+controlled oscillator: a 14-bit integer phase accumulator indexing a 16384-entry complex
+exponential table. No carrier phase recovery is attempted — thanks to the differential
+encoding (below), a small frequency error only appears as a slow, constant rotation of the
+constellation, which the differential detector tolerates.
+
+The I/Q signal is decimated further by half-band stages, keeping at least 5 samples per
+symbol, and finally filtered with a root-raised-cosine filter (roll-off 0.7, spanning
+±3 symbol periods). There is no explicit bandpass filter at RF; the band selection to
+2.88 MHz ± 150 kHz happens at baseband in these low-pass stages.
 
 ## 2. Carrier and symbol rate
 
@@ -30,7 +44,7 @@ The carrier frequency of 2.88 MHz is exactly 10× the QPSK symbol rate of 288 kS
 Each symbol carries two bits, giving a raw bit rate of 576 kbit/s.
 There are 10 cycles of the carrier for each symbol period.
 
-## 3. QPSK demodulation
+## 3. Differential QPSK detection
 
 QPSK encodes two bits per symbol as one of four phase states: 45°, 135°, 225°, or 315°
 relative to the carrier. Rather than recovering an absolute carrier reference, the encoder
@@ -39,21 +53,31 @@ the data symbol (mod 4). The decoder therefore looks at the *phase difference* b
 consecutive symbols, which is always 0°, 90°, 180°, or 270°, and the original carrier
 phase is irrelevant.
 
-Multiplying pairs of ±1 samples yields +1 if they agree and −1 if they differ. Summing
-several such products over a few carrier cycles gives a reliable estimate. The demodulator
-adds the 160- and 168-sample products to a first accumulator (in-phase), and the 164- and
-172-sample products to a second (quadrature). The accumulator with the larger absolute
-value indicates whether the phase shift is a multiple of 0°/180° or 90°/270°; its sign
-resolves the ambiguity. The result is a symbol value 0–3.
+The detector runs on the filtered baseband I/Q signal at the full (post-decimation) sample
+rate: each sample is multiplied by the complex conjugate of the sample one symbol period
+earlier, so the argument of the product is the phase advance over exactly one symbol.
+The decision is a simple quadrant test — whichever of |Re| and |Im| is larger selects the
+axis, and its sign resolves the direction: 0° → symbol 0, 90° → 1, 270° → 2, 180° → 3.
+
+(An earlier version of this decoder instead used the 1-bit demodulation scheme described
+in the patent — sums of products of hard-limited samples at four different lags — which is
+attractive because it is cheap to implement in hardware. Processing the full-resolution
+signal is more robust with noisy captures.)
 
 ## 4. Symbol clock recovery (DPLL)
 
-The symbol stream is not aligned to the input sample clock. A digital phase-locked loop
-(DPLL) tracks the symbol rate by observing when the demodulated signal transitions between
-values. The phase detector looks for signal transitions; transitions accompanied by multiple
-glitches (the signal switching more than once before settling) are ignored, and only
-clean single-step transitions are used to update the loop. In practice there are enough
-clean transitions to keep the DPLL locked reliably.
+The symbol stream is not aligned to the input sample clock, so a digital phase-locked loop
+selects which of the ~5+ differential decisions per symbol period to emit. A 10-bit
+counter advances by a nominal per-sample step (symbol rate / sample rate × 2¹⁰); each time
+it wraps around, the current decision is output as the next symbol.
+
+The phase detector observes where the detected symbol value *changes* within the counter
+cycle: symbol transitions should occur half a period away from the sampling instant, and
+their offset from the counter midpoint is the phase error. Only cycles containing exactly
+one transition update the loop — multiple toggles within one symbol period indicate noise
+and are ignored. In practice there are enough clean transitions to keep the loop locked
+reliably. The error drives a proportional-plus-integral loop filter (gains 1/16 and 1/512,
+giving a natural frequency around 2 kHz with damping factor ≈ 0.7).
 
 ## 5. Frame synchronisation and byte alignment
 
