@@ -25,7 +25,8 @@ NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string executable_dir, st
                                       vulkan_manager, input_format,
                                       NtscRfDemodulatorConstants::c_sample_block_size,
                                       benchmark_shaders),
-  m_efm_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size, true, true, 2, 3, std::nullopt),
+  m_efm_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size, true, true,
+                    EfmDemodulator::defaultLog2Decimation(sample_frequency), 3, std::nullopt),
   m_efm_enabled(efm_enabled) {
 }
 

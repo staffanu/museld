@@ -12,6 +12,10 @@
 #include "../filter/Window.h"
 #include "EfmDemodulator.h"
 
+int EfmDemodulator::defaultLog2Decimation(double input_sample_frequency) {
+    return std::max(0, (int)(log(input_sample_frequency / 8e6) / log(2)));
+}
+
 EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int input_block_size, bool use_simd,
     bool rf_input, int log2_decimation, int adaptive_filter_size, std::optional<std::string> retiming_debug_filename)
     : m_log(log),

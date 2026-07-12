@@ -26,6 +26,9 @@ public:
     // Filters the input samples and performs clock recovery to extract the channel bit stream of 4.3218 M symbols/s
     void demodulate(const float *input_buffer, std::vector<float> &reclocked_data);
 
+    // The largest power-of-two decimation that keeps the decimated sample rate above 8 MHz.
+    static int defaultLog2Decimation(double input_sample_frequency);
+
 private:
     static IirFilter<5> *makeEllipticLowpassFilter(double Fs);
 

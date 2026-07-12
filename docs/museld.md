@@ -144,7 +144,6 @@ RF → TimingRecovery (Mueller-Müller PLL) → EfmDecoder → CIRC C1/C2 Reed-S
 
 - **Motion vectors**: MUSE specifies motion compensation in control data (3+4 bits), but these bits are
   always zero on every disc tested. It is unclear whether this feature was ever used on MUSE laserdiscs.
-- **RF sample rate**: EFM input filters are hard-coded for 62.5 MHz; other sample rates require filter recomputation.
 - **Non-linear de-emphasis**: Unclear whether it has already been applied on baseband (player output) input; use the L key to toggle.
 - **EFM de-emphasis**: Not yet implemented; needed for discs with emphasis flag set, if any exist.
 - **Audio channel mapping**: Four-channel MUSE audio channel assignment may vary across audio backends and device configurations.

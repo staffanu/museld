@@ -26,11 +26,9 @@ namespace NtscRfDemodulatorConstants {
 
     static constexpr int c_sample_block_size = 512 * 1024;
     static constexpr int c_video_decimation_rate = 2;
-    static constexpr int c_efm_decimation_rate = 4;
     static constexpr int c_audio_decimation_rate = 4;
 
     static constexpr int c_video_block_size = c_sample_block_size / c_video_decimation_rate;
-    static constexpr int c_efm_block_size = c_sample_block_size / c_efm_decimation_rate;
     static constexpr int c_audio_block_size = c_sample_block_size / c_audio_decimation_rate;
 
     // enough buffers for two frames
