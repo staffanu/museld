@@ -1,0 +1,417 @@
+#include <stdio.h>
+#include <sys/time.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <signal.h>
+#include <unistd.h>
+#include <math.h>
+#include <ctype.h>
+
+#include <algorithm>
+#include <functional>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include <libps5000a/ps5000aApi.h>
+
+/*
+ * Streams samples from a Picoscope 5000A-series device to a file.
+ *
+ * Analog mode (default): signed little-endian 16 bit samples from one channel,
+ * or signed 8 bit samples with --bits 8.
+ * To convert 16 bit samples into unsigned byte values (sacrificing precision) this works:
+ *
+ * od -w2 -t d1 -v <filename> | LC_ALL=C awk '{ printf("%c", $3+128) }' > output.bin
+ *
+ * To show as decimal, do this:
+ *
+ * od -w2 -t d2 -v <filename>
+ *
+ * Digital mode (--digital, MSO models only): each sample is one byte holding
+ * D0-D7 (--bits 8), or one little-endian 16 bit word holding D0-D15 (--bits 16).
+ */
+
+#define CHECK_CALL(call, message) \
+  { \
+    PICO_STATUS status = (call); \
+    if (status != PICO_OK) { \
+      fprintf(stderr, "ERROR: %s (status %d)\n", message, status); exit(1); \
+    } \
+  }
+
+int16_t g_ready = 0;
+int32_t g_sampleCount;
+uint32_t g_startIndex;
+int16_t g_overflow;
+volatile sig_atomic_t g_stop = 0;
+
+bool g_digital = false;
+int g_digitalPorts = 1; // 1 / 2 ports of 8 digital channels each
+size_t g_bytesPerSample = 2;
+PS5000A_CHANNEL g_channel = PS5000A_CHANNEL_A;
+
+int16_t *driverBuffers[2];
+int16_t *appBuffer;
+
+void sigintHandler(int)
+{
+  if (g_stop) // second Ctrl-C: give up on a clean shutdown
+    _exit(1);
+  g_stop = 1;
+}
+
+void PREF4 callBackStreaming(int16_t handle, int32_t n_samples, uint32_t startIndex,
+			     int16_t overflow, uint32_t triggerAt, int16_t triggered,
+			     int16_t autoStop, void *pParameter)
+{
+  if (n_samples != 0) {
+    g_sampleCount = n_samples;
+    g_startIndex  = startIndex;
+    g_ready = 1;
+    g_overflow = overflow;
+
+    if (!g_digital && g_bytesPerSample == 1)
+      for (int i = 0; i < n_samples; i++) // 8 bit resolution: the ADC value is in the high byte
+        ((int8_t *)appBuffer)[startIndex + i] = (int8_t)(driverBuffers[0][startIndex + i] >> 8);
+    else if (!g_digital)
+      memcpy(appBuffer + startIndex, driverBuffers[0] + startIndex, n_samples * sizeof(int16_t));
+    else
+      for (int i = 0; i < n_samples; i++) {
+        if (g_digitalPorts == 2)
+          appBuffer[startIndex + i] = // little endian
+                  (driverBuffers[0][startIndex + i] & 0xff) | ((driverBuffers[1][startIndex + i] & 0xff) << 8);
+        else
+          ((uint8_t *)appBuffer)[startIndex + i] = driverBuffers[0][startIndex + i] & 0xff;
+      }
+  }
+}
+
+void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sampleInterval, long n_total_samples)
+{
+  uint32_t bufferSize = 2000000;
+  int hasOverflow = 0;
+
+  /* Trigger disabled */
+  CHECK_CALL(ps5000aSetSimpleTrigger(handle, 0, PS5000A_CHANNEL_A, 0, PS5000A_RISING, 0, 0),
+	     "ps5000aSetSimpleTrigger failed");
+
+  int n_buffers = g_digital ? g_digitalPorts : 1;
+  for (int i = 0; i < n_buffers; i++) {
+    PS5000A_CHANNEL source = g_digital ? (PS5000A_CHANNEL)(PS5000A_DIGITAL_PORT0 + i) : g_channel;
+    driverBuffers[i] = (int16_t*)calloc(bufferSize, sizeof(int16_t));
+    CHECK_CALL(ps5000aSetDataBuffer(handle, source, driverBuffers[i], bufferSize, 0, PS5000A_RATIO_MODE_NONE),
+	       "ps5000aSetDataBuffer");
+  }
+
+  appBuffer = (int16_t*)calloc(bufferSize, sizeof(int16_t));
+
+  if (n_total_samples != 0)
+    printf("Streaming Data for %ld samples to %s\n", n_total_samples, filename);
+  else
+    printf("Streaming Data to %s until interrupted (Ctrl-C)\n", filename);
+  FILE *fp = fopen(filename, "w");
+  if (!fp) {
+    printf("Cannot open the file %s for writing.\n", filename);
+    exit(1);
+  }
+
+  uint32_t requestedInterval = sampleInterval;
+  CHECK_CALL(ps5000aRunStreaming(handle, &sampleInterval, PS5000A_NS,
+				 0 /* maxPreTriggerSamples */, 0 /* maxPostTriggerSamples */, 0 /*autostop*/,
+				 1 /* downsampleRatio */, PS5000A_RATIO_MODE_NONE, bufferSize),
+	     "ps5000aRunStreaming");
+  if (sampleInterval != requestedInterval)
+    fprintf(stderr, "WARNING: sample interval %u ns not supported by the device; using %u ns (%.6g MS/s)\n",
+	    requestedInterval, sampleInterval, 1e3 / sampleInterval);
+  else
+    printf("Actual sample interval used: %u ns (%.6g MS/s)\n", sampleInterval, 1e3 / sampleInterval);
+
+  struct timeval start, end;
+  gettimeofday(&start, NULL);
+
+  long totalSamples = 0;
+  while (!g_stop && (totalSamples < n_total_samples || n_total_samples == 0)) {
+    g_ready = 0;
+    CHECK_CALL(ps5000aGetStreamingLatestValues(handle, callBackStreaming, NULL),
+	       "ps5000aGetStreamingLatestValues");
+
+    if (g_ready && g_sampleCount > 0) { /* Can be ready and have no data, if autoStop has fired */
+      long n_write = g_sampleCount;
+      if (n_total_samples != 0)
+	n_write = std::min(n_write, n_total_samples - totalSamples); // exact requested sample count
+      totalSamples += n_write;
+      printf("Collected %7d samples, index = %7u, Total: %11ld samples %s         \r",
+	     g_sampleCount, g_startIndex, totalSamples, g_overflow ? " OVERFLOW" : "");
+      fflush(stdout);
+      hasOverflow |= g_overflow;
+      fwrite((uint8_t *)appBuffer + g_startIndex * g_bytesPerSample, g_bytesPerSample, n_write, fp);
+    }
+  }
+
+  gettimeofday(&end, NULL);
+  long millis = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
+
+  printf("\nData collection %s.  Total time %ld ms. %s\n",
+	 g_stop ? "interrupted" : "complete", millis, hasOverflow ? " OVERFLOW detected!" : "");
+  ps5000aStop(handle);
+  fclose(fp);
+
+  for (int i = 0; i < n_buffers; i++) {
+    PS5000A_CHANNEL source = g_digital ? (PS5000A_CHANNEL)(PS5000A_DIGITAL_PORT0 + i) : g_channel;
+    CHECK_CALL(ps5000aSetDataBuffer(handle, source, NULL, 0, 0, PS5000A_RATIO_MODE_NONE),
+	       "ps5000aSetDataBuffer");
+    free(driverBuffers[i]);
+  }
+  free(appBuffer);
+}
+
+int32_t main(int argc, char *argv[])
+{
+  PS5000A_RANGE range = PS5000A_100MV;
+  PS5000A_COUPLING coupling = PS5000A_AC;
+  int bits = 0; // 0 = default for the selected mode
+  uint32_t sample_interval = 16; // ns
+  long n_total_samples = 0; // 0 = stream until interrupted
+  double duration_seconds = 0;
+  double logic_threshold_volts = 1.65;
+  std::string filename = "stream.bin";
+  bool filename_given = false;
+
+  const std::vector<std::string> args(argv + 1, argv + argc);
+  auto it = args.cbegin();
+
+  struct Option {
+    std::string name;
+    std::string help;
+    std::function<void ()> handler;
+  };
+  std::vector<Option> options;
+
+  auto usage = [&options] () -> void {
+    fprintf(stderr, "usage: picostream [options] [output_file (default stream.bin)]\n");
+    for (const auto &o: options)
+      fprintf(stderr, "  %-18s %s\n", o.name.c_str(), o.help.c_str());
+    exit(EXIT_FAILURE);
+  };
+
+  auto nextArg = [&it, &args, &usage] () -> const std::string & {
+    if (it == args.cend())
+      usage();
+    return *it++;
+  };
+
+  options.push_back({"--digital", "capture digital ports (MSO models) instead of an analog channel", [&] () -> void {
+    g_digital = true;
+  }});
+  options.push_back({"--bits", "<n>: analog ADC resolution 8/12/14/15/16 (default 12; 8 writes s8, others s16le); digital channel count 8/16 (default 8)", [&] () -> void {
+    bits = stoi(nextArg());
+  }});
+  options.push_back({"--rate", "<hz>: sample rate, e.g. 62.5e6 (default 62.5e6)", [&] () -> void {
+    double rate = stod(nextArg());
+    if (rate <= 0)
+      throw std::runtime_error("Invalid sample rate");
+    sample_interval = (uint32_t)fmax(1, llround(1e9 / rate));
+    double actual_rate = 1e9 / sample_interval;
+    if (fabs(actual_rate - rate) > 1e-6 * rate)
+      fprintf(stderr, "WARNING: rate %.9g Hz is not a whole number of nanoseconds per sample; requesting %u ns (%.9g Hz)\n",
+	      rate, sample_interval, actual_rate);
+  }});
+  options.push_back({"--sample-interval", "<ns>: sample interval in nanoseconds (alternative to --rate; default 16)", [&] () -> void {
+    sample_interval = stoul(nextArg());
+    if (sample_interval == 0)
+      throw std::runtime_error("Invalid sample interval");
+  }});
+  options.push_back({"--range", "<v>: analog voltage range 10mV/20mV/50mV/100mV/200mV/500mV/1V/2V/5V/10V/20V (default 100mV)", [&] () -> void {
+    static const struct { const char *name; PS5000A_RANGE range; } ranges[] = {
+      {"10mV", PS5000A_10MV}, {"20mV", PS5000A_20MV}, {"50mV", PS5000A_50MV},
+      {"100mV", PS5000A_100MV}, {"200mV", PS5000A_200MV}, {"500mV", PS5000A_500MV},
+      {"1V", PS5000A_1V}, {"2V", PS5000A_2V}, {"5V", PS5000A_5V},
+      {"10V", PS5000A_10V}, {"20V", PS5000A_20V},
+    };
+    const std::string name = nextArg();
+    auto match = std::find_if(std::begin(ranges), std::end(ranges),
+			      [&name] (const auto &r) -> bool { return strcasecmp(name.c_str(), r.name) == 0; });
+    if (match == std::end(ranges))
+      throw std::runtime_error("Invalid voltage range: " + name);
+    range = match->range;
+  }});
+  options.push_back({"--coupling", "<ac|dc>: analog input coupling (default ac)", [&] () -> void {
+    const std::string name = nextArg();
+    if (strcasecmp(name.c_str(), "ac") == 0)
+      coupling = PS5000A_AC;
+    else if (strcasecmp(name.c_str(), "dc") == 0)
+      coupling = PS5000A_DC;
+    else
+      throw std::runtime_error("Invalid coupling: " + name);
+  }});
+  options.push_back({"--channel", "<A-D>: analog input channel (default A)", [&] () -> void {
+    const std::string name = nextArg();
+    if (name.size() != 1 || toupper(name[0]) < 'A' || toupper(name[0]) > 'D')
+      throw std::runtime_error("Invalid channel: " + name);
+    g_channel = (PS5000A_CHANNEL)(PS5000A_CHANNEL_A + toupper(name[0]) - 'A');
+  }});
+  options.push_back({"--threshold", "<volts>: digital logic threshold (default 1.65)", [&] () -> void {
+    logic_threshold_volts = stod(nextArg());
+    if (fabs(logic_threshold_volts) > 5)
+      throw std::runtime_error("Logic threshold must be within -5 to 5 V");
+  }});
+  options.push_back({"--samples", "<n>: number of samples to capture (default: until Ctrl-C)", [&] () -> void {
+    n_total_samples = stol(nextArg());
+    if (n_total_samples < 0)
+      throw std::runtime_error("Invalid sample count");
+  }});
+  options.push_back({"--duration", "<seconds>: capture duration (alternative to --samples)", [&] () -> void {
+    duration_seconds = stod(nextArg());
+    if (duration_seconds <= 0)
+      throw std::runtime_error("Invalid duration");
+  }});
+  options.push_back({"--help", "show this help", [&] () -> void {
+    usage();
+  }});
+
+  try {
+    while (it != args.cend()) {
+      auto option = std::find_if(options.cbegin(), options.cend(),
+				 [it] (const Option &o) -> bool { return *it == o.name; });
+      if (option != options.cend()) {
+	it++;
+	option->handler();
+      } else if (it->find("-", 0) == 0) {
+	usage();
+      } else if (!filename_given) {
+	filename = *it++;
+	filename_given = true;
+      } else {
+	usage();
+      }
+    }
+  } catch (const std::exception &e) {
+    fprintf(stderr, "%s\n", e.what());
+    usage();
+  }
+
+  PS5000A_DEVICE_RESOLUTION resolution;
+  if (g_digital) {
+    if (bits == 0)
+      bits = 8;
+    if (bits != 8 && bits != 16) {
+      fprintf(stderr, "--bits must be 8 or 16 in digital mode\n");
+      exit(1);
+    }
+    g_digitalPorts = bits / 8;
+    g_bytesPerSample = g_digitalPorts;
+    resolution = PS5000A_DR_8BIT; // required for fastest sampling rates
+  } else {
+    if (bits == 0)
+      bits = 12;
+    switch (bits) {
+      case 8:  resolution = PS5000A_DR_8BIT; break;
+      case 12: resolution = PS5000A_DR_12BIT; break;
+      case 14: resolution = PS5000A_DR_14BIT; break;
+      case 15: resolution = PS5000A_DR_15BIT; break;
+      case 16: resolution = PS5000A_DR_16BIT; break;
+      default:
+	fprintf(stderr, "--bits must be 8, 12, 14, 15 or 16 in analog mode\n");
+	exit(1);
+    }
+    g_bytesPerSample = bits == 8 ? 1 : 2;
+  }
+
+  if (duration_seconds > 0)
+    n_total_samples = llround(duration_seconds * 1e9 / sample_interval);
+
+  int maxChannels = 100;
+  int16_t handle;
+
+  PICO_STATUS status = ps5000aOpenUnit(&handle, NULL, resolution);
+  if (status == PICO_NOT_FOUND) {
+    printf("Picoscope device not found\n");
+    exit(1);
+  } else if (status == PICO_POWER_SUPPLY_NOT_CONNECTED) {
+    printf("5 V power supply not connected.  Using USB only.\n");
+    maxChannels = 2;
+    CHECK_CALL(ps5000aChangePowerSource(handle, PICO_POWER_SUPPLY_NOT_CONNECTED), "ps5000aChangePowerSource"); // Tell the driver that's ok
+  } else if (status == PICO_USB3_0_DEVICE_NON_USB3_0_PORT) {
+    maxChannels = 2;
+    printf("Switching to use USB power from non-USB 3.0 port.\n");
+    CHECK_CALL(ps5000aChangePowerSource(handle, PICO_USB3_0_DEVICE_NON_USB3_0_PORT), "ps5000aChangePowerSource");
+  } else if (status != PICO_OK) {
+    printf("Picoscope open failed\n");
+    exit(1);
+  }
+
+  char line[80];
+  int16_t requiredSize = 0;
+  CHECK_CALL(ps5000aGetUnitInfo(handle, (int8_t*)line, sizeof(line), &requiredSize, PICO_VARIANT_INFO), "ps5000aGetUnitInfo");
+
+  int16_t channelCount = std::min<int16_t>((int16_t)(line[1] - '0'), maxChannels);
+
+  CHECK_CALL(ps5000aSetEts(handle, PS5000A_ETS_OFF, 0, 0, NULL), "ps5000aSetEts"); // Turn off hasHardwareETS
+
+  if (g_digital) {
+    if (!strstr(line, "MSO")) {
+      printf("Not MSO model, digital channels not supported.\n");
+      exit(1);
+    }
+
+    printf("Unit has %d analog channels -- disabling all.\n", channelCount);
+    for (int i = 0; i < channelCount; i++)
+      CHECK_CALL(ps5000aSetChannel(handle, (PS5000A_CHANNEL)(PS5000A_CHANNEL_A + i),
+				   0, // disable
+				   PS5000A_DC,
+				   PS5000A_1V,
+				   0.0), // Analogue offset
+		 "ps5000aSetChannel");
+
+    int16_t logic_level = (int16_t)lround(logic_threshold_volts / 5.0 * 32767); // -32767 to 32767 corresponds to -5 to 5 V
+    for (int i = 0; i < 2; i++)
+      CHECK_CALL(ps5000aSetDigitalPort(handle, (PS5000A_CHANNEL)(i + PS5000A_DIGITAL_PORT0),
+				       i < g_digitalPorts, logic_level),
+		 "ps5000aSetDigitalPort");
+    printf("Capturing %d digital channels, logic threshold %.2f V\n", bits, logic_threshold_volts);
+  } else {
+    printf("Unit has %d channels.\n", channelCount);
+    if (g_channel - PS5000A_CHANNEL_A >= channelCount) {
+      printf("Channel %c not available.\n", 'A' + (g_channel - PS5000A_CHANNEL_A));
+      exit(1);
+    }
+
+    int16_t value;
+    ps5000aMaximumValue(handle, &value);
+    printf("Max ADC value=%d\n", value);
+
+    float maximumVoltage;
+    float minimumVoltage;
+    CHECK_CALL(ps5000aGetAnalogueOffset(handle, range, coupling, &maximumVoltage, &minimumVoltage), "ps5000aGetAnalogueOffset");
+
+    printf("Permitted analog offset range: %f-%f\n", minimumVoltage, maximumVoltage);
+
+    if (strstr(line, "MSO"))
+      for (int i = 0; i < 2; i++)
+	CHECK_CALL(ps5000aSetDigitalPort(handle, (PS5000A_CHANNEL)(i + PS5000A_DIGITAL_PORT0), 0, 0), "ps5000aSetDigitalPort");
+
+    for (int i = 0; i < channelCount; i++)
+      CHECK_CALL(ps5000aSetChannel(handle, (PS5000A_CHANNEL)(PS5000A_CHANNEL_A + i),
+				   PS5000A_CHANNEL_A + i == g_channel, // enable only the selected channel
+				   coupling,
+				   range,
+				   0.0), // Analogue offset
+		 "ps5000aSetChannel");
+  }
+
+  signal(SIGINT, sigintHandler);
+
+  if (!g_digital && coupling == PS5000A_AC) {
+    long samples_to_discard = 1000000000L / sample_interval; // 1s
+    printf("Capturing %ld samples to /dev/null to let AC coupling capacitor settle\n", samples_to_discard);
+    collectStreamingImmediate(handle, "/dev/null", sample_interval, samples_to_discard);
+  }
+
+  if (!g_stop)
+    collectStreamingImmediate(handle, filename.c_str(), sample_interval, n_total_samples);
+
+  ps5000aCloseUnit(handle);
+  return 0;
+}

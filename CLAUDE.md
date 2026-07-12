@@ -41,7 +41,7 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
   cmake/           — CMake helpers (ac3rfConfig.cmake.in, modules/FindLIBAV.cmake, etc.)
   python/          — nanobind Python bindings source
 fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device
-picostream/        — Standalone: C wrapper for Picoscope oscilloscope capture
+picostream/        — Standalone: Picoscope oscilloscope capture tool (analog + MSO digital)
 octave/            — Octave/Matlab scripts for filter design and algorithm exploration
 tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parseQ.awk)
 ```
