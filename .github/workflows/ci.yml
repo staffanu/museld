@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux (museld + ac3rf-efm-decode + python + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build pkg-config \
+            libvulkan-dev glslc libglfw3-dev libflac++-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
+            catch2 libcatch2-dev python3-dev
+
+      - name: Configure
+        run: >
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+          -S player -B build
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  macos:
+    name: macOS (museld + ac3rf-efm-decode + tests)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: >
+          brew install ninja glfw vulkan-headers vulkan-loader molten-vk shaderc
+          flac catch2 ffmpeg
+
+      - name: Configure
+        run: >
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+          -DBUILD_PYTHON=OFF
+          -S player -B build
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    name: Windows MSYS2 (ac3rf-efm-decode + tests)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: git
+          pacboy: >-
+            gcc:p cmake:p ninja:p pkgconf:p flac:p catch:p
+
+      # BUILD_MUSE=OFF until museld is ported to Windows
+      - name: Configure
+        run: |
+          git config --global --add safe.directory '*'
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
+            -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF \
+            -S player -B build
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  # Tracks the state of the museld Windows port; failure does not fail the workflow.
+  windows-muse-experimental:
+    name: Windows MSYS2 museld (experimental)
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: git
+          pacboy: >-
+            gcc:p cmake:p ninja:p pkgconf:p flac:p
+            vulkan-headers:p vulkan-loader:p glfw:p shaderc:p
+
+      - name: Configure
+        run: |
+          git config --global --add safe.directory '*'
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DBUILD_PYTHON=OFF \
+            -S player -B build
+
+      - name: Build
+        run: cmake --build build

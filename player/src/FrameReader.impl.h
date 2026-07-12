@@ -3,12 +3,16 @@
 //
 
 #include <pthread.h>
-#include <sys/fcntl.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <format>
 #include "musevk/VulkanBuffer.h"
 #include "FrameReader.h"
 #include "logging/Logger.h"
+
+#ifndef O_BINARY
+#  define O_BINARY 0
+#endif
 
 template<class InputBlock>
 FrameReader<InputBlock>::FrameReader(Logger &log, const std::string &filename, bool input_is_realtime,
@@ -55,7 +59,7 @@ bool FrameReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>
 
     if (m_output_filename) {
         m_output_file_fd = open(m_output_filename.value().c_str(),
-                                O_WRONLY | O_TRUNC | O_CREAT,
+                                O_WRONLY | O_TRUNC | O_CREAT | O_BINARY,
                                 S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         if (m_output_file_fd == -1)
             throw std::runtime_error(std::format("Unable to open output file for writing: {}",

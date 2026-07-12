@@ -14,6 +14,10 @@
 #include "logging/Logger.h"
 #include "util/Interpolate.h"
 
+#ifndef O_BINARY
+#  define O_BINARY 0
+#endif
+
 using namespace std;
 
 NtscFrameReader::NtscFrameReader(
@@ -58,7 +62,7 @@ NtscFrameReader::NtscFrameReader(
 
 bool NtscFrameReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) {
     if (m_demodulator == nullptr) {
-        m_file_fd = open(m_filename.c_str(), O_NONBLOCK);
+        m_file_fd = open(m_filename.c_str(), O_RDONLY | O_BINARY | O_NONBLOCK);
         if (m_file_fd == -1)
             throw runtime_error(std::format("NtscFrameReader: Unable to open input file {}", m_filename));
 #ifdef linux

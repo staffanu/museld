@@ -36,6 +36,10 @@ add_library(ac3rf STATIC
 
 target_compile_features(ac3rf PUBLIC cxx_std_23)
 
+# The library is also linked into the nanobind Python module (a shared
+# object), which requires position-independent code on Linux.
+set_target_properties(ac3rf PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 # std::format is experimental in Clang/libc++ < 17
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 17)
     target_compile_options(ac3rf PUBLIC -fexperimental-library)

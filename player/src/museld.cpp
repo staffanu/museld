@@ -313,8 +313,7 @@ enum InputType {
 
 int main(int argc, char *argv[]) {
     auto log_selection = StreamLogger::c_log_warn;
-    std::string executable(argv[0]);
-    std::string executable_dir = executable.substr(0, executable.find_last_of('/'));
+    std::string executable_dir = std::filesystem::path(argv[0]).parent_path().string();
     bool decode_all_fields = true;
     bool full_screen = false;
     bool no_sync = false;
