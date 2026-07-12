@@ -101,7 +101,11 @@ void StreamLogger::log(LogPriority priority, LogCategoryFlags categorization, co
         auto now_t = chrono::system_clock::to_time_t(tp);
         auto ms = tp.time_since_epoch().count() % 1000;
         struct tm tm_info{};
+#ifdef _WIN32
+        localtime_s(&tm_info, &now_t);
+#else
         localtime_r(&now_t, &tm_info);
+#endif
         ostringstream ss;
         ss << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S")
            << '.' << std::setfill('0') << std::setw(3) << ms
