@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 #include "logging/Logger.h"

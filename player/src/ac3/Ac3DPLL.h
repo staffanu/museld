@@ -4,6 +4,8 @@
 #ifndef AC3RF_DECODE_AC3DPLL_H
 #define AC3RF_DECODE_AC3DPLL_H
 
+#include <cstdint>
+
 #include "logging/Logger.h"
 
 class Ac3DPLL {

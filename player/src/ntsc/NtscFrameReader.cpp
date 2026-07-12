@@ -17,6 +17,9 @@
 #ifndef O_BINARY
 #  define O_BINARY 0
 #endif
+#ifndef O_NONBLOCK
+#  define O_NONBLOCK 0
+#endif
 
 using namespace std;
 

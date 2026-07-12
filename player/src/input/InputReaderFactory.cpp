@@ -12,6 +12,10 @@
 #ifndef O_BINARY
 #  define O_BINARY 0
 #endif
+// Windows has no FIFOs; is_fifo() is always false there, so the flag is never used.
+#ifndef O_NONBLOCK
+#  define O_NONBLOCK 0
+#endif
 
 static std::unique_ptr<InputReader> makeInputReaderForFd(int fd, bool is_fifo, InputFormat format, uint32_t block_size) {
     switch (format) {
