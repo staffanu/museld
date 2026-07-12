@@ -146,7 +146,6 @@ RF → TimingRecovery (Mueller-Müller PLL) → EfmDecoder → CIRC C1/C2 Reed-S
   always zero on every disc tested. It is unclear whether this feature was ever used on MUSE laserdiscs.
 - **Non-linear de-emphasis**: Unclear whether it has already been applied on baseband (player output) input; use the L key to toggle.
 - **EFM de-emphasis**: Not yet implemented; needed for discs with emphasis flag set, if any exist.
-- **Audio channel mapping**: Four-channel MUSE audio channel assignment may vary across audio backends and device configurations.
 - **Direct USB input**: Currently requires an external capture program writing to a FIFO (e.g., picostream).
 - **Picture filters**: Most filters were computed early in the project; picture quality could probably be improved by spending more time on them.
 - **Motion detection**: The algorithm is quite simplistic and could probably be improved.
