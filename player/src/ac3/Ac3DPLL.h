@@ -36,7 +36,7 @@ private:
     double g1 = 1 / 16.0;
     double g2 = 1 / 512.0; // these constants yield approximately a natural frequency of 2060 Hz and damping factor 0.72
 
-    // we get a new sample with frequency 16 * 2.88 MHz = 46.08 MHz
+    // nominal counter increment per input sample: 2^c_counter_bits * symbol frequency / sample frequency
     const int m_nominal_add;
 
     uint8_t m_prev_symbol = 0;
