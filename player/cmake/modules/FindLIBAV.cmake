@@ -1,6 +1,7 @@
 find_package(PkgConfig)
 
-pkg_check_modules(AVCODEC libavcodec)
+# avcodec_get_supported_config() needs FFmpeg 7.1 (libavcodec 61.13)
+pkg_check_modules(AVCODEC libavcodec>=61.13)
 pkg_check_modules(AVFORMAT libavformat)
 pkg_check_modules(AVUTIL libavutil>=51)
 pkg_check_modules(SWRESAMPLE libswresample)
