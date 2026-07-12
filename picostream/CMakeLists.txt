@@ -18,3 +18,7 @@ add_executable(picostream
 target_link_libraries(picostream
         PRIVATE ${PICOSCOPE_LIBRARIES}
 )
+set_target_properties(picostream PROPERTIES
+        BUILD_RPATH ${PICOSCOPE_LIBRARY_DIR}
+        INSTALL_RPATH ${PICOSCOPE_LIBRARY_DIR}
+)
