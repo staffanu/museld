@@ -141,6 +141,11 @@ bool InputController::poll(GLFWwindow *window,
     if (checkKey(window, GLFW_KEY_PRINT_SCREEN)) {
         glfwSetClipboardString(window, state.last_cursor_string.c_str());
     }
+    if (checkKey(window, GLFW_KEY_S)) {
+        state.export_frame = true;
+        if (state.paused)
+            state.redo_last_field = true; // re-decode so baked-in OSD text is not exported
+    }
     if (checkKey(window, GLFW_KEY_7) && reader.cycleEqMode) {
         std::string mode = reader.cycleEqMode();
         state.osd_text = std::format("EQ {}", mode);

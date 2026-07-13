@@ -59,6 +59,8 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--full-screen` | Start full screen |
 | `--seek <seconds>` | Seek to position before starting playback |
 | `--pause` | Start paused |
+| `--export-frame <file>` | Save one decoded frame as PNG to `<file>` and quit. Combine with `--export-frame-at` to give the decoder (DPLL, adaptive equaliser, motion detection) a warm-up run from the `--seek` position. |
+| `--export-frame-at <seconds>` | Stream position of the frame saved by `--export-frame` (same units as `--seek`). Default: the first decoded frame. |
 | `--no-dropout` / `--highlight-dropout` | Disable dropout concealment, or highlight dropouts instead of concealing them (see below) |
 | `--write-muse16 <file>` | Re-encode input to the 16.2 MHz format (see below) |
 | `--write <file>` | Write decoded video and audio to a media file (requires FFmpeg ≥ 7.1) |
@@ -102,6 +104,7 @@ also given, which is the mode to use for batch rendering.
 | C | Show cursor coordinates and input-file offsets (see below) |
 | L | Toggle non-linear de-emphasis processing |
 | Z | Cycle zoom: 1× → 2× → 4× (arrow keys pan when zoomed) |
+| S | Export the displayed frame to a timestamped PNG in the current directory (without OSD text and subtitles) |
 | Print Screen | Copy the displayed cursor/offset text to the clipboard |
 
 The C key overlay shows the cursor position both in single-field coordinates (374×516) and in the

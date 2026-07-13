@@ -16,6 +16,7 @@
 #include "PlayerState.h"
 #include "OsdOverlay.h"
 #include "FrameBlitter.h"
+#include "FrameExporter.h"
 #include "InputController.h"
 #include "subtitles/SrtParser.h"
 #include "subtitles/SubtitleFont.h"
@@ -60,7 +61,10 @@ static void runPlayer(Logger &log,
                       AudioPlayback *audio_playback,
                       const std::string &executable_dir,
                       const std::optional<std::string> &subtitles_path,
-                      const std::optional<std::string> &subtitle_font_path) {
+                      const std::optional<std::string> &subtitle_font_path,
+                      const std::optional<std::string> &export_frame_filename,
+                      double export_frame_after_seconds,
+                      double seconds_per_iteration) {
     vk::Device &device = manager.getDevice();
 
     vk::SemaphoreCreateInfo semaphoreInfo{};
@@ -81,6 +85,7 @@ static void runPlayer(Logger &log,
         OsdOverlay osd;
         FrameBlitter blitter;
         InputController input(log);
+        FrameExporter frame_exporter(log, manager, command_pool);
 
         std::unique_ptr<SubtitleOverlay> subtitle_overlay;
         if (subtitles_path) {
@@ -123,6 +128,26 @@ static void runPlayer(Logger &log,
             if (!state.paused)
                 state.field_count++;
             state.redo_last_field = false;
+
+            // Scripted export: decode until the requested stream position is reached
+            bool scripted_export = false;
+            if (export_frame_filename &&
+                state.field_count * seconds_per_iteration >= export_frame_after_seconds) {
+                state.export_frame = true;
+                scripted_export = true;
+            }
+
+            // Export before the OSD and subtitles are drawn into the image, so
+            // the file contains only the decoded picture
+            if (state.export_frame) {
+                state.export_frame = false;
+                auto path = frame_exporter.exportFrame(*images.out_image,
+                                                       scripted_export ? export_frame_filename : std::nullopt);
+                if (scripted_export)
+                    break;
+                state.osd_text = path ? std::format("SAVED {}", std::filesystem::path(*path).filename().string())
+                                      : "EXPORT FAILED";
+            }
 
 #ifdef HAVE_LIBAV
             if (vfw)
@@ -188,7 +213,9 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   optional<string> const &output_filename,
                   [[maybe_unused]] VideoWriterPreset write_preset,
                   optional<string> const &subtitles_path,
-                  optional<string> const &subtitle_font_path) {
+                  optional<string> const &subtitle_font_path,
+                  optional<string> const &export_frame_filename,
+                  double export_frame_after_seconds) {
     glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -285,11 +312,15 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         if (!decoder->initialize())
             throw runtime_error("Decoder initialization failed");
 
+        const double fields_per_second = std::is_same<InputBlock, MuseInputBlock>::value ? 60.0 : 60000.0 / 1001.0;
+        const double seconds_per_iteration = (decode_all_fields ? 1 : 2) / fields_per_second;
+
         runPlayer(log, manager, *decoder, reader_controls, window, full_screen, start_paused,
                   dropout_mode, efm_audio, benchmark_shaders,
                   output_filename.has_value(),
                   vfw, audio_playback.get(), executable_dir,
-                  subtitles_path, subtitle_font_path);
+                  subtitles_path, subtitle_font_path,
+                  export_frame_filename, export_frame_after_seconds, seconds_per_iteration);
     }
 
 #ifdef HAVE_LIBAV
@@ -325,6 +356,8 @@ int main(int argc, char *argv[]) {
     double input_sample_frequency = 62.5e6;
     double initial_seek_seconds = 0;
     bool start_paused = false;
+    optional<string> export_frame_filename; // save one frame as PNG and quit
+    double export_frame_at_seconds = 0;     // stream position of the exported frame (like --seek)
     optional<string> muse_output_filename; // always written as little endian unsigned short values
     optional<string> output_filename; // container/codec selected by --write-preset
     VideoWriterPreset write_preset = VideoWriterPreset::eStandard;
@@ -379,6 +412,12 @@ int main(int argc, char *argv[]) {
     });
     options.emplace_back("--pause", [&] () mutable -> void {
         start_paused = true;
+    });
+    options.emplace_back("--export-frame", [&] () mutable -> void {
+        export_frame_filename = *(it++);
+    });
+    options.emplace_back("--export-frame-at", [&] () mutable -> void {
+        export_frame_at_seconds = stod(*(it++));
     });
     options.emplace_back("--write-muse16", [&] () mutable -> void {
         muse_output_filename = *(it++);
@@ -510,6 +549,8 @@ int main(int argc, char *argv[]) {
 
                 musevk::VulkanManager manager(log);
 
+                const double export_frame_after_seconds = max(0.0, export_frame_at_seconds - initial_seek_seconds);
+
                 switch (input_type) {
                     case eNtscRf: {
                         auto *reader = new NtscFrameReader(
@@ -520,7 +561,8 @@ int main(int argc, char *argv[]) {
                                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
                                                      efm_audio,
                                                      benchmark_shaders, eq_mode, eq_alpha, output_filename, write_preset,
-                                     subtitles_path, subtitle_font_path);
+                                     subtitles_path, subtitle_font_path,
+                                     export_frame_filename, export_frame_after_seconds);
                         delete reader;
                         break;
                     }
@@ -530,7 +572,8 @@ int main(int argc, char *argv[]) {
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
                                      efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename, write_preset,
-                                     subtitles_path, subtitle_font_path);
+                                     subtitles_path, subtitle_font_path,
+                                     export_frame_filename, export_frame_after_seconds);
                         delete reader;
                         break;
                     }
@@ -543,7 +586,8 @@ int main(int argc, char *argv[]) {
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
                                      efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename, write_preset,
-                                     subtitles_path, subtitle_font_path);
+                                     subtitles_path, subtitle_font_path,
+                                     export_frame_filename, export_frame_after_seconds);
                         delete reader;
                         break;
                     }

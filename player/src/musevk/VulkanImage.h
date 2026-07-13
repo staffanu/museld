@@ -51,6 +51,10 @@ namespace musevk {
                                      vk::PipelineStageFlagBits src_stage, vk::PipelineStageFlagBits dst_stage,
                                      vk::AccessFlags src_access_mask, vk::AccessFlags dst_access_mask);
 
+        // Copy the whole image into dest with tightly packed rows, ordered after
+        // compute-shader writes.  dest must be large enough for the image's texel format.
+        void enqueueCopyToBuffer(CommandBuffer &command_buffer, vk::Buffer &dest);
+
         vk::WriteDescriptorSet
         makeWriteDescriptorSet(vk::DescriptorSet &descriptor_set, uint32_t binding_index) const final {
             return {
