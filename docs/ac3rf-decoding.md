@@ -76,8 +76,12 @@ cycle: symbol transitions should occur half a period away from the sampling inst
 their offset from the counter midpoint is the phase error. Only cycles containing exactly
 one transition update the loop — multiple toggles within one symbol period indicate noise
 and are ignored. In practice there are enough clean transitions to keep the loop locked
-reliably. The error drives a proportional-plus-integral loop filter (gains 1/16 and 1/512,
-giving a natural frequency around 2 kHz with damping factor ≈ 0.7).
+reliably. The error drives a proportional-plus-integral loop filter whose gains are
+computed from an explicit second-order loop design: natural frequency 1800 Hz, damping
+factor 0.6. The designed gains are divided by the combined phase-detector/VCO gain (≈0.3;
+the detector's average gain is well below unity because only cycles with a single clean
+transition contribute an error update), so that the realized closed-loop dynamics match
+the design values.
 
 ## 5. Frame synchronisation and byte alignment
 
