@@ -13,6 +13,7 @@ struct PlayerState {
     int paused_countdown = 0;
     Decoder::FieldInterpolationMode field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
     bool redo_last_field = false;
+    bool export_frame = false;
     bool enable_non_linear = true;
     bool enable_cursor = false;
     bool show_disc_code = false;

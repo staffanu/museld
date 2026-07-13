@@ -61,6 +61,10 @@ namespace musevk {
     }
 
     void VulkanImage::enqueueDeviceToHostVisibleCopy(CommandBuffer &command_buffer) {
+        enqueueCopyToBuffer(command_buffer, m_host_visible_buffer.value());
+    }
+
+    void VulkanImage::enqueueCopyToBuffer(CommandBuffer &command_buffer, vk::Buffer &dest) {
         command_buffer.enqueueTransitionMemoryLayout(m_image,
                                                      m_layout, m_layout,
                                                      vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer,
@@ -68,7 +72,7 @@ namespace musevk {
         vk::BufferImageCopy region(0, m_width, m_height,
                                    vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
                                    vk::Offset3D(0, 0, 0), vk::Extent3D(m_width, m_height, 1));
-        command_buffer.enqueueCopyImageToBuffer(m_image, m_layout, m_host_visible_buffer.value(), region);
+        command_buffer.enqueueCopyImageToBuffer(m_image, m_layout, dest, region);
     }
 
     void VulkanImage::enqueueHostSyncBarrier(CommandBuffer &command_buffer,
