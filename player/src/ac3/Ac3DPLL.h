@@ -4,7 +4,9 @@
 #ifndef AC3RF_DECODE_AC3DPLL_H
 #define AC3RF_DECODE_AC3DPLL_H
 
+#include <cmath>
 #include <cstdint>
+#include <numbers>
 
 #include "logging/Logger.h"
 
@@ -28,13 +30,20 @@ private:
     static constexpr int c_counter_bits = 10;
     constexpr static int c_nominal_symbol_frequency = 576000 / 2;
 
-    // state for symbol reclocking
-    //    val omega = 2 * math.Pi * 1800 // undamped frequency
-    //    val zeta = 1.0 // damping factor
-    //    val g1 = 1 - math.exp(-2 * zeta * omega / 288000)
-    //    val g2 = 1 + math.exp(-2 * omega * zeta / 288000) - 2 * math.exp(-omega * zeta / 288000) * math.cos(omega / 288000 * math.sqrt(1 - zeta * zeta));
-    double g1 = 1 / 16.0;
-    double g2 = 1 / 512.0; // these constants yield approximately a natural frequency of 2060 Hz and damping factor 0.72
+    // The symbol reclocking loop filter is designed as a second-order loop with natural
+    // frequency c_omega and damping factor c_zeta, updated at the symbol rate.
+    static constexpr double c_omega = 2 * std::numbers::pi * 1800; // undamped natural frequency [rad/s]
+    static constexpr double c_zeta = 0.6; // damping factor
+    static constexpr double c_Ts = 1.0 / c_nominal_symbol_frequency;
+    const double c_g1 = 1 - std::exp(-2 * c_zeta * c_omega * c_Ts);
+    const double c_g2 = 1 + std::exp(-2 * c_omega * c_zeta * c_Ts)
+        - 2 * std::exp(-c_omega * c_zeta * c_Ts) * std::cos(c_omega * c_Ts * std::sqrt(1 - c_zeta * c_zeta));
+
+    // Combined phase detector and VCO gain; the detector's average gain is well below unity
+    // since only cycles with exactly one symbol transition update the loop.
+    const double m_GpdGvco = 0.3;
+    const double m_G1; // proportional gain
+    const double m_G2; // integral gain
 
     // nominal counter increment per input sample: 2^c_counter_bits * symbol frequency / sample frequency
     const int m_nominal_add;

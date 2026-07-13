@@ -12,6 +12,8 @@ Ac3DPLL::Ac3DPLL(Logger &log, double input_sample_frequency) :
     m_log(log),
     m_input_sample_frequency(input_sample_frequency),
     m_symbol_distance(std::round(m_input_sample_frequency / c_nominal_symbol_frequency)),
+    m_G1(c_g1 / m_GpdGvco),
+    m_G2(c_g2 / m_GpdGvco),
     m_nominal_add((1 << c_counter_bits) * c_nominal_symbol_frequency / input_sample_frequency)
 {
     assert(m_symbol_distance < (int)(input_sample_frequency / c_nominal_symbol_frequency) * 4);
@@ -51,7 +53,7 @@ std::vector<uint8_t> Ac3DPLL::reclockSymbols(const std::vector<float> &input_i, 
             int error = m_number_of_toggles == 1 ? -(m_toggle_position - (1 << (c_counter_bits - 1))) : 0;
 
             m_error_sum = (m_error_sum + error) << (32 - c_error_sum_bits) >> (32 - c_error_sum_bits); // truncate and sign extend
-            m_filter_out = error * g1 + m_error_sum * g2;
+            m_filter_out = error * m_G1 + m_error_sum * m_G2;
             m_number_of_toggles = 0;
         }
 
