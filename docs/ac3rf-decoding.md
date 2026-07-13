@@ -135,11 +135,14 @@ byte whose value is always `0x1C` on Laserdiscs (encoding 48 kHz sample rate and
 frame size per the AC3 specification). Once the start of a sync frame is located, the
 decoder reads 1536 bytes, then skips zero bytes until the next `0x0B77` word.
 
+## Acknowledgments
+
+Thanks to Ian and Leighton Smallshire for convincing me to look for the inner Reed-Solomon code! When I first figured out how this all works I didn't realize that a second layer of encoding was being used, and assumed that the parity bytes represented some auxiliary data.
+
 ## References
 
 - US Patent 5,748,834 — QPSK modulation of AC3 on Laserdisc
 - ATSC A/52 — AC3 audio coding standard
-- *Digital Audio on LaserDisc*, Ian (ld-decode project) — framing reverse-engineering
 
 ## Author and License
 
