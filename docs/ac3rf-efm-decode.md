@@ -180,34 +180,6 @@ Resample a 62.5 MHz capture to 40 MHz (the output is raw u8):
 ac3rf-efm-decode --sample-freq 62500000 --resample 40e6 capture.u8 > resampled.u8
 ```
 
-## Python bindings
-
-The `ac3rf` Python module exposes `Ac3RfDemodulator` and `Ac3Decoder` for use in scripts and
-notebooks. nanobind is fetched automatically at build time; Python 3.8+ is required.
-
-```bash
-cmake -DCMAKE_BUILD_TYPE=Release -S player -B player/build-release
-cmake --build player/build-release
-# Add the build dir to PYTHONPATH so Python can find the module:
-export PYTHONPATH=player/build-release/python
-```
-
-Basic usage:
-
-```python
-import ac3rf
-import numpy as np
-
-logger = ac3rf.StreamLogger(ac3rf.StreamLogger.LOG_WARN)
-demod = ac3rf.Ac3RfDemodulator(logger, 40e6, 65536, ac3rf.simd_supported())
-decoder = ac3rf.Ac3Decoder(logger)
-
-# Feed float32 samples; call repeatedly as data arrives
-samples = np.frombuffer(open("capture.u8", "rb").read(), dtype=np.uint8).astype(np.float32) - 128
-symbols = demod.demodulate_to_symbols(samples)
-ac3_blocks = decoder.decode_symbols(symbols)   # list of bytes, one per 1536-byte AC3 sync frame
-```
-
 ## Author and License
 
 Software written by Staffan Ulfberg 2021–2026.
