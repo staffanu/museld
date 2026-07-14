@@ -84,10 +84,10 @@ Used to capture MUSE RF in real time for piping directly into museld.
 
 All components require CMake 3.22+ and a C++23 compiler.
 
-### museld + ac3rf-efm-decode + Python bindings (default)
+### museld + ac3rf-efm-decode (default)
 
-All three are built by default. Dependencies: Vulkan (a recent SDK, see below), GLFW, FLAC++,
-Python 3.8+, pkg-config. Audio output (miniaudio), font rendering (stb_truetype), and the
+Both are built by default. Dependencies: Vulkan (a recent SDK, see below), GLFW, FLAC++,
+pkg-config. Audio output (miniaudio), font rendering (stb_truetype), and the
 subtitle font are bundled and need no packages. FFmpeg ≥ 7.1 is optional and enables video
 file output (`--write`); with older or no FFmpeg, museld builds without it.
 
@@ -95,7 +95,7 @@ Ubuntu packages:
 ```bash
 sudo apt install cmake pkg-config libvulkan-dev glslc libglfw3-dev libflac++-dev \
     libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
-    catch2 python3-dev
+    catch2
 ```
 
 On Ubuntu 24.04 the distro Vulkan headers are too old for museld; instead of
@@ -128,20 +128,17 @@ cmake --build player/build-release
 ```
 
 GLSL shaders in `player/src/shaders/` are compiled to SPIR-V by `glslc` at build time.
-nanobind (for the Python bindings) is fetched automatically by CMake.
 
 ### ac3rf-efm-decode only (minimal dependencies)
 
 Dependencies: FLAC++ (`libflac++`), pkg-config.
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF \
-    -S player -B player/build-ac3rf
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MUSE=OFF -S player -B player/build-ac3rf
 cmake --build player/build-ac3rf
 
 # With AddressSanitizer
-cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF \
-    -S player -B player/build-debug
+cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_MUSE=OFF -S player -B player/build-debug
 cmake --build player/build-debug
 ```
 
@@ -162,7 +159,7 @@ cmake --build picostream/build-release
 ## Running tests
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF -DBUILD_TESTING=ON \
+cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_MUSE=OFF -DBUILD_TESTING=ON \
     -S player -B player/build-debug
 cmake --build player/build-debug
 cd player/build-debug && ctest -V

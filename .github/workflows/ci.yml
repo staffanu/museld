@@ -7,7 +7,7 @@ on:
 
 jobs:
   linux:
-    name: Linux (museld + ac3rf-efm-decode + python + tests)
+    name: Linux (museld + ac3rf-efm-decode + tests)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +28,7 @@ jobs:
             ninja-build pkg-config \
             libglfw3-dev libflac++-dev \
             libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
-            catch2 python3-dev
+            catch2
 
       - name: Configure
         run: >
@@ -55,7 +55,6 @@ jobs:
       - name: Configure
         run: >
           cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
-          -DBUILD_PYTHON=OFF
           -S player -B build
 
       - name: Build
@@ -95,7 +94,6 @@ jobs:
         run: |
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DMUSELD_ARCH=${{ matrix.march }} -DUSE_LIBAV=OFF \
-            -DBUILD_PYTHON=OFF \
             -S player -B build-lean
           cmake --build build-lean
 
@@ -103,7 +101,6 @@ jobs:
         run: |
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DMUSELD_ARCH=${{ matrix.march }} \
-            -DBUILD_PYTHON=OFF \
             -S player -B build-full
           cmake --build build-full
 
@@ -217,7 +214,7 @@ jobs:
           git config --global --add safe.directory '*'
           cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
             -DMUSELD_ARCH=x86-64-v2 \
-            -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF \
+            -DBUILD_MUSE=OFF \
             -S player -B build
 
       - name: Build
@@ -274,7 +271,6 @@ jobs:
           git config --global --add safe.directory '*'
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DMUSELD_ARCH=x86-64-v2 -DUSE_LIBAV=OFF \
-            -DBUILD_PYTHON=OFF \
             -S player -B build-lean
           cmake --build build-lean
 
@@ -282,7 +278,6 @@ jobs:
         run: |
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DMUSELD_ARCH=x86-64-v2 \
-            -DBUILD_PYTHON=OFF \
             -S player -B build-full
           cmake --build build-full
 

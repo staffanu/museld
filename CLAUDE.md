@@ -39,7 +39,6 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
   tests/           — Catch2 unit tests (ReedSolomonTest, BchDecoderTest, SrtParserTest)
   third_party/     — Vendored single-header libs (stb_truetype.h, miniaudio.h) and the bundled subtitle font (Noto Sans JP, SIL OFL)
   cmake/           — CMake helpers (ac3rfConfig.cmake.in, modules/FindLIBAV.cmake, etc.)
-  python/          — nanobind Python bindings source
 fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device
 picostream/        — Standalone: Picoscope oscilloscope capture tool (analog + MSO digital)
 octave/            — Octave/Matlab scripts for filter design and algorithm exploration
@@ -71,16 +70,16 @@ cmake --build player/cmake-build-relwithdebinfo
 ### Other build configurations
 
 ```bash
-# Release build (museld + ac3rf-efm-decode + Python bindings)
+# Release build (museld + ac3rf-efm-decode)
 cmake -DCMAKE_BUILD_TYPE=Release -S player -B player/build-release
 cmake --build player/build-release
 
 # ac3rf-efm-decode only (minimal deps)
-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF -S player -B player/build-ac3rf
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MUSE=OFF -S player -B player/build-ac3rf
 cmake --build player/build-ac3rf
 
 # Debug build (includes AddressSanitizer)
-cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF -S player -B player/build-debug
+cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_MUSE=OFF -S player -B player/build-debug
 cmake --build player/build-debug
 ```
 
@@ -137,7 +136,7 @@ The `src/` directory is the include root for both binaries. The `ac3rf` CMake ta
 
 ### Key Design Patterns
 
-**Static library / CLI separation**: `ac3rf` (pure decoding logic) is a library; `ac3rf-efm-decode` adds I/O. Python bindings wrap only the library.
+**Static library / CLI separation**: `ac3rf` (pure decoding logic) is a library; `ac3rf-efm-decode` adds I/O.
 
 **`ByteWithErasureFlag<T>` template**: Carries erasure metadata through the entire pipeline — filter stages, demodulation, Reed-Solomon — enabling fine-grained error tracking.
 
