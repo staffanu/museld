@@ -1,0 +1,11 @@
+# Every text file here is stored with LF endings and is checked out that way on
+# every platform. Git for Windows otherwise checks the tree out with CRLF, since
+# core.autocrlf defaults to true there, while the MSYS2 git that the build calls
+# has it off: every file then looks modified, and the version string that comes
+# from "git describe --dirty" ends up marked dirty. Keeping LF also means the
+# shell scripts under packaging/ stay runnable under MSYS2.
+* text=auto eol=lf
+
+# Content that must never be touched, whatever the heuristics decide.
+*.png binary
+*.ttf binary
