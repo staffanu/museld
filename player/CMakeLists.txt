@@ -6,12 +6,19 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Building for the CPU doing the build is right for local use, but a binary that
 # is distributed has to target a baseline the audience actually has: set this to
 # e.g. x86-64-v3 (AVX2, Haswell/Zen and later), which still enables the AVX filter
-# paths, or x86-64-v2 for a lower floor without them.
-set(MUSELD_ARCH "native" CACHE STRING "CPU to target, as passed to -march=")
+# paths, or x86-64-v2 for a lower floor without them. Set it to nothing at all to
+# leave the compiler's own default alone, which is what the arm64 macOS packages
+# do — every Mac that runs them is an M1 or later anyway.
+set(MUSELD_ARCH "native" CACHE STRING "CPU to target, as passed to -march=; empty to leave the default")
+if(MUSELD_ARCH)
+    set(MUSELD_ARCH_FLAG "-march=${MUSELD_ARCH}")
+else()
+    set(MUSELD_ARCH_FLAG "")
+endif()
 
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math -march=${MUSELD_ARCH}")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ffast-math -march=${MUSELD_ARCH}")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -ffast-math -march=${MUSELD_ARCH}")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math ${MUSELD_ARCH_FLAG}")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ffast-math ${MUSELD_ARCH_FLAG}")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -ffast-math ${MUSELD_ARCH_FLAG}")
 
 # AddressSanitizer is not supported by MinGW-GCC on Windows
 if(NOT MINGW)
