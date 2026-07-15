@@ -95,8 +95,9 @@ Licence and source code
 -----------------------
 
 Software written by Staffan Ulfberg 2021-2026 and distributed under the GNU
-General Public License v3 — see gpl-3.0.txt. The complete corresponding source
-code is at https://github.com/staffanu/museld.
+General Public License, version 3 or (at your option) any later version — see
+gpl-3.0.txt. The complete corresponding source code is at
+https://github.com/staffanu/museld.
 
 The libraries in lib/ are unmodified builds from Homebrew (https://brew.sh),
 relinked to load from this folder; their sources are available from Homebrew and

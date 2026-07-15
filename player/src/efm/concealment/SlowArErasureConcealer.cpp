@@ -1,5 +1,5 @@
 // Copyright 2025-2026 Staffan Ulfberg
-// This file is licensed under the provisions of the Gnu General Public License v3 (see gpl-3.0.txt)
+// This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
 #include <cassert>
 #include <cmath>
@@ -10,9 +10,9 @@
 /*
 * This class implements the algorithm presented in "Interpolation of Missing Samples in Audio Signals
 * Based on Autoregressive Modeling" by Laurent Oudre, and is heavily based on his published implementation,
-* which is licensed under the Gnu General Public License, V3.  The changes are to the main outer loop, which
-* takes input data in chunks instead of processing an entire file, and also, code was reformatted and uses
-* some C++ features.
+* which is licensed under the GNU General Public License v3 or later.  The changes are to the main
+* outer loop, which takes input data in chunks instead of processing an entire file, and also, code
+* was reformatted and uses some C++ features.
 */
 
 SlowArErasureConcealer::SlowArErasureConcealer(Logger &log, int order, int hop_size, std::optional<std::string> debug_filename) :
