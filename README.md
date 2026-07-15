@@ -15,24 +15,31 @@ toolchain, try that first.
 
 ## Download
 
-Windows builds are produced by CI and attached to
+Windows and macOS builds are produced by CI and attached to
 [releases](https://github.com/staffanu/museld/releases). Each zip contains everything the
-programs need to run — unpack it and run them from a terminal:
+programs need to run — unpack it and run them from a terminal. The macOS builds are
+universal, running natively on both Apple Silicon and Intel, and need macOS 15 or newer:
 
 | Download | Contains |
 |---|---|
-| `museld-windows-x86_64.zip` | The player and the decoder CLI. |
-| `museld-windows-x86_64-video-export.zip` | The same, plus FFmpeg so that `--write` works. Nearly ten times the size. |
-| `ac3rf-efm-decode-windows-x86_64.zip` | The decoder CLI on its own, if you don't want the player. |
+| `museld-windows-x86_64.zip`<br>`museld-macos-universal.zip` | The player and the decoder CLI. |
+| `museld-windows-x86_64-video-export.zip`<br>`museld-macos-universal-video-export.zip` | The same, plus FFmpeg so that `--write` works. Several times the size. |
+| `ac3rf-efm-decode-windows-x86_64.zip`<br>`ac3rf-efm-decode-macos-universal.zip` | The decoder CLI on its own, if you don't want the player. |
 
-museld needs a GPU with Vulkan support and current graphics drivers. Note that the Windows
-build of museld is **experimental**: it compiles and links, but has had little testing on
-real Windows machines. `ac3rf-efm-decode` is in better shape.
+museld needs a GPU with Vulkan support and current graphics drivers; on macOS it reaches
+the GPU through the bundled MoltenVK. Note that the Windows and macOS builds of museld are
+**experimental**: they compile and link, but have had little testing on real machines.
+`ac3rf-efm-decode` is in better shape.
+
+Neither download is signed with a paid certificate, so both systems object the first time.
+On macOS, clear the quarantine tag once with `xattr -cr <folder>`, or download with `curl`
+instead of a browser, which never sets it. On Windows, SmartScreen offers "More info" then
+"Run anyway".
 
 Builds of the latest commit (rather than the latest release) can be downloaded from the
 artifacts of any green
 [CI run](https://github.com/staffanu/museld/actions/workflows/ci.yml); this requires being
-signed in to GitHub. On Linux and macOS, build from source as described below.
+signed in to GitHub. On Linux, build from source as described below.
 
 ## Components
 
