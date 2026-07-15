@@ -44,6 +44,8 @@ fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB devic
 picostream/        — Standalone: Picoscope oscilloscope capture tool (analog + MSO digital)
 octave/            — Octave/Matlab scripts for filter design and algorithm exploration
 tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parseQ.awk)
+packaging/         — Scripts and per-package READMEs for the Windows/macOS downloads
+docs/              — Reference documentation (player, CLI, AC3-RF decoding, packaging)
 ```
 
 ## Clangd / LSP Diagnostics
@@ -108,6 +110,24 @@ cd player/build-debug && ctest -V
 
 Tests are only built when `-DBUILD_TESTING=ON` is passed. They are in `player/tests/`
 (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`, `FilterSimdParityTest.cpp`, `SrtParserTest.cpp`).
+
+## CI and Packaging
+
+`.github/workflows/ci.yml` builds on Linux, macOS and Windows (MSYS2 UCRT64) on every push,
+and also packages downloadable binaries: three zips per platform (player, player with
+FFmpeg for `--write`, and `ac3rf-efm-decode` alone), attached to a GitHub release when a
+`v*` tag is pushed. The staging scripts live in `packaging/`.
+
+Two options exist for the packages and matter when touching the build:
+
+- `MUSELD_ARCH` — the value passed to `-march=`, default `native`. The packages set a
+  portable baseline instead, since `native` targets the CPU doing the build. Empty means
+  no `-march` at all (used for arm64 macOS).
+- `USE_LIBAV` — default ON; OFF builds museld without the video file writer, which is how
+  the small packages avoid FFmpeg.
+
+See **docs/packaging.md** before changing any of this — it records why the packages are
+split, what museld loads at runtime, and how Vulkan is wired up on macOS.
 
 ## Architecture
 

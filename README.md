@@ -41,6 +41,9 @@ artifacts of any green
 [CI run](https://github.com/staffanu/museld/actions/workflows/ci.yml); this requires being
 signed in to GitHub. On Linux, build from source as described below.
 
+See **[docs/packaging.md](docs/packaging.md)** for what is inside the packages, how CI
+builds them, and how to make a release.
+
 ## Components
 
 ### museld
