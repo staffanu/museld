@@ -69,12 +69,18 @@ if [ -f "$pkg/museld" ]; then
 
     # MoltenVK implements Vulkan on top of Metal. The loader discovers it through
     # this manifest, whose library_path we make relative to the manifest itself so
-    # that it resolves inside the package wherever the user unpacks it.
+    # that it resolves inside the package wherever the user unpacks it. Look both
+    # files up rather than spell out paths that the formula is free to move.
     molten_prefix=$(brew --prefix molten-vk)
-    cp "$molten_prefix/lib/libMoltenVK.dylib" "$pkg/lib/"
+    molten_lib=$(find -L "$molten_prefix" -name libMoltenVK.dylib -print -quit)
+    molten_icd=$(find -L "$molten_prefix" -name MoltenVK_icd.json -print -quit)
+    [ -n "$molten_lib" ] || { echo "no libMoltenVK.dylib under $molten_prefix" >&2; exit 1; }
+    [ -n "$molten_icd" ] || { echo "no MoltenVK_icd.json under $molten_prefix" >&2; exit 1; }
+
+    cp "$molten_lib" "$pkg/lib/"
     chmod u+w "$pkg/lib/libMoltenVK.dylib"
     sed -E 's|"library_path"[[:space:]]*:[[:space:]]*"[^"]*"|"library_path": "../../lib/libMoltenVK.dylib"|' \
-        "$molten_prefix/share/vulkan/icd.d/MoltenVK_icd.json" > "$pkg/vulkan/icd.d/MoltenVK_icd.json"
+        "$molten_icd" > "$pkg/vulkan/icd.d/MoltenVK_icd.json"
     grep -q '\.\./\.\./lib/libMoltenVK\.dylib' "$pkg/vulkan/icd.d/MoltenVK_icd.json" \
         || { echo "failed to point the MoltenVK manifest at the bundled driver" >&2; exit 1; }
 else
