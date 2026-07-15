@@ -117,10 +117,14 @@ jobs:
             gcc:p cmake:p ninja:p pkgconf:p flac:p ffmpeg:p
             vulkan-headers:p vulkan-loader:p glfw:p shaderc:p
 
+      # The default -march=native would target whatever CPU this runner happens
+      # to have; x86-64-v3 (Haswell/Zen and later) is the baseline for the
+      # published binaries and still enables the AVX filter paths.
       - name: Configure
         run: |
           git config --global --add safe.directory '*'
-          cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DMUSELD_ARCH=x86-64-v3 \
             -DBUILD_PYTHON=OFF \
             -S player -B build
 
@@ -157,9 +161,33 @@ jobs:
             done
           done
 
+          # The Vulkan loader normally arrives with the graphics driver, so it is
+          # not among the DLLs resolved above. Ship it too: it finds the driver
+          # through the registry either way, and museld then starts far enough to
+          # report a missing Vulkan device itself instead of failing to load.
+          cp /ucrt64/bin/vulkan-1.dll "$pkg/"
+
           zip -qr "$pkg.zip" "$pkg"
           ls -la "$pkg"
           du -sh "$pkg.zip"
+
+      # Run the packaged binaries with MSYS2 off the PATH: anything the package
+      # fails to ship shows up here rather than on someone's machine. --help
+      # returns before a Vulkan device is needed, so this works without a GPU.
+      - name: Smoke test the package
+        run: |
+          set -euo pipefail
+          cd museld-windows-x86_64
+          # Only the binaries under test get the stripped PATH; the shell keeps
+          # its own so grep and rm still work.
+          clean_path="/c/Windows/System32:/c/Windows"
+          PATH="$clean_path" ./ac3rf-efm-decode.exe --version
+          # museld's --help exits non-zero, so check that it printed its usage;
+          # a package missing a DLL never gets as far as printing anything.
+          PATH="$clean_path" ./museld.exe --help > help.txt 2>&1 || true
+          grep -q "^usage: museld" help.txt
+          rm help.txt
+          echo "packaged binaries start with only Windows system DLLs available"
 
       - name: Upload package
         uses: actions/upload-artifact@v4
