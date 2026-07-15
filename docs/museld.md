@@ -169,4 +169,4 @@ RF → TimingRecovery (Mueller-Müller PLL) → EfmDecoder → CIRC C1/C2 Reed-S
 
 Software written by Staffan Ulfberg 2021–2026.
 
-Licensed under the [GNU General Public License v3](../gpl-3.0.txt).
+Licensed under the [GNU General Public License](../gpl-3.0.txt), version 3 or (at your option) any later version.
