@@ -64,6 +64,132 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  # Homebrew only has libraries for the architecture it is installed on, so each
+  # architecture is built where it is native and the two are joined with lipo in
+  # macos-package below.
+  macos-build:
+    name: macOS build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Nothing older than an M1 can run these, so the compiler default is
+          # already the right baseline; on Intel pick one explicitly rather than
+          # let -march=native target this runner's CPU.
+          - arch: arm64
+            runner: macos-latest
+            march: ""
+          - arch: x86_64
+            runner: macos-15-intel
+            march: "x86-64-v3"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: >-
+          brew install ninja glfw vulkan-headers vulkan-loader molten-vk shaderc
+          flac ffmpeg
+
+      - name: Build without video export
+        run: |
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DMUSELD_ARCH=${{ matrix.march }} -DUSE_LIBAV=OFF \
+            -DBUILD_PYTHON=OFF \
+            -S player -B build-lean
+          cmake --build build-lean
+
+      - name: Build with video export
+        run: |
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DMUSELD_ARCH=${{ matrix.march }} \
+            -DBUILD_PYTHON=OFF \
+            -S player -B build-full
+          cmake --build build-full
+
+      - name: Stage packages
+        run: |
+          set -euo pipefail
+          stage=packaging/macos/stage-package.sh
+          out=stage/${{ matrix.arch }}
+          mkdir -p "$out"
+          "$stage" build-lean "$out/museld-macos" museld ac3rf-efm-decode
+          "$stage" build-full "$out/museld-macos-video-export" museld ac3rf-efm-decode
+          "$stage" build-lean "$out/ac3rf-efm-decode-macos" ac3rf-efm-decode
+
+      - name: Check the staged packages
+        run: |
+          set -euo pipefail
+          for pkg in stage/${{ matrix.arch }}/*/; do
+            (packaging/macos/smoke-test.sh "$pkg")
+          done
+
+      # Through a tarball, because artifacts do not preserve the executable bit.
+      - name: Pack the staged tree
+        run: tar -czf macos-stage-${{ matrix.arch }}.tar.gz -C stage ${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-stage-${{ matrix.arch }}
+          path: macos-stage-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  macos-package:
+    name: macOS universal packages
+    needs: macos-build
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-stage-*
+          merge-multiple: true
+
+      - name: Unpack both architectures
+        run: |
+          set -euo pipefail
+          mkdir -p stage
+          for t in macos-stage-*.tar.gz; do tar -xzf "$t" -C stage; done
+          ls stage
+
+      - name: Merge into universal packages
+        run: |
+          set -euo pipefail
+          merge=packaging/macos/merge-universal.sh
+          for name in museld-macos museld-macos-video-export ac3rf-efm-decode-macos; do
+            case "$name" in
+              museld-macos)                  out=museld-macos-universal ;;
+              museld-macos-video-export)     out=museld-macos-universal-video-export ;;
+              ac3rf-efm-decode-macos)        out=ac3rf-efm-decode-macos-universal ;;
+            esac
+            "$merge" "stage/arm64/$name" "stage/x86_64/$name" "$out"
+            zip -qry "$out.zip" "$out"
+          done
+
+      - name: Smoke test the packages
+        run: |
+          set -euo pipefail
+          for pkg in museld-macos-universal museld-macos-universal-video-export \
+                     ac3rf-efm-decode-macos-universal; do
+            (packaging/macos/smoke-test.sh "$pkg" --universal)
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-packages
+          path: "*.zip"
+          if-no-files-found: error
+
+      - name: Attach packages to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.zip"
+
   windows:
     name: Windows MSYS2 (ac3rf-efm-decode + tests)
     runs-on: windows-latest
