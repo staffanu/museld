@@ -16,11 +16,18 @@ toolchain, try that first.
 ## Download
 
 Windows builds are produced by CI and attached to
-[releases](https://github.com/staffanu/museld/releases) as a zip containing `museld.exe`,
-`ac3rf-efm-decode.exe`, and everything they need to run — unpack it and run the programs
-from a terminal. museld needs a GPU with Vulkan support and current graphics drivers.
-Note that the Windows build of museld is **experimental**: it compiles and links, but has
-had little testing on real Windows machines. `ac3rf-efm-decode` is in better shape.
+[releases](https://github.com/staffanu/museld/releases). Each zip contains everything the
+programs need to run — unpack it and run them from a terminal:
+
+| Download | Contains |
+|---|---|
+| `museld-windows-x86_64.zip` | The player and the decoder CLI. |
+| `museld-windows-x86_64-video-export.zip` | The same, plus FFmpeg so that `--write` works. Nearly ten times the size. |
+| `ac3rf-efm-decode-windows-x86_64.zip` | The decoder CLI on its own, if you don't want the player. |
+
+museld needs a GPU with Vulkan support and current graphics drivers. Note that the Windows
+build of museld is **experimental**: it compiles and links, but has had little testing on
+real Windows machines. `ac3rf-efm-decode` is in better shape.
 
 Builds of the latest commit (rather than the latest release) can be downloaded from the
 artifacts of any green

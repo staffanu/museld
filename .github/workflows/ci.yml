@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   linux:
@@ -94,11 +95,14 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-  # Builds the full Windows port and packages it for download. museld's Windows
+  # Builds the Windows port and packages it for download. museld's Windows
   # runtime is still experimental, but the build has to keep working since the
-  # published package comes from here.
+  # published packages come from here.
+  #
+  # Two builds: FFmpeg is over 90% of the bytes museld needs, so the video export
+  # it provides gets its own download rather than being forced on everyone.
   windows-package:
-    name: Windows MSYS2 museld + package
+    name: Windows MSYS2 museld + packages
     runs-on: windows-latest
     permissions:
       contents: write
@@ -120,83 +124,48 @@ jobs:
       # The default -march=native would target whatever CPU this runner happens
       # to have; x86-64-v3 (Haswell/Zen and later) is the baseline for the
       # published binaries and still enables the AVX filter paths.
-      - name: Configure
+      - name: Build without video export
         run: |
           git config --global --add safe.directory '*'
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DMUSELD_ARCH=x86-64-v3 -DUSE_LIBAV=OFF \
+            -DBUILD_PYTHON=OFF \
+            -S player -B build-lean
+          cmake --build build-lean
+
+      - name: Build with video export
+        run: |
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DMUSELD_ARCH=x86-64-v3 \
             -DBUILD_PYTHON=OFF \
-            -S player -B build
+            -S player -B build-full
+          cmake --build build-full
 
-      - name: Build
-        run: cmake --build build
-
-      # museld loads its SPIR-V shaders and the subtitle font from the directory
-      # the executable lives in, so those have to travel with the binaries.
-      - name: Stage package
+      - name: Stage packages
         run: |
           set -euo pipefail
-          pkg=museld-windows-x86_64
-          mkdir -p "$pkg/shaders" "$pkg/fonts"
-          cp build/src/museld.exe build/src/ac3rf-efm-decode.exe "$pkg/"
-          cp build/src/shaders/*.spv "$pkg/shaders/"
-          cp build/src/fonts/NotoSansJP-Regular.ttf "$pkg/fonts/"
-          cp gpl-3.0.txt "$pkg/"
-          cp packaging/windows/README.txt "$pkg/"
+          stage=packaging/windows/stage-package.sh
+          "$stage" build-lean museld-windows-x86_64 museld.exe ac3rf-efm-decode.exe
+          "$stage" build-full museld-windows-x86_64-video-export museld.exe ac3rf-efm-decode.exe
+          "$stage" build-lean ac3rf-efm-decode-windows-x86_64 ac3rf-efm-decode.exe
 
-          # Bundle the UCRT64 DLLs the binaries need, transitively. Anything
-          # resolving outside /ucrt64/bin is a Windows system DLL and is left
-          # to the target machine.
-          changed=1
-          while [ "$changed" = 1 ]; do
-            changed=0
-            for f in "$pkg"/*.exe "$pkg"/*.dll; do
-              [ -f "$f" ] || continue
-              for dll in $(ldd "$f" | awk '/=> \/ucrt64\/bin\// {print $3}'); do
-                if [ ! -f "$pkg/$(basename "$dll")" ]; then
-                  cp "$dll" "$pkg/"
-                  changed=1
-                fi
-              done
-            done
+      - name: Smoke test the packages
+        run: |
+          set -euo pipefail
+          for pkg in museld-windows-x86_64 museld-windows-x86_64-video-export \
+                     ac3rf-efm-decode-windows-x86_64; do
+            (packaging/windows/smoke-test.sh "$pkg")
           done
 
-          # The Vulkan loader normally arrives with the graphics driver, so it is
-          # not among the DLLs resolved above. Ship it too: it finds the driver
-          # through the registry either way, and museld then starts far enough to
-          # report a missing Vulkan device itself instead of failing to load.
-          cp /ucrt64/bin/vulkan-1.dll "$pkg/"
-
-          zip -qr "$pkg.zip" "$pkg"
-          ls -la "$pkg"
-          du -sh "$pkg.zip"
-
-      # Run the packaged binaries with MSYS2 off the PATH: anything the package
-      # fails to ship shows up here rather than on someone's machine. --help
-      # returns before a Vulkan device is needed, so this works without a GPU.
-      - name: Smoke test the package
-        run: |
-          set -euo pipefail
-          cd museld-windows-x86_64
-          # Only the binaries under test get the stripped PATH; the shell keeps
-          # its own so grep and rm still work.
-          clean_path="/c/Windows/System32:/c/Windows"
-          PATH="$clean_path" ./ac3rf-efm-decode.exe --version
-          # museld's --help exits non-zero, so check that it printed its usage;
-          # a package missing a DLL never gets as far as printing anything.
-          PATH="$clean_path" ./museld.exe --help > help.txt 2>&1 || true
-          grep -q "^usage: museld" help.txt
-          rm help.txt
-          echo "packaged binaries start with only Windows system DLLs available"
-
-      - name: Upload package
+      - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: museld-windows-x86_64
-          path: museld-windows-x86_64.zip
+          name: windows-packages
+          path: "*.zip"
+          if-no-files-found: error
 
-      - name: Attach package to release
+      - name: Attach packages to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: museld-windows-x86_64.zip
+          files: "*.zip"
