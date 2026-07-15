@@ -40,7 +40,11 @@ static uint8_t encodeSrgb(float linear) {
 static std::string makeTimestampedFilename() {
     time_t now = time(nullptr);
     tm tm_now{};
+#ifdef _WIN32
+    localtime_s(&tm_now, &now);
+#else
     localtime_r(&now, &tm_now);
+#endif
     char base[64];
     strftime(base, sizeof(base), "museld-%Y%m%d-%H%M%S", &tm_now);
     std::string name = std::format("{}.png", base);

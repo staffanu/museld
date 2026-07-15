@@ -94,12 +94,12 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-  # Builds the full Windows port and packages it for download. Also tracks the
-  # state of the museld Windows port; failure does not fail the workflow.
+  # Builds the full Windows port and packages it for download. museld's Windows
+  # runtime is still experimental, but the build has to keep working since the
+  # published package comes from here.
   windows-package:
-    name: Windows MSYS2 museld + package (experimental)
+    name: Windows MSYS2 museld + package
     runs-on: windows-latest
-    continue-on-error: true
     permissions:
       contents: write
     defaults:
