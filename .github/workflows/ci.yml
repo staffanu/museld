@@ -94,11 +94,14 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-  # Tracks the state of the museld Windows port; failure does not fail the workflow.
-  windows-muse-experimental:
-    name: Windows MSYS2 museld (experimental)
+  # Builds the full Windows port and packages it for download. Also tracks the
+  # state of the museld Windows port; failure does not fail the workflow.
+  windows-package:
+    name: Windows MSYS2 museld + package (experimental)
     runs-on: windows-latest
     continue-on-error: true
+    permissions:
+      contents: write
     defaults:
       run:
         shell: msys2 {0}
@@ -109,9 +112,9 @@ jobs:
         with:
           msystem: UCRT64
           update: true
-          install: git
+          install: git zip
           pacboy: >-
-            gcc:p cmake:p ninja:p pkgconf:p flac:p
+            gcc:p cmake:p ninja:p pkgconf:p flac:p ffmpeg:p
             vulkan-headers:p vulkan-loader:p glfw:p shaderc:p
 
       - name: Configure
@@ -123,3 +126,49 @@ jobs:
 
       - name: Build
         run: cmake --build build
+
+      # museld loads its SPIR-V shaders and the subtitle font from the directory
+      # the executable lives in, so those have to travel with the binaries.
+      - name: Stage package
+        run: |
+          set -euo pipefail
+          pkg=museld-windows-x86_64
+          mkdir -p "$pkg/shaders" "$pkg/fonts"
+          cp build/src/museld.exe build/src/ac3rf-efm-decode.exe "$pkg/"
+          cp build/src/shaders/*.spv "$pkg/shaders/"
+          cp build/src/fonts/NotoSansJP-Regular.ttf "$pkg/fonts/"
+          cp gpl-3.0.txt "$pkg/"
+          cp packaging/windows/README.txt "$pkg/"
+
+          # Bundle the UCRT64 DLLs the binaries need, transitively. Anything
+          # resolving outside /ucrt64/bin is a Windows system DLL and is left
+          # to the target machine.
+          changed=1
+          while [ "$changed" = 1 ]; do
+            changed=0
+            for f in "$pkg"/*.exe "$pkg"/*.dll; do
+              [ -f "$f" ] || continue
+              for dll in $(ldd "$f" | awk '/=> \/ucrt64\/bin\// {print $3}'); do
+                if [ ! -f "$pkg/$(basename "$dll")" ]; then
+                  cp "$dll" "$pkg/"
+                  changed=1
+                fi
+              done
+            done
+          done
+
+          zip -qr "$pkg.zip" "$pkg"
+          ls -la "$pkg"
+          du -sh "$pkg.zip"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: museld-windows-x86_64
+          path: museld-windows-x86_64.zip
+
+      - name: Attach package to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: museld-windows-x86_64.zip
