@@ -83,7 +83,7 @@ void processFile(Logger &logger, Operation input_type,
                     logger.sync();
                     prev_processed_time = processed_time;
                 }
-                std::vector<TwoChannelSample> output = efm_pcm_processor.processSamples(decoded_samples);
+                std::vector<TwoChannelSample> output = efm_pcm_processor.processSamples(decoded_samples, efm_decoder.preEmphasis());
 
                 if (write(out_fd, output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
                     throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
@@ -115,7 +115,7 @@ void processFile(Logger &logger, Operation input_type,
                 std::vector<TwoChannelSampleWithErasureFlags> output_with_erasures =
                     efm_decoder.decode(reclocked_data, processed_input_blocks % (int)(input_sample_frequency / block_size) == 0);
 
-                std::vector<TwoChannelSample> output = efm_pcm_processor.processSamples(output_with_erasures);
+                std::vector<TwoChannelSample> output = efm_pcm_processor.processSamples(output_with_erasures, efm_decoder.preEmphasis());
 
                 if (write(out_fd, output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
                     throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
