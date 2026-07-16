@@ -422,8 +422,15 @@ void ReedSolomon<irreducible_poly, alpha>::doDecode(std::vector<ByteWithErasureF
                     uneraseAll(data);
                     m_statistics["corrected one error"]++;
                 } else if (number_of_erasures == 2 || number_of_erasures == 3) {
-                    tryDecodeErasures(syndromes,data);
-                    m_statistics["corrected erasures"]++;
+                    // Deliberately not 4: with only n - k = 4 syndromes the erasure solution is
+                    // exactly determined, so a 5th unflagged error is silently "corrected" into
+                    // garbage.
+                    if (tryDecodeErasures(syndromes,data))
+                        m_statistics["corrected erasures"]++;
+                    else {
+                        eraseAll(data);
+                        m_statistics["failed"]++;
+                    }
                 } else if (number_of_erasures == 1 && determinant != GF(0) && tryCorrectTwoErrors(syndromes, data)) {
                     int erasures_now = std::count_if(data.cbegin(), data.cend(), [](ByteWithErasureFlag b) -> bool { return b.isErased(); });
                     if (erasures_now == 0) {
