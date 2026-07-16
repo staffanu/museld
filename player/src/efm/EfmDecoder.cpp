@@ -122,6 +122,7 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
           m_frame{},
           m_subcode_p_start_flag(false),
           m_subcode_q_use(nullopt),
+          m_subcode_q_undefined_control(nullopt),
           m_c1(32, 28, 0, RS_C1, false),
           m_c2(28, 24, 0, RS_C2, false),
           m_initial_delay_lines{},
@@ -331,13 +332,27 @@ void EfmDecoder::handleSubcode() {
         else if ((get_bit(0, 'Q')) == 1)
             use = Broadcasting;
 
-        if (use.has_value() && (!m_subcode_q_use.has_value() || m_subcode_q_use.value() != use)) {
-            m_subcode_q_use = use;
-            m_log.debug(eAudio, std::format("Subcode Q use = {}",
-                use.value() == Audio2ChannelWithPreEmphasis ? "Audio2ChannelWithPreEmphasis" :
-                use.value() == Audio2ChannelNoPreEmphasis ? "Audio2ChannelNoPreEmphasis" :
-                use.value() == DigitalData ? "DigitalData" :
-                "Broadcasting"));
+        if (use.has_value()) {
+            m_subcode_q_undefined_control.reset();
+            if (!m_subcode_q_use.has_value() || m_subcode_q_use.value() != use) {
+                m_subcode_q_use = use;
+                m_log.debug(eAudio, std::format("Subcode Q use = {}",
+                    use.value() == Audio2ChannelWithPreEmphasis ? "Audio2ChannelWithPreEmphasis" :
+                    use.value() == Audio2ChannelNoPreEmphasis ? "Audio2ChannelNoPreEmphasis" :
+                    use.value() == DigitalData ? "DigitalData" :
+                    "Broadcasting"));
+            }
+        } else {
+            // IEC 60908 17.5 defines 0 0 X X, 0 1 X 0 and 1 X X X and leaves the rest for later,
+            // so 0 1 X 1 lands here.  The CRC passed, so this is what the disc says rather than a
+            // decoding error.  Warn once per distinct value instead of silently keeping the old use.
+            const int control = (get_bit(0, 'Q') ? 8 : 0) | (get_bit(1, 'Q') ? 4 : 0)
+                              | (get_bit(2, 'Q') ? 2 : 0) | (get_bit(3, 'Q') ? 1 : 0);
+            if (m_subcode_q_undefined_control != control) {
+                m_subcode_q_undefined_control = control;
+                m_log.warn(eAudio, std::format(
+                    "Subcode Q control field {:04b} is not defined in IEC 60908 17.5; keeping previous use", control));
+            }
         }
     } else
         m_q_subcode_crc_failures_last_second++;

@@ -171,7 +171,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     if (m_decode_audio && m_field_index == 0) {
         if (efm_audio && input_block != nullptr) {
             auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
-            for (const auto &s : m_efm_pcm_processor.processSamples(raw)) {
+            for (const auto &s : m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis())) {
                 if (out.audio_sample_count >= MAX_AUDIO_OUTPUT_SAMPLES) break;
                 out.audio_samples[out.audio_sample_count].samples[0] = s.samples[0];
                 out.audio_samples[out.audio_sample_count].samples[1] = s.samples[1];

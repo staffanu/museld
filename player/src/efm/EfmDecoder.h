@@ -27,6 +27,11 @@ public:
     std::vector<TwoChannelSampleWithErasureFlags> decode(const std::vector<float> &data, bool log_now);
     std::string reedSolomonStatistics();
 
+    // The Q-channel pre-emphasis flag (IEC 60908 clause 17.5).  The control field only changes
+    // during a pause of at least 2 s, so the CIRC delay between a frame's control byte and its
+    // audio samples needs no compensation.  A failed Q CRC leaves the last good value in place.
+    [[nodiscard]] bool preEmphasis() const { return m_subcode_q_use == Audio2ChannelWithPreEmphasis; }
+
 private:
     static constexpr int c_minimum_frames_before_c1_c2_valid = 97;
 
@@ -83,6 +88,7 @@ private:
         Broadcasting
     };
     std::optional<SubcodePUse> m_subcode_q_use;
+    std::optional<int> m_subcode_q_undefined_control; // last out-of-spec control field warned about
 
     ReedSolomon<0x11d, 2> m_c1;
     ReedSolomon<0x11d, 2> m_c2;
