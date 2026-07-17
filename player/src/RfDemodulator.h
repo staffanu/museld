@@ -72,10 +72,17 @@ public:
 
     std::unique_ptr<B> getNextDemodulatedBlock() {
         std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
+        // m_stop_request belongs in the predicate, not just in a notify: waking a
+        // wait only asks the question again, so without it here a waiter would
+        // find no blocks and an unfinished thread and go back to sleep, and
+        // cleanup()'s notify below would do nothing. Nobody waits here while
+        // cleanup() runs today -- the reader thread is joined before the
+        // demodulator is stopped -- but that is an argument about ordering
+        // elsewhere, not something this function should depend on.
         m_cv_filled.wait(
                 lock,
-                [this] { return m_reader_thread_finished || !m_filled_blocks.empty(); });
-        if (m_filled_blocks.empty())
+                [this] { return m_stop_request || m_reader_thread_finished || !m_filled_blocks.empty(); });
+        if (m_stop_request || m_filled_blocks.empty())
             return nullptr;
 
         auto block = std::move(m_filled_blocks.front());
@@ -109,10 +116,13 @@ public:
     void cleanup() {
         {
             std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
-            m_cv_vacant.notify_one();
-            m_cv_filled.notify_one();
             m_stop_request = true;
         }
+        // Set the flag under the lock, then notify with it released: waiters have
+        // to re-take the mutex to check, so notifying while still holding it only
+        // wakes them into blocking on it again.
+        m_cv_vacant.notify_all();
+        m_cv_filled.notify_all();
         m_log.debug(eInput, "RfDemodulator: requested stop");
         m_demodulator_thread->join();
         delete m_demodulator_thread;
