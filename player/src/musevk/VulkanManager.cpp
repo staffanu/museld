@@ -101,7 +101,13 @@ namespace musevk {
         auto result = m_present_queue->presentKHR(presentInfo);
         if (result == vk::Result::eSuboptimalKHR)
             m_log.warn(eVideo, "presentKHR: eSuboptimalKHR");
-        else if (result != vk::Result::eSuccess)
+        else if (result == vk::Result::eErrorOutOfDateKHR) {
+            // Windows reports a resized window here rather than from
+            // acquireNextImageKHR, which is where the other platforms surface it.
+            // The image is already queued, so rebuild before the next acquire.
+            m_log.warn(eVideo, "presentKHR: eErrorOutOfDateKHR");
+            recreate_swap_chain_next_call = true;
+        } else if (result != vk::Result::eSuccess)
             throw runtime_error("presentKHR failed");
     }
 

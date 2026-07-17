@@ -24,7 +24,11 @@ namespace musevk {
 
         [[nodiscard]] vk::Result presentKHR(vk::PresentInfoKHR presentInfo) {
             std::scoped_lock lock(m_mutex);
-            return m_queue.presentKHR(presentInfo);
+            // Pass a pointer, not a reference: the reference overload is
+            // vulkan.hpp's enhanced one, which throws eErrorOutOfDateKHR rather
+            // than returning it. A resized window is normal, and the caller
+            // handles it -- so take the noexcept overload and keep the result.
+            return m_queue.presentKHR(&presentInfo);
         }
 
     private:
