@@ -82,10 +82,18 @@ not stop the others from publishing.
 **The CPU baseline.** `-march=native` targets the CPU doing the build, so a package built
 that way on a CI runner can die with an illegal instruction on a user's older machine. The
 `MUSELD_ARCH` cache variable exists for this: it defaults to `native`, which is right for
-local builds, and the packages set it to `x86-64-v3` (AVX2, Haswell/Zen and later). Do not
-lower it to `x86-64-v2` casually — the AVX paths in `filter/FirFilterStage.cpp` are gated
-on `__AVX__` at compile time and would silently disappear. On arm64 macOS it is set to
-nothing at all, leaving clang's default: every Mac that can run these is an M1 or later.
+local builds, and the packages set it to `x86-64-v2` (SSE4.2, Nehalem and later). On arm64
+macOS it is set to nothing at all, leaving clang's default: every Mac that can run these is
+an M1 or later.
+
+The baseline decides only which CPUs can run the binary, not whether AVX is used:
+`firFilterAvx` in `filter/FirFilterStage.cpp` carries a function-level `target("avx")`
+attribute, so it is compiled on every x86 build whatever `-march` says, and
+`FirFilterStage::simdSupported()` picks it via CPUID at runtime. Raising the baseline
+therefore buys very little and locks out old CPUs; it used to be set to `x86-64-v3`
+precisely because the AVX paths were gated on `__AVX__` and lowering it would have made
+them silently disappear. Whoever chooses `use_simd` must ask `simdSupported()` rather than
+assume — passing `true` unconditionally is a crash on any CPU below the AVX line.
 
 **Files museld loads at runtime.** museld finds its SPIR-V shaders and subtitle font
 relative to its own executable, so `shaders/` and `fonts/` have to travel with it; a bare

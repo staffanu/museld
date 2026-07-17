@@ -7,7 +7,12 @@
 #include <format>
 #include <sstream>
 #include <algorithm>
+#include <stdexcept>
 #include "FirFilterStage.h"
+
+#ifdef FIRFILTERSTAGE_X86
+#include <immintrin.h>
+#endif
 
 FirFilterStage::FirFilterStage(
     std::string name,
@@ -27,6 +32,12 @@ FirFilterStage::FirFilterStage(
     m_output_buffer(output_buffer),
     m_use_simd(use_simd) {
 
+    // Catch a forced --simd on a CPU without the instructions here, where it can
+    // still be reported: by the time firFilter() runs it would be an illegal
+    // instruction rather than an error message.
+    if (m_use_simd && !simdSupported())
+        throw std::runtime_error("SIMD requested but this CPU does not support it");
+
     // Reverse the filter coefficients to simply loops for convolution
     std::reverse(m_filter.begin(), m_filter.end());
     if (m_use_simd) {
@@ -41,8 +52,15 @@ FirFilterStage::~FirFilterStage() {
 }
 
 bool FirFilterStage::simdSupported() {
-#if defined __AVX__
-    return true;
+#ifdef FIRFILTERSTAGE_X86
+    // Asked at runtime, not compile time: firFilterAvx is always present on x86,
+    // so what matters is whether this CPU can execute it, not what -march allowed
+    // the rest of the translation unit to use.
+    static const bool supported = [] {
+        __builtin_cpu_init();
+        return __builtin_cpu_supports("avx") != 0;
+    }();
+    return supported;
 #elif __ARM_NEON == 1
     return true;
 #else
@@ -80,7 +98,7 @@ std::string FirFilterStage::toString() const {
 int FirFilterStage::inputSampleAlignment() const {
     if (!m_use_simd)
         return m_decimation_factor;
-#if defined __AVX__
+#ifdef FIRFILTERSTAGE_X86
     return std::lcm(c_AVX_floats_per_chunk, 2 * m_decimation_factor);
 #elif __ARM_NEON == 1
     return std::lcm(c_NEON_floats_per_chunk, 2 * m_decimation_factor);
@@ -108,7 +126,8 @@ void FirFilterStage::firFilter(
         float *output,
         int decimation_factor) {
     if (m_use_simd) {
-#if defined __AVX__
+        // m_use_simd is only ever set when simdSupported() agrees -- see the ctor.
+#ifdef FIRFILTERSTAGE_X86
         firFilterAvx(input, input_length, filter, filter_length, output, decimation_factor);
 #elif __ARM_NEON == 1
         firFilterNeon(input, input_length, filter, filter_length, output, decimation_factor);
@@ -137,12 +156,10 @@ void FirFilterStage::firFilterNormal(
 }
 
 
-#ifdef __AVX__
-#include <immintrin.h>
-#include <numeric>
-#endif
-
 // Filters the real or imaginary part, so uses every other float of the input/output
+#ifdef FIRFILTERSTAGE_X86
+[[gnu::target("avx")]]
+#endif
 void FirFilterStage::firFilterAvx(
     const float *input,   // input signal of length output_length + filter_length - 1 -- stored in every other float
     size_t input_length,  // usable input (not including the filter_length-1 extra values)
@@ -150,7 +167,7 @@ void FirFilterStage::firFilterAvx(
     size_t filter_length,
     float *output,        // the output size is input_length / decimation_factor, again stored in every other float
     int decimation_factor) {
-#ifdef __AVX__
+#ifdef FIRFILTERSTAGE_X86
     assert(input_length % decimation_factor == 0);
     const int output_size = input_length / decimation_factor;
     assert(output_size % 2 == 0); // even output length!
