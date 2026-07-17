@@ -8,6 +8,13 @@
 #include <mutex>
 
 namespace musevk {
+    // Every command below takes its arguments by pointer, which is what picks
+    // vulkan.hpp's plain wrapper -- noexcept, and hands back the vk::Result. The
+    // overloads taking references or values are the "enhanced" ones, which throw
+    // on any result the command does not list as a success. They are the same
+    // name and differ only in how an argument is passed, so the choice is easy to
+    // make by accident: presentKHR used to, and a resized window (a normal
+    // eErrorOutOfDateKHR) killed museld on Windows as a result.
     class Queue {
     public:
         explicit Queue(vk::Queue queue) :
@@ -17,17 +24,13 @@ namespace musevk {
         Queue(const Queue &) = delete;
         Queue &operator=(const Queue &) = delete;
 
-        void submit(vk::SubmitInfo &submit_info, vk::Fence &fence) {
+        [[nodiscard]] vk::Result submit(vk::SubmitInfo &submit_info, vk::Fence &fence) {
             std::scoped_lock lock(m_mutex);
-            m_queue.submit(submit_info, fence);
+            return m_queue.submit(1, &submit_info, fence);
         }
 
         [[nodiscard]] vk::Result presentKHR(vk::PresentInfoKHR presentInfo) {
             std::scoped_lock lock(m_mutex);
-            // Pass a pointer, not a reference: the reference overload is
-            // vulkan.hpp's enhanced one, which throws eErrorOutOfDateKHR rather
-            // than returning it. A resized window is normal, and the caller
-            // handles it -- so take the noexcept overload and keep the result.
             return m_queue.presentKHR(&presentInfo);
         }
 

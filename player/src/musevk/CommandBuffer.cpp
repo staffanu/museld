@@ -190,7 +190,9 @@ namespace musevk {
         }
 
         vk::SubmitInfo submitInfo(wait_semaphores, wait_dst_stage_masks, m_command_buffer, signal_semaphores);
-        m_queue.submit(submitInfo, m_fence);
+        auto result = m_queue.submit(submitInfo, m_fence);
+        if (result != vk::Result::eSuccess)
+            throw std::runtime_error(std::format("queue submit returned with result {}", (uint32_t)result));
     }
 
     bool CommandBuffer::isSubmitted() const {
@@ -199,13 +201,13 @@ namespace musevk {
 
     void CommandBuffer::wait() {
         assert(m_is_running);
-        try { // TODO: figure out why waitForFences returns a result when it throws an exception on errors
-            auto result = m_device.waitForFences(m_fence, VK_TRUE, UINT64_MAX);
-            if (result != vk::Result::eSuccess)
-                throw std::runtime_error(std::format("waitForFences returned with result {}", (uint32_t)result));
-        } catch (vk::SystemError &x) {
-            throw std::runtime_error(std::format("waitForFences threw exception {}", x.what()));
-        }
+        // It returned a result *and* threw because the enhanced overload does
+        // both: the result told eSuccess from eTimeout, its two success codes,
+        // while anything else -- eErrorDeviceLost and friends -- came back as an
+        // exception. The pointer overload just returns all of them.
+        auto result = m_device.waitForFences(1, &m_fence, VK_TRUE, UINT64_MAX);
+        if (result != vk::Result::eSuccess)
+            throw std::runtime_error(std::format("waitForFences returned with result {}", (uint32_t)result));
         m_device.resetFences(m_fence);
         m_is_running = false;
         if (!m_memory_ranges_to_invalidate.empty()) {
