@@ -87,6 +87,7 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
     const bool output_yuv = controls.output_yuv;
 
     out.audio_sample_count = 0;
+    out.decoded = false;
 
     if (redo_last_field) // undo the field advance from the previous call
         m_field_index = (m_field_index + 1) % 2;
@@ -102,12 +103,13 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
                 return false;
             case InputStatus::eTimeout:
                 m_log.info(eDecoder, "Input timeout");
-                return true;
+                return true; // out.decoded stays false: nothing was decoded
             default:
                 assert(input_block != nullptr);
             break;
         }
     }
+    out.decoded = true;
 
     m_first_stage_command_buffer->begin();
     if (m_timestamp_query_pool != nullptr)

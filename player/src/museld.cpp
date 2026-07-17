@@ -125,7 +125,10 @@ static void runPlayer(Logger &log,
         while ((state.paused && !state.redo_last_field)
                || decoder.next(make_controls(state.redo_last_field), state.last_decoded)) {
 
-            if (!state.paused)
+            // Only fields that were actually decoded: next() also returns true
+            // when the input timed out, and counting those would make
+            // --export-frame-at fire early and the frame rate below flattering.
+            if (!state.paused && state.last_decoded.decoded)
                 state.field_count++;
             state.redo_last_field = false;
 
