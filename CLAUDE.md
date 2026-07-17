@@ -145,7 +145,7 @@ The `src/` directory is the include root for both binaries. The `ac3rf` CMake ta
 
 **Input format abstraction**: `InputReader` specializations with auto-detection by file extension.
 
-**SIMD-aware FIR filtering**: `FirFilterStage.h` has AVX, NEON, and scalar paths with runtime selection via `--simd`/`--no-simd`.
+**SIMD-aware FIR filtering**: `FirFilterStage.h` has AVX, NEON, and scalar paths. On x86 the AVX path is compiled in regardless of `-march` (function-level target attribute) and chosen at runtime via CPUID, so `MUSELD_ARCH` sets which CPUs can run the binary without deciding whether AVX is used. `--simd`/`--no-simd` override the automatic choice; forcing `--simd` on a CPU without support is an error.
 
 **Video file output presets**: `museld --write <file> --write-preset standard|archival` (`VideoFileWriter`, `VideoWriterOptions.h`). `standard` = H.264 (libx264, CRF) + AAC in MP4; `archival` = lossless FFV1 16-bit + PCM in Matroska. Container/codecs come from the preset, not the filename extension. Color metadata (BT.709 for MUSE, SMPTE 170M for NTSC, full range) is tagged per input type. Audio is kept in sync with the video clock: small deficits (25–100 ms) are concealed by stretching/interpolation, larger gaps by silence with a fade-out, excess audio by dropping samples. For batch rendering add `--no-sync`, otherwise the display loop caps decoding at 1.0x realtime. Raw captures without a recognized extension need `--input-format` (e.g. `s16`).
 
@@ -187,7 +187,8 @@ NTSC frame buffer → Vulkan GPU color decode → video output
 
 ### Compiler Flags
 
-- Always: `-ffast-math`, `-march=native`
+- Always: `-ffast-math`, and `-march=${MUSELD_ARCH}` — `native` by default, but the
+  packages pin a portable baseline (see **CI and Packaging**); empty means no `-march`
 - Debug: `-fsanitize=address`
 - macOS: `-mmacosx-version-min=15.0`
 

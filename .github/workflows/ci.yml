@@ -207,11 +207,16 @@ jobs:
           pacboy: >-
             gcc:p cmake:p ninja:p pkgconf:p flac:p catch:p
 
-      # BUILD_MUSE=OFF until museld is ported to Windows
+      # BUILD_MUSE=OFF until museld is ported to Windows.
+      #
+      # Built at the same baseline as the packages rather than the default
+      # native, so the tests run against what is actually shipped. The AVX paths
+      # are still covered: they are picked at runtime, and the runners have AVX.
       - name: Configure
         run: |
           git config --global --add safe.directory '*'
           cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
+            -DMUSELD_ARCH=x86-64-v2 \
             -DBUILD_MUSE=OFF -DBUILD_PYTHON=OFF \
             -S player -B build
 
@@ -220,6 +225,18 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      # The packages are built at a baseline below AVX, so the AVX filter path is
+      # reachable only through runtime detection -- and if that detection breaks,
+      # everything still passes quietly on the scalar path (the parity tests skip
+      # themselves when SIMD is unavailable). The runners have AVX, so --simd must
+      # be accepted here: if this step fails, the packages are shipping scalar-only.
+      - name: Check the AVX path is reachable at the package baseline
+        run: |
+          set -euo pipefail
+          head -c 1048576 /dev/urandom > simd-check.s16
+          ./build/src/ac3rf-efm-decode.exe --simd --sample-freq 40e6 --ac3 \
+            --output-filename simd-check.ac3 simd-check.s16
 
   # Builds the Windows port and packages it for download. museld's Windows
   # runtime is still experimental, but the build has to keep working since the
@@ -248,13 +265,15 @@ jobs:
             vulkan-headers:p vulkan-loader:p glfw:p shaderc:p
 
       # The default -march=native would target whatever CPU this runner happens
-      # to have; x86-64-v3 (Haswell/Zen and later) is the baseline for the
-      # published binaries and still enables the AVX filter paths.
+      # to have; x86-64-v2 (Nehalem/Westmere and later) is the baseline for the
+      # published binaries. This does not cost the AVX filter paths: those are
+      # compiled in regardless of -march and selected at runtime, so the floor
+      # here only decides which CPUs can run the binary at all.
       - name: Build without video export
         run: |
           git config --global --add safe.directory '*'
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DMUSELD_ARCH=x86-64-v3 -DUSE_LIBAV=OFF \
+            -DMUSELD_ARCH=x86-64-v2 -DUSE_LIBAV=OFF \
             -DBUILD_PYTHON=OFF \
             -S player -B build-lean
           cmake --build build-lean
@@ -262,7 +281,7 @@ jobs:
       - name: Build with video export
         run: |
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DMUSELD_ARCH=x86-64-v3 \
+            -DMUSELD_ARCH=x86-64-v2 \
             -DBUILD_PYTHON=OFF \
             -S player -B build-full
           cmake --build build-full

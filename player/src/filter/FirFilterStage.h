@@ -7,7 +7,17 @@
 #include <memory>
 #include <vector>
 
+#if defined(__x86_64__) || defined(__i386__)
+#define FIRFILTERSTAGE_X86 1
+#endif
+
 // Generic FIR filter stage with optional SIMD acceleration.
+//
+// The AVX path is compiled on every x86 build regardless of -march, via a
+// function-level target attribute, and chosen at runtime by simdSupported().
+// That keeps the -march baseline free to be low enough for old CPUs to run the
+// binary at all, without giving up AVX on the CPUs that have it: -march governs
+// what the compiler may emit everywhere *else*, not whether firFilterAvx exists.
 //
 // CAVEAT — SIMD-vs-scalar fractional shift: when use_simd is true, the
 // constructor pads the reversed filter with trailing zeros so its length
@@ -62,6 +72,9 @@ private:
         const float *filter, size_t filter_size, float *output, int decimation_factor);
 
     constexpr static int c_AVX_floats_per_chunk = 8;
+#ifdef FIRFILTERSTAGE_X86
+    [[gnu::target("avx")]]
+#endif
     static void firFilterAvx(const float *input, size_t input_length,
         const float *filter, size_t filter_size, float *output, int decimation_factor);
 

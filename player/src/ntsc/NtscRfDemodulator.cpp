@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <algorithm>
 #include "NtscRfDemodulator.h"
+#include "filter/FirFilterStage.h"
 #include "filter/WindowedSinc.h"
 #include "musevk/VulkanUtil.h"
 #include "musevk/TimestampQueryPool.h"
@@ -25,7 +26,8 @@ NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string executable_dir, st
                                       vulkan_manager, input_format,
                                       NtscRfDemodulatorConstants::c_sample_block_size,
                                       benchmark_shaders),
-  m_efm_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size, true, true,
+  m_efm_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
+                    FirFilterStage::simdSupported(), true,
                     EfmDemodulator::defaultLog2Decimation(sample_frequency), 3, std::nullopt),
   m_efm_enabled(efm_enabled) {
 }
