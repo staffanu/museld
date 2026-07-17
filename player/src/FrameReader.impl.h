@@ -77,8 +77,8 @@ template<class InputBlock>
 void FrameReader<InputBlock>::cleanup() {
     {
         std::unique_lock<std::mutex> lock(m_mutex);
-        m_cv_vacant.notify_one();
         m_stop_request = true;
+        m_cv_vacant.notify_all();
     }
     m_reader_thread->join();
     delete m_reader_thread;

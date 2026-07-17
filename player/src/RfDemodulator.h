@@ -115,14 +115,14 @@ public:
 
     void cleanup() {
         {
+            // Set the flag before notifying, as the EFM worker's stop does: the
+            // waiters test it, so a notify that precedes it wakes them to find
+            // nothing changed.
             std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
             m_stop_request = true;
+            m_cv_vacant.notify_all();
+            m_cv_filled.notify_all();
         }
-        // Set the flag under the lock, then notify with it released: waiters have
-        // to re-take the mutex to check, so notifying while still holding it only
-        // wakes them into blocking on it again.
-        m_cv_vacant.notify_all();
-        m_cv_filled.notify_all();
         m_log.debug(eInput, "RfDemodulator: requested stop");
         m_demodulator_thread->join();
         delete m_demodulator_thread;
