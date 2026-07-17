@@ -199,7 +199,8 @@ void ResamplingFrameReader::threadFunc() {
         }
 
         if (!process(output_block)) {
-            m_log.info(eInput, "ResamplingFrameReader: end of file");
+            m_log.info(eInput, m_stop_request ? "ResamplingFrameReader: stop requested"
+                                              : "ResamplingFrameReader: end of file");
             break;
         }
 
@@ -217,6 +218,13 @@ void ResamplingFrameReader::threadFunc() {
 }
 
 bool ResamplingFrameReader::readInput(std::unique_ptr<MuseInputBlock> const &output_block) {
+    // threadFunc only looks at m_stop_request between output blocks, and it only
+    // finishes one once the input locks -- so on junk input it never gets to look
+    // again, and cleanup() waits here for the whole file. This runs for every
+    // sub-buffer, locked or not, so it is where a stop can actually be noticed.
+    if (m_stop_request)
+        return false;
+
     float *read_ptr = m_input_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
     uint8_t *dropout_read_ptr = m_input_dropout_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
 

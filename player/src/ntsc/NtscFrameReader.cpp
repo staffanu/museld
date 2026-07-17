@@ -171,7 +171,8 @@ void NtscFrameReader::threadFunc() {
         }
 
         if (!process(output_block)) {
-            m_log.info(eInput, "NtscFrameReader: end of file");
+            m_log.info(eInput, m_stop_request ? "NtscFrameReader: stop requested"
+                                              : "NtscFrameReader: end of file");
             break;
         }
 
@@ -189,6 +190,11 @@ void NtscFrameReader::threadFunc() {
 }
 
 bool NtscFrameReader::readInput(std::unique_ptr<NtscInputBlock> const &output_block) {
+    // See ResamplingFrameReader::readInput: threadFunc cannot look at
+    // m_stop_request until the input locks, so a stop has to be noticed here.
+    if (m_stop_request)
+        return false;
+
     uint8_t *read_ptr = m_input_buffer + m_bytes_per_sample * c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
     uint8_t *dropout_read_ptr = m_input_dropout_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
 
