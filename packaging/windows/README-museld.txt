@@ -38,10 +38,17 @@ Requirements
 museld.exe needs a GPU with Vulkan support and up-to-date graphics drivers.
 ac3rf-efm-decode.exe has no special requirements.
 
-Status: the Windows build of museld.exe is EXPERIMENTAL. It compiles and links,
-but has had little testing on real Windows machines — expect problems, and
-please report them at https://github.com/staffanu/museld/issues. The
-ac3rf-efm-decode.exe decoder is in better shape.
+Status: the Windows build of museld.exe still counts as EXPERIMENTAL, but it is
+no longer untested: it decodes real MUSE captures correctly, with picture and
+subtitles matching the Linux build. That testing is thin — a small number of
+machines, mostly single frames rather than long playback — so problems are still
+likely away from the paths that have been tried. Please report them at
+https://github.com/staffanu/museld/issues. The ac3rf-efm-decode.exe decoder is
+in better shape.
+
+Sustained playback needs the disk to keep up: at the default 62.5 MHz a MUSE RF
+capture is about 125 MB/s, and a drive slower than that will starve the decoder
+whatever the CPU can do.
 
 Quick start
 -----------
