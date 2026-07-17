@@ -40,6 +40,11 @@ public:
     };
 
     struct DecodedField {
+        // False when next() returned true without producing a field, which it
+        // does on a read timeout so that the caller stays responsive. Anything
+        // counting fields has to look at this: the timeouts are frequent enough
+        // to shift a stream position by several fields.
+        bool decoded;
         AudioMode audio_mode;
         int audio_sample_count;
         AudioFrame audio_samples[MAX_AUDIO_OUTPUT_SAMPLES];
