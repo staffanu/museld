@@ -36,8 +36,8 @@ add_library(ac3rf STATIC
 
 target_compile_features(ac3rf PUBLIC cxx_std_23)
 
-# The library is also linked into the nanobind Python module (a shared
-# object), which requires position-independent code on Linux.
+# The library is installed and exported for external use, so it may be linked
+# into a shared object, which requires position-independent code on Linux.
 set_target_properties(ac3rf PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # std::format is experimental in Clang/libc++ < 17
