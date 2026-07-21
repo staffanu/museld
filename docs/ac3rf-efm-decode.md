@@ -84,6 +84,8 @@ output file in effect, the output is appended.
 | `--log <level>` | Log verbosity: 0=off, 1=error, 2=warn, 3=info, 4=debug |
 | `--log-filename <file>` | Write log output to this file instead of stderr |
 | `--reclock-debug-filename <file>` | Write EFM timing recovery debug data to file |
+| `--t-values-output-filename <file>` | Write EFM t-values (run lengths between NRZI transitions) as one unsigned byte per value — the same format as ld-decode `.efm` files. Values are kept in the EFM-legal range 3–11 without changing the total bit count (short runs are merged into the next run, long dropout runs are split into legal chunks), so consumers never lose 588-bit frame alignment. |
+| `--circ-debug-filename <file>` | Write the CIRC decoder's frame-by-frame debug dump (data and erasure flags before and after C1 and C2) to a text file. |
 
 The reclock debug file contains binary float pairs: the first float in each pair is the symbol
 sample used by the Mueller-Müller timing detector, the second is the computed timing error. It can

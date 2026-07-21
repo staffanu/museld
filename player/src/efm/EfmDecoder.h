@@ -16,7 +16,8 @@ class Logger;
 
 class EfmDecoder {
 public:
-    explicit EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt = std::nullopt);
+    explicit EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt,
+                        std::optional<std::string> t_values_filename_opt);
     ~EfmDecoder();
 
     EfmDecoder(const EfmDecoder &) = delete;
@@ -60,6 +61,14 @@ private:
 
     Logger &m_log;
     FILE *m_circ_debug_file;
+    // Run lengths between NRZI transitions, written as one u8 per value (the format
+    // used by ld-decode .efm files).  Values are kept in the EFM-legal range [3, 11]
+    // without changing the total bit count, so consumers never lose 588-bit frame
+    // alignment: a too-short run is carried into the following run, and a too-long
+    // run (dropout) is split into legal chunks.
+    FILE *m_t_values_file;
+    int m_t_value_run_length;
+    int m_t_value_carry;
     int m_total_bits;
     float m_prev_symbol;
     int m_shift_register;

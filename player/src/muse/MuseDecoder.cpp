@@ -41,7 +41,7 @@ MuseDecoder::MuseDecoder(
   m_field_index(0),
   m_total_elapsed_time_us(0),
   m_audio_decoder(log),
-  m_efm_decoder(log),
+  m_efm_decoder(log, std::nullopt, std::nullopt),
   m_efm_pcm_processor(log),
   m_equalizer(log, eq_mode, eq_alpha),
   m_frame_buffers() {

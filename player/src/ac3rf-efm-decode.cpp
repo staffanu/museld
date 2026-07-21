@@ -43,6 +43,7 @@ void processFile(Logger &logger, Operation input_type,
     std::unique_ptr<InputReader> reader, uint32_t block_size, int out_fd, bool use_simd,
     std::optional<int> efm_log2_decimation_opt,
     int efm_adaptive_filter_size, std::optional<std::string> efm_retiming_debug_filename,
+    std::optional<std::string> efm_t_values_output_filename, std::optional<std::string> efm_circ_debug_filename,
     ErasureConcealer::ConcealmentImplementation concealment_impl,
     double target_sample_frequency) {
 
@@ -63,7 +64,7 @@ void processFile(Logger &logger, Operation input_type,
 
             EfmDemodulator efm_demodulator(logger, input_sample_frequency, reader->block_size(), use_simd,
                 input_type == EfmRf, efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
-            EfmDecoder efm_decoder(logger);
+            EfmDecoder efm_decoder(logger, efm_circ_debug_filename, efm_t_values_output_filename);
             EfmPcmProcessor efm_pcm_processor(logger, concealment_impl);
 
             std::vector<float> reclocked_data;
@@ -96,7 +97,7 @@ void processFile(Logger &logger, Operation input_type,
         case EfmTValues: {
             logger.info(eApplication, "Processing EFM t-values");
 
-            EfmDecoder efm_decoder(logger);
+            EfmDecoder efm_decoder(logger, efm_circ_debug_filename, efm_t_values_output_filename);
             EfmPcmProcessor efm_pcm_processor(logger, concealment_impl);
 
             // Reading floats is "wrong" but this is a very unusual use case, so whatever makes the shortest code
@@ -184,6 +185,8 @@ int main(int argc, char *argv[]) {
     std::optional<int> efm_log2_decimation = std::nullopt;
     int efm_adaptive_filter_size = 3;
     std::optional<std::string> efm_retiming_debug_filename = std::nullopt;
+    std::optional<std::string> efm_t_values_output_filename = std::nullopt;
+    std::optional<std::string> efm_circ_debug_filename = std::nullopt;
     ErasureConcealer::ConcealmentImplementation concealment_impl = ErasureConcealer::AutoregressiveModel;
     bool did_show_help_or_version = false;
 
@@ -247,6 +250,12 @@ int main(int argc, char *argv[]) {
     });
     options.emplace_back("--reclock-debug-filename", [&] () mutable  -> void {
         efm_retiming_debug_filename = *(it++);
+    });
+    options.emplace_back("--t-values-output-filename", [&] () mutable  -> void {
+        efm_t_values_output_filename = *(it++);
+    });
+    options.emplace_back("--circ-debug-filename", [&] () mutable  -> void {
+        efm_circ_debug_filename = *(it++);
     });
     options.emplace_back("--error-concealment", [&] () mutable  -> void {
         std::string concealment_impl_name = *(it++);
@@ -354,7 +363,8 @@ int main(int argc, char *argv[]) {
                 log.info(eApplication, std::format("Processing input file {}", filename));
                 processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
                     makeInputReader(filename, input_format, block_size), block_size, out_fd, use_simd,
-                    efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl, target_sample_frequency);
+                    efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,
+                    efm_t_values_output_filename, efm_circ_debug_filename, concealment_impl, target_sample_frequency);
 
                 it++;
             }
@@ -368,7 +378,8 @@ int main(int argc, char *argv[]) {
             auto stdin_reader = makeStdinInputReader(input_format_option.value(), block_size);
             processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
                 std::move(stdin_reader), block_size, out_fd, use_simd,
-                efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename, concealment_impl, target_sample_frequency);
+                efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,
+                efm_t_values_output_filename, efm_circ_debug_filename, concealment_impl, target_sample_frequency);
         }
         if (out_fd != 1)
             close(out_fd);
