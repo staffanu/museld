@@ -38,7 +38,7 @@ NtscDecoder::NtscDecoder(
   m_frame_no(-1),
   m_field_index(0),
   m_total_elapsed_time_us(0),
-  m_efm_decoder(log),
+  m_efm_decoder(log, std::nullopt, std::nullopt),
   m_efm_pcm_processor(log),
   m_frames() {
 }

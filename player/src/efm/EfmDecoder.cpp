@@ -105,9 +105,13 @@ const std::array<std::pair<int, int>, 6> EfmDecoder::c_left_output_map =
 const std::array<std::pair<int, int>, 6> EfmDecoder::c_right_output_map =
         array<pair<int, int>, 6> { pair{6, 7}, pair{18, 19}, pair{8, 9}, pair{20, 21}, pair{10, 11}, pair{22, 23}};
 
-EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt)
+EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt,
+                       std::optional<std::string> t_values_filename_opt)
         : m_log(log),
           m_circ_debug_file(nullptr),
+          m_t_values_file(nullptr),
+          m_t_value_run_length(0),
+          m_t_value_carry(0),
           m_total_bits(0),
           m_prev_symbol(0.f),
           m_shift_register(0),
@@ -152,11 +156,19 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
         if (m_circ_debug_file == nullptr)
             throw std::runtime_error(std::format("Error opening CIRC debug file: {}", strerror(errno)));
     }
+
+    if (t_values_filename_opt.has_value()) {
+        m_t_values_file = fopen(t_values_filename_opt.value().c_str(), "wb");
+        if (m_t_values_file == nullptr)
+            throw std::runtime_error(std::format("Error opening t-values output file: {}", strerror(errno)));
+    }
 }
 
 EfmDecoder::~EfmDecoder() {
     if (m_circ_debug_file != nullptr)
         fclose(m_circ_debug_file);
+    if (m_t_values_file != nullptr)
+        fclose(m_t_values_file);
 
     for (auto p: m_initial_delay_lines)
         delete[] p;
@@ -174,6 +186,33 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
         bool toggle = symbol * m_prev_symbol < 0;
         m_total_bits += 1;
         m_bits_in_frame += 1;
+
+        if (m_t_values_file != nullptr) {
+            m_t_value_run_length++;
+            if (toggle) {
+                // Keep emitted values in the EFM-legal range [3, 11] (IEC 60908
+                // clause 13) while preserving the total bit count exactly, so a
+                // consumer's 588-bit frame alignment never drifts: a too-short
+                // run (spurious transition) is carried into the following run,
+                // and a too-long run (dropout) is split into legal chunks.
+                int run = m_t_value_run_length + m_t_value_carry;
+                m_t_value_carry = 0;
+                if (run < 3) {
+                    m_t_value_carry = run;
+                } else {
+                    while (run > 14) {
+                        fputc(11, m_t_values_file);
+                        run -= 11;
+                    }
+                    if (run > 11) {
+                        fputc(run - 3, m_t_values_file);
+                        run = 3;
+                    }
+                    fputc(run, m_t_values_file);
+                }
+                m_t_value_run_length = 0;
+            }
+        }
 
         m_shift_register = m_shift_register << 1 | toggle;
 
