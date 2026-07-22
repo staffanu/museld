@@ -4,6 +4,7 @@
 #ifndef MUSECPP_NTSCDECODER_H
 #define MUSECPP_NTSCDECODER_H
 
+#include <array>
 #include <deque>
 #include "musevk/TimestampStatistics.h"
 #include "efm/EfmDecoder.h"
@@ -58,6 +59,11 @@ private:
     musevk::TimestampQueryPool *m_timestamp_query_pool; // if set we use it
 
     std::pair<float, float> m_eq;
+    NtscFrame::NoiseEstimate m_noise; // EWMA-smoothed, reader voltage units
+    double m_blanking_avg;            // EWMA of the per-frame blanking level ...
+    double m_blanking_sq_avg;         // ... and of its square, for the wander σ
+    std::array<double, 256> m_noise_psd; // cumulative blank-VBI-line power spectrum
+    long m_noise_psd_windows;
     vk::Semaphore m_first_stage_complete_semaphore;
     std::shared_ptr<musevk::CommandBuffer> m_reset_timestamp_query_pool_command_buffer;
     std::shared_ptr<musevk::CommandBuffer> m_first_stage_command_buffer;

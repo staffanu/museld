@@ -14,6 +14,24 @@ class NtscFrame {
 public:
     NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager);
 
+    // Robust noise sigmas measured on the flat reference regions of the raw
+    // input frame, in the reader's voltage units (0.0 = sync tip, 0.3 =
+    // blanking, 1.0 = white).  The NTSC RF demodulator has already applied
+    // de-emphasis, so this is noise as it reaches the picture.
+    struct NoiseEstimate {
+        float sigma_blanking; // back porch windows of the picture lines
+        float sigma_sync;     // sync tip windows
+        float blanking_level; // robust blanking level, for tracking wander
+    };
+    static NoiseEstimate EstimateNoise(float const *data);
+
+    // Accumulates the power spectrum of blanking-level windows on blank VBI
+    // lines into psd[256] (bin k = k/256 × 14.318 MHz; for white noise of
+    // variance σ² every bin converges to σ²).  Windows are only used when flat
+    // and near the blanking level; max_sigma gates out VBI lines carrying
+    // signal.  Returns the number of windows added.
+    static int AccumulateNoisePsd(float const *data, double *psd, float max_sigma);
+
     void set_frame_no(int frame_no, long input_offset, double input_samples_per_sample);
     [[nodiscard]] long getInputOffset() const;
     [[nodiscard]] double getInputSamplesPerNtscSample() const;
