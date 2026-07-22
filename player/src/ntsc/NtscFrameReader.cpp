@@ -75,7 +75,7 @@ bool NtscFrameReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &b
         }
 #endif
     } else {
-        m_demodulator->initialize(NtscRfDemodulatorConstants::c_number_of_block_buffers);
+        m_demodulator->initialize(m_demodulator->numberOfBlockBuffers());
     }
 
     m_input_samples_per_sample_ref = m_sample_rate / NtscInputBlock::c_video_sampling_frequency;
