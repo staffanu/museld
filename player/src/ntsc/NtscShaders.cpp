@@ -34,28 +34,7 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
   m_image_U_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_Y_BUF_WIDTH / 2, NTSC_FIELD_HEIGHT), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_image_V_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_Y_BUF_WIDTH / 2, NTSC_FIELD_HEIGHT), 2,
-                                          vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
-
-  // Filters created in Octave:
-  // fsc = 3.5795e+06
-  // W=[(fsc-1.2e6)/(4*fsc/2) (fsc+1.2e6)/(4*fsc/2)]
-  // notch = fir1(30, W, 'stop'); bandpass = fir1(30, W, 'pass')
-  m_y_c_notch_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
-          Size(31),
-          {
-            0.00016, 0.00361, -0.00012, -0.00032, -0.00021, -0.01672, 0.00077, 0.03424,
-            -0.00059, -0.00129, -0.00073, -0.11566, 0.00178, 0.26475, -0.00097, 0.66263,
-            -0.00097, 0.26475, 0.00178, -0.11566, -0.00073, -0.00129, -0.00059, 0.03424,
-            0.00077, -0.01672, -0.00021, -0.00032, -0.00012, 0.00361, 0.00016
-          })),
-  m_y_c_bandpass_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
-          Size(31),
-          {
-              -0.00016, -0.00362, 0.00012, 0.00032, 0.00021, 0.01675, -0.00078, -0.03429,
-              0.00059, 0.00130, 0.00073, 0.11585, -0.00178, -0.26520, 0.00097, 0.33472,
-              0.00097, -0.26520, -0.00178, 0.11585, 0.00073, 0.00130, 0.00059, -0.03429,
-             -0.00078, 0.01675, 0.00021, 0.00032, 0.00012, -0.00362, -0.00016
-          }))
+                                          vk::BufferUsageFlagBits::eStorageBuffer, eHostRead))
 {
   m_copy_to_frame_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_copy_to_frame",
@@ -65,13 +44,9 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
         "ntsc_detect_color_burst_phase",
         {eBuffer, eBuffer}, sizeof(uint32_t) * 0,
         VulkanUtil::loadSpirv(executable_dir, "ntsc_detect_color_burst_phase.comp"), Size(NTSC_TOTAL_HEIGHT)));
-  m_filter_color_for_frame_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
-          "filter_color_for_frame",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 2,
-          VulkanUtil::loadSpirv(executable_dir, "ntsc_filter_color_for_frame.comp"), Size(NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT)));
   m_decode_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_decode_single_field",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
           VulkanUtil::loadSpirv(executable_dir, "ntsc_decode_single_field.comp"), Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT)));
   m_decode_two_fields_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_decode_two_fields",
@@ -96,12 +71,7 @@ void NtscShaders::copyToFrame(musevk::CommandBuffer &sq, std::shared_ptr<musevk:
   sq.enqueueComputeShader<int32_t>(m_copy_to_frame_algo,{ dropout_mode == DropoutMode::eNormal ? 0 : dropout_mode == DropoutMode::eDisabled ? 1 : 2 });
 }
 
-void NtscShaders::filterColorForFrame(musevk::CommandBuffer &sq, NtscFrame *frame) {
-
-  m_filter_color_for_frame_algo->updateBufferDescriptorsInSet(0, {m_y_c_notch_filter_buffer, m_y_c_bandpass_filter_buffer,
-                                                                  frame->data(), frame->y_data(), frame->c_data()});
-  sq.enqueueComputeShader<uint32_t>(m_filter_color_for_frame_algo, { m_y_c_notch_filter_buffer->size().x_size, m_y_c_bandpass_filter_buffer->size().x_size });
-
+void NtscShaders::detectColorBurstPhase(musevk::CommandBuffer &sq, NtscFrame *frame) {
   m_detect_color_burst_phase_algo->updateBufferDescriptorsInSet(0, { frame->data(), frame->burst_phase_data() });
   sq.enqueueComputeShader<uint32_t>(m_detect_color_burst_phase_algo, {});
 }
@@ -109,7 +79,7 @@ void NtscShaders::filterColorForFrame(musevk::CommandBuffer &sq, NtscFrame *fram
 void NtscShaders::decodeSingleField(CommandBuffer &sq, NtscFieldView &field, float rot_re, float rot_im) {
   int field_parity = field.m_field_parity;
 
-  m_decode_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, field.m_y_data, field.m_c_data, field.m_burst_phase_data, m_field_Y_buffer, m_field_U_buffer, m_field_V_buffer});
+  m_decode_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, field.m_burst_phase_data, m_field_Y_buffer, m_field_U_buffer, m_field_V_buffer});
   sq.enqueueComputeShader<uint32_t>(m_decode_single_field_algo,
       { (uint32_t)field_parity, std::bit_cast<uint32_t>(rot_re), std::bit_cast<uint32_t>(rot_im) });
 }
