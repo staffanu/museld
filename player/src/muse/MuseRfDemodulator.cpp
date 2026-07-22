@@ -1,6 +1,7 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <bit>
 #include <chrono>
 #include <cstring>
 #include <thread>
@@ -148,7 +149,7 @@ void MuseRfDemodulator::demodulate() {
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager.getDevice(),
                               "detect_dropouts",
-                              {lowpass_in_buffer, dropout_buffer}, 4 * sizeof(uint32_t),
+                              {lowpass_in_buffer, dropout_buffer}, 6 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts.comp"), Size(MuseDemodulatedBlock::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
@@ -296,10 +297,13 @@ void MuseRfDemodulator::demodulate() {
                 {(uint32_t)rrc_filter_size, MuseDemodulatedBlock::c_video_block_size,
                  /* out offset */ 0, /* decimation */ 1}, 1);
 
-        // Detect dropouts
+        // Detect dropouts.  The MUSE range is 0..255 with grey at 128; the
+        // pre-emphasis overshoots reach far outside it, so the legal window is
+        // -2.2 and +5.5 half-ranges around grey.
         command_buffer->enqueueComputeShader<uint32_t>(
                 detect_dropouts_shader, {MuseDemodulatedBlock::c_video_block_size,
-                                         (uint32_t)lowpass_filter_size - 1, (uint32_t)c_dropout_delay, MuseDemodulatedBlock::c_video_decimation_rate});
+                                         (uint32_t)lowpass_filter_size - 1, (uint32_t)c_dropout_delay, MuseDemodulatedBlock::c_video_decimation_rate,
+                                         std::bit_cast<uint32_t>(-2.2f * 112.f + 128.f), std::bit_cast<uint32_t>(5.5f * 112.f + 128.f)});
 
         // Barrier: ensure all compute shader writes are visible to the subsequent transfer operations
         command_buffer->enqueueBarrier(vk::AccessFlagBits::eShaderWrite,
