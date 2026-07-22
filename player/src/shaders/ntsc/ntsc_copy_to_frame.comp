@@ -15,18 +15,14 @@ layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
     float frame_in[][NTSC_TOTAL_WIDTH];
 };
 
+// The extended dropout plane prepared by ntsc_extend_dropouts.comp (never
+// flagged in the vertical interval).
 layout(set = 0, binding = 1) buffer readonly dropout_data_buffer {
     uint8_t dropout_data[][NTSC_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 2) buffer writeonly frame_out_buffer {
     float16_t frame_out[][NTSC_TOTAL_WIDTH];
-};
-
-// Extended flags for the decode stage (dropout highlighting); the vertical
-// interval is never flagged here, matching the concealment.
-layout(set = 0, binding = 3) buffer writeonly dropout_out_buffer {
-    uint8_t dropout_out[][NTSC_TOTAL_WIDTH];
 };
 
 // LaserVision video de-emphasis (IEC 60857 Figure 9): flat to omega1 = 1/320 ns,
@@ -42,12 +38,8 @@ const float deemphasis[24] = float[](
     0.00999187, 0.00802567, 0.00644638, 0.00517786, 0.00415896, 0.00334056,
     0.00268321, 0.00215520, 0.00173110, 0.00139046, 0.00111684, 0.00089707);
 
-// The detected dropouts are extended a few samples in both directions.
 bool is_dropout(int r, int c) {
-    for (int i = -4; i <= 4; i++)
-        if (dropout_data[r][clamp(c + i, 0, NTSC_TOTAL_WIDTH - 1)] != 0)
-            return true;
-    return false;
+    return dropout_data[r][clamp(c, 0, NTSC_TOTAL_WIDTH - 1)] != 0;
 }
 
 // Reads the raw composite with dropout concealment.  Concealment substitutes
@@ -56,9 +48,7 @@ bool is_dropout(int r, int c) {
 // two lines away is in phase.
 float composite_sample(int r, int c) {
     float v = frame_in[r][c];
-    // No concealment on the vertical interval: substituted lines would corrupt
-    // the white flag and picture number codes there.
-    if (dropout_mode == 1 || (r % 263) < 21 || !is_dropout(r, c))
+    if (dropout_mode == 1 || !is_dropout(r, c))
         return v;
     // Search outward for clean lines; a dropout often also covers the nearest
     // in-phase neighbours.
@@ -124,5 +114,4 @@ void main() {
     // colour burst swings below blanking level -- clipping it would corrupt the
     // burst phase and amplitude reference.
     frame_out[row][col] = clamp((float16_t(v) - 0.3hf) * 1.43hf, -0.5hf, 1.5hf);
-    dropout_out[row][col] = uint8_t((row % 263) >= 21 && is_dropout(int(row), int(col)) ? 1 : 0);
 }

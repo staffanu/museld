@@ -1,0 +1,69 @@
+#version 450
+
+// Turns the raw per-sample dropout flags into the frame's dropout plane,
+// with run extension after ld-decode's recipe: bridge short gaps between
+// flagged samples, extend trailing edges in proportion to the run length
+// (dropouts ramp out slowly), and pad every region a little.  The vertical
+// interval is never flagged: concealment there would corrupt the white flag
+// and the picture number codes.
+//
+// This shader should be invoked with global invocation ids ranging from
+// (0, 0) to (NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT).
+
+#include "muse.h"
+
+layout(set = 0, binding = 0) buffer readonly dropout_in_buffer {
+    uint8_t dropout_in[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 1) buffer writeonly dropout_out_buffer {
+    uint8_t dropout_out[][NTSC_TOTAL_WIDTH];
+};
+
+bool raw_flag(uint row, int c) {
+    return dropout_in[row][clamp(c, 0, NTSC_TOTAL_WIDTH - 1)] != 0;
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= NTSC_TOTAL_HEIGHT || col >= NTSC_TOTAL_WIDTH)
+        return;
+
+    if (row % 263 < 21) {
+        dropout_out[row][col] = uint8_t(0);
+        return;
+    }
+
+    // fixed pad, as before
+    bool flagged = false;
+    for (int i = -4; i <= 4 && !flagged; i++)
+        flagged = raw_flag(row, int(col) + i);
+
+    // bridge: flags on both sides within a short gap
+    if (!flagged) {
+        bool left = false;
+        bool right = false;
+        for (int i = 1; i <= 12; i++) {
+            left = left || raw_flag(row, int(col) - i);
+            right = right || raw_flag(row, int(col) + i);
+        }
+        flagged = left && right;
+    }
+
+    // proportional trailing extension: the more flagged samples just before
+    // this one, the further the run is allowed to reach (capped)
+    if (!flagged) {
+        int count = 0;
+        int last = 1000;
+        for (int i = 1; i <= 34; i++)
+            if (raw_flag(row, int(col) - i)) {
+                count++;
+                last = min(last, i);
+            }
+        flagged = last <= min(count, 24);
+    }
+
+    dropout_out[row][col] = uint8_t(flagged ? 1 : 0);
+}

@@ -89,6 +89,13 @@ void main() {
     bool deep_low = local_avg < deep_ratio_squared * long_avg;
     bool envelope_low = local_avg < line_ratio_squared * line_ref;
 
+    // An envelope transient criterion after ld-decode's differential RF
+    // detector was tried here and removed again: their 10 MHz highpass keys
+    // on above-carrier spectral content that a legitimate signal cannot
+    // contain, but an envelope derivative also sees legitimate picture edges
+    // through the disc MTF, and no threshold separated dropout edges from
+    // subtitle edges.  A true above-band highpass path would be needed.
+
     // Second factor: a real dropout also turns the demodulated signal into
     // noise, with sample-to-sample steps far beyond what the bandlimited
     // legal signal can produce.  Bright picture detail (text) lowers the
