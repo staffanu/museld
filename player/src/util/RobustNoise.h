@@ -23,6 +23,20 @@ public:
         return *mid;
     }
 
+    // Robust level of a flat window: the value at the window centre after a
+    // median-based slope fit — insensitive to both tilt and dropout samples.
+    static float robustCenter(float const *samples, int count) {
+        int half = count / 2;
+        std::vector<float> tmp(half);
+        for (int i = 0; i < half; i++)
+            tmp[i] = (samples[i + half] - samples[i]) / (float)half;
+        float slope = median(tmp);
+        tmp.resize(count);
+        for (int i = 0; i < count; i++)
+            tmp[i] = samples[i] - slope * (i - (count - 1) / 2.0f);
+        return median(tmp);
+    }
+
     // Appends the residuals of a robust line fit over the window to out.  Removing
     // level and tilt keeps low-frequency wander (DPLL residuals, hum) out of the
     // noise estimate, and the median-based fit keeps a dropout spike in the window
