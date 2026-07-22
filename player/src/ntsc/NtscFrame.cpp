@@ -21,8 +21,11 @@ NtscFrame::NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager)
         m_burst_phase_data(std::make_unique<musevk::VulkanBuffer>(
                 manager, musevk::Size(NtscInputBlock::c_total_video_lines), 4 /* 2 * sizeof(float16) */,
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostNone)),
-        m_fields({NtscFieldView(log, frame_no, m_data, m_burst_phase_data, 0),
-                  NtscFieldView(log, frame_no, m_data, m_burst_phase_data, 1) }) {
+        m_dropout_data(std::make_unique<musevk::VulkanBuffer>(
+                manager, musevk::Size(NtscInputBlock::c_samples_per_video_line, NtscInputBlock::c_total_video_lines), sizeof(uint8_t),
+                vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostNone)),
+        m_fields({NtscFieldView(log, frame_no, m_data, m_burst_phase_data, m_dropout_data, 0),
+                  NtscFieldView(log, frame_no, m_data, m_burst_phase_data, m_dropout_data, 1) }) {
 }
 
 NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data) {
@@ -87,6 +90,10 @@ double NtscFrame::getInputSamplesPerNtscSample() const {
 
 std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::data() {
     return m_data;
+}
+
+std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::dropout_data() {
+    return m_dropout_data;
 }
 
 std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::burst_phase_data() {

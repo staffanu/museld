@@ -23,6 +23,12 @@ layout(set = 0, binding = 2) buffer writeonly frame_out_buffer {
     float16_t frame_out[][NTSC_TOTAL_WIDTH];
 };
 
+// Extended flags for the decode stage (dropout highlighting); the vertical
+// interval is never flagged here, matching the concealment.
+layout(set = 0, binding = 3) buffer writeonly dropout_out_buffer {
+    uint8_t dropout_out[][NTSC_TOTAL_WIDTH];
+};
+
 // LaserVision video de-emphasis (IEC 60857 Figure 9): flat to omega1 = 1/320 ns,
 // -6 dB/octave to omega2 = 1/120 ns, -8.5 dB above.  Bilinear transform of
 // D(s) = (1 + s 120ns)/(1 + s 320ns) on the line-locked 4 fsc grid (which makes
@@ -117,10 +123,6 @@ void main() {
     // A loose clamp: the picture path re-clamps to 0..1 at the end, and the
     // colour burst swings below blanking level -- clipping it would corrupt the
     // burst phase and amplitude reference.
-    float16_t out_v = clamp((float16_t(v) - 0.3hf) * 1.43hf, -0.5hf, 1.5hf);
-
-    if (dropout_mode == 2 && (row % 263) >= 21 && is_dropout(int(row), int(col)))
-        out_v = 1.2hf; // paint detected dropouts bright white
-
-    frame_out[row][col] = out_v;
+    frame_out[row][col] = clamp((float16_t(v) - 0.3hf) * 1.43hf, -0.5hf, 1.5hf);
+    dropout_out[row][col] = uint8_t((row % 263) >= 21 && is_dropout(int(row), int(col)) ? 1 : 0);
 }

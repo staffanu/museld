@@ -5,11 +5,13 @@
 
 NtscFieldView::NtscFieldView(Logger &log, int frame_no, const std::shared_ptr<musevk::VulkanBuffer> &data,
     const std::shared_ptr<musevk::VulkanBuffer> &burst_phase_data,
+    const std::shared_ptr<musevk::VulkanBuffer> &dropout_data,
     int field_parity)
 : m_log(log),
   m_frame_no(frame_no),
   m_data(data),
   m_burst_phase_data(burst_phase_data),
+  m_dropout_data(dropout_data),
   m_field_parity(field_parity),
   m_prev_field(nullptr) {
 }

@@ -27,13 +27,14 @@ public:
                    std::shared_ptr<musevk::VulkanBuffer> const &video_input,
                    std::shared_ptr<musevk::VulkanBuffer> const &dropout_input,
                    std::shared_ptr<musevk::VulkanBuffer> const &buffer,
+                   std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane,
                    DropoutMode dropout_mode);
 
   // Filter the raw frame data for luma and color using notch and bandpass filters respectively
   // Also fills in the color burst phase information
   void detectColorBurstPhase(musevk::CommandBuffer &sq, NtscFrame *frame);
 
-  void decodeSingleField(musevk::CommandBuffer &sq, NtscFieldView &field, float rot_re, float rot_im);
+  void decodeSingleField(musevk::CommandBuffer &sq, NtscFieldView &field, DropoutMode dropout_mode, float rot_re, float rot_im);
 
   bool decodeTwoFieldsAndDetectMotion(musevk::CommandBuffer &sq,
                                      const std::vector<std::reference_wrapper<NtscFieldView>> &fields,
