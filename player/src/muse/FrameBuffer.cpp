@@ -45,22 +45,15 @@ std::shared_ptr<musevk::VulkanBuffer> &FrameBuffer::data() {
 }
 
 std::pair<float, float> FrameBuffer::EstimateRescale(float const *data) {
-    float line_1_high_sum = 0;
-    float line_2_low_sum = 0;
-    for (int i = 19; i < 259; i++) {
-        line_1_high_sum += data[0 * MUSE_TOTAL_WIDTH + i];
-        line_2_low_sum += data[1 * MUSE_TOTAL_WIDTH + i];
-    }
-    float blanking_sum =  0;
-    for (int i = 127; i < 383; i++)
-        blanking_sum += data[562 * MUSE_TOTAL_WIDTH + i] + data[1124 * MUSE_TOTAL_WIDTH + i];
-
-    float avg_high = (float)line_1_high_sum / 240.0f;
-    float avg_low = (float)line_2_low_sum / 240.0f;
-    float avg_blanking = (float)blanking_sum / 512.0f;
-    vector<pair<float, float>> v = {{16.0f , avg_low}, {128.0f, avg_blanking }, {239.0f, avg_high }};
-    auto rescale = LinearRegression::linearRegression(v);
-    return rescale;
+    // Robust window centres rather than means: a dropout hitting a reference
+    // window drags a mean (and with it the whole level mapping) but leaves the
+    // median-based centre alone.
+    float med_high = RobustNoise::robustCenter(data + 0 * MUSE_TOTAL_WIDTH + 19, 240);
+    float med_low = RobustNoise::robustCenter(data + 1 * MUSE_TOTAL_WIDTH + 19, 240);
+    float med_blanking = (RobustNoise::robustCenter(data + 562 * MUSE_TOTAL_WIDTH + 127, 256) +
+                          RobustNoise::robustCenter(data + 1124 * MUSE_TOTAL_WIDTH + 127, 256)) / 2.0f;
+    vector<pair<float, float>> v = {{16.0f , med_low}, {128.0f, med_blanking }, {239.0f, med_high }};
+    return LinearRegression::linearRegression(v);
 }
 
 FrameBuffer::NoiseEstimate FrameBuffer::EstimateNoise(float const *data) {

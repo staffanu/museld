@@ -149,13 +149,31 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // gives the same flat-region anchors as estimating it on the EQ'd buffer.
         m_equalizer.updateFromFrame(input_float, m_frame_no, phase_c);
 
-        auto rescale_estimate = FrameBuffer::EstimateRescale(input_float);
-        if (m_rescale.first == -1 && m_rescale.second == -1)
-            m_rescale = rescale_estimate;
-        else
-            m_rescale = {m_rescale.first * 0.9 + rescale_estimate.first * 0.1, m_rescale.second * 0.9 + rescale_estimate.second * 0.1};
-
         auto noise_estimate = FrameBuffer::EstimateNoise(input_float);
+
+        // A dropout covering more than half of a reference window defeats even
+        // the median-based EstimateRescale, but it also makes the window's
+        // robust sigma explode -- so skip the rescale update on such frames.
+        // The noise EWMA below is not gated, so after a genuine change in noise
+        // level the gate reopens by itself once the EWMA has caught up.
+        bool reference_windows_clean =
+                m_noise.sigma_clamp < 0 ||
+                (noise_estimate.sigma_clamp < 4.0f * m_noise.sigma_clamp &&
+                 noise_estimate.sigma_high < 4.0f * m_noise.sigma_high &&
+                 noise_estimate.sigma_low < 4.0f * m_noise.sigma_low);
+        if (reference_windows_clean) {
+            auto rescale_estimate = FrameBuffer::EstimateRescale(input_float);
+            if (m_rescale.first == -1 && m_rescale.second == -1)
+                m_rescale = rescale_estimate;
+            else
+                m_rescale = {m_rescale.first * 0.9 + rescale_estimate.first * 0.1, m_rescale.second * 0.9 + rescale_estimate.second * 0.1};
+        } else {
+            m_log.debug(eDecoder, std::format(
+                    "rescale update skipped: reference window σ spike (clamp {:.1f}/{:.1f}, high {:.1f}/{:.1f}, low {:.1f}/{:.1f})",
+                    noise_estimate.sigma_clamp, m_noise.sigma_clamp,
+                    noise_estimate.sigma_high, m_noise.sigma_high,
+                    noise_estimate.sigma_low, m_noise.sigma_low));
+        }
         if (m_noise.sigma_clamp < 0) {
             m_noise = noise_estimate;
             m_clamp_mean_avg = noise_estimate.clamp_mean;
