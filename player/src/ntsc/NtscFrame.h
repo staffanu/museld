@@ -37,6 +37,7 @@ public:
     [[nodiscard]] double getInputSamplesPerNtscSample() const;
     std::shared_ptr<musevk::VulkanBuffer> &data();
     std::shared_ptr<musevk::VulkanBuffer> &burst_phase_data();
+    std::shared_ptr<musevk::VulkanBuffer> &dropout_data();
     NtscFieldView &get_field(int parity);
     [[nodiscard]] std::shared_ptr<VbiData> getVbiData() const;
     void processVbi();
@@ -49,6 +50,7 @@ private:
     double m_input_samples_per_sample;
     std::shared_ptr<musevk::VulkanBuffer> m_data;
     std::shared_ptr<musevk::VulkanBuffer> m_burst_phase_data;
+    std::shared_ptr<musevk::VulkanBuffer> m_dropout_data; // extended flags, written by the copy shader
     std::vector<NtscFieldView> m_fields;
     std::shared_ptr<VbiData> m_vbi_data;
 };

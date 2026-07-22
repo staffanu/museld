@@ -199,7 +199,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         input_block->dropout_data->synchronizeHostWrites(*m_first_stage_command_buffer);
 
         m_shaders.copyToFrame(*m_first_stage_command_buffer, input_block->video_data, input_block->dropout_data,
-            frame->data(), dropout_mode);
+            frame->data(), frame->dropout_data(), dropout_mode);
         frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
 
         m_shaders.detectColorBurstPhase(*m_first_stage_command_buffer, frame);
@@ -219,7 +219,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         out.field_parity = decoded_field_index;
 
         m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[0]->get_field(decoded_field_index),
-                                    m_rot_re, m_rot_im);
+                                    dropout_mode, m_rot_re, m_rot_im);
         auto fields = vector<reference_wrapper<NtscFieldView>>{
                 m_frames[0]->get_field(decoded_field_index),
                 m_frames[1 - decoded_field_index]->get_field(1 - decoded_field_index),

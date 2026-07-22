@@ -7,6 +7,7 @@
 
 layout(push_constant) uniform PushConstants {
     uint field_parity;
+    uint dropout_mode; // 0: normal, 1: disabled, 2: highlight
     float rot_re;
     float rot_im;
 };
@@ -29,6 +30,10 @@ layout(set = 0, binding = 3) buffer writeonly r_data_buffer {
 
 layout(set = 0, binding = 4) buffer writeonly b_data_buffer {
     float16_t V_data[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 5) buffer readonly dropout_data_buffer {
+    uint8_t dropout_data[][NTSC_TOTAL_WIDTH];
 };
 
 float16_t cosine_lut[] = { 1.hf, 0.hf, -1.hf, 0.hf };
@@ -63,6 +68,24 @@ float16_t chroma_sample(uint frame_line, uint next_line, uint fcol) {
            - 0.25hf * input_frame[next_line][fcol];
 }
 
+float16_t comb_luma(uint frame_line, uint next_line, uint frame_col) {
+    return 0.25hf * input_frame[frame_line - 1][frame_col]
+           + 0.5hf * input_frame[frame_line][frame_col]
+           + 0.25hf * input_frame[next_line][frame_col];
+}
+
+f16vec2 demodulated_chroma(uint frame_line, uint next_line, uint frame_col) {
+    float16_t c_re = 0.hf;
+    float16_t c_im = 0.hf;
+    for (int n = 0; n < 19; n++) {
+        uint fc = uint(int(frame_col) + n - 9);
+        float16_t cs = 2.hf * chroma_sample(frame_line, next_line, fc);
+        c_re += chroma_lowpass[n] * cs * color_cosine(fc);
+        c_im += chroma_lowpass[n] * cs * color_sine(fc);
+    }
+    return f16vec2(c_re, c_im);
+}
+
 void main() {
     uint row = gl_GlobalInvocationID.y;
     uint col = gl_GlobalInvocationID.x;
@@ -76,18 +99,44 @@ void main() {
     // the comb degrades to two lines on the frame's last line
     uint next_line = min(frame_line + 1, NTSC_TOTAL_HEIGHT - 1);
 
-    float16_t Y = 0.25hf * input_frame[frame_line - 1][frame_col]
-                  + 0.5hf * input_frame[frame_line][frame_col]
-                  + 0.25hf * input_frame[next_line][frame_col];
+    float16_t Y = comb_luma(frame_line, next_line, frame_col);
+    bool painted = false;
 
-    float16_t c_re = 0.hf;
-    float16_t c_im = 0.hf;
-    for (int n = 0; n < 19; n++) {
-        uint fc = uint(int(frame_col) + n - 9);
-        float16_t cs = 2.hf * chroma_sample(frame_line, next_line, fc);
-        c_re += chroma_lowpass[n] * cs * color_cosine(fc);
-        c_im += chroma_lowpass[n] * cs * color_sine(fc);
+    // Black-spot rescue: picture luma below blanking level is illegal, and
+    // short dropouts that keep a healthy-looking envelope often land there.
+    // Substitute the nearest line with the same subcarrier phase.  (The
+    // envelope-detected dropouts are concealed upstream in the copy shader;
+    // this catches what that detector cannot see.)  The horizontal median
+    // makes the test blind to the subcarrier-rate ringing that saturated
+    // chroma edges leave in the comb luma, while a sustained black spot
+    // passes through it.
+    float16_t y_left = comb_luma(frame_line, next_line, frame_col - 1);
+    float16_t y_right = comb_luma(frame_line, next_line, frame_col + 1);
+    float16_t y_median = max(min(y_left, Y), min(max(y_left, Y), y_right));
+    if (dropout_mode != 1 && y_median < -0.06hf) {
+        if (dropout_mode == 2) {
+            painted = true;
+        } else {
+            for (int k = 2; k <= 8; k += 2) {
+                uint fl = uint(clamp(int(frame_line) - k, 22, NTSC_TOTAL_HEIGHT - 1));
+                float16_t y2 = comb_luma(fl, fl + 1, frame_col);
+                if (y2 < -0.06hf) {
+                    fl = uint(clamp(int(frame_line) + k, 22, NTSC_TOTAL_HEIGHT - 1));
+                    y2 = comb_luma(fl, fl + 1, frame_col);
+                }
+                if (y2 >= -0.06hf) {
+                    Y = y2;
+                    frame_line = fl;
+                    next_line = min(fl + 1, NTSC_TOTAL_HEIGHT - 1);
+                    break;
+                }
+            }
+        }
     }
+
+    f16vec2 c_demod = demodulated_chroma(frame_line, next_line, frame_col);
+    float16_t c_re = c_demod.x;
+    float16_t c_im = c_demod.y;
 
     // rotate the c vector by the conjugate of the burst reference, which also
     // carries the burst-referenced gain (a + ib)(c + id) = ac-bd + i(bc+ad)
@@ -106,6 +155,14 @@ void main() {
     // computed in NtscDecoder.
     float16_t V = I * float16_t(rot_re) - Q * float16_t(rot_im);
     float16_t U = Q * float16_t(rot_re) + I * float16_t(rot_im);
+
+    if (dropout_mode == 2 && (painted || dropout_data[frame_line][frame_col] != 0)) {
+        // paint detected dropouts pure red (inverts through the RGB matrix
+        // in the combine shader to (1, 0, 0))
+        Y = 0.299hf;
+        U = -0.14714hf;
+        V = 0.61497hf;
+    }
 
     Y_data[row][col] = Y;
     U_data[row][col] = U;
