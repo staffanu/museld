@@ -136,9 +136,9 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         m_noise_psd_windows += NtscFrame::AccumulateNoisePsd(input_block->video_data->data<float>(),
                                                              m_noise_psd.data(), 3.0f * m_noise.sigma_blanking);
         if (m_frame_no % 30 == 0 && m_noise.sigma_blanking > 0) {
-            // 100 IRE = the blanking-to-white span of 0.7 voltage units.  The
-            // input is already de-emphasized by the RF demodulator, so this is
-            // an unweighted post-de-emphasis figure.
+            // 100 IRE = the blanking-to-white span of 0.7 voltage units.  These
+            // sigmas are measured on the raw demodulated baseband, before the
+            // frame-domain de-emphasis.
             constexpr float ire = 100.0f / 0.7f;
             double wander_var = m_blanking_sq_avg - m_blanking_avg * m_blanking_avg;
             m_log.info(eDecoder, std::format(
@@ -149,34 +149,39 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                     m_noise.sigma_sync * ire,
                     sqrt(max(0.0, wander_var)) * ire));
             if (m_noise_psd_windows > 0) {
-                // Band-limit to the 4.2 MHz System M video bandwidth and weight
-                // with the Rec. 567 unified network (BT.1439 Annex 2 §3:
-                // τ = 245 ns, a = 4.5).  The RF demodulator has already applied
-                // de-emphasis, so these are the conventional spec-sheet figures;
-                // IEC 60857 12.2.2 requires the unweighted blanking-level S/N
-                // to be at least 30 dB.
+                // Band-limit to the 4.2 MHz System M video bandwidth, apply the
+                // frame-domain de-emphasis response (|D|² of the bilinear
+                // transform in ntsc_copy_to_frame.comp), and weight with the
+                // Rec. 567 unified network (BT.1439 Annex 2 §3: τ = 245 ns,
+                // a = 4.5).  IEC 60857 12.2.2 requires ≥ 30 dB unweighted at
+                // the video output, i.e. the after-de-emphasis figure.
+                constexpr double b0 = 0.436493739, b1 = -0.239713775, a1 = -0.803220036;
                 constexpr double tau = 245e-9, aw = 4.5;
                 constexpr double fs = 910.0 * 525.0 * 30.0 / 1.001; // 4 × fsc
-                double total = 0, band = 0, weighted = 0;
+                double total = 0, band = 0, deemphasized = 0, weighted = 0;
                 for (int k = 0; k < 256; k++) {
                     double f = std::min(k, 256 - k) / 256.0 * fs;
                     double p = m_noise_psd[k] / m_noise_psd_windows;
                     total += p;
                     if (f <= 4.2e6) {
                         band += p;
+                        double cosw = cos(2 * M_PI * f / fs);
+                        double d2 = (b0 * b0 + b1 * b1 + 2 * b0 * b1 * cosw) / (1 + a1 * a1 + 2 * a1 * cosw);
+                        deemphasized += p * d2;
                         double wt = 2 * M_PI * f * tau;
-                        weighted += p * (1 + wt * wt / (aw * aw)) / (1 + (1 + 1 / aw) * (1 + 1 / aw) * wt * wt);
+                        weighted += p * d2 * (1 + wt * wt / (aw * aw)) / (1 + (1 + 1 / aw) * (1 + 1 / aw) * wt * wt);
                     }
                 }
                 total /= 256;
                 band /= 256;
+                deemphasized /= 256;
                 weighted /= 256;
                 m_log.info(eDecoder, std::format(
-                        "noise spectrum: SNR {:.1f} dB unweighted in 4.2 MHz, {:.1f} dB Rec. 567-weighted "
-                        "(weighting gain {:.1f} dB; spectrum total σ = {:.2f} IRE)",
+                        "noise spectrum: SNR {:.1f} dB unweighted in 4.2 MHz, {:.1f} dB after de-emphasis, "
+                        "{:.1f} dB Rec. 567-weighted (spectrum total σ = {:.2f} IRE)",
                         20.0 * log10(0.7 / sqrt(band)),
+                        20.0 * log10(0.7 / sqrt(deemphasized)),
                         20.0 * log10(0.7 / sqrt(weighted)),
-                        10.0 * log10(band / weighted),
                         sqrt(total) * ire));
             }
         }

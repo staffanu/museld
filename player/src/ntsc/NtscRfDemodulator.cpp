@@ -52,8 +52,8 @@ void NtscRfDemodulator::demodulate() {
     // FIR band-pass filter that also creates an analytic signal.  The passband is 3.5 to 13.5 MHz.
     // Reverse because the FIR shader correlates rather than convolves.
     std::vector<std::complex<float>> bandpass_filter_def =
-            WindowedSinc::complex_band_pass<float>(WindowedSinc::rectangular_ntaps(40e6, 1.5e6),
-                                                   40.0e6, 3.5e6, 13.5e6);
+            WindowedSinc::complex_band_pass<float>(WindowedSinc::rectangular_ntaps(m_sample_frequency, 1.5e6),
+                                                   m_sample_frequency, 3.5e6, 13.5e6);
     std::reverse(bandpass_filter_def.begin(), bandpass_filter_def.end());
 
     std::vector<float> bandpass_filter_re_coeffs;
@@ -70,26 +70,29 @@ void NtscRfDemodulator::demodulate() {
 
     // FIR lowpass filter for the demodulated signal
     std::vector<float> lowpass_filter_def =
-            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(40e6, 2e6), 40e6, 5e6);
+            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(m_sample_frequency, 2e6), m_sample_frequency, 5e6);
     std::reverse(lowpass_filter_def.begin(), lowpass_filter_def.end()); // symmetric, but the shader correlates
 
     shared_ptr<VulkanBuffer> lowpass_filter =
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(lowpass_filter_def.size()), lowpass_filter_def);
 
-    // FIR de-emphasis filter (applied to the decimated lowpass filtered signal)
-    // For NTSC, the two frequencies are 3.125 MHz and 8.33 MHz
-    std::vector<float> deemphasis_filter_def =
-            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(20e6, 5e6), 20e6, 5e6);
-    std::reverse(deemphasis_filter_def.begin(), deemphasis_filter_def.end()); // symmetric, but the shader correlates
+    // FIR cleanup lowpass at the decimated rate.  The video de-emphasis is NOT
+    // applied here: it lives in the frame domain (ntsc_copy_to_frame.comp),
+    // where the line-locked 4 fsc grid makes its coefficients independent of
+    // the capture sample rate.
+    const float decimated_frequency = m_sample_frequency / c_video_decimation_rate;
+    std::vector<float> decimated_lowpass_filter_def =
+            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(decimated_frequency, 5e6), decimated_frequency, 5e6);
+    std::reverse(decimated_lowpass_filter_def.begin(), decimated_lowpass_filter_def.end()); // symmetric, but the shader correlates
 
-    shared_ptr<VulkanBuffer> deemphasis_filter =
-            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(deemphasis_filter_def.size()), deemphasis_filter_def);
+    shared_ptr<VulkanBuffer> decimated_lowpass_filter =
+            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(decimated_lowpass_filter_def.size()), decimated_lowpass_filter_def);
 
     // Create buffers for data
     const int input_buffer_size = c_sample_block_size + (int)bandpass_filter_def.size() - 1;
     const int analytic_buffer_size = c_sample_block_size + 1;
     const int lowpass_in_buffer_size = c_sample_block_size + (int)lowpass_filter_def.size() - 1;
-    const int deemphasis_in_buffer_size = c_sample_block_size + (int)deemphasis_filter_def.size() - 1;
+    const int decimated_lowpass_in_buffer_size = c_sample_block_size + (int)decimated_lowpass_filter_def.size() - 1;
 
     // We need to delay the output of the detected dropouts as much as the rest of the filter chain delays the video signal
     const int dropout_delay = (int)lowpass_filter_def.size() / c_video_decimation_rate / 2 - 1;
@@ -108,7 +111,7 @@ void NtscRfDemodulator::demodulate() {
             m_vulkan_manager, Size(lowpass_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
     shared_ptr<VulkanBuffer> equalization_in_buffer = make_unique<musevk::VulkanBuffer>(
-            m_vulkan_manager, Size(deemphasis_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+            m_vulkan_manager, Size(decimated_lowpass_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
     shared_ptr<VulkanBuffer> dropout_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(dropout_buffer_size), sizeof(uint8_t), buffer_usage_flags, HostAccess::eHostNone);
@@ -252,7 +255,7 @@ void NtscRfDemodulator::demodulate() {
         // Demodulate the analytic signal, and scale to [0, 1].
         command_buffer->enqueueComputeShader<float>(fm_quadrature_shader,
                                                     {c_sample_block_size, (float)lowpass_filter_def.size() - 1,
-                                                     c_sample_frequency, c_frequency_deviation, c_center_frequency, /* scale */ 0.5f, /* add */ 0.5f});
+                                                     m_sample_frequency, c_frequency_deviation, c_center_frequency, /* scale */ 0.5f, /* add */ 0.5f});
 
         // Lowpass filter the demodulated signal, and down-sample (decimate by factor 2)
         fir_filter_shader->updateWorkgroup(Size(c_video_block_size));
@@ -261,10 +264,10 @@ void NtscRfDemodulator::demodulate() {
                 {(uint32_t)lowpass_filter_def.size(), c_video_block_size, /* out offset */ 0, c_video_decimation_rate}, 0);
 
         // Run the down-sampled signal through the de-emphasis filter and store in the output block
-        fir_filter_shader->updateBufferDescriptorsInSet(1, {deemphasis_filter, equalization_in_buffer, block->video_data});
+        fir_filter_shader->updateBufferDescriptorsInSet(1, {decimated_lowpass_filter, equalization_in_buffer, block->video_data});
         command_buffer->enqueueComputeShader<uint32_t>(
                 fir_filter_shader,
-                {(uint32_t)deemphasis_filter_def.size(), c_video_block_size, /* out offset */ 0, /* decimation */ 1}, 1);
+                {(uint32_t)decimated_lowpass_filter_def.size(), c_video_block_size, /* out offset */ 0, /* decimation */ 1}, 1);
 
         // Detect dropouts FIXME update for LD
         command_buffer->enqueueComputeShader<uint32_t>(

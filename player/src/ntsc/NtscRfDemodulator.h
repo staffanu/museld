@@ -22,17 +22,12 @@
 #include "efm/EfmDemodulator.h"
 
 namespace NtscRfDemodulatorConstants {
-    static constexpr float c_sample_frequency = 40.0e6f;
-
     static constexpr int c_sample_block_size = 512 * 1024;
     static constexpr int c_video_decimation_rate = 2;
     static constexpr int c_audio_decimation_rate = 4;
 
     static constexpr int c_video_block_size = c_sample_block_size / c_video_decimation_rate;
     static constexpr int c_audio_block_size = c_sample_block_size / c_audio_decimation_rate;
-
-    // enough buffers for two frames
-    static constexpr int c_number_of_block_buffers = (int)(2 * c_sample_frequency / 30 / c_sample_block_size);
 }
 
 struct NtscDemodulatedBlock {
@@ -66,6 +61,11 @@ public:
     void operator=(const NtscRfDemodulator&) = delete;
 
     void setEfmEnabled(bool enabled) { m_efm_enabled = enabled; }
+
+    // enough buffers for two frames
+    [[nodiscard]] int numberOfBlockBuffers() const {
+        return std::max(2, (int)(2 * m_sample_frequency / 30 / NtscRfDemodulatorConstants::c_sample_block_size));
+    }
 
 protected:
     void demodulate() override;
