@@ -219,8 +219,21 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         out.input_samples_per_muse_sample = m_frames[0]->getInputSamplesPerNtscSample();
         out.field_parity = decoded_field_index;
 
+        // The illegal-level bounds in the decode shader are relative to the
+        // measured blanking level and scaled from the measured noise, since
+        // captures sit a few percent off the nominal level mapping.  The 0.52
+        // approximates how much the comb and the de-emphasis attenuate the
+        // measured raw blanking noise.
+        float level_offset = 0.0f;
+        float sigma_out = 0.02f;
+        if (m_noise.sigma_blanking >= 0) {
+            level_offset = ((float)m_blanking_avg - 0.3f) * 1.43f;
+            sigma_out = m_noise.sigma_blanking * 1.43f * 0.52f;
+        }
+        float level_floor = level_offset - max(0.02f, 2.5f * sigma_out);
+        float level_ceiling = level_offset + 1.4f;
         m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[0]->get_field(decoded_field_index),
-                                    dropout_mode, m_rot_re, m_rot_im);
+                                    dropout_mode, m_rot_re, m_rot_im, level_floor, level_ceiling);
         auto fields = vector<reference_wrapper<NtscFieldView>>{
                 m_frames[0]->get_field(decoded_field_index),
                 m_frames[1 - decoded_field_index]->get_field(1 - decoded_field_index),

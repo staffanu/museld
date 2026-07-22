@@ -42,6 +42,12 @@ bool is_dropout(int r, int c) {
     return dropout_data[r][clamp(c, 0, NTSC_TOTAL_WIDTH - 1)] != 0;
 }
 
+// Donor lines are only refused for core detections (1), not for the
+// precautionary extension (2) around them.
+bool is_core_dropout(int r, int c) {
+    return dropout_data[r][clamp(c, 0, NTSC_TOTAL_WIDTH - 1)] == 1;
+}
+
 // Reads the raw composite with dropout concealment.  Concealment substitutes
 // the nearest lines with the same subcarrier phase: the adjacent lines are
 // 180 degrees out of phase, so they would invert the colour in the patch --
@@ -58,14 +64,14 @@ float composite_sample(int r, int c) {
     bool down_ok = false;
     for (int k = 2; k <= 8 && !up_ok; k += 2) {
         int rr = max(r - k, 0);
-        if (!is_dropout(rr, c)) {
+        if (!is_core_dropout(rr, c)) {
             up_v = frame_in[rr][c];
             up_ok = true;
         }
     }
     for (int k = 2; k <= 8 && !down_ok; k += 2) {
         int rr = min(r + k, NTSC_TOTAL_HEIGHT - 1);
-        if (!is_dropout(rr, c)) {
+        if (!is_core_dropout(rr, c)) {
             down_v = frame_in[rr][c];
             down_ok = true;
         }
