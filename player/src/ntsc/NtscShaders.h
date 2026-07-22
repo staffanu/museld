@@ -23,11 +23,14 @@ public:
 
   void operator=(const NtscShaders &) = delete;
 
+  void extendDropouts(musevk::CommandBuffer &sq,
+                      std::shared_ptr<musevk::VulkanBuffer> const &dropout_input,
+                      std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane);
+
   void copyToFrame(musevk::CommandBuffer &sq,
                    std::shared_ptr<musevk::VulkanBuffer> const &video_input,
-                   std::shared_ptr<musevk::VulkanBuffer> const &dropout_input,
-                   std::shared_ptr<musevk::VulkanBuffer> const &buffer,
                    std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane,
+                   std::shared_ptr<musevk::VulkanBuffer> const &buffer,
                    DropoutMode dropout_mode);
 
   // Filter the raw frame data for luma and color using notch and bandpass filters respectively
@@ -51,6 +54,7 @@ private:
   Logger &m_log;
   musevk::VulkanManager &m_vulkan_manager;
 
+  std::shared_ptr<musevk::ComputeShader> m_extend_dropouts_algo;
   std::shared_ptr<musevk::ComputeShader> m_copy_to_frame_algo;
   std::shared_ptr<musevk::ComputeShader> m_detect_color_burst_phase_algo;
   std::shared_ptr<musevk::ComputeShader> m_decode_single_field_algo;

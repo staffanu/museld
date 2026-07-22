@@ -198,8 +198,9 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         input_block->video_data->synchronizeHostWrites(*m_first_stage_command_buffer);
         input_block->dropout_data->synchronizeHostWrites(*m_first_stage_command_buffer);
 
-        m_shaders.copyToFrame(*m_first_stage_command_buffer, input_block->video_data, input_block->dropout_data,
-            frame->data(), frame->dropout_data(), dropout_mode);
+        m_shaders.extendDropouts(*m_first_stage_command_buffer, input_block->dropout_data, frame->dropout_data());
+        m_shaders.copyToFrame(*m_first_stage_command_buffer, input_block->video_data, frame->dropout_data(),
+            frame->data(), dropout_mode);
         frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
 
         m_shaders.detectColorBurstPhase(*m_first_stage_command_buffer, frame);
