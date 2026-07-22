@@ -71,6 +71,11 @@ private:
     musevk::TimestampQueryPool *m_timestamp_query_pool; // if set we use it
 
     std::pair<float, float> m_rescale;
+    FrameBuffer::NoiseEstimate m_noise; // EWMA-smoothed, raw sample units
+    double m_clamp_mean_avg;            // EWMA of the per-frame clamp mean ...
+    double m_clamp_mean_sq_avg;         // ... and of its square, for the wander σ
+    std::array<double, 256> m_noise_psd; // cumulative clamp-residual power spectrum
+    long m_noise_psd_windows;
     vk::Semaphore m_first_stage_complete_semaphore;
     std::shared_ptr<musevk::CommandBuffer> m_reset_timestamp_query_pool_command_buffer;
     std::shared_ptr<musevk::CommandBuffer> m_first_stage_command_buffer;
