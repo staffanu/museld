@@ -21,6 +21,7 @@ NtscDecoder::NtscDecoder(
         Logger &log, FrameReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
         musevk::CommandPool &command_pool, std::string const &executable_dir,
         bool decode_video, bool decode_all_fields, bool decode_audio,
+        float tint_degrees, float saturation,
         musevk::TimestampQueryPool *timestamp_query_pool)
 : Decoder(),
   m_log(log),
@@ -48,6 +49,13 @@ NtscDecoder::NtscDecoder(
   m_efm_decoder(log, std::nullopt, std::nullopt),
   m_efm_pcm_processor(log),
   m_frames() {
+    // 183.8 degrees is the structural 180 (see ntsc_decode_single_field.comp)
+    // plus the offset calibrated against the Video Essentials colorbars; the
+    // residual is source-dependent (differential phase of the player and disc),
+    // which is what --tint adjusts.
+    float a = (183.8f + tint_degrees) * (float)M_PI / 180.0f;
+    m_rot_re = saturation * sinf(a);
+    m_rot_im = saturation * cosf(a);
 }
 
 NtscDecoder::~NtscDecoder() {
@@ -210,7 +218,8 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         out.input_samples_per_muse_sample = m_frames[0]->getInputSamplesPerNtscSample();
         out.field_parity = decoded_field_index;
 
-        m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[0]->get_field(decoded_field_index));
+        m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[0]->get_field(decoded_field_index),
+                                    m_rot_re, m_rot_im);
         auto fields = vector<reference_wrapper<NtscFieldView>>{
                 m_frames[0]->get_field(decoded_field_index),
                 m_frames[1 - decoded_field_index]->get_field(1 - decoded_field_index),

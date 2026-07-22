@@ -7,6 +7,8 @@
 
 layout(push_constant) uniform PushConstants {
     uint field_parity;
+    float rot_re;
+    float rot_im;
 };
 
 layout(set = 0, binding = 0) buffer readonly input_frame_buffer {
@@ -112,13 +114,11 @@ void main() {
     // As arranged below, the transform computes U + jV = e^(ja) conj(I + jQ)
     // with a = atan2(rot_re, rot_im): the conjugation reconciles the phase
     // direction of the sine LUT with the subcarrier's, and the angle folds
-    // together the burst-to-U/V axis offsets.  a = 183.8 degrees, calibrated
-    // against the Video Essentials colorbars capture.
-    float16_t rot_re = -0.0663hf;
-    float16_t rot_im = -0.9978hf;
-
-    float16_t V = I * rot_re - Q * rot_im;
-    float16_t U = Q * rot_re + I * rot_im;
+    // together the structural 180 degrees, the calibrated offset, and the
+    // --tint option; --saturation scales the magnitude.  The values are
+    // computed in NtscDecoder.
+    float16_t V = I * float16_t(rot_re) - Q * float16_t(rot_im);
+    float16_t U = Q * float16_t(rot_re) + I * float16_t(rot_im);
 
     Y_data[row][col] = Y;
     U_data[row][col] = U;

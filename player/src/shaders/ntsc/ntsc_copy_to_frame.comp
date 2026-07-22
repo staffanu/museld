@@ -46,7 +46,14 @@ void main() {
     // TODO: handle dropouts
 
     // The causal filter reads backwards in time; rows are contiguous in time,
-    // so before column 0 it continues on the tail of the previous row.
+    // so before column 0 it continues on the tail of the previous row.  The
+    // sync pulse is replaced by blanking level so that the settling tail of
+    // the channel's imperfectly inverted sync edge cannot reach the colour
+    // burst.  (Measured effect on the Video Essentials capture: none -- the
+    // full-cycle burst correlation already rejects the smooth transient --
+    // but this makes the burst reference immune to worse sync edges.)  Only
+    // columns before the burst can see the pulse, so the picture is
+    // unaffected.
     float v = 0.0;
     for (int n = 0; n < 24; n++) {
         int c = int(col) - n;
@@ -59,7 +66,7 @@ void main() {
                 c = 0;
             }
         }
-        v += deemphasis[n] * frame_in[r][c];
+        v += deemphasis[n] * (c < 74 ? 0.3 : frame_in[r][c]);
     }
 
     // A loose clamp: the picture path re-clamps to 0..1 at the end, and the

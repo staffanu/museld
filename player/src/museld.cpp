@@ -213,6 +213,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   bool start_paused, bool decode_video, DropoutMode dropout_mode,
                   bool decode_audio, bool efm_audio, bool benchmark_shaders,
                   MuseAdaptiveEqualizer::Mode eq_mode, float eq_alpha,
+                  float tint_degrees, float saturation,
                   optional<string> const &output_filename,
                   [[maybe_unused]] VideoWriterPreset write_preset,
                   optional<string> const &subtitles_path,
@@ -309,6 +310,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             decoder = std::make_unique<NtscDecoder>(log, (FrameReader<NtscInputBlock> &)reader,
                                                     manager, command_pool, executable_dir,
                                                     decode_video, decode_all_fields, decode_audio,
+                                                    tint_degrees, saturation,
                                                     timestamp_query_pool.get());
         }
 
@@ -371,6 +373,8 @@ int main(int argc, char *argv[]) {
     bool benchmark_shaders = false;
     MuseAdaptiveEqualizer::Mode eq_mode = MuseAdaptiveEqualizer::Mode::eAdapt;
     constexpr float eq_alpha = 0.005f;
+    float tint_degrees = 0.0f;
+    float saturation = 1.0f;
     optional<string> subtitles_path;
     optional<string> subtitle_font_path;
 
@@ -494,6 +498,12 @@ int main(int argc, char *argv[]) {
         else if (name == "frozen") eq_mode = MuseAdaptiveEqualizer::Mode::eFrozen;
         else throw std::runtime_error(std::format("Unknown --eq mode {} (expected off|on|frozen)", name));
     });
+    options.emplace_back("--tint", [&] () mutable -> void {
+        tint_degrees = (float)stod(*(it++));
+    });
+    options.emplace_back("--saturation", [&] () mutable -> void {
+        saturation = (float)stod(*(it++));
+    });
     options.emplace_back("--no-sync", [&] () mutable -> void {
         no_sync = true;
     });
@@ -563,7 +573,7 @@ int main(int argc, char *argv[]) {
                         process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
                                                      efm_audio,
-                                                     benchmark_shaders, eq_mode, eq_alpha, output_filename, write_preset,
+                                                     benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitles_path, subtitle_font_path,
                                      export_frame_filename, export_frame_after_seconds);
                         delete reader;
@@ -574,7 +584,7 @@ int main(int argc, char *argv[]) {
                                 log, *it, input_format, initial_seek_seconds, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
-                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename, write_preset,
+                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitles_path, subtitle_font_path,
                                      export_frame_filename, export_frame_after_seconds);
                         delete reader;
@@ -588,7 +598,7 @@ int main(int argc, char *argv[]) {
                                 efm_audio, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
-                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, output_filename, write_preset,
+                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitles_path, subtitle_font_path,
                                      export_frame_filename, export_frame_after_seconds);
                         delete reader;

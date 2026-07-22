@@ -1,6 +1,7 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <bit>
 #include "NtscConstants.h"
 #include "NtscShaders.h"
 #include "DropoutMode.h"
@@ -70,7 +71,7 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
           VulkanUtil::loadSpirv(executable_dir, "ntsc_filter_color_for_frame.comp"), Size(NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT)));
   m_decode_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_decode_single_field",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 1,
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
           VulkanUtil::loadSpirv(executable_dir, "ntsc_decode_single_field.comp"), Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT)));
   m_decode_two_fields_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_decode_two_fields",
@@ -105,11 +106,12 @@ void NtscShaders::filterColorForFrame(musevk::CommandBuffer &sq, NtscFrame *fram
   sq.enqueueComputeShader<uint32_t>(m_detect_color_burst_phase_algo, {});
 }
 
-void NtscShaders::decodeSingleField(CommandBuffer &sq, NtscFieldView &field) {
+void NtscShaders::decodeSingleField(CommandBuffer &sq, NtscFieldView &field, float rot_re, float rot_im) {
   int field_parity = field.m_field_parity;
 
   m_decode_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, field.m_y_data, field.m_c_data, field.m_burst_phase_data, m_field_Y_buffer, m_field_U_buffer, m_field_V_buffer});
-  sq.enqueueComputeShader<int32_t>(m_decode_single_field_algo,{ field_parity });
+  sq.enqueueComputeShader<uint32_t>(m_decode_single_field_algo,
+      { (uint32_t)field_parity, std::bit_cast<uint32_t>(rot_re), std::bit_cast<uint32_t>(rot_im) });
 }
 
 // There are 4 fields in the vector.  Index 0 is the newest.
