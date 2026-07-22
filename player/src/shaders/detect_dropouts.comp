@@ -13,6 +13,11 @@ layout(push_constant) uniform PushConstants {
     uint source_offset;
     uint dest_offset;
     uint video_decimation_rate;
+    // The legal demodulated signal range, in the demodulator's own units --
+    // both wider than the nominal video range, since pre-emphasis overshoots
+    // are part of a healthy signal.
+    float low_threshold;
+    float high_threshold;
 };
 
 layout(set = 0, binding = 0) buffer readonly source_buffer {
@@ -29,13 +34,13 @@ void main() {
     if (ix >= dest_size)
         return;
 
-    // We interpret excessive signal values to indicate a dropout.  Due to pre-emphasis the signal is often
-    // outside the [-1, 1] range normally, so the thresholds for dropout detection are much wider.  Since the
-    // fm demodulation step scales the signal to MUSE range, we have to take that into account as well.
+    // We interpret excessive signal values to indicate a dropout: when the
+    // carrier drops out, the FM demodulator produces frequency estimates far
+    // outside the legal deviation range.
     int dropout = 0;
     for (uint i = 0; i < video_decimation_rate; i++) {
         float v = source[source_offset + ix * video_decimation_rate + i];
-        if (v < -2.2f * 112.f + 128.f || v > 5.5f * 112.f + 128.f)
+        if (v < low_threshold || v > high_threshold)
             dropout = 1;
     }
 

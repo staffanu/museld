@@ -1,6 +1,7 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <bit>
 #include <cstring>
 #include <thread>
 #include <utility>
@@ -140,9 +141,9 @@ void NtscRfDemodulator::demodulate() {
 
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager.getDevice(),
-                              "detect_dropouts",
-                              {lowpass_in_buffer, dropout_buffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts.comp"), Size(NtscRfDemodulatorConstants::c_video_block_size)));
+                              "detect_dropouts_envelope",
+                              {analytic_buffer_re, analytic_buffer_im, dropout_buffer}, 5 * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts_envelope.comp"), Size(NtscRfDemodulatorConstants::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
     // will have undefined output otherwise.
@@ -269,9 +270,17 @@ void NtscRfDemodulator::demodulate() {
                 fir_filter_shader,
                 {(uint32_t)decimated_lowpass_filter_def.size(), c_video_block_size, /* out offset */ 0, /* decimation */ 1}, 1);
 
-        // Detect dropouts FIXME update for LD
+        // Detect dropouts from the RF envelope: flagged when the local
+        // envelope falls below half the surrounding carrier level (in power,
+        // 0.25).  Not more sensitive than that: the disc MTF genuinely lowers
+        // the envelope at the high (bright) end of the deviation range, and a
+        // 0.7 ratio was observed flagging white subtitles as dropouts.  The
+        // analytic signal is written with offset 1 into its buffers, and the
+        // flags are delayed like the video to compensate the decimating
+        // lowpass.
         command_buffer->enqueueComputeShader<uint32_t>(
-                detect_dropouts_shader, {NtscRfDemodulatorConstants::c_video_block_size, (uint32_t)lowpass_filter_def.size() - 1, (uint32_t)dropout_delay, c_video_decimation_rate});
+                detect_dropouts_shader, {NtscRfDemodulatorConstants::c_video_block_size, 1u, (uint32_t)dropout_delay, c_video_decimation_rate,
+                                         std::bit_cast<uint32_t>(0.25f)});
 
         // Barrier: ensure all compute shader writes are visible to the subsequent transfer operations
         command_buffer->enqueueBarrier(vk::AccessFlagBits::eShaderWrite,

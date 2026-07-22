@@ -1,0 +1,64 @@
+#version 450
+
+// Dropout detection from the RF envelope, the way hardware players do it: a
+// dropout is a collapse of the carrier amplitude, whatever the demodulated
+// value happens to be.  The envelope (squared) around each output sample is
+// compared against a long strided average that tracks the healthy carrier
+// level, so no absolute threshold or per-capture gain calibration is needed.
+//
+// It should be invoked with global invocation ids from 0 to dest_size - 1.
+// The analytic signal is indexed from source_offset; the destination from
+// dest_offset up to dest_offset + dest_size - 1.
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint dest_size;
+    uint source_offset;
+    uint dest_offset;
+    uint video_decimation_rate;
+    float ratio_squared; // flag when local envelope² < ratio² × long average
+};
+
+layout(set = 0, binding = 0) buffer readonly analytic_re_buffer {
+    float analytic_re[];
+};
+
+layout(set = 0, binding = 1) buffer readonly analytic_im_buffer {
+    float analytic_im[];
+};
+
+layout(set = 0, binding = 2) buffer writeonly dest_buffer {
+    uint8_t dest[];
+};
+
+float envelope_squared(int i) {
+    i = clamp(i, 0, int(source_offset + dest_size * video_decimation_rate) - 1);
+    float re = analytic_re[i];
+    float im = analytic_im[i];
+    return re * re + im * im;
+}
+
+void main() {
+    uint ix = gl_GlobalInvocationID.x;
+
+    if (ix >= dest_size)
+        return;
+
+    int center = int(source_offset + ix * video_decimation_rate);
+
+    // local envelope over ±4 raw samples
+    float local_sum = 0.0;
+    for (int i = -4; i <= 4; i++)
+        local_sum += envelope_squared(center + i);
+    float local_avg = local_sum / 9.0;
+
+    // carrier reference: 32 samples strided over ±4096 raw samples (~200 µs),
+    // long enough that even a maximum-length 100 µs dropout cannot drag it down
+    float long_sum = 0.0;
+    for (int i = -16; i < 16; i++)
+        long_sum += envelope_squared(center + i * 256 + 128);
+    float long_avg = long_sum / 32.0;
+
+    dest[dest_offset + ix] = uint8_t(local_avg < ratio_squared * long_avg ? 1 : 0);
+}
