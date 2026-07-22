@@ -62,5 +62,8 @@ void main() {
         v += deemphasis[n] * frame_in[r][c];
     }
 
-    frame_out[row][col] = clamp((float16_t(v) - 0.3hf) * 1.43hf, 0.hf, 1.hf);
+    // A loose clamp: the picture path re-clamps to 0..1 at the end, and the
+    // colour burst swings below blanking level -- clipping it would corrupt the
+    // burst phase and amplitude reference.
+    frame_out[row][col] = clamp((float16_t(v) - 0.3hf) * 1.43hf, -0.5hf, 1.5hf);
 }

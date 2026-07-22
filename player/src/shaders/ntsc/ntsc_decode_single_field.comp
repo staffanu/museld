@@ -48,6 +48,28 @@ float16_t color_sine(uint col) {
     return sine_lut[col % 4];
 }
 
+// Post-demodulation chroma lowpass: 19-tap Hamming-windowed sinc, 1.0 MHz
+// cutoff on the 4 fsc grid (-60 dB at fsc, -52 dB at the 2 fsc demodulation
+// image).  Applied to the raw demodulation products, it also interpolates the
+// missing quadrature: at 4 fsc each sample carries only one of them.
+const float16_t chroma_lowpass[19] = float16_t[](
+    -0.00218987hf, -0.00165572hf, 0.00063727hf, 0.00857601hf, 0.02546721hf,
+    0.05192392hf, 0.08466937hf, 0.11698703hf, 0.14079925hf, 0.14957109hf,
+    0.14079925hf, 0.11698703hf, 0.08466937hf, 0.05192392hf, 0.02546721hf,
+    0.00857601hf, 0.00063727hf, -0.00165572hf, -0.00218987hf);
+
+// A/B experiment: the top field half separates Y/C with a 3-line comb (the
+// same-field adjacent lines are 180 degrees apart in subcarrier phase), the
+// bottom half with the 1D notch/bandpass filters.
+float16_t chroma_sample(uint frame_line, uint fcol, bool comb) {
+    if (comb)
+        return -0.25hf * input_frame[frame_line - 1][fcol]
+               + 0.5hf * input_frame[frame_line][fcol]
+               - 0.25hf * input_frame[frame_line + 1][fcol];
+    else
+        return input_frame_c[frame_line][fcol];
+}
+
 void main() {
     uint row = gl_GlobalInvocationID.y;
     uint col = gl_GlobalInvocationID.x;
@@ -58,30 +80,42 @@ void main() {
     uint frame_line = 22 + row + 263 * field_parity;
     uint frame_col = col + NTSC_FIELD_START_X;
 
+    bool comb = row < 120;
+
     float16_t Y;
-    float16_t c;
-    if (row < 120) {
-        Y = 0.25hf * input_frame[frame_line - 1][frame_col] + 0.5hf * input_frame[frame_line][frame_col] + 0.25hf * input_frame[frame_line][frame_col];
-        c = -0.25hf * input_frame[frame_line - 1][frame_col] + 0.5hf * input_frame[frame_line][frame_col] - 0.25hf * input_frame[frame_line][frame_col];
+    if (comb) {
+        Y = 0.25hf * input_frame[frame_line - 1][frame_col]
+            + 0.5hf * input_frame[frame_line][frame_col]
+            + 0.25hf * input_frame[frame_line + 1][frame_col];
     } else {
         Y = input_frame_y[frame_line][frame_col];
-        c = input_frame_c[frame_line][frame_col];
     }
+
+    float16_t c_re = 0.hf;
+    float16_t c_im = 0.hf;
+    for (int n = 0; n < 19; n++) {
+        uint fc = uint(int(frame_col) + n - 9);
+        float16_t cs = 2.hf * chroma_sample(frame_line, fc, comb);
+        c_re += chroma_lowpass[n] * cs * color_cosine(fc);
+        c_im += chroma_lowpass[n] * cs * color_sine(fc);
+    }
+
+    // rotate the c vector by the conjugate of the burst reference, which also
+    // carries the burst-referenced gain (a + ib)(c + id) = ac-bd + i(bc+ad)
 
     float16_t b_re = phase_data[frame_line].x;
     float16_t b_im = phase_data[frame_line].y;
 
-    float16_t c_re = 2.hf * c * color_cosine(frame_col);
-    float16_t c_im = 2.hf * c * color_sine(frame_col);
-
-    // rotate the c vector by the conjugate of the burst phase
-    // (a + ib)(c + id) = ac-bd + i(bc+ad)
-
     float16_t I = c_re * b_re + c_im * b_im;
     float16_t Q = c_im * b_re - c_re * b_im;
 
-    float16_t rot_re = 0.8387hf;
-    float16_t rot_im = -0.5446hf;
+    // As arranged below, the transform computes U + jV = e^(ja) conj(I + jQ)
+    // with a = atan2(rot_re, rot_im): the conjugation reconciles the phase
+    // direction of the sine LUT with the subcarrier's, and the angle folds
+    // together the burst-to-U/V axis offsets.  a = 183.8 degrees, calibrated
+    // against the Video Essentials colorbars capture.
+    float16_t rot_re = -0.0663hf;
+    float16_t rot_im = -0.9978hf;
 
     float16_t V = I * rot_re - Q * rot_im;
     float16_t U = Q * rot_re + I * rot_im;

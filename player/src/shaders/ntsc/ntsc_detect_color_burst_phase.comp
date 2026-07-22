@@ -36,13 +36,27 @@ void main() {
     float16_t b_re = 0.hf;
     float16_t b_im = 0.hf;
     for (uint i = 0; i < 32; i++) {
-        uint burst_col = 70 + i;
+        uint burst_col = 78 + i;
         b_re += input_frame[line][burst_col] * color_cosine(burst_col);
         b_im += input_frame[line][burst_col] * color_sine(burst_col);
     }
     float16_t b_abs = sqrt(b_re * b_re + b_im * b_im);
-    b_re /= b_abs;
-    b_im /= b_abs;
 
-    phase_data[line] = f16vec2(b_re, b_im);
+    // Burst-referenced chroma AGC.  The burst amplitude is 20 IRE = 0.2 units
+    // by definition, and the 32-sample correlation sums 16 unit LUT samples,
+    // so a nominal burst measures |b| = 3.2.  The disc and RF chain attenuate
+    // the chroma band considerably (a factor 3-4 observed), which is exactly
+    // what referencing the gain to the equally attenuated burst corrects.
+    // Lines without a usable burst (monochrome content, VBI) are marked
+    // achromatic instead of dividing by a noise vector.
+    if (b_abs < 0.2hf) {
+        phase_data[line] = f16vec2(0.hf, 0.hf);
+        return;
+    }
+    // The nominal burst is 3.2 (0.2 units × 16 LUT samples); 3.11 is the value
+    // calibrated against the Video Essentials colorbars, covering the chroma
+    // path insertion loss relative to the burst measurement window.
+    float16_t gain = clamp(3.11hf / b_abs, 0.25hf, 8.0hf);
+
+    phase_data[line] = f16vec2(b_re / b_abs * gain, b_im / b_abs * gain);
 }
