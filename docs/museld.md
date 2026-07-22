@@ -68,6 +68,8 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--log <spec>` | Log level per category, e.g. `A3V4` (Audio=Info, Video=Debug). Categories: M P A V D I O; levels 0–4 = Off Error Warn Info Debug |
 | `--benchmark-shaders` | Print GPU shader timing statistics |
 | `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |
+| `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
+| `--saturation <factor>` | NTSC: scale the chroma gain (default 1.0, applied on top of the burst-referenced AGC) |
 | `--subtitles <file.srt>` | Display SRT subtitles synced to the disc's own time code |
 | `--subtitle-font <file.ttf>` | Override the default subtitle font (bundled Noto Sans JP) |
 

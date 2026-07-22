@@ -31,6 +31,7 @@ public:
             Logger &log, FrameReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
             musevk::CommandPool &command_pool, std::string const &executable_dir,
             bool decode_video, bool decode_all_fields, bool decode_audio,
+            float tint_degrees, float saturation,
             musevk::TimestampQueryPool *timestamp_query_pool);
     ~NtscDecoder();
     NtscDecoder(const NtscDecoder&) = delete;
@@ -59,6 +60,8 @@ private:
     musevk::TimestampQueryPool *m_timestamp_query_pool; // if set we use it
 
     std::pair<float, float> m_eq;
+    float m_rot_re; // chroma rotation/gain for the decode shader; set in the constructor
+    float m_rot_im;
     NtscFrame::NoiseEstimate m_noise; // EWMA-smoothed, reader voltage units
     double m_blanking_avg;            // EWMA of the per-frame blanking level ...
     double m_blanking_sq_avg;         // ... and of its square, for the wander σ
