@@ -50,7 +50,7 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
         VulkanUtil::loadSpirv(executable_dir, "ntsc_detect_color_burst_phase.comp"), Size(NTSC_TOTAL_HEIGHT)));
   m_decode_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_decode_single_field",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 4,
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 6,
           VulkanUtil::loadSpirv(executable_dir, "ntsc_decode_single_field.comp"), Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT)));
   m_decode_two_fields_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_decode_two_fields",
@@ -87,14 +87,15 @@ void NtscShaders::detectColorBurstPhase(musevk::CommandBuffer &sq, NtscFrame *fr
 }
 
 void NtscShaders::decodeSingleField(CommandBuffer &sq, NtscFieldView &field, DropoutMode dropout_mode,
-                                    float rot_re, float rot_im) {
+                                    float rot_re, float rot_im, float level_floor, float level_ceiling) {
   int field_parity = field.m_field_parity;
 
   m_decode_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, field.m_burst_phase_data, m_field_Y_buffer, m_field_U_buffer, m_field_V_buffer, field.m_dropout_data});
   sq.enqueueComputeShader<uint32_t>(m_decode_single_field_algo,
       { (uint32_t)field_parity,
         dropout_mode == DropoutMode::eNormal ? 0u : dropout_mode == DropoutMode::eDisabled ? 1u : 2u,
-        std::bit_cast<uint32_t>(rot_re), std::bit_cast<uint32_t>(rot_im) });
+        std::bit_cast<uint32_t>(rot_re), std::bit_cast<uint32_t>(rot_im),
+        std::bit_cast<uint32_t>(level_floor), std::bit_cast<uint32_t>(level_ceiling) });
 }
 
 // There are 4 fields in the vector.  Index 0 is the newest.

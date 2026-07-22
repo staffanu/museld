@@ -37,7 +37,7 @@ public:
   // Also fills in the color burst phase information
   void detectColorBurstPhase(musevk::CommandBuffer &sq, NtscFrame *frame);
 
-  void decodeSingleField(musevk::CommandBuffer &sq, NtscFieldView &field, DropoutMode dropout_mode, float rot_re, float rot_im);
+  void decodeSingleField(musevk::CommandBuffer &sq, NtscFieldView &field, DropoutMode dropout_mode, float rot_re, float rot_im, float level_floor, float level_ceiling);
 
   bool decodeTwoFieldsAndDetectMotion(musevk::CommandBuffer &sq,
                                      const std::vector<std::reference_wrapper<NtscFieldView>> &fields,

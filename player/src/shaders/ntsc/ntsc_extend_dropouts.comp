@@ -20,8 +20,13 @@ layout(set = 0, binding = 1) buffer writeonly dropout_out_buffer {
     uint8_t dropout_out[][NTSC_TOTAL_WIDTH];
 };
 
+// Flags outside the active picture columns are ignored: the detector also
+// fires around sync and burst, and extending those runs would leak into the
+// picture edges.
 bool raw_flag(uint row, int c) {
-    return dropout_in[row][clamp(c, 0, NTSC_TOTAL_WIDTH - 1)] != 0;
+    if (c < NTSC_FIELD_START_X || c >= NTSC_FIELD_START_X + NTSC_Y_BUF_WIDTH)
+        return false;
+    return dropout_in[row][c] != 0;
 }
 
 void main() {
@@ -36,25 +41,31 @@ void main() {
         return;
     }
 
-    // fixed pad, as before
-    bool flagged = false;
-    for (int i = -4; i <= 4 && !flagged; i++)
-        flagged = raw_flag(row, int(col) + i);
+    // The plane distinguishes core detections (1) from the precautionary
+    // extension around them (2): concealment repairs both but only refuses
+    // donor lines carrying a core detection -- refusing the soft skirts too
+    // was observed to push donors out of reach and leave dropouts uncorrected.
+
+    // core: fixed pad around a detection
+    bool core = false;
+    for (int i = -4; i <= 4 && !core; i++)
+        core = raw_flag(row, int(col) + i);
 
     // bridge: flags on both sides within a short gap
-    if (!flagged) {
+    bool soft = false;
+    if (!core) {
         bool left = false;
         bool right = false;
         for (int i = 1; i <= 12; i++) {
             left = left || raw_flag(row, int(col) - i);
             right = right || raw_flag(row, int(col) + i);
         }
-        flagged = left && right;
+        soft = left && right;
     }
 
     // proportional trailing extension: the more flagged samples just before
     // this one, the further the run is allowed to reach (capped)
-    if (!flagged) {
+    if (!core && !soft) {
         int count = 0;
         int last = 1000;
         for (int i = 1; i <= 34; i++)
@@ -62,8 +73,8 @@ void main() {
                 count++;
                 last = min(last, i);
             }
-        flagged = last <= min(count, 24);
+        soft = last <= min(count, 24);
     }
 
-    dropout_out[row][col] = uint8_t(flagged ? 1 : 0);
+    dropout_out[row][col] = uint8_t(core ? 1 : soft ? 2 : 0);
 }
