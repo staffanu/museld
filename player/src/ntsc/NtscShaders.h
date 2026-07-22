@@ -31,7 +31,7 @@ public:
 
   // Filter the raw frame data for luma and color using notch and bandpass filters respectively
   // Also fills in the color burst phase information
-  void filterColorForFrame(musevk::CommandBuffer &sq, NtscFrame *frame);
+  void detectColorBurstPhase(musevk::CommandBuffer &sq, NtscFrame *frame);
 
   void decodeSingleField(musevk::CommandBuffer &sq, NtscFieldView &field, float rot_re, float rot_im);
 
@@ -52,7 +52,6 @@ private:
 
   std::shared_ptr<musevk::ComputeShader> m_copy_to_frame_algo;
   std::shared_ptr<musevk::ComputeShader> m_detect_color_burst_phase_algo;
-  std::shared_ptr<musevk::ComputeShader> m_filter_color_for_frame_algo;
   std::shared_ptr<musevk::ComputeShader> m_decode_single_field_algo;
   std::shared_ptr<musevk::ComputeShader> m_decode_two_fields_algo;
   std::shared_ptr<musevk::ComputeShader> m_combine_still_and_moving_algo;
@@ -77,8 +76,6 @@ private:
   std::shared_ptr<musevk::VulkanBuffer> m_image_V_out; // ..
 
     // filter definitions
-    std::shared_ptr<musevk::VulkanBuffer> m_y_c_notch_filter_buffer;
-    std::shared_ptr<musevk::VulkanBuffer> m_y_c_bandpass_filter_buffer;
 };
 
 

@@ -202,7 +202,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
             frame->data(), dropout_mode);
         frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
 
-        m_shaders.filterColorForFrame(*m_first_stage_command_buffer, frame);
+        m_shaders.detectColorBurstPhase(*m_first_stage_command_buffer, frame);
     }
     m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
