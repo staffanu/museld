@@ -1,12 +1,15 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <vector>
 #include "NtscFrame.h"
+#include "NtscConstants.h"
 #include "NtscFieldView.h"
 #include "NtscInputBlock.h"
 #include "musevk/VulkanBuffer.h"
 #include "musevk/VulkanManager.h"
 #include "musevk/HalfFloatUtil.h"
+#include "util/RobustNoise.h"
 
 NtscFrame::NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager)
 : m_frame_no(frame_no),
@@ -26,6 +29,50 @@ NtscFrame::NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager)
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostNone)),
         m_fields({NtscFieldView(log, frame_no, m_data, m_burst_phase_data, m_y_data, m_c_data, 0),
                   NtscFieldView(log, frame_no, m_data, m_burst_phase_data, m_y_data, m_c_data, 1) }) {
+}
+
+NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data) {
+    // Back porch windows sit after the colour burst (which reaches ~column 112)
+    // and before active video at column NTSC_FIELD_START_X = 129; sync tip
+    // windows inside the ~67-sample horizontal sync pulse.  Rows 40-250 and
+    // 303-513 keep clear of vertical sync and the VBI code lines (white flag,
+    // picture numbers).
+    NoiseEstimate est{};
+    std::vector<float> porch_residuals, sync_residuals, centers;
+    porch_residuals.reserve(422 * 16);
+    sync_residuals.reserve(422 * 48);
+    centers.reserve(422);
+    for (int field_start : {40, 303}) {
+        for (int row = field_start; row <= field_start + 210; row++) {
+            float center;
+            RobustNoise::appendDetrendedResiduals(data + row * NTSC_TOTAL_WIDTH + 113, 16, porch_residuals, &center);
+            centers.push_back(center);
+            RobustNoise::appendDetrendedResiduals(data + row * NTSC_TOTAL_WIDTH + 8, 48, sync_residuals);
+        }
+    }
+    est.sigma_blanking = RobustNoise::robustSigma(porch_residuals);
+    est.sigma_sync = RobustNoise::robustSigma(sync_residuals);
+    est.blanking_level = RobustNoise::median(centers);
+    return est;
+}
+
+int NtscFrame::AccumulateNoisePsd(float const *data, double *psd, float max_sigma) {
+    // Candidate blank VBI rows.  Discs differ in which lines carry the white
+    // flag, picture numbers, and captions, so every window must qualify
+    // instead: level close to blanking (rejects the white flag and active
+    // video) and sigma below the gate (a Philips code line measures ~0.5).
+    int windows = 0;
+    for (int row : {8, 10, 11, 12, 13, 14, 270, 272, 273, 274, 275, 276})
+        for (int col : {150, 425}) {
+            std::vector<float> residuals;
+            float center;
+            RobustNoise::appendDetrendedResiduals(data + row * NTSC_TOTAL_WIDTH + col, 256, residuals, &center);
+            if (std::abs(center - 0.3f) > 0.1f || RobustNoise::robustSigma(residuals) > max_sigma)
+                continue;
+            RobustNoise::accumulateDetrendedWindowPsd(data + row * NTSC_TOTAL_WIDTH + col, 256, psd);
+            windows++;
+        }
+    return windows;
 }
 
 void NtscFrame::set_frame_no(int frame_no, long input_offset, double input_samples_per_sample) {

@@ -4,6 +4,7 @@
 #include <string>
 #include <map>
 #include <chrono>
+#include <cmath>
 #include <format>
 #include "musevk/VulkanManager.h"
 #include "musevk/TimestampQueryPool.h"
@@ -12,6 +13,7 @@
 #include "FrameReader.h"
 #include "NtscInputBlock.h"
 #include "NtscShaders.h"
+#include "util/RobustNoise.h"
 
 using namespace std;
 
@@ -30,6 +32,11 @@ NtscDecoder::NtscDecoder(
   m_decode_audio(decode_audio),
   m_timestamp_query_pool(timestamp_query_pool),
   m_eq{1, 0},
+  m_noise{-1, -1, -1},
+  m_blanking_avg(0),
+  m_blanking_sq_avg(0),
+  m_noise_psd{},
+  m_noise_psd_windows(0),
   m_first_stage_complete_semaphore(manager.getDevice().createSemaphore(vk::SemaphoreCreateInfo())),
   m_reset_timestamp_query_pool_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
   m_first_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
@@ -114,6 +121,65 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         m_frames.push_front(frame);
 
         frame->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_video_sample);
+
+        auto noise_estimate = NtscFrame::EstimateNoise(input_block->video_data->data<float>());
+        if (m_noise.sigma_blanking < 0) {
+            m_noise = noise_estimate;
+            m_blanking_avg = noise_estimate.blanking_level;
+            m_blanking_sq_avg = (double)noise_estimate.blanking_level * noise_estimate.blanking_level;
+        } else {
+            m_noise.sigma_blanking = m_noise.sigma_blanking * 0.9f + noise_estimate.sigma_blanking * 0.1f;
+            m_noise.sigma_sync = m_noise.sigma_sync * 0.9f + noise_estimate.sigma_sync * 0.1f;
+            m_blanking_avg = m_blanking_avg * 0.9 + noise_estimate.blanking_level * 0.1;
+            m_blanking_sq_avg = m_blanking_sq_avg * 0.9 + (double)noise_estimate.blanking_level * noise_estimate.blanking_level * 0.1;
+        }
+        m_noise_psd_windows += NtscFrame::AccumulateNoisePsd(input_block->video_data->data<float>(),
+                                                             m_noise_psd.data(), 3.0f * m_noise.sigma_blanking);
+        if (m_frame_no % 30 == 0 && m_noise.sigma_blanking > 0) {
+            // 100 IRE = the blanking-to-white span of 0.7 voltage units.  The
+            // input is already de-emphasized by the RF demodulator, so this is
+            // an unweighted post-de-emphasis figure.
+            constexpr float ire = 100.0f / 0.7f;
+            double wander_var = m_blanking_sq_avg - m_blanking_avg * m_blanking_avg;
+            m_log.info(eDecoder, std::format(
+                    "noise: SNR {:.1f} dB over the 100 IRE range "
+                    "(σ = {:.2f} IRE at blanking, {:.2f} at sync tip; blanking wander σ = {:.2f} IRE)",
+                    20.0f * log10(0.7f / m_noise.sigma_blanking),
+                    m_noise.sigma_blanking * ire,
+                    m_noise.sigma_sync * ire,
+                    sqrt(max(0.0, wander_var)) * ire));
+            if (m_noise_psd_windows > 0) {
+                // Band-limit to the 4.2 MHz System M video bandwidth and weight
+                // with the Rec. 567 unified network (BT.1439 Annex 2 §3:
+                // τ = 245 ns, a = 4.5).  The RF demodulator has already applied
+                // de-emphasis, so these are the conventional spec-sheet figures;
+                // IEC 60857 12.2.2 requires the unweighted blanking-level S/N
+                // to be at least 30 dB.
+                constexpr double tau = 245e-9, aw = 4.5;
+                constexpr double fs = 910.0 * 525.0 * 30.0 / 1.001; // 4 × fsc
+                double total = 0, band = 0, weighted = 0;
+                for (int k = 0; k < 256; k++) {
+                    double f = std::min(k, 256 - k) / 256.0 * fs;
+                    double p = m_noise_psd[k] / m_noise_psd_windows;
+                    total += p;
+                    if (f <= 4.2e6) {
+                        band += p;
+                        double wt = 2 * M_PI * f * tau;
+                        weighted += p * (1 + wt * wt / (aw * aw)) / (1 + (1 + 1 / aw) * (1 + 1 / aw) * wt * wt);
+                    }
+                }
+                total /= 256;
+                band /= 256;
+                weighted /= 256;
+                m_log.info(eDecoder, std::format(
+                        "noise spectrum: SNR {:.1f} dB unweighted in 4.2 MHz, {:.1f} dB Rec. 567-weighted "
+                        "(weighting gain {:.1f} dB; spectrum total σ = {:.2f} IRE)",
+                        20.0 * log10(0.7 / sqrt(band)),
+                        20.0 * log10(0.7 / sqrt(weighted)),
+                        10.0 * log10(band / weighted),
+                        sqrt(total) * ire));
+            }
+        }
 
         // The input block data was written by the host, so make sure it is visible on the GPU
         input_block->video_data->synchronizeHostWrites(*m_first_stage_command_buffer);
