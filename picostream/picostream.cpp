@@ -9,12 +9,16 @@
 #include <ctype.h>
 
 #include <algorithm>
+#include <chrono>
+#include <climits>
 #include <functional>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include <libps5000a/ps5000aApi.h>
+
+#include "SignalLossDetector.h"
 
 /*
  * Streams samples from a Picoscope 5000A-series device to a file.
@@ -31,6 +35,10 @@
  *
  * Digital mode (--digital, MSO models only): each sample is one byte holding
  * D0-D7 (--bits 8), or one little-endian 16 bit word holding D0-D15 (--bits 16).
+ *
+ * On exit (analog mode) the min/max sample values are reported in both integer and volt
+ * form, together with how many samples reached the ADC full-scale limit.  With
+ * --stop-on-signal-loss the capture stops automatically once the input goes silent.
  */
 
 #define CHECK_CALL(call, message) \
@@ -51,6 +59,8 @@ bool g_digital = false;
 int g_digitalPorts = 1; // 1 / 2 ports of 8 digital channels each
 size_t g_bytesPerSample = 2;
 PS5000A_CHANNEL g_channel = PS5000A_CHANNEL_A;
+double g_rangeVolts = 0.1; // full-scale voltage of the selected --range
+int g_maxAdcValue = 32767;  // ADC reading at full scale (from ps5000aMaximumValue)
 
 int16_t *driverBuffers[2];
 int16_t *appBuffer;
@@ -88,10 +98,16 @@ void PREF4 callBackStreaming(int16_t handle, int32_t n_samples, uint32_t startIn
   }
 }
 
-void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sampleInterval, long n_total_samples)
+void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sampleInterval, long n_total_samples,
+			       SignalLossDetector *detector, bool reportStats)
 {
   uint32_t bufferSize = 2000000;
   int hasOverflow = 0;
+  bool signalLost = false;
+
+  int sampleMin = INT_MAX;
+  int sampleMax = INT_MIN;
+  long long clippedSamples = 0;
 
   /* Trigger disabled */
   CHECK_CALL(ps5000aSetSimpleTrigger(handle, 0, PS5000A_CHANNEL_A, 0, PS5000A_RISING, 0, 0),
@@ -147,14 +163,51 @@ void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sa
       fflush(stdout);
       hasOverflow |= g_overflow;
       fwrite((uint8_t *)appBuffer + g_startIndex * g_bytesPerSample, g_bytesPerSample, n_write, fp);
+
+      if (reportStats) { // stats on the raw ADC value (over the written samples) so they convert to volts
+	const int16_t *src = driverBuffers[0] + g_startIndex;
+	for (long i = 0; i < n_write; i++) {
+	  int value = src[i];
+	  if (value < sampleMin) sampleMin = value;
+	  if (value > sampleMax) sampleMax = value;
+	  if (std::abs(value) >= g_maxAdcValue) clippedSamples++; // saturated at the ADC rail
+	}
+      }
+
+      if (detector && detector->process((uint8_t *)appBuffer + g_startIndex * g_bytesPerSample, g_sampleCount)) {
+	signalLost = true;
+	break;
+      }
     }
   }
 
   gettimeofday(&end, NULL);
   long millis = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
 
+  const char *how = signalLost ? "stopped (signal lost)" : g_stop ? "interrupted" : "complete";
   printf("\nData collection %s.  Total time %ld ms. %s\n",
-	 g_stop ? "interrupted" : "complete", millis, hasOverflow ? " OVERFLOW detected!" : "");
+	 how, millis, hasOverflow ? " OVERFLOW detected!" : "");
+
+  if (signalLost) {
+    char when[64];
+    struct tm tm;
+    localtime_r(&end.tv_sec, &tm);
+    strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
+    printf("*** SIGNAL LOST at %s -- capture stopped automatically after %ld samples ***\n",
+	   when, totalSamples);
+  }
+
+  if (reportStats && sampleMax >= sampleMin) { // saw at least one sample
+    double minVolts = (double)sampleMin * g_rangeVolts / g_maxAdcValue;
+    double maxVolts = (double)sampleMax * g_rangeVolts / g_maxAdcValue;
+    printf("Sample range: min %d (%.6g V), max %d (%.6g V)\n", sampleMin, minVolts, sampleMax, maxVolts);
+    if (clippedSamples > 0)
+      printf("Out of range: %lld samples (%.3f%% of %ld) reached the ADC full-scale limit\n",
+	     clippedSamples, 100.0 * clippedSamples / totalSamples, totalSamples);
+    else
+      printf("Out of range: none\n");
+  }
+
   ps5000aStop(handle);
   fclose(fp);
 
@@ -176,6 +229,8 @@ int32_t main(int argc, char *argv[])
   long n_total_samples = 0; // 0 = stream until interrupted
   double duration_seconds = 0;
   double logic_threshold_volts = 1.65;
+  double signal_loss_timeout = 0; // 0 = disabled
+  double signal_loss_threshold = 0.1;
   std::string filename = "stream.bin";
   bool filename_given = false;
 
@@ -224,11 +279,11 @@ int32_t main(int argc, char *argv[])
       throw std::runtime_error("Invalid sample interval");
   }});
   options.push_back({"--range", "<v>: analog voltage range 10mV/20mV/50mV/100mV/200mV/500mV/1V/2V/5V/10V/20V (default 100mV)", [&] () -> void {
-    static const struct { const char *name; PS5000A_RANGE range; } ranges[] = {
-      {"10mV", PS5000A_10MV}, {"20mV", PS5000A_20MV}, {"50mV", PS5000A_50MV},
-      {"100mV", PS5000A_100MV}, {"200mV", PS5000A_200MV}, {"500mV", PS5000A_500MV},
-      {"1V", PS5000A_1V}, {"2V", PS5000A_2V}, {"5V", PS5000A_5V},
-      {"10V", PS5000A_10V}, {"20V", PS5000A_20V},
+    static const struct { const char *name; PS5000A_RANGE range; double volts; } ranges[] = {
+      {"10mV", PS5000A_10MV, 0.01}, {"20mV", PS5000A_20MV, 0.02}, {"50mV", PS5000A_50MV, 0.05},
+      {"100mV", PS5000A_100MV, 0.1}, {"200mV", PS5000A_200MV, 0.2}, {"500mV", PS5000A_500MV, 0.5},
+      {"1V", PS5000A_1V, 1}, {"2V", PS5000A_2V, 2}, {"5V", PS5000A_5V, 5},
+      {"10V", PS5000A_10V, 10}, {"20V", PS5000A_20V, 20},
     };
     const std::string name = nextArg();
     auto match = std::find_if(std::begin(ranges), std::end(ranges),
@@ -236,6 +291,7 @@ int32_t main(int argc, char *argv[])
     if (match == std::end(ranges))
       throw std::runtime_error("Invalid voltage range: " + name);
     range = match->range;
+    g_rangeVolts = match->volts;
   }});
   options.push_back({"--coupling", "<ac|dc>: analog input coupling (default ac)", [&] () -> void {
     const std::string name = nextArg();
@@ -266,6 +322,16 @@ int32_t main(int argc, char *argv[])
     duration_seconds = stod(nextArg());
     if (duration_seconds <= 0)
       throw std::runtime_error("Invalid duration");
+  }});
+  options.push_back({"--stop-on-signal-loss", "<seconds>: auto-stop when the analog signal stays silent this long (default: off)", [&] () -> void {
+    signal_loss_timeout = stod(nextArg());
+    if (signal_loss_timeout <= 0)
+      throw std::runtime_error("Signal loss timeout must be positive");
+  }});
+  options.push_back({"--signal-loss-threshold", "<frac>: silence level as a fraction of the running average (0-1, default 0.1)", [&] () -> void {
+    signal_loss_threshold = stod(nextArg());
+    if (signal_loss_threshold <= 0 || signal_loss_threshold >= 1)
+      throw std::runtime_error("Signal loss threshold must be between 0 and 1 (exclusive)");
   }});
   options.push_back({"--help", "show this help", [&] () -> void {
     usage();
@@ -317,6 +383,11 @@ int32_t main(int argc, char *argv[])
 	exit(1);
     }
     g_bytesPerSample = bits == 8 ? 1 : 2;
+  }
+
+  if (g_digital && signal_loss_timeout > 0) {
+    fprintf(stderr, "--stop-on-signal-loss is only supported in analog mode\n");
+    exit(1);
   }
 
   if (duration_seconds > 0)
@@ -380,6 +451,7 @@ int32_t main(int argc, char *argv[])
 
     int16_t value;
     ps5000aMaximumValue(handle, &value);
+    g_maxAdcValue = value;
     printf("Max ADC value=%d\n", value);
 
     float maximumVoltage;
@@ -406,12 +478,20 @@ int32_t main(int argc, char *argv[])
   if (!g_digital && coupling == PS5000A_AC) {
     long samples_to_discard = 1000000000L / sample_interval; // 1s
     printf("Capturing %ld samples to /dev/null to let AC coupling capacitor settle\n", samples_to_discard);
-    collectStreamingImmediate(handle, "/dev/null", sample_interval, samples_to_discard);
+    collectStreamingImmediate(handle, "/dev/null", sample_interval, samples_to_discard, nullptr, false);
+  }
+
+  SignalLossDetector *detector = nullptr;
+  if (signal_loss_timeout > 0) {
+    detector = new SignalLossDetector(signal_loss_timeout, signal_loss_threshold, g_bytesPerSample == 1);
+    printf("Will auto-stop after %.3g s below %.3g x the running average signal level\n",
+	   signal_loss_timeout, signal_loss_threshold);
   }
 
   if (!g_stop)
-    collectStreamingImmediate(handle, filename.c_str(), sample_interval, n_total_samples);
+    collectStreamingImmediate(handle, filename.c_str(), sample_interval, n_total_samples, detector, !g_digital);
 
+  delete detector;
   ps5000aCloseUnit(handle);
   return 0;
 }
