@@ -230,6 +230,14 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
 
         m_shaders.detectColorBurstPhase(*m_first_stage_command_buffer, frame);
+
+        // Motion mask for the de-interlacing combine, from the composite
+        // history of the last three frames.  Thresholds scale with the
+        // measured noise; 0.55 approximates how much the frame-domain
+        // de-emphasis attenuates the raw blanking sigma.
+        float sigma_c = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.55f : 0.01f;
+        m_shaders.detectMotion(*m_first_stage_command_buffer, frame->data(), m_frames[1]->data(), m_frames[2]->data(),
+                               m_frame_no > 0, max(0.012f, 4.0f * sigma_c), max(0.04f, 10.0f * sigma_c));
     }
     m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
@@ -255,24 +263,12 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         float level_ceiling = 1.4f;
         m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[0]->get_field(decoded_field_index),
                                     dropout_mode, m_rot_re, m_rot_im, level_floor, level_ceiling);
-        auto fields = vector<reference_wrapper<NtscFieldView>>{
-                m_frames[0]->get_field(decoded_field_index),
-                m_frames[1 - decoded_field_index]->get_field(1 - decoded_field_index),
-                m_frames[1]->get_field(decoded_field_index),
-                m_frames[2 - decoded_field_index]->get_field(1 - decoded_field_index)};
-
-        if (m_shaders.decodeTwoFieldsAndDetectMotion(*m_second_stage_command_buffer, fields, true)) {
-            m_log.debug(eVideo, std::format("Field {} inter-frame interpolation success", decoded_field_index));
-            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
-                                                 field_interpolation_mode == FieldInterpolationMode::eForceIntraField,
-                                                 field_interpolation_mode == FieldInterpolationMode::eForceInterFrame,
-                                                 decoded_field_index,
-                                                 output_yuv);
-        } else {
-            m_log.warn(eVideo, std::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
-            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false,
+        // Weaving the still parts needs the previous field's decode, which
+        // only exists when all fields are decoded
+        m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
+                field_interpolation_mode == FieldInterpolationMode::eForceIntraField || !m_decode_all_fields,
+                field_interpolation_mode == FieldInterpolationMode::eForceInterFrame,
                 decoded_field_index, output_yuv);
-        }
     }
 
     m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});

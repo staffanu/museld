@@ -7,34 +7,37 @@
 
 layout(push_constant) uniform PushConstants {
     // both set to 1 makes no sense
-    uint force_field_only;
-    uint force_inter_frame_only;
-    int field_parity; // Parity for the field buffer: 0 for first field (lower)(?), 1 for second (upper)(?)
+    uint force_field_only;  // bob: interpolate everything from the current field
+    uint force_weave_only;  // weave: always take the missing rows from the previous field
+    int field_parity;       // parity of the current field: 0 owns even output rows, 1 odd
     uint output_yuv;
 };
 
-layout(set = 0, binding = 0) buffer readonly restrict field_Y_buffer {
-    float16_t field_Y[][NTSC_Y_BUF_WIDTH];
+// The decoded fields, one buffer set per parity.  The set of the current
+// field's parity was just decoded; the other set still holds the previous
+// (opposite-parity) field, which is what the still parts weave in.
+layout(set = 0, binding = 0) buffer readonly restrict field0_Y_buffer {
+    float16_t field0_Y[][NTSC_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 1) buffer readonly restrict field_r_buffer {
-    float16_t field_U[][NTSC_Y_BUF_WIDTH];
+layout(set = 0, binding = 1) buffer readonly restrict field0_U_buffer {
+    float16_t field0_U[][NTSC_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 2) buffer readonly restrict field_b_buffer {
-    float16_t field_V[][NTSC_Y_BUF_WIDTH];
+layout(set = 0, binding = 2) buffer readonly restrict field0_V_buffer {
+    float16_t field0_V[][NTSC_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 3) buffer readonly restrict inter_frame_Y_buffer {
-    float16_t inter_frame_Y[][NTSC_Y_BUF_WIDTH];
+layout(set = 0, binding = 3) buffer readonly restrict field1_Y_buffer {
+    float16_t field1_Y[][NTSC_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 4) buffer readonly restrict inter_frame_r_buffer {
-    float16_t inter_frame_U[][NTSC_Y_BUF_WIDTH];
+layout(set = 0, binding = 4) buffer readonly restrict field1_U_buffer {
+    float16_t field1_U[][NTSC_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 5) buffer readonly restrict inter_frame_b_buffer {
-    float16_t inter_frame_V[][NTSC_Y_BUF_WIDTH];
+layout(set = 0, binding = 5) buffer readonly restrict field1_V_buffer {
+    float16_t field1_V[][NTSC_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 6) buffer readonly restrict movement_buffer {
@@ -55,6 +58,16 @@ layout(set = 0, binding = 10) buffer writeonly frame_out_v_buffer {
     uint16_t frame_out_V[][NTSC_Y_BUF_WIDTH / 2];
 };
 
+f16vec3 currentField(uint i, uint col) {
+    return field_parity == 0 ? f16vec3(field0_Y[i][col], field0_U[i][col], field0_V[i][col])
+                             : f16vec3(field1_Y[i][col], field1_U[i][col], field1_V[i][col]);
+}
+
+f16vec3 previousField(uint i, uint col) {
+    return field_parity == 0 ? f16vec3(field1_Y[i][col], field1_U[i][col], field1_V[i][col])
+                             : f16vec3(field0_Y[i][col], field0_U[i][col], field0_V[i][col]);
+}
+
 void main() {
     uint row = gl_GlobalInvocationID.y;
     uint col = gl_GlobalInvocationID.x;
@@ -62,39 +75,25 @@ void main() {
     if (row >= NTSC_FIELD_HEIGHT * 2 || col >= NTSC_Y_BUF_WIDTH)
         return;
 
-    float16_t Y, U, V;
-    if (force_field_only != 0) {
-        if ((row & 1) == 0) {
-            if (field_parity == 0) {
-                Y = field_Y[row / 2][col];
-                U = field_U[row / 2][col];
-                V = field_V[row / 2][col];
-            } else {
-                Y = 0.5hf * field_Y[row / 2][col] + 0.5hf * field_Y[clamp(row / 2 - 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
-                U = 0.5hf * field_U[row / 2][col] + 0.5hf * field_U[clamp(row / 2 - 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
-                V = 0.5hf * field_V[row / 2][col] + 0.5hf * field_V[clamp(row / 2 - 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
-            }
-        } else {
-            if (field_parity == 0) {
-                Y = 0.5hf * field_Y[row / 2][col] + 0.5hf * field_Y[clamp(row / 2 + 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
-                U = 0.5hf * field_U[row / 2][col] + 0.5hf * field_U[clamp(row / 2 + 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
-                V = 0.5hf * field_V[row / 2][col] + 0.5hf * field_V[clamp(row / 2 + 1, 0, NTSC_FIELD_HEIGHT - 1)][col];
-            } else {
-                Y = field_Y[row / 2][col];
-                U = field_U[row / 2][col];
-                V = field_V[row / 2][col];
-            }
-        }
-    } else if (force_inter_frame_only != 0) {
-        Y = inter_frame_Y[row][col];
-        U = 0.hf;
-        V = 0.hf;
+    f16vec3 yuv;
+    if (int(row & 1u) == field_parity) {
+        // A row the current field sampled: use it directly
+        yuv = currentField(row / 2, col);
     } else {
-        // FIXME: combine!
-        Y = field_Y[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
-        U = field_U[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
-        V = field_V[clamp((row + 1 - field_parity) / 2, 0, NTSC_FIELD_HEIGHT - 1)][col];
+        // A row the current field did not sample.  Where the picture is
+        // still, the previous field's row (which sits exactly here) is the
+        // real thing; where it moves, that row is 1/60 s stale and would
+        // comb, so interpolate the current field's neighbours instead.
+        uint n0 = row / 2;
+        uint n1 = uint(clamp(int(row / 2) + (field_parity == 0 ? 1 : -1), 0, NTSC_FIELD_HEIGHT - 1));
+        f16vec3 bob = 0.5hf * (currentField(n0, col) + currentField(n1, col));
+        f16vec3 weave = previousField(row / 2, col);
+        float16_t m = force_field_only != 0 ? 1.hf
+                    : force_weave_only != 0 ? 0.hf
+                    : movement_data[row][col];
+        yuv = mix(weave, bob, m);
     }
+    float16_t Y = yuv.x, U = yuv.y, V = yuv.z;
     Y = clamp(Y, 0.hf, 1.hf);
     U = clamp(U, -1.hf, 1.hf);
     V = clamp(V, -1.hf, 1.hf);
