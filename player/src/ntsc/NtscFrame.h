@@ -22,6 +22,7 @@ public:
         float sigma_blanking; // back porch windows of the picture lines
         float sigma_sync;     // sync tip windows
         float blanking_level; // robust blanking level, for tracking wander
+        float white_flag_level; // 100 IRE white flag level, -1 when no VBI line qualified
     };
     static NoiseEstimate EstimateNoise(float const *data);
 

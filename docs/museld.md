@@ -78,6 +78,17 @@ picture lines. `--no-dropout` leaves them untouched; `--highlight-dropout` paint
 (dropout in the luminance area) or green (dropout in the color area). The D key cycles between
 the three modes during playback.
 
+**NTSC level calibration**: video levels are calibrated automatically against references in the
+signal. Black (0 IRE) tracks the measured back porch blanking level; the gain (100 IRE) is taken
+from the white flag — a flat 100 IRE line in the vertical interval that most discs carry — when
+one is found, and stays at the nominal FM deviation mapping otherwise. The measured levels are
+logged with the noise figures (`--log D3`).
+
+**Display rendering**: for display and PNG export, both the MUSE and NTSC paths convert the
+decoded signal to linear light (CRT law, gamma 2.2) with SMPTE C primaries mapped to sRGB;
+the sRGB swapchain then encodes it for the monitor. The `--write` output is unaffected — it
+stays in the signal domain as Y'CbCr, tagged with the source's color metadata.
+
 **`--write-muse16`** writes the input stream in the 16.2 MHz format (each sample stored ×4 as a
 little-endian 16-bit value), which is what `--input-type muse-16` reads. This is useful for cutting
 small video segments out of larger files, and for re-coding oversampled or RF captures to the much

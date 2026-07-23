@@ -65,6 +65,10 @@ private:
     NtscFrame::NoiseEstimate m_noise; // EWMA-smoothed, reader voltage units
     double m_blanking_avg;            // EWMA of the per-frame blanking level ...
     double m_blanking_sq_avg;         // ... and of its square, for the wander σ
+    double m_white_avg;               // EWMA of the white flag level, -1 until first seen
+    long m_white_flag_frames;         // frames whose white flag qualified
+    float m_level_offset_v;           // rescale applied by the copy shader:
+    float m_level_scale;              // out = (v - offset) * scale
     std::array<double, 256> m_noise_psd; // cumulative blank-VBI-line power spectrum
     long m_noise_psd_windows;
     vk::Semaphore m_first_stage_complete_semaphore;
