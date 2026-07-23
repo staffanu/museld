@@ -42,7 +42,7 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
           VulkanUtil::loadSpirv(executable_dir, "ntsc_extend_dropouts.comp"), Size(NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT)));
   m_copy_to_frame_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_copy_to_frame",
-          {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 1,
+          {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
           VulkanUtil::loadSpirv(executable_dir, "ntsc_copy_to_frame.comp"), Size(NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT)));
   m_detect_color_burst_phase_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
         "ntsc_detect_color_burst_phase",
@@ -75,10 +75,12 @@ void NtscShaders::extendDropouts(musevk::CommandBuffer &sq, std::shared_ptr<muse
 
 void NtscShaders::copyToFrame(musevk::CommandBuffer &sq, std::shared_ptr<musevk::VulkanBuffer> const &video_input,
   std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane, std::shared_ptr<musevk::VulkanBuffer> const &buffer,
-  DropoutMode dropout_mode) {
+  DropoutMode dropout_mode, float level_offset_v, float level_scale) {
 
   m_copy_to_frame_algo->updateBufferDescriptorsInSet(0, {video_input, dropout_plane, buffer});
-  sq.enqueueComputeShader<int32_t>(m_copy_to_frame_algo,{ dropout_mode == DropoutMode::eNormal ? 0 : dropout_mode == DropoutMode::eDisabled ? 1 : 2 });
+  sq.enqueueComputeShader<uint32_t>(m_copy_to_frame_algo,
+      { dropout_mode == DropoutMode::eNormal ? 0u : dropout_mode == DropoutMode::eDisabled ? 1u : 2u,
+        std::bit_cast<uint32_t>(level_offset_v), std::bit_cast<uint32_t>(level_scale) });
 }
 
 void NtscShaders::detectColorBurstPhase(musevk::CommandBuffer &sq, NtscFrame *frame) {

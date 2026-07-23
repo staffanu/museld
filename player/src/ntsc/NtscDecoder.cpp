@@ -33,9 +33,13 @@ NtscDecoder::NtscDecoder(
   m_decode_audio(decode_audio),
   m_timestamp_query_pool(timestamp_query_pool),
   m_eq{1, 0},
-  m_noise{-1, -1, -1},
+  m_noise{-1, -1, -1, -1},
   m_blanking_avg(0),
   m_blanking_sq_avg(0),
+  m_white_avg(-1),
+  m_white_flag_frames(0),
+  m_level_offset_v(0.3f),
+  m_level_scale(1.0f / 0.7f),
   m_noise_psd{},
   m_noise_psd_windows(0),
   m_first_stage_complete_semaphore(manager.getDevice().createSemaphore(vk::SemaphoreCreateInfo())),
@@ -49,11 +53,12 @@ NtscDecoder::NtscDecoder(
   m_efm_decoder(log, std::nullopt, std::nullopt),
   m_efm_pcm_processor(log),
   m_frames() {
-    // 183.8 degrees is the structural 180 (see ntsc_decode_single_field.comp)
-    // plus the offset calibrated against the Video Essentials colorbars; the
-    // residual is source-dependent (differential phase of the player and disc),
-    // which is what --tint adjusts.
-    float a = (183.8f + tint_degrees) * (float)M_PI / 180.0f;
+    // 185.8 degrees is the structural 180 (see ntsc_decode_single_field.comp)
+    // plus the offset calibrated against the Video Essentials colorbars
+    // (sRGB-linearized bar measurements null the mean hue error); the residual
+    // is source-dependent (differential phase of the player and disc), which
+    // is what --tint adjusts.
+    float a = (185.8f + tint_degrees) * (float)M_PI / 180.0f;
     m_rot_re = saturation * sinf(a);
     m_rot_im = saturation * cosf(a);
 }
@@ -141,6 +146,21 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
             m_blanking_avg = m_blanking_avg * 0.9 + noise_estimate.blanking_level * 0.1;
             m_blanking_sq_avg = m_blanking_sq_avg * 0.9 + (double)noise_estimate.blanking_level * noise_estimate.blanking_level * 0.1;
         }
+        if (noise_estimate.white_flag_level >= 0) {
+            m_white_avg = m_white_avg < 0 ? noise_estimate.white_flag_level
+                                          : m_white_avg * 0.9 + noise_estimate.white_flag_level * 0.1;
+            m_white_flag_frames++;
+        }
+
+        // Level calibration for the copy shader's rescale to blanking = 0,
+        // white = 1: the offset (0 IRE) tracks the measured back porch level,
+        // and the gain (100 IRE) comes from the white flag when the disc
+        // provides one -- after a settling count, since a single flagged frame
+        // is no reference.  Without a flag the nominal 0.7 V span stays.
+        if (m_noise.sigma_blanking >= 0)
+            m_level_offset_v = (float)m_blanking_avg;
+        if (m_white_flag_frames >= 30)
+            m_level_scale = std::clamp(1.0f / ((float)m_white_avg - m_level_offset_v), 1.1f, 1.9f);
         m_noise_psd_windows += NtscFrame::AccumulateNoisePsd(input_block->video_data->data<float>(),
                                                              m_noise_psd.data(), 3.0f * m_noise.sigma_blanking);
         if (m_frame_no % 30 == 0 && m_noise.sigma_blanking > 0) {
@@ -156,6 +176,12 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                     m_noise.sigma_blanking * ire,
                     m_noise.sigma_sync * ire,
                     sqrt(max(0.0, wander_var)) * ire));
+            m_log.info(eDecoder, std::format(
+                    "levels: blanking {:.3f} V, white flag {}, rescale gain {:.3f} (nominal {:.3f})",
+                    m_blanking_avg,
+                    m_white_avg < 0 ? "not seen"
+                                    : std::format("{:.3f} V ({} frames)", m_white_avg, m_white_flag_frames),
+                    m_level_scale, 1.0f / 0.7f));
             if (m_noise_psd_windows > 0) {
                 // Band-limit to the 4.2 MHz System M video bandwidth, apply the
                 // frame-domain de-emphasis response (|D|² of the bilinear
@@ -200,7 +226,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
         m_shaders.extendDropouts(*m_first_stage_command_buffer, input_block->dropout_data, frame->dropout_data());
         m_shaders.copyToFrame(*m_first_stage_command_buffer, input_block->video_data, frame->dropout_data(),
-            frame->data(), dropout_mode);
+            frame->data(), dropout_mode, m_level_offset_v, m_level_scale);
         frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
 
         m_shaders.detectColorBurstPhase(*m_first_stage_command_buffer, frame);
@@ -219,19 +245,14 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         out.input_samples_per_muse_sample = m_frames[0]->getInputSamplesPerNtscSample();
         out.field_parity = decoded_field_index;
 
-        // The illegal-level bounds in the decode shader are relative to the
-        // measured blanking level and scaled from the measured noise, since
-        // captures sit a few percent off the nominal level mapping.  The 0.52
-        // approximates how much the comb and the de-emphasis attenuate the
-        // measured raw blanking noise.
-        float level_offset = 0.0f;
-        float sigma_out = 0.02f;
-        if (m_noise.sigma_blanking >= 0) {
-            level_offset = ((float)m_blanking_avg - 0.3f) * 1.43f;
-            sigma_out = m_noise.sigma_blanking * 1.43f * 0.52f;
-        }
-        float level_floor = level_offset - max(0.02f, 2.5f * sigma_out);
-        float level_ceiling = level_offset + 1.4f;
+        // The illegal-level bounds in the decode shader are scaled from the
+        // measured noise; the copy shader's calibrated rescale puts blanking
+        // at exactly 0, so they need no offset.  The 0.52 approximates how
+        // much the comb and the de-emphasis attenuate the measured raw
+        // blanking noise.
+        float sigma_out = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.52f : 0.02f;
+        float level_floor = -max(0.02f, 2.5f * sigma_out);
+        float level_ceiling = 1.4f;
         m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[0]->get_field(decoded_field_index),
                                     dropout_mode, m_rot_re, m_rot_im, level_floor, level_ceiling);
         auto fields = vector<reference_wrapper<NtscFieldView>>{

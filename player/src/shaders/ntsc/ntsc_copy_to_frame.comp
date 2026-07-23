@@ -8,7 +8,9 @@
 #include "muse.h"
 
 layout(push_constant) uniform PushConstants {
-    uint dropout_mode; // 0: normal, 1: disabled, 2: highlight
+    uint dropout_mode;  // 0: normal, 1: disabled, 2: highlight
+    float level_offset; // measured blanking level in reader voltage units
+    float level_scale;  // output units per volt: 1 / (white - blanking)
 };
 
 layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
@@ -113,11 +115,11 @@ void main() {
                 c = 0;
             }
         }
-        v += deemphasis[n] * (c < 74 ? 0.3 : composite_sample(r, c));
+        v += deemphasis[n] * (c < 74 ? level_offset : composite_sample(r, c));
     }
 
     // A loose clamp: the picture path re-clamps to 0..1 at the end, and the
     // colour burst swings below blanking level -- clipping it would corrupt the
     // burst phase and amplitude reference.
-    frame_out[row][col] = clamp((float16_t(v) - 0.3hf) * 1.43hf, -0.5hf, 1.5hf);
+    frame_out[row][col] = clamp(float16_t((v - level_offset) * level_scale), -0.5hf, 1.5hf);
 }

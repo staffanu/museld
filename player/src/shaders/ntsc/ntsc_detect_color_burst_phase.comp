@@ -53,10 +53,11 @@ void main() {
         phase_data[line] = f16vec2(0.hf, 0.hf);
         return;
     }
-    // The nominal burst is 3.2 (0.2 units × 16 LUT samples); 3.11 is the value
-    // calibrated against the Video Essentials colorbars, covering the chroma
-    // path insertion loss relative to the burst measurement window.
-    float16_t gain = clamp(3.11hf / b_abs, 0.25hf, 8.0hf);
+    // The nominal burst is 3.2 (0.2 units × 16 LUT samples); 2.92 is the value
+    // calibrated against the Video Essentials colorbars (sRGB-linearized bar
+    // measurements), covering the chroma path insertion loss relative to the
+    // burst measurement window.
+    float16_t gain = clamp(2.92hf / b_abs, 0.25hf, 8.0hf);
 
     phase_data[line] = f16vec2(b_re / b_abs * gain, b_im / b_abs * gain);
 }

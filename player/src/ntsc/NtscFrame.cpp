@@ -50,6 +50,32 @@ NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data) {
     est.sigma_blanking = RobustNoise::robustSigma(porch_residuals);
     est.sigma_sync = RobustNoise::robustSigma(sync_residuals);
     est.blanking_level = RobustNoise::median(centers);
+
+    // White flag: a full flat line at 100 IRE in the vertical interval (IEC
+    // 60857 writes it on line 11/274 to mark the first field of a film frame,
+    // but mastering varies, so scan the same candidate rows as the noise
+    // spectrum).  A window qualifies when it is flat (rejects Philips code
+    // pulses, which detrend to σ ≈ 0.5) and sits at the nominal 0.7 V above
+    // the blanking level just measured (rejects blank lines and captions).
+    // It is the only trustworthy gain reference on this medium: sync depth
+    // measures ~14 % off its 40 IRE definition on real captures.
+    std::vector<float> white_centers;
+    float sigma_gate = std::max(3.0f * est.sigma_blanking, 0.02f);
+    for (int row : {8, 10, 11, 12, 13, 14, 270, 272, 273, 274, 275, 276}) {
+        float row_centers[2];
+        bool qualified = true;
+        for (int w = 0; w < 2; w++) {
+            std::vector<float> residuals;
+            RobustNoise::appendDetrendedResiduals(
+                    data + row * NTSC_TOTAL_WIDTH + (w == 0 ? 150 : 425), 256, residuals, &row_centers[w]);
+            if (std::abs(row_centers[w] - est.blanking_level - 0.7f) > 0.15f ||
+                RobustNoise::robustSigma(residuals) > sigma_gate)
+                qualified = false;
+        }
+        if (qualified && std::abs(row_centers[0] - row_centers[1]) < 0.05f)
+            white_centers.push_back(0.5f * (row_centers[0] + row_centers[1]));
+    }
+    est.white_flag_level = white_centers.empty() ? -1.0f : RobustNoise::median(white_centers);
     return est;
 }
 
