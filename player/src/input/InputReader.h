@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <chrono>
+#include <cmath>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -40,15 +41,46 @@ public:
         return m_block_size;
     }
 
+    // Enable adaptive DC removal on the converted samples.  RF carries no
+    // legitimate DC, but the unsigned formats leave their container offset
+    // behind with no range convention to derive it from (u16 captures are
+    // commonly 10 bits stored in 16-bit values), and capture hardware leaves
+    // residual offsets on the signed formats too; an offset comparable to
+    // the RF amplitude biases the envelope dropout detector through the
+    // analytic bandpass.  The estimate is applied with one block of lag so
+    // the conversion loops never re-read their output, which may live in
+    // write-combined (GPU staging) memory.  Must stay off for baseband
+    // inputs, where absolute levels carry the picture.
+    void setDcBlocking(bool enabled) {
+        m_dc_block = enabled;
+    }
+
     bool is_fifo() const {
         return m_is_fifo;
     }
 
 protected:
+    // No NaN sentinels here: the project compiles with -ffast-math, under
+    // which std::isnan constant-folds to false and a NaN would poison every
+    // sample that follows.
+    float dcOffset() const {
+        return m_dc_block && m_dc_valid ? (float)m_dc : 0.0f;
+    }
+
+    void updateDc(double block_mean) {
+        if (m_dc_block) {
+            m_dc = m_dc_valid ? m_dc * 0.9 + block_mean * 0.1 : block_mean;
+            m_dc_valid = true;
+        }
+    }
+
     int m_fd;
     uint32_t m_block_size;
     bool m_is_fifo;
     std::mutex m_fd_mutex;
+    bool m_dc_block = false;
+    bool m_dc_valid = false;
+    double m_dc = 0.0;
 };
 
 // Reads exactly m_block_size samples of type T from the file descriptor and converts to float.
@@ -109,6 +141,8 @@ public:
             filled_bytes += (size_t)read_count;
         }
 
+        float dc = dcOffset();
+        double sum = 0;
         for (uint32_t i = 0; i < m_block_size; i++) {
             T val = m_buffer[i];
             if constexpr (ByteSwap && sizeof(T) == 2) {
@@ -117,8 +151,10 @@ public:
                 raw = __builtin_bswap16(raw);
                 memcpy(&val, &raw, 2);
             }
-            f[i] = val;
+            sum += (double)val;
+            f[i] = (float)val - dc;
         }
+        updateDc(sum / m_block_size);
 
         return m_block_size;
     }
