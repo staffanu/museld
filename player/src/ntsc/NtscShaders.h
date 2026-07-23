@@ -38,11 +38,19 @@ public:
   // Also fills in the color burst phase information
   void detectColorBurstPhase(musevk::CommandBuffer &sq, NtscFrame *frame);
 
-  void decodeSingleField(musevk::CommandBuffer &sq, NtscFieldView &field, DropoutMode dropout_mode, float rot_re, float rot_im, float level_floor, float level_ceiling);
+  void decodeSingleField(musevk::CommandBuffer &sq, NtscFieldView &field,
+                         std::shared_ptr<musevk::VulkanBuffer> const &prev_frame,
+                         std::shared_ptr<musevk::VulkanBuffer> const &next_frame,
+                         std::shared_ptr<musevk::VulkanBuffer> const &prev_burst,
+                         std::shared_ptr<musevk::VulkanBuffer> const &next_burst,
+                         DropoutMode dropout_mode, bool use_3d_comb,
+                         float rot_re, float rot_im, float level_floor, float level_ceiling,
+                         float chroma_sel_floor);
 
   // Computes the per-pixel motion mask from the composite frame history into
   // the current movement buffer (flipping the ping-pong index)
   void detectMotion(musevk::CommandBuffer &sq,
+                    std::shared_ptr<musevk::VulkanBuffer> const &frame_next,
                     std::shared_ptr<musevk::VulkanBuffer> const &frame0,
                     std::shared_ptr<musevk::VulkanBuffer> const &frame1,
                     std::shared_ptr<musevk::VulkanBuffer> const &frame2,
@@ -72,7 +80,9 @@ private:
   std::array<std::shared_ptr<musevk::VulkanBuffer>, 2> m_field_U_buffers;
   std::array<std::shared_ptr<musevk::VulkanBuffer>, 2> m_field_V_buffers;
 
-  std::shared_ptr<musevk::VulkanBuffer> m_raw_motion_buffer; // NTSC_FIELD_HEIGHT * 2 * NTSC_Y_BUF_WIDTH
+  std::shared_ptr<musevk::VulkanBuffer> m_raw_past_buffer;   // NTSC_FIELD_HEIGHT * 2 * NTSC_Y_BUF_WIDTH
+  std::shared_ptr<musevk::VulkanBuffer> m_raw_future_buffer;
+  std::shared_ptr<musevk::VulkanBuffer> m_future_movement_buffer;
 
   int m_current_movement_buffer_index;
   std::vector<std::shared_ptr<musevk::VulkanBuffer>> m_movement_buffers; // NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH

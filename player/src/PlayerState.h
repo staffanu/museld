@@ -15,6 +15,7 @@ struct PlayerState {
     bool redo_last_field = false;
     bool export_frame = false;
     bool enable_non_linear = true;
+    bool use_3d_comb = true; // NTSC: temporal Y/C separation on still parts
     bool enable_cursor = false;
     bool show_disc_code = false;
     int zoom_factor = 1;

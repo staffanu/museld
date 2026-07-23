@@ -76,6 +76,43 @@ NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data) {
             white_centers.push_back(0.5f * (row_centers[0] + row_centers[1]));
     }
     est.white_flag_level = white_centers.empty() ? -1.0f : RobustNoise::median(white_centers);
+
+    // Burst phase: correlate the colour burst window (columns 78..110, 8
+    // subcarrier cycles on the 4 fsc grid) against the quadrature pair per
+    // line.  The burst inverts line to line, so odd lines are flipped before
+    // the amplitude-weighted circular statistics.
+    {
+        static constexpr float lut_cos[4] = {1, 0, -1, 0};
+        static constexpr float lut_sin[4] = {0, 1, 0, -1};
+        std::vector<std::pair<float, float>> line_vecs;
+        line_vecs.reserve(422);
+        double sum_i = 0, sum_q = 0;
+        for (int field_start : {40, 303}) {
+            for (int row = field_start; row <= field_start + 210; row++) {
+                float bi = 0, bq = 0;
+                for (int x = 78; x < 110; x++) {
+                    float v = data[row * NTSC_TOTAL_WIDTH + x];
+                    bi += v * lut_cos[x % 4];
+                    bq += v * lut_sin[x % 4];
+                }
+                if (row & 1) { bi = -bi; bq = -bq; }
+                line_vecs.emplace_back(bi, bq);
+                sum_i += bi;
+                sum_q += bq;
+            }
+        }
+        est.burst_phase = (float)atan2(sum_q, sum_i);
+        double var_sum = 0, w_sum = 0;
+        for (auto [bi, bq] : line_vecs) {
+            double a = std::hypot(bi, bq);
+            if (a <= 0)
+                continue;
+            double d = std::remainder(atan2(bq, bi) - est.burst_phase, 2 * M_PI);
+            var_sum += a * d * d;
+            w_sum += a;
+        }
+        est.burst_phase_sigma = w_sum > 0 ? (float)sqrt(var_sum / w_sum) : 0.0f;
+    }
     return est;
 }
 

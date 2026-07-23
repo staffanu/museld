@@ -54,6 +54,7 @@ static void runPlayer(Logger &log,
                       bool full_screen,
                       bool start_paused,
                       Decoder::FieldInterpolationMode initial_field_interpolation_mode,
+                      bool initial_use_3d_comb,
                       DropoutMode dropout_mode,
                       bool efm_audio,
                       bool benchmark_shaders,
@@ -84,6 +85,7 @@ static void runPlayer(Logger &log,
         PlayerState state;
         state.paused_countdown = start_paused ? 5 : 0;
         state.field_interpolation_mode = initial_field_interpolation_mode;
+        state.use_3d_comb = initial_use_3d_comb;
 
         OsdOverlay osd;
         FrameBlitter blitter;
@@ -120,6 +122,7 @@ static void runPlayer(Logger &log,
                     state.field_interpolation_mode,
                     redo,
                     state.enable_non_linear,
+                    state.use_3d_comb,
                     dropout_mode,
                     output_yuv,
             };
@@ -218,7 +221,7 @@ template<class InputBlock>
 void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, FrameReader<InputBlock> &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
                   bool start_paused, Decoder::FieldInterpolationMode field_interpolation_mode,
-                  bool decode_video, DropoutMode dropout_mode,
+                  bool use_3d_comb, bool decode_video, DropoutMode dropout_mode,
                   bool decode_audio, bool efm_audio, bool benchmark_shaders,
                   MuseAdaptiveEqualizer::Mode eq_mode, float eq_alpha,
                   float tint_degrees, float saturation,
@@ -333,7 +336,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         const double seconds_per_iteration = (decode_all_fields ? 1 : 2) / fields_per_second;
 
         runPlayer(log, manager, *decoder, reader_controls, window, full_screen, start_paused,
-                  field_interpolation_mode, dropout_mode, efm_audio, benchmark_shaders,
+                  field_interpolation_mode, use_3d_comb, dropout_mode, efm_audio, benchmark_shaders,
                   output_filename.has_value(),
                   vfw, audio_playback.get(), executable_dir,
                   subtitles_path, subtitle_font_path,
@@ -374,6 +377,7 @@ int main(int argc, char *argv[]) {
     double initial_seek_seconds = 0;
     bool start_paused = false;
     auto field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
+    bool use_3d_comb = true;
     optional<string> export_frame_filename; // save one frame as PNG and quit
     double export_frame_at_seconds = 0;     // stream position of the exported frame (like --seek)
     optional<string> muse_output_filename; // always written as little endian unsigned short values
@@ -437,6 +441,9 @@ int main(int argc, char *argv[]) {
         else if (name == "intra-field") field_interpolation_mode = Decoder::FieldInterpolationMode::eForceIntraField;
         else if (name == "inter-frame") field_interpolation_mode = Decoder::FieldInterpolationMode::eForceInterFrame;
         else throw std::runtime_error(std::format("Unknown --field-interpolation {} (expected normal|intra-field|inter-frame)", name));
+    });
+    options.emplace_back("--no-3d-comb", [&] () mutable -> void {
+        use_3d_comb = false;
     });
     options.emplace_back("--pause", [&] () mutable -> void {
         start_paused = true;
@@ -595,7 +602,7 @@ int main(int argc, char *argv[]) {
                                         input_sample_frequency, initial_seek_seconds, benchmark_shaders, efm_audio,
                                         muse_output_filename);
                         process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                                     full_screen, no_sync, start_paused, field_interpolation_mode, decode_video, dropout_mode, decode_audio,
+                                                     full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, decode_video, dropout_mode, decode_audio,
                                                      efm_audio,
                                                      benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitles_path, subtitle_font_path,
@@ -607,7 +614,7 @@ int main(int argc, char *argv[]) {
                         auto *reader = new PhaseCorrect16MHzFrameReader(
                                 log, *it, input_format, initial_seek_seconds, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                     full_screen, no_sync, start_paused, field_interpolation_mode, decode_video, dropout_mode, decode_audio,
+                                     full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, decode_video, dropout_mode, decode_audio,
                                      efm_audio, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitles_path, subtitle_font_path,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds);
@@ -621,7 +628,7 @@ int main(int argc, char *argv[]) {
                                 input_sample_frequency, initial_seek_seconds, input_type == eMuseRf, benchmark_shaders,
                                 efm_audio, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                     full_screen, no_sync, start_paused, field_interpolation_mode, decode_video, dropout_mode, decode_audio,
+                                     full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, decode_video, dropout_mode, decode_audio,
                                      efm_audio, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitles_path, subtitle_font_path,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds);

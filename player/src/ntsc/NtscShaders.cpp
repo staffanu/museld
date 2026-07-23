@@ -21,7 +21,9 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
                      createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH)}),
   m_field_V_buffers({createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH),
                      createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH)}),
-  m_raw_motion_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH)),
+  m_raw_past_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH)),
+  m_raw_future_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH)),
+  m_future_movement_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH)),
   m_current_movement_buffer_index(0),
   m_movement_buffers({ createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH),
                      createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH) }),
@@ -51,15 +53,15 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
         VulkanUtil::loadSpirv(executable_dir, "ntsc_detect_color_burst_phase.comp"), Size(NTSC_TOTAL_HEIGHT)));
   m_decode_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_decode_single_field",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 6,
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 8,
           VulkanUtil::loadSpirv(executable_dir, "ntsc_decode_single_field.comp"), Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT)));
   m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_detect_motion",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 4,
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 4,
           VulkanUtil::loadSpirv(executable_dir, "ntsc_detect_motion.comp"), Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2)));
   m_combine_still_and_moving_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_combine_still_and_moving",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eImage, eBuffer, eBuffer, eBuffer},
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eImage, eBuffer, eBuffer, eBuffer},
           sizeof(uint32_t) * 4,
           VulkanUtil::loadSpirv(executable_dir, "ntsc_combine_still_and_moving.comp"), Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2)));
 }
@@ -89,29 +91,41 @@ void NtscShaders::detectColorBurstPhase(musevk::CommandBuffer &sq, NtscFrame *fr
   sq.enqueueComputeShader<uint32_t>(m_detect_color_burst_phase_algo, {});
 }
 
-void NtscShaders::decodeSingleField(CommandBuffer &sq, NtscFieldView &field, DropoutMode dropout_mode,
-                                    float rot_re, float rot_im, float level_floor, float level_ceiling) {
+void NtscShaders::decodeSingleField(CommandBuffer &sq, NtscFieldView &field,
+                                    std::shared_ptr<musevk::VulkanBuffer> const &prev_frame,
+                                    std::shared_ptr<musevk::VulkanBuffer> const &next_frame,
+                                    std::shared_ptr<musevk::VulkanBuffer> const &prev_burst,
+                                    std::shared_ptr<musevk::VulkanBuffer> const &next_burst,
+                                    DropoutMode dropout_mode, bool use_3d_comb,
+                                    float rot_re, float rot_im, float level_floor, float level_ceiling,
+                                    float chroma_sel_floor) {
   int field_parity = field.m_field_parity;
 
   m_decode_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, field.m_burst_phase_data,
       m_field_Y_buffers[field_parity], m_field_U_buffers[field_parity], m_field_V_buffers[field_parity],
-      field.m_dropout_data});
+      field.m_dropout_data, prev_frame, next_frame,
+      m_movement_buffers[m_current_movement_buffer_index], m_future_movement_buffer,
+      prev_burst, next_burst});
   sq.enqueueComputeShader<uint32_t>(m_decode_single_field_algo,
       { (uint32_t)field_parity,
         dropout_mode == DropoutMode::eNormal ? 0u : dropout_mode == DropoutMode::eDisabled ? 1u : 2u,
+        use_3d_comb ? 1u : 0u,
         std::bit_cast<uint32_t>(rot_re), std::bit_cast<uint32_t>(rot_im),
-        std::bit_cast<uint32_t>(level_floor), std::bit_cast<uint32_t>(level_ceiling) });
+        std::bit_cast<uint32_t>(level_floor), std::bit_cast<uint32_t>(level_ceiling),
+        std::bit_cast<uint32_t>(chroma_sel_floor) });
 }
 
 void NtscShaders::detectMotion(CommandBuffer &sq,
+                               std::shared_ptr<musevk::VulkanBuffer> const &frame_next,
                                std::shared_ptr<musevk::VulkanBuffer> const &frame0,
                                std::shared_ptr<musevk::VulkanBuffer> const &frame1,
                                std::shared_ptr<musevk::VulkanBuffer> const &frame2,
                                bool use_prev_movement, float motion_none, float motion_full) {
     int out = 1 - m_current_movement_buffer_index; // the other buffer holds the previous mask
     m_detect_motion_algo->updateBufferDescriptorsInSet(0,
-        {frame0, frame1, frame2, m_raw_motion_buffer, m_movement_buffers[m_current_movement_buffer_index],
-         m_movement_buffers[out]});
+        {frame_next, frame0, frame1, frame2, m_raw_past_buffer, m_raw_future_buffer,
+         m_movement_buffers[m_current_movement_buffer_index],
+         m_movement_buffers[out], m_future_movement_buffer});
     for (uint32_t phase : {1u, 2u})
         sq.enqueueComputeShader<uint32_t>(m_detect_motion_algo,
             { phase, use_prev_movement ? 1u : 0u,
@@ -129,7 +143,7 @@ void NtscShaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field
           0,
           {m_field_Y_buffers[0], m_field_U_buffers[0], m_field_V_buffers[0],
            m_field_Y_buffers[1], m_field_U_buffers[1], m_field_V_buffers[1],
-           m_movement_buffers[m_current_movement_buffer_index], m_image_out,
+           m_movement_buffers[m_current_movement_buffer_index], m_future_movement_buffer, m_image_out,
            m_image_Y_out, m_image_U_out, m_image_V_out});
   sq.enqueueComputeShader(m_combine_still_and_moving_algo,
                           vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u, field_parity, output_yuv ? 1u : 0u});

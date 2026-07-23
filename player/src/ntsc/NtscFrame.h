@@ -23,6 +23,12 @@ public:
         float sigma_sync;     // sync tip windows
         float blanking_level; // robust blanking level, for tracking wander
         float white_flag_level; // 100 IRE white flag level, -1 when no VBI line qualified
+        // Colour burst phase against the sampling grid (line-alternation
+        // unwrapped): the amplitude-weighted circular mean over the picture
+        // lines and the spread around it.  The frame-to-frame mean tracks the
+        // sampling phase coherence the 3D comb depends on.
+        float burst_phase;       // radians
+        float burst_phase_sigma; // radians
     };
     static NoiseEstimate EstimateNoise(float const *data);
 

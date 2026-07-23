@@ -40,21 +40,27 @@ layout(set = 0, binding = 5) buffer readonly restrict field1_V_buffer {
     float16_t field1_V[][NTSC_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 6) buffer readonly restrict movement_buffer {
-    float16_t movement_data[][NTSC_Y_BUF_WIDTH];
+// Directional motion masks: past covers motion before the displayed frame's
+// fields were captured, future motion after (from the lookahead frame)
+layout(set = 0, binding = 6) buffer readonly restrict past_movement_buffer {
+    float16_t past_movement[][NTSC_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 7, rgba16f) uniform writeonly image2D frame_out_image;
+layout(set = 0, binding = 7) buffer readonly restrict future_movement_buffer {
+    float16_t future_movement[][NTSC_Y_BUF_WIDTH];
+};
 
-layout(set = 0, binding = 8) buffer writeonly frame_out_y_buffer {
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D frame_out_image;
+
+layout(set = 0, binding = 9) buffer writeonly frame_out_y_buffer {
     uint16_t frame_out_Y[][NTSC_Y_BUF_WIDTH];
 };
 
-layout(set = 0, binding = 9) buffer writeonly frame_out_u_buffer {
+layout(set = 0, binding = 10) buffer writeonly frame_out_u_buffer {
     uint16_t frame_out_U[][NTSC_Y_BUF_WIDTH / 2];
 };
 
-layout(set = 0, binding = 10) buffer writeonly frame_out_v_buffer {
+layout(set = 0, binding = 11) buffer writeonly frame_out_v_buffer {
     uint16_t frame_out_V[][NTSC_Y_BUF_WIDTH / 2];
 };
 
@@ -88,9 +94,15 @@ void main() {
         uint n1 = uint(clamp(int(row / 2) + (field_parity == 0 ? 1 : -1), 0, NTSC_FIELD_HEIGHT - 1));
         f16vec3 bob = 0.5hf * (currentField(n0, col) + currentField(n1, col));
         f16vec3 weave = previousField(row / 2, col);
+        // Each field consults the evidence window that brackets its weave:
+        // field 0 weaves the previous frame's field 1, whose staleness
+        // interval lies in the past window; field 1 weaves this frame's
+        // field 0, whose staleness interval [field 0, field 1] is only
+        // covered by the lookahead differences.
         float16_t m = force_field_only != 0 ? 1.hf
                     : force_weave_only != 0 ? 0.hf
-                    : movement_data[row][col];
+                    : field_parity == 0 ? past_movement[row][col]
+                                        : future_movement[row][col];
         yuv = mix(weave, bob, m);
     }
     float16_t Y = yuv.x, U = yuv.y, V = yuv.z;
