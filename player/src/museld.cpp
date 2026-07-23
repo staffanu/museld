@@ -64,6 +64,7 @@ static void runPlayer(Logger &log,
                       const std::optional<std::string> &subtitle_font_path,
                       const std::optional<std::string> &export_frame_filename,
                       double export_frame_after_seconds,
+                      double write_duration_seconds,
                       double seconds_per_iteration) {
     vk::Device &device = manager.getDevice();
 
@@ -153,11 +154,15 @@ static void runPlayer(Logger &log,
             }
 
 #ifdef HAVE_LIBAV
-            if (vfw)
+            if (vfw) {
                 vfw->addVideoFrameWithAudio(images.out_Y, images.out_U, images.out_V,
                                             state.last_decoded.audio_mode,
                                             state.last_decoded.audio_sample_count,
                                             state.last_decoded.audio_samples);
+                // Breaking out finalizes the file in the writer's destructor
+                if (state.field_count * seconds_per_iteration >= write_duration_seconds)
+                    break;
+            }
 #endif
 
             if (audio_playback && state.last_decoded.audio_sample_count != 0
@@ -219,7 +224,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   optional<string> const &subtitles_path,
                   optional<string> const &subtitle_font_path,
                   optional<string> const &export_frame_filename,
-                  double export_frame_after_seconds) {
+                  double export_frame_after_seconds,
+                  double write_duration_seconds) {
     glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -256,15 +262,18 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     if (output_filename) {
         VideoColorStandard color_standard;
         int dar_num, dar_den; // display aspect ratio
+        int fps_num, fps_den;
         if constexpr (std::is_same<InputBlock, MuseInputBlock>::value) {
             color_standard = VideoColorStandard::eBt709;
             dar_num = 16; dar_den = 9;
+            fps_num = decode_all_fields ? 60 : 30; fps_den = 1;
         } else {
             color_standard = VideoColorStandard::eSmpte170m;
             dar_num = 4; dar_den = 3;
+            fps_num = decode_all_fields ? 60000 : 30000; fps_den = 1001;
         }
         vfw = make_unique<VideoFileWriter>(output_filename.value(), log,
-                                           initial_w, initial_h, decode_all_fields ? 60 : 30,
+                                           initial_w, initial_h, fps_num, fps_den,
                                            write_preset, color_standard, dar_num, dar_den);
         if (!vfw->init())
             throw runtime_error("Cannot initialize output encoder");
@@ -325,7 +334,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   output_filename.has_value(),
                   vfw, audio_playback.get(), executable_dir,
                   subtitles_path, subtitle_font_path,
-                  export_frame_filename, export_frame_after_seconds, seconds_per_iteration);
+                  export_frame_filename, export_frame_after_seconds, write_duration_seconds, seconds_per_iteration);
     }
 
 #ifdef HAVE_LIBAV
@@ -366,6 +375,7 @@ int main(int argc, char *argv[]) {
     optional<string> muse_output_filename; // always written as little endian unsigned short values
     optional<string> output_filename; // container/codec selected by --write-preset
     VideoWriterPreset write_preset = VideoWriterPreset::eStandard;
+    double write_duration_seconds = std::numeric_limits<double>::infinity();
     bool decode_video = true;
     DropoutMode dropout_mode = DropoutMode::eNormal;
     bool decode_audio = true;
@@ -441,6 +451,9 @@ int main(int argc, char *argv[]) {
         if      (name == "standard") write_preset = VideoWriterPreset::eStandard;
         else if (name == "archival") write_preset = VideoWriterPreset::eArchival;
         else throw std::runtime_error(std::format("Unknown --write-preset {} (expected standard|archival)", name));
+    });
+    options.emplace_back("--write-duration", [&] () mutable -> void {
+        write_duration_seconds = stod(*(it++));
     });
     options.emplace_back("--no-video", [&] () mutable -> void {
         decode_video = false;
@@ -575,7 +588,7 @@ int main(int argc, char *argv[]) {
                                                      efm_audio,
                                                      benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitles_path, subtitle_font_path,
-                                     export_frame_filename, export_frame_after_seconds);
+                                     export_frame_filename, export_frame_after_seconds, write_duration_seconds);
                         delete reader;
                         break;
                     }
@@ -586,7 +599,7 @@ int main(int argc, char *argv[]) {
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
                                      efm_audio, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitles_path, subtitle_font_path,
-                                     export_frame_filename, export_frame_after_seconds);
+                                     export_frame_filename, export_frame_after_seconds, write_duration_seconds);
                         delete reader;
                         break;
                     }
@@ -600,7 +613,7 @@ int main(int argc, char *argv[]) {
                                      full_screen, no_sync, start_paused, decode_video, dropout_mode, decode_audio,
                                      efm_audio, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitles_path, subtitle_font_path,
-                                     export_frame_filename, export_frame_after_seconds);
+                                     export_frame_filename, export_frame_after_seconds, write_duration_seconds);
                         delete reader;
                         break;
                     }
