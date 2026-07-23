@@ -27,6 +27,31 @@ layout(set = 0, binding = 2) buffer writeonly frame_out_buffer {
     float16_t frame_out[][NTSC_TOTAL_WIDTH];
 };
 
+// Motion masks of the previous frame (this frame's are not computed yet);
+// their future side covers the differences against this frame, which is
+// exactly the evidence needed: a real dropout's garbage never matches the
+// neighbouring frames, so it always registers as motion there, while a
+// false detection on static content (subtitle strokes) shows none -- and
+// concealing those from the surrounding lines damages the picture more
+// than the marginal defect it was flagged for.
+layout(set = 0, binding = 3) buffer readonly past_motion_buffer {
+    float16_t past_motion[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 4) buffer readonly future_motion_buffer {
+    float16_t future_motion[][NTSC_Y_BUF_WIDTH];
+};
+
+float motion_at(int r, int c) {
+    int field = r >= 263 ? 1 : 0;
+    int fr = r - 22 - 263 * field;
+    if (fr < 0 || fr >= NTSC_FIELD_HEIGHT)
+        return 1.0; // outside the picture rows: keep the old behavior
+    int orow = fr * 2 + field;
+    int oc = clamp(c - NTSC_FIELD_START_X, 0, NTSC_Y_BUF_WIDTH - 1);
+    return max(float(past_motion[orow][oc]), float(future_motion[orow][oc]));
+}
+
 // LaserVision video de-emphasis (IEC 60857 Figure 9): flat to omega1 = 1/320 ns,
 // -6 dB/octave to omega2 = 1/120 ns, -8.5 dB above.  Bilinear transform of
 // D(s) = (1 + s 120ns)/(1 + s 320ns) on the line-locked 4 fsc grid (which makes
@@ -41,7 +66,11 @@ const float deemphasis[24] = float[](
     0.00268321, 0.00215520, 0.00173110, 0.00139046, 0.00111684, 0.00089707);
 
 bool is_dropout(int r, int c) {
-    return dropout_data[r][clamp(c, 0, NTSC_TOTAL_WIDTH - 1)] != 0;
+    int cc = clamp(c, 0, NTSC_TOTAL_WIDTH - 1);
+    // A flag without temporal deviation is content, not a dropout.  The gate
+    // sits low: shallow real dropouts deviate modestly, while static content
+    // (subtitle text) measures essentially zero.
+    return dropout_data[r][cc] != 0 && motion_at(r, cc) > 0.1;
 }
 
 // Donor lines are only refused for core detections (1), not for the

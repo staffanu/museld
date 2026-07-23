@@ -45,7 +45,7 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
           VulkanUtil::loadSpirv(executable_dir, "ntsc_extend_dropouts.comp"), Size(NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT)));
   m_copy_to_frame_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_copy_to_frame",
-          {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
           VulkanUtil::loadSpirv(executable_dir, "ntsc_copy_to_frame.comp"), Size(NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT)));
   m_detect_color_burst_phase_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
         "ntsc_detect_color_burst_phase",
@@ -53,7 +53,7 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
         VulkanUtil::loadSpirv(executable_dir, "ntsc_detect_color_burst_phase.comp"), Size(NTSC_TOTAL_HEIGHT)));
   m_decode_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_decode_single_field",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 8,
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 8,
           VulkanUtil::loadSpirv(executable_dir, "ntsc_decode_single_field.comp"), Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT)));
   m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
           "ntsc_detect_motion",
@@ -80,7 +80,8 @@ void NtscShaders::copyToFrame(musevk::CommandBuffer &sq, std::shared_ptr<musevk:
   std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane, std::shared_ptr<musevk::VulkanBuffer> const &buffer,
   DropoutMode dropout_mode, float level_offset_v, float level_scale) {
 
-  m_copy_to_frame_algo->updateBufferDescriptorsInSet(0, {video_input, dropout_plane, buffer});
+  m_copy_to_frame_algo->updateBufferDescriptorsInSet(0, {video_input, dropout_plane, buffer,
+      m_movement_buffers[m_current_movement_buffer_index], m_future_movement_buffer});
   sq.enqueueComputeShader<uint32_t>(m_copy_to_frame_algo,
       { dropout_mode == DropoutMode::eNormal ? 0u : dropout_mode == DropoutMode::eDisabled ? 1u : 2u,
         std::bit_cast<uint32_t>(level_offset_v), std::bit_cast<uint32_t>(level_scale) });
@@ -96,6 +97,8 @@ void NtscShaders::decodeSingleField(CommandBuffer &sq, NtscFieldView &field,
                                     std::shared_ptr<musevk::VulkanBuffer> const &next_frame,
                                     std::shared_ptr<musevk::VulkanBuffer> const &prev_burst,
                                     std::shared_ptr<musevk::VulkanBuffer> const &next_burst,
+                                    std::shared_ptr<musevk::VulkanBuffer> const &prev_dropout,
+                                    std::shared_ptr<musevk::VulkanBuffer> const &next_dropout,
                                     DropoutMode dropout_mode, bool use_3d_comb,
                                     float rot_re, float rot_im, float level_floor, float level_ceiling,
                                     float chroma_sel_floor) {
@@ -105,7 +108,7 @@ void NtscShaders::decodeSingleField(CommandBuffer &sq, NtscFieldView &field,
       m_field_Y_buffers[field_parity], m_field_U_buffers[field_parity], m_field_V_buffers[field_parity],
       field.m_dropout_data, prev_frame, next_frame,
       m_movement_buffers[m_current_movement_buffer_index], m_future_movement_buffer,
-      prev_burst, next_burst});
+      prev_burst, next_burst, prev_dropout, next_dropout});
   sq.enqueueComputeShader<uint32_t>(m_decode_single_field_algo,
       { (uint32_t)field_parity,
         dropout_mode == DropoutMode::eNormal ? 0u : dropout_mode == DropoutMode::eDisabled ? 1u : 2u,
