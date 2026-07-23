@@ -43,6 +43,8 @@ public:
                          std::shared_ptr<musevk::VulkanBuffer> const &next_frame,
                          std::shared_ptr<musevk::VulkanBuffer> const &prev_burst,
                          std::shared_ptr<musevk::VulkanBuffer> const &next_burst,
+                         std::shared_ptr<musevk::VulkanBuffer> const &prev_dropout,
+                         std::shared_ptr<musevk::VulkanBuffer> const &next_dropout,
                          DropoutMode dropout_mode, bool use_3d_comb,
                          float rot_re, float rot_im, float level_floor, float level_ceiling,
                          float chroma_sel_floor);

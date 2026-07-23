@@ -67,6 +67,14 @@ layout(set = 0, binding = 11) buffer readonly next_burst_phase_buffer {
     f16vec2 next_phase_data[]; // per-line burst of frame N+1
 };
 
+layout(set = 0, binding = 12) buffer readonly prev_dropout_buffer {
+    uint8_t prev_dropout[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 13) buffer readonly next_dropout_buffer {
+    uint8_t next_dropout[][NTSC_TOTAL_WIDTH];
+};
+
 float16_t cosine_lut[] = { 1.hf, 0.hf, -1.hf, 0.hf };
 float16_t sine_lut[] = { 0.hf, 1.hf, 0.hf, -1.hf };
 
@@ -103,6 +111,27 @@ float16_t comb_luma(uint frame_line, uint next_line, uint frame_col) {
     return 0.25hf * input_frame[frame_line - 1][frame_col]
            + 0.5hf * input_frame[frame_line][frame_col]
            + 0.25hf * input_frame[next_line][frame_col];
+}
+
+// Comb and chroma taps on the neighbour frames, for temporal dropout
+// concealment: a still neighbour's same pixel is a far better donor than
+// the surrounding lines.  The donor's chroma is demodulated against its own
+// frame's burst reference, which absorbs the frame-to-frame subcarrier
+// inversion and the sampling phase jitter in one step.
+float16_t chroma_sample_prev(uint fl, uint nl, uint fc) {
+    return -0.25hf * prev_frame[fl - 1][fc] + 0.5hf * prev_frame[fl][fc] - 0.25hf * prev_frame[nl][fc];
+}
+
+float16_t comb_luma_prev(uint fl, uint nl, uint fc) {
+    return 0.25hf * prev_frame[fl - 1][fc] + 0.5hf * prev_frame[fl][fc] + 0.25hf * prev_frame[nl][fc];
+}
+
+float16_t chroma_sample_next(uint fl, uint nl, uint fc) {
+    return -0.25hf * next_frame[fl - 1][fc] + 0.5hf * next_frame[fl][fc] - 0.25hf * next_frame[nl][fc];
+}
+
+float16_t comb_luma_next(uint fl, uint nl, uint fc) {
+    return 0.25hf * next_frame[fl - 1][fc] + 0.5hf * next_frame[fl][fc] + 0.25hf * next_frame[nl][fc];
 }
 
 // Sampling phase correction for the temporal pairs: the DPLL grid jitters a
@@ -218,7 +247,13 @@ void main() {
         float16_t y = dx == 0 ? Y : comb_luma(frame_line, next_line, uint(int(frame_col) + dx));
         outside += (y < float16_t(level_floor) || y > float16_t(level_ceiling)) ? 1 : 0;
     }
-    if (dropout_mode != 1 && outside >= 3) {
+    // An illegal level at a pixel the motion masks call still is picture
+    // content, not a dropout: real dropout garbage deviates from the
+    // neighbouring frames and registers as motion.  This keeps the sporadic
+    // threshold flicker on high-contrast static detail (subtitle strokes
+    // overshoot the ceiling on noise) from being "rescued" into smear.
+    float16_t motion_here = max(past_motion[mask_row][col], future_motion[mask_row][col]);
+    if (dropout_mode != 1 && outside >= 3 && motion_here > 0.1hf) {
         if (dropout_mode == 2) {
             painted = true;
         } else {
@@ -242,14 +277,46 @@ void main() {
 
     // The temporal paths only apply to healthy pixels: concealed or rescued
     // composite has no valid history in the neighbouring frames.
-    bool temporal = use_3d_comb != 0 && !rescued && dropout_data[frame_line][frame_col] == 0;
+    bool own_flagged = dropout_data[frame_line][frame_col] != 0;
+    bool temporal = use_3d_comb != 0 && !rescued && !own_flagged;
+
+    // Temporal dropout concealment: for a flagged pixel whose surroundings
+    // are still, the same pixel of the stiller neighbour frame is a far
+    // better donor than the upstream line average.  The donor is decoded
+    // in place (its own comb taps and its own burst reference); a side is
+    // refused when its motion mask says the content moved or its own
+    // dropout plane flags the same spot, and with both sides refused the
+    // line-average concealment stands.
+    int donor = 0; // 0: none, -1: previous frame, +1: next frame
+    if (dropout_mode == 0 && !rescued && own_flagged && motion_here > 0.1hf) {
+        float16_t mp = past_motion[mask_row][col];
+        float16_t mf = future_motion[mask_row][col];
+        for (int attempt = 0; attempt < 2 && donor == 0; attempt++) {
+            bool try_prev = (mp <= mf) == (attempt == 0);
+            if ((try_prev ? mp : mf) > 0.5hf)
+                continue;
+            if ((try_prev ? prev_dropout[frame_line][frame_col] : next_dropout[frame_line][frame_col]) != 0)
+                continue;
+            donor = try_prev ? -1 : 1;
+        }
+    }
 
     // Gather both chroma estimates over the demodulation window and blend by
     // the envelope comparison (the temporal candidates are already
     // motion-gated per column, so a moving column degenerates to spatial and
     // pulls the weight down with it).
     float16_t c_src[19];
-    if (temporal) {
+    f16vec2 burst_ref = phase_data[frame_line];
+    if (donor != 0) {
+        for (int n = 0; n < 19; n++) {
+            uint fc = uint(int(frame_col) + n - 9);
+            c_src[n] = donor < 0 ? chroma_sample_prev(frame_line, next_line, fc)
+                                 : chroma_sample_next(frame_line, next_line, fc);
+        }
+        Y = donor < 0 ? comb_luma_prev(frame_line, next_line, frame_col)
+                      : comb_luma_next(frame_line, next_line, frame_col);
+        burst_ref = donor < 0 ? prev_phase_data[frame_line] : next_phase_data[frame_line];
+    } else if (temporal) {
         f16vec2 rot_p0 = pair_rotation(prev_phase_data[frame_line], phase_data[frame_line]);
         f16vec2 rot_n0 = pair_rotation(next_phase_data[frame_line], phase_data[frame_line]);
         uint nl = row + 1 < NTSC_FIELD_HEIGHT ? frame_line + 1 : frame_line;
@@ -306,8 +373,8 @@ void main() {
     // rotate the c vector by the conjugate of the burst reference, which also
     // carries the burst-referenced gain (a + ib)(c + id) = ac-bd + i(bc+ad)
 
-    float16_t b_re = phase_data[frame_line].x;
-    float16_t b_im = phase_data[frame_line].y;
+    float16_t b_re = burst_ref.x;
+    float16_t b_im = burst_ref.y;
 
     float16_t I = c_re * b_re + c_im * b_im;
     float16_t Q = c_im * b_re - c_re * b_im;
@@ -321,7 +388,7 @@ void main() {
     float16_t V = I * float16_t(rot_re) - Q * float16_t(rot_im);
     float16_t U = Q * float16_t(rot_re) + I * float16_t(rot_im);
 
-    if (dropout_mode == 2 && (painted || dropout_data[frame_line][frame_col] != 0)) {
+    if (dropout_mode == 2 && (painted || (dropout_data[frame_line][frame_col] != 0 && motion_here > 0.1hf))) {
         // paint detected dropouts pure red (inverts through the RGB matrix
         // in the combine shader to (1, 0, 0))
         Y = 0.299hf;

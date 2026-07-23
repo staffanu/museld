@@ -281,6 +281,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[1]->get_field(decoded_field_index),
                                     m_frames[2]->data(), m_frames[0]->data(),
                                     m_frames[2]->burst_phase_data(), m_frames[0]->burst_phase_data(),
+                                    m_frames[2]->dropout_data(), m_frames[0]->dropout_data(),
                                     dropout_mode, use_3d_comb, m_rot_re, m_rot_im, level_floor, level_ceiling,
                                     15.0f * sigma_out);
         // Weaving the still parts needs the previous field's decode, which
