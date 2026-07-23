@@ -211,6 +211,8 @@ void MuseRfDemodulator::demodulate() {
     constexpr int c_timing_report_blocks = 256;
     const double block_budget_ms = MuseDemodulatedBlock::c_sample_block_size / (double)m_sample_frequency * 1e3;
     double read_ms = 0, acquire_ms = 0, record_ms = 0, submit_ms = 0, efm_ms = 0, gpu_wait_ms = 0;
+    // EXPERIMENT (pi5-investigation): break the record phase down further
+    double rec_hostwrite_ms = 0, rec_shaders_ms = 0, rec_dropcopy_ms = 0, rec_hostread_ms = 0, rec_tailcopy_ms = 0;
     int timed_blocks = 0;
     auto ms_between = [](timing_clock::time_point a, timing_clock::time_point b) {
         return std::chrono::duration<double, std::milli>(b - a).count();
@@ -266,6 +268,7 @@ void MuseRfDemodulator::demodulate() {
 
         // Make the data available on the GPU; this is necessary in case we didn't find a memory type good for both host writes and shader reads
         input_buffer->synchronizeHostWrites(*command_buffer);
+        auto t_after_host_writes = timing_clock::now();  // EXPERIMENT (pi5-investigation)
 
         // Run the input signal through the bandpass filter that also converts the signal to an analytic signal
         input_fir_filter_shader->updateWorkgroup(Size(MuseDemodulatedBlock::c_sample_block_size));
@@ -305,6 +308,8 @@ void MuseRfDemodulator::demodulate() {
                                          (uint32_t)lowpass_filter_size - 1, (uint32_t)c_dropout_delay, MuseDemodulatedBlock::c_video_decimation_rate,
                                          std::bit_cast<uint32_t>(-2.2f * 112.f + 128.f), std::bit_cast<uint32_t>(5.5f * 112.f + 128.f)});
 
+        auto t_after_shaders = timing_clock::now();  // EXPERIMENT (pi5-investigation)
+
         // Barrier: ensure all compute shader writes are visible to the subsequent transfer operations
         command_buffer->enqueueBarrier(vk::AccessFlagBits::eShaderWrite,
                                        vk::AccessFlagBits::eTransferRead,
@@ -314,9 +319,12 @@ void MuseRfDemodulator::demodulate() {
         // Copy data from dropout detection to the output buffer before writing over the first part of the buffer below
         command_buffer->enqueueCopyBuffer(*dropout_buffer, *block->dropouts, 0, 0, MuseDemodulatedBlock::c_video_block_size * sizeof(uint8_t));
 
+        auto t_after_dropout_copy = timing_clock::now();  // EXPERIMENT (pi5-investigation)
+
         // Ensure data can be read from the host later
         block->video_data->synchronizeForHostRead(*command_buffer);
         block->dropouts->synchronizeForHostRead(*command_buffer);
+        auto t_after_host_read_sync = timing_clock::now();  // EXPERIMENT (pi5-investigation)
 
         // After filtering, we need to copy the last data from the input buffers to their start,
         // since the filter output is shorter than the input.  The same is true for the demodulation input,
@@ -350,6 +358,11 @@ void MuseRfDemodulator::demodulate() {
         read_ms += ms_between(t_loop_start, t_after_read);
         acquire_ms += ms_between(t_after_read, t_after_acquire);
         record_ms += ms_between(t_after_acquire, t_after_record);
+        rec_hostwrite_ms += ms_between(t_after_acquire, t_after_host_writes);
+        rec_shaders_ms   += ms_between(t_after_host_writes, t_after_shaders);
+        rec_dropcopy_ms  += ms_between(t_after_shaders, t_after_dropout_copy);
+        rec_hostread_ms  += ms_between(t_after_dropout_copy, t_after_host_read_sync);
+        rec_tailcopy_ms  += ms_between(t_after_host_read_sync, t_after_record);
         submit_ms += ms_between(t_after_record, t_after_submit);
         efm_ms += ms_between(t_after_submit, t_after_efm);
         gpu_wait_ms += ms_between(t_after_efm, t_after_gpu_wait);
@@ -361,7 +374,14 @@ void MuseRfDemodulator::demodulate() {
                     record_ms / timed_blocks, submit_ms / timed_blocks, efm_ms / timed_blocks,
                     gpu_wait_ms / timed_blocks,
                     (read_ms + acquire_ms + record_ms + submit_ms + efm_ms + gpu_wait_ms) / timed_blocks));
+            m_log.info(ePerformance, std::format(
+                    "  record breakdown: host-write sync {:.2f} ms, shader enqueues {:.2f} ms, "
+                    "dropout copy {:.2f} ms, host-read sync {:.2f} ms, tail copies {:.2f} ms",
+                    rec_hostwrite_ms / timed_blocks, rec_shaders_ms / timed_blocks,
+                    rec_dropcopy_ms / timed_blocks, rec_hostread_ms / timed_blocks,
+                    rec_tailcopy_ms / timed_blocks));
             read_ms = acquire_ms = record_ms = submit_ms = efm_ms = gpu_wait_ms = 0;
+            rec_hostwrite_ms = rec_shaders_ms = rec_dropcopy_ms = rec_hostread_ms = rec_tailcopy_ms = 0;
             timed_blocks = 0;
         }
 

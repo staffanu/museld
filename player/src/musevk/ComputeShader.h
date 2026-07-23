@@ -55,10 +55,18 @@ namespace musevk {
             return m_buffers[descriptor_set_index];
         }
 
+        // EXPERIMENT (pi5-investigation): the default local workgroup sizes assume a device that
+        // allows 1024 invocations per group.  V3D (Raspberry Pi) allows only 256, so record the
+        // device limit here and clamp against it.  Set once, before any shader is created.
+        static void setMaxWorkgroupInvocations(uint32_t max_invocations) {
+            s_max_workgroup_invocations = max_invocations;
+        }
+
     private:
         friend class CommandBuffer;
         static const Size c_default_workgroup_size;
         static const Size c_default_linear_workgroup_size;
+        static uint32_t s_max_workgroup_invocations;
 
         void initialize(const std::vector<MemoryObjectType> &buffer_types, int max_descriptor_sets);
 
