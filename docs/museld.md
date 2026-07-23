@@ -65,6 +65,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--write-muse16 <file>` | Re-encode input to the 16.2 MHz format (see below) |
 | `--write <file>` | Write decoded video and audio to a media file (requires FFmpeg ≥ 7.1) |
 | `--write-preset <preset>` | Media file preset: `standard` (H.264 + AAC in MP4, default) or `archival` (lossless FFV1 16-bit + PCM in Matroska). Container and codecs come from the preset, not the filename extension. |
+| `--write-duration <seconds>` | Stop after writing this much video and finalize the file (default: run to the end of the input) |
 | `--log <spec>` | Log level per category, e.g. `A3V4` (Audio=Info, Video=Debug). Categories: M P A V D I O; levels 0–4 = Off Error Warn Info Debug |
 | `--benchmark-shaders` | Print GPU shader timing statistics |
 | `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |

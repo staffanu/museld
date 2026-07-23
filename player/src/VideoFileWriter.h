@@ -23,14 +23,16 @@ extern "C" {
 
 class VideoFileWriter {
 public:
-    VideoFileWriter(std::string filename, Logger &log, int video_width, int video_height, int video_frame_rate,
+    VideoFileWriter(std::string filename, Logger &log, int video_width, int video_height,
+                    int video_fps_num, int video_fps_den,
                     VideoWriterPreset preset, VideoColorStandard color_standard,
                     int display_aspect_num, int display_aspect_den) :
             m_filename(std::move(filename)),
             m_log(log),
             m_video_width(video_width),
             m_video_height(video_height),
-            m_video_frame_rate(video_frame_rate),
+            m_video_fps_num(video_fps_num),
+            m_video_fps_den(video_fps_den),
             m_preset(preset),
             m_color_standard(color_standard),
             m_display_aspect{display_aspect_num, display_aspect_den},
@@ -112,7 +114,8 @@ private:
     Logger &m_log;
     int m_video_width;
     int m_video_height;
-    int m_video_frame_rate;
+    int m_video_fps_num; // frames per second as a rational, e.g. 60000/1001
+    int m_video_fps_den;
     VideoWriterPreset m_preset;
     VideoColorStandard m_color_standard;
     AVRational m_display_aspect;
