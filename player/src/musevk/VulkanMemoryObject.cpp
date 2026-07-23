@@ -80,7 +80,16 @@ musevk::VulkanMemoryObject::makeMemoryPropertyFlags(HostAccess host_access) {
                             std::make_optional(
                                     vk::MemoryPropertyFlagBits::eHostVisible |
                                     vk::MemoryPropertyFlagBits::eHostCached |
-                                    vk::MemoryPropertyFlagBits::eHostCoherent))
+                                    vk::MemoryPropertyFlagBits::eHostCoherent)),
+
+                    // EXPERIMENT (pi5-investigation): V3D exposes a single memory type with no
+                    // eHostCached, so accept uncached host-visible memory as a last resort.
+                    // Host reads through this mapping are slow.
+                    std::make_pair(
+                            vk::MemoryPropertyFlagBits::eDeviceLocal |
+                            vk::MemoryPropertyFlagBits::eHostVisible |
+                            vk::MemoryPropertyFlagBits::eHostCoherent,
+                            std::nullopt)
             };
         case HostAccess::eHostWrite:
             return {
@@ -117,7 +126,14 @@ musevk::VulkanMemoryObject::makeMemoryPropertyFlags(HostAccess host_access) {
                             std::make_optional(
                                     vk::MemoryPropertyFlagBits::eHostVisible |
                                     vk::MemoryPropertyFlagBits::eHostCached |
-                                    vk::MemoryPropertyFlagBits::eHostCoherent))
+                                    vk::MemoryPropertyFlagBits::eHostCoherent)),
+
+                    // EXPERIMENT (pi5-investigation): see eHostRead above — uncached fallback for V3D.
+                    std::make_pair(
+                            vk::MemoryPropertyFlagBits::eDeviceLocal |
+                            vk::MemoryPropertyFlagBits::eHostVisible |
+                            vk::MemoryPropertyFlagBits::eHostCoherent,
+                            std::nullopt)
             };
         default:
             throw std::runtime_error("Undefined host_access type");

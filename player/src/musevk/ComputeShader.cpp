@@ -9,6 +9,7 @@ using namespace std;
 namespace musevk {
     const Size ComputeShader::c_default_workgroup_size = Size(32, 2, 1);
     const Size ComputeShader::c_default_linear_workgroup_size = Size(1024, 1, 1);
+    uint32_t ComputeShader::s_max_workgroup_invocations = 1024;
 
     ComputeShader::ComputeShader(vk::Device &device,
                                  std::string name,
@@ -57,6 +58,12 @@ namespace musevk {
 
         m_local_workgroup_size = m_workgroup_size.y_size == 1 && m_workgroup_size.z_size == 1 ?
                 c_default_linear_workgroup_size : c_default_workgroup_size;
+
+        // Halve the x extent until the group fits what the device allows (see setMaxWorkgroupInvocations).
+        while (m_local_workgroup_size.x_size * m_local_workgroup_size.y_size * m_local_workgroup_size.z_size
+                       > s_max_workgroup_invocations
+               && m_local_workgroup_size.x_size > 1)
+            m_local_workgroup_size.x_size /= 2;
 
         m_buffers.resize(max_descriptor_sets);
         createShaderModule();

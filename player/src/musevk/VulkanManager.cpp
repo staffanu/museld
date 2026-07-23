@@ -10,6 +10,7 @@
 #include <format>
 #include "VulkanManager.h"
 #include "VulkanBuffer.h"
+#include "ComputeShader.h"
 
 using namespace std;
 
@@ -204,6 +205,7 @@ namespace musevk {
                 m_queue_families = queue_families.value();
                 m_physical_device_properties = properties;
                 m_log.info(eVideo, std::format("Picked device {}", string(properties.deviceName)));
+                ComputeShader::setMaxWorkgroupInvocations(properties.limits.maxComputeWorkGroupInvocations);
                 break;
             }
         }
@@ -274,9 +276,15 @@ namespace musevk {
                                         uniformAndStorageBuffer16BitAccess, shaderFloat16, shaderInt16,
                                         storagePushConstant16));
 
+        // EXPERIMENT (pi5-investigation): 16-bit arithmetic is only needed by the muse/ and
+        // ntsc/ decode shaders; the RF demodulation shaders are all fp32.  Raspberry Pi's V3D
+        // supports 16-bit storage but has no 16-bit ALU, so treat the arithmetic features as
+        // optional here to let the demodulation path run on the real GPU.
+        if (!(shaderFloat16 && shaderInt16 && shaderInt8))
+            m_log.warn(eVideo, "Device lacks 16/8-bit shader arithmetic; decode shaders will not work");
+
         return storageBuffer16BitAccess && uniformAndStorageBuffer8BitAccess
-            && shaderInt8 && uniformAndStorageBuffer16BitAccess
-            && shaderFloat16 && shaderInt16 && storagePushConstant16;
+            && uniformAndStorageBuffer16BitAccess && storagePushConstant16;
     }
 
     bool VulkanManager::checkDeviceExtensionSupport(vk::PhysicalDevice &device) {
@@ -305,10 +313,20 @@ namespace musevk {
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
+        // EXPERIMENT (pi5-investigation): only ask for the 16/8-bit arithmetic features when
+        // the device actually has them — enabling an unsupported feature fails device creation.
+        auto available = m_physical_device.getFeatures2<
+                vk::PhysicalDeviceFeatures2,
+                vk::PhysicalDeviceVulkan11Features,
+                vk::PhysicalDeviceVulkan12Features>();
+        const bool has_float16 = available.get<vk::PhysicalDeviceVulkan12Features>().shaderFloat16;
+        const bool has_int8    = available.get<vk::PhysicalDeviceVulkan12Features>().shaderInt8;
+        const bool has_int16   = available.get<vk::PhysicalDeviceFeatures2>().features.shaderInt16;
+
         auto device_vulkan_12_features = vk::PhysicalDeviceVulkan12Features();
         device_vulkan_12_features.uniformAndStorageBuffer8BitAccess = true;
-        device_vulkan_12_features.shaderFloat16 = true;
-        device_vulkan_12_features.shaderInt8 = true;
+        device_vulkan_12_features.shaderFloat16 = has_float16;
+        device_vulkan_12_features.shaderInt8 = has_int8;
         device_vulkan_12_features.pNext = nullptr;
 
         auto device_vulkan_11_features = vk::PhysicalDeviceVulkan11Features();
@@ -319,7 +337,7 @@ namespace musevk {
 
         auto device_features2 = vk::PhysicalDeviceFeatures2();
         device_features2.pNext = &device_vulkan_11_features;
-        device_features2.features.shaderInt16 = true;
+        device_features2.features.shaderInt16 = has_int16;
 
         vk::DeviceCreateInfo createInfo{};
         createInfo.setQueueCreateInfos(queueCreateInfos);
