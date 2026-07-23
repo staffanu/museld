@@ -40,6 +40,8 @@ NtscDecoder::NtscDecoder(
   m_white_flag_frames(0),
   m_level_offset_v(0.3f),
   m_level_scale(1.0f / 0.7f),
+  m_prev_burst_phase(std::numeric_limits<double>::quiet_NaN()),
+  m_burst_coherence_avg(-1),
   m_noise_psd{},
   m_noise_psd_windows(0),
   m_first_stage_complete_semaphore(manager.getDevice().createSemaphore(vk::SemaphoreCreateInfo())),
@@ -52,6 +54,8 @@ NtscDecoder::NtscDecoder(
   m_total_elapsed_time_us(0),
   m_efm_decoder(log, std::nullopt, std::nullopt),
   m_efm_pcm_processor(log),
+  m_pending_audio(),
+  m_pending_audio_mode(MODE_UNKNOWN),
   m_frames() {
     // 185.8 degrees is the structural 180 (see ntsc_decode_single_field.comp)
     // plus the offset calibrated against the Video Essentials colorbars
@@ -72,16 +76,11 @@ NtscDecoder::~NtscDecoder() {
 }
 
 bool NtscDecoder::initialize() {
-    // Always keep the two latest frames (required for motion detection) -- pretend we have two already
-    // The newest frame is always at index 0
-    for (int i = 0; i < 3; i++)
+    // Newest read frame (the lookahead) at index 0, the displayed frame at
+    // index 1, and its two-frame history behind it -- pretend they all exist
+    // already so the first reads decode blank frames instead of special cases
+    for (int i = 0; i < 4; i++)
         m_frames.push_back(new NtscFrame(m_log, -i, m_manager));
-
-    for (int i = 0; i < 3; i++)
-        for (int parity = 0; parity <= 1; parity++) {
-            m_frames[i]->get_field(parity).set_prev_field(
-                    &m_frames[parity == 1 ? i : (i + 1) % 2]->get_field(1 - parity));
-        }
 
     m_frame_no = 0;
     m_field_index = 0;
@@ -93,6 +92,7 @@ bool NtscDecoder::initialize() {
 // For NTSC, enable_non_linear is not implemented
 bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     const bool efm_audio = controls.efm_audio;
+    const bool use_3d_comb = controls.use_3d_comb;
     const FieldInterpolationMode field_interpolation_mode = controls.field_interpolation_mode;
     const bool redo_last_field = controls.redo_last_field;
     const DropoutMode dropout_mode = controls.dropout_mode;
@@ -146,6 +146,15 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
             m_blanking_avg = m_blanking_avg * 0.9 + noise_estimate.blanking_level * 0.1;
             m_blanking_sq_avg = m_blanking_sq_avg * 0.9 + (double)noise_estimate.blanking_level * noise_estimate.blanking_level * 0.1;
         }
+        // Frame-to-frame burst phase coherence: the subcarrier inverts once
+        // per frame, so the mean burst phase should advance by exactly pi.
+        // The deviation is the sampling phase error the 3D comb sees.
+        if (!std::isnan(m_prev_burst_phase)) {
+            double err = std::abs(std::remainder(noise_estimate.burst_phase - m_prev_burst_phase - M_PI, 2 * M_PI));
+            m_burst_coherence_avg = m_burst_coherence_avg < 0 ? err : m_burst_coherence_avg * 0.9 + err * 0.1;
+        }
+        m_prev_burst_phase = noise_estimate.burst_phase;
+
         if (noise_estimate.white_flag_level >= 0) {
             m_white_avg = m_white_avg < 0 ? noise_estimate.white_flag_level
                                           : m_white_avg * 0.9 + noise_estimate.white_flag_level * 0.1;
@@ -176,6 +185,10 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                     m_noise.sigma_blanking * ire,
                     m_noise.sigma_sync * ire,
                     sqrt(max(0.0, wander_var)) * ire));
+            m_log.info(eDecoder, std::format(
+                    "burst: line phase sigma {:.1f} deg, frame-to-frame coherence error {:.1f} deg (EWMA)",
+                    noise_estimate.burst_phase_sigma * 180.0 / M_PI,
+                    m_burst_coherence_avg * 180.0 / M_PI));
             m_log.info(eDecoder, std::format(
                     "levels: blanking {:.3f} V, white flag {}, rescale gain {:.3f} (nominal {:.3f})",
                     m_blanking_avg,
@@ -231,13 +244,14 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
         m_shaders.detectColorBurstPhase(*m_first_stage_command_buffer, frame);
 
-        // Motion mask for the de-interlacing combine, from the composite
-        // history of the last three frames.  Thresholds scale with the
-        // measured noise; 0.55 approximates how much the frame-domain
-        // de-emphasis attenuates the raw blanking sigma.
+        // Directional motion masks for the frame about to be displayed
+        // (m_frames[1]), with the just-read frame as lookahead.  Thresholds
+        // scale with the measured noise; 0.55 approximates how much the
+        // frame-domain de-emphasis attenuates the raw blanking sigma.
         float sigma_c = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.55f : 0.01f;
-        m_shaders.detectMotion(*m_first_stage_command_buffer, frame->data(), m_frames[1]->data(), m_frames[2]->data(),
-                               m_frame_no > 0, max(0.012f, 4.0f * sigma_c), max(0.04f, 10.0f * sigma_c));
+        m_shaders.detectMotion(*m_first_stage_command_buffer, frame->data(), m_frames[1]->data(),
+                               m_frames[2]->data(), m_frames[3]->data(),
+                               m_frame_no > 1, max(0.012f, 4.0f * sigma_c), max(0.04f, 10.0f * sigma_c));
     }
     m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 
@@ -249,8 +263,8 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     if (m_decode_video && (m_decode_all_fields || m_field_index == 0)) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
-        out.last_frame_buffer_input_offset = m_frames[0]->getInputOffset();
-        out.input_samples_per_muse_sample = m_frames[0]->getInputSamplesPerNtscSample();
+        out.last_frame_buffer_input_offset = m_frames[1]->getInputOffset();
+        out.input_samples_per_muse_sample = m_frames[1]->getInputSamplesPerNtscSample();
         out.field_parity = decoded_field_index;
 
         // The illegal-level bounds in the decode shader are scaled from the
@@ -261,8 +275,14 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         float sigma_out = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.52f : 0.02f;
         float level_floor = -max(0.02f, 2.5f * sigma_out);
         float level_ceiling = 1.4f;
-        m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[0]->get_field(decoded_field_index),
-                                    dropout_mode, m_rot_re, m_rot_im, level_floor, level_ceiling);
+        // Selector noise floor: |cs - ct| accumulated over the 19-sample
+        // window is ~sigma per sample for plain noise; 15 sigma keeps noise
+        // from flipping the comb choice on flat areas.
+        m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[1]->get_field(decoded_field_index),
+                                    m_frames[2]->data(), m_frames[0]->data(),
+                                    m_frames[2]->burst_phase_data(), m_frames[0]->burst_phase_data(),
+                                    dropout_mode, use_3d_comb, m_rot_re, m_rot_im, level_floor, level_ceiling,
+                                    15.0f * sigma_out);
         // Weaving the still parts needs the previous field's decode, which
         // only exists when all fields are decoded
         m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
@@ -280,20 +300,25 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     }
 
     if (m_decode_audio && m_field_index == 0) {
+        // Deliver the audio held from the previous read (it belongs to the
+        // frame being displayed), then decode and hold this block's audio
+        out.audio_mode = m_pending_audio_mode;
+        for (const auto &s : m_pending_audio) {
+            if (out.audio_sample_count >= MAX_AUDIO_OUTPUT_SAMPLES) break;
+            out.audio_samples[out.audio_sample_count++] = s;
+        }
+        m_pending_audio.clear();
         if (efm_audio && input_block != nullptr) {
             auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
             for (const auto &s : m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis())) {
-                if (out.audio_sample_count >= MAX_AUDIO_OUTPUT_SAMPLES) break;
-                out.audio_samples[out.audio_sample_count].samples[0] = s.samples[0];
-                out.audio_samples[out.audio_sample_count].samples[1] = s.samples[1];
-                out.audio_samples[out.audio_sample_count].samples[2] = 0;
-                out.audio_samples[out.audio_sample_count].samples[3] = 0;
-                out.audio_sample_count++;
+                AudioFrame f{};
+                f.samples[0] = s.samples[0];
+                f.samples[1] = s.samples[1];
+                m_pending_audio.push_back(f);
             }
-            out.audio_mode = MODE_EFM;
+            m_pending_audio_mode = MODE_EFM;
         } else { // Analog audio
-            out.audio_mode = MODE_UNKNOWN;
-            out.audio_sample_count = 0;
+            m_pending_audio_mode = MODE_UNKNOWN;
         }
     }
 
@@ -318,7 +343,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     else
         m_field_index = (m_field_index + 1) % 2;
 
-    out.disc_info = m_frames[0]->getVbiData();
+    out.disc_info = m_frames[1]->getVbiData();
 
     return true;
 }

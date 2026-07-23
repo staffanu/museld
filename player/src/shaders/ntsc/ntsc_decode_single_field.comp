@@ -8,11 +8,14 @@
 layout(push_constant) uniform PushConstants {
     uint field_parity;
     uint dropout_mode; // 0: normal, 1: disabled, 2: highlight
+    uint use_3d_comb;  // 0 forces the spatial comb everywhere (key 4 / --no-3d-comb)
     float rot_re;
     float rot_im;
     float level_floor;   // below this, picture luma is considered illegal
     float level_ceiling; // likewise above this; both computed in NtscDecoder
                          // from the measured blanking level and noise
+    float chroma_sel_floor; // noise floor for the spatial/temporal comb
+                            // selector, scaled from the measured sigma
 };
 
 layout(set = 0, binding = 0) buffer readonly input_frame_buffer {
@@ -37,6 +40,31 @@ layout(set = 0, binding = 4) buffer writeonly b_data_buffer {
 
 layout(set = 0, binding = 5) buffer readonly dropout_data_buffer {
     uint8_t dropout_data[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 6) buffer readonly prev_frame_buffer {
+    float16_t prev_frame[][NTSC_TOTAL_WIDTH]; // composite of frame N-1
+};
+
+layout(set = 0, binding = 7) buffer readonly next_frame_buffer {
+    float16_t next_frame[][NTSC_TOTAL_WIDTH]; // composite of frame N+1 (lookahead)
+};
+
+// Directional motion masks from ntsc_detect_motion.comp, frame-row indexed
+layout(set = 0, binding = 8) buffer readonly past_motion_buffer {
+    float16_t past_motion[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 9) buffer readonly future_motion_buffer {
+    float16_t future_motion[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 10) buffer readonly prev_burst_phase_buffer {
+    f16vec2 prev_phase_data[]; // per-line burst of frame N-1
+};
+
+layout(set = 0, binding = 11) buffer readonly next_burst_phase_buffer {
+    f16vec2 next_phase_data[]; // per-line burst of frame N+1
 };
 
 float16_t cosine_lut[] = { 1.hf, 0.hf, -1.hf, 0.hf };
@@ -77,12 +105,81 @@ float16_t comb_luma(uint frame_line, uint next_line, uint frame_col) {
            + 0.25hf * input_frame[next_line][frame_col];
 }
 
-f16vec2 demodulated_chroma(uint frame_line, uint next_line, uint frame_col) {
+// Sampling phase correction for the temporal pairs: the DPLL grid jitters a
+// few degrees of subcarrier line to line (the sync loop must stay wide to
+// track player wow, so this floor cannot be tuned away), and the pair
+// difference (f0 - fneighbour)/2 comes out as the chroma rotated by half the
+// lines' phase offset.  The offset is measured exactly by the two lines' own
+// colour bursts: e^(-j delta) = -b_n conj(b_0) / |...|, and the estimate is
+// de-rotated by delta/2 using the one-sample-shift quadrature, which is
+// exact at fsc on the 4 fsc grid.  Returns (cos, sin) of delta/2.
+f16vec2 pair_rotation(f16vec2 bn, f16vec2 b0) {
+    float rx = float(bn.x) * float(b0.x) + float(bn.y) * float(b0.y);
+    float ry = float(bn.y) * float(b0.x) - float(bn.x) * float(b0.y);
+    float m = sqrt(rx * rx + ry * ry);
+    if (m < 1e-4)
+        return f16vec2(1.hf, 0.hf); // no usable burst on one of the lines
+    float cd = -rx / m;
+    float sd = ry / m;
+    float ch = sqrt(max(0.5 * (1.0 + cd), 0.0));
+    float sh = (sd >= 0.0 ? 1.0 : -1.0) * sqrt(max(0.5 * (1.0 - cd), 0.0));
+    return f16vec2(float16_t(ch), float16_t(sh));
+}
+
+// Interpolate two rotations: the grid phase is continuous in scan time, so
+// between this line's burst and the next line's burst the phase offset
+// drifts linearly, and the correction at a column is the interpolation of
+// the two measurements.  Without it the correction is exact at the burst and
+// decays across the line (measured: half the artifact left at the far edge).
+f16vec2 lerp_rotation(f16vec2 a, f16vec2 b, float t) {
+    vec2 v = mix(vec2(a), vec2(b), t);
+    float l = max(length(v), 1e-4);
+    return f16vec2(v / l);
+}
+
+float16_t rotated_prev_pair(uint fl, uint fc, f16vec2 r) {
+    float16_t c0 = 0.5hf * (input_frame[fl][fc] - prev_frame[fl][fc]);
+    float16_t cm = 0.5hf * (input_frame[fl][fc - 1] - prev_frame[fl][fc - 1]);
+    float16_t cp = 0.5hf * (input_frame[fl][fc + 1] - prev_frame[fl][fc + 1]);
+    return c0 * r.x + 0.5hf * (cm - cp) * r.y;
+}
+
+float16_t rotated_next_pair(uint fl, uint fc, f16vec2 r) {
+    float16_t c0 = 0.5hf * (input_frame[fl][fc] - next_frame[fl][fc]);
+    float16_t cm = 0.5hf * (input_frame[fl][fc - 1] - next_frame[fl][fc - 1]);
+    float16_t cp = 0.5hf * (input_frame[fl][fc + 1] - next_frame[fl][fc + 1]);
+    return c0 * r.x + 0.5hf * (cm - cp) * r.y;
+}
+
+
+
+// The spatial and temporal estimates fail differently: the spatial comb
+// leaks vertical luma detail (and hanging-dot errors at horizontal chroma
+// edges) into its estimate but is exact on vertically uniform content,
+// while the temporal estimate is blind to vertical detail but carries the
+// residue of frame-to-frame sampling phase jitter (a few degrees of
+// subcarrier), which shimmers on saturated flat areas.  Where the picture
+// is vertically uniform the two estimates agree to within that jitter
+// residue -- which scales with the chroma envelope -- so a disagreement
+// beyond a few % of the envelope (and above the noise floor) is the spatial
+// comb's leak, and only then is the temporal estimate worth its jitter.
+float16_t temporal_weight(const float16_t cs[19], const float16_t ct[19]) {
+    float16_t e_s = 0.hf;
+    float16_t d = 0.hf;
+    for (int n = 0; n < 19; n++) {
+        e_s += abs(cs[n]);
+        d += abs(cs[n] - ct[n]);
+    }
+    float16_t floor_ = float16_t(chroma_sel_floor);
+    return clamp((d - 0.02hf * e_s - floor_) / (0.2hf * e_s + floor_), 0.hf, 1.hf);
+}
+
+f16vec2 demodulated_chroma(const float16_t c_src[19], uint frame_col) {
     float16_t c_re = 0.hf;
     float16_t c_im = 0.hf;
     for (int n = 0; n < 19; n++) {
         uint fc = uint(int(frame_col) + n - 9);
-        float16_t cs = 2.hf * chroma_sample(frame_line, next_line, fc);
+        float16_t cs = 2.hf * c_src[n];
         c_re += chroma_lowpass[n] * cs * color_cosine(fc);
         c_im += chroma_lowpass[n] * cs * color_sine(fc);
     }
@@ -98,12 +195,14 @@ void main() {
 
     uint frame_line = 22 + row + 263 * field_parity;
     uint frame_col = col + NTSC_FIELD_START_X;
+    uint mask_row = row * 2 + field_parity;
 
     // the comb degrades to two lines on the frame's last line
     uint next_line = min(frame_line + 1, NTSC_TOTAL_HEIGHT - 1);
 
     float16_t Y = comb_luma(frame_line, next_line, frame_col);
     bool painted = false;
+    bool rescued = false;
 
     // Illegal-level rescue: picture luma below blanking level, or far above
     // white, is illegal -- short dropouts that keep a healthy-looking
@@ -134,13 +233,73 @@ void main() {
                     Y = y2;
                     frame_line = fl;
                     next_line = min(fl + 1, NTSC_TOTAL_HEIGHT - 1);
+                    rescued = true;
                     break;
                 }
             }
         }
     }
 
-    f16vec2 c_demod = demodulated_chroma(frame_line, next_line, frame_col);
+    // The temporal paths only apply to healthy pixels: concealed or rescued
+    // composite has no valid history in the neighbouring frames.
+    bool temporal = use_3d_comb != 0 && !rescued && dropout_data[frame_line][frame_col] == 0;
+
+    // Gather both chroma estimates over the demodulation window and blend by
+    // the envelope comparison (the temporal candidates are already
+    // motion-gated per column, so a moving column degenerates to spatial and
+    // pulls the weight down with it).
+    float16_t c_src[19];
+    if (temporal) {
+        f16vec2 rot_p0 = pair_rotation(prev_phase_data[frame_line], phase_data[frame_line]);
+        f16vec2 rot_n0 = pair_rotation(next_phase_data[frame_line], phase_data[frame_line]);
+        uint nl = row + 1 < NTSC_FIELD_HEIGHT ? frame_line + 1 : frame_line;
+        f16vec2 rot_p1 = pair_rotation(prev_phase_data[nl], phase_data[nl]);
+        f16vec2 rot_n1 = pair_rotation(next_phase_data[nl], phase_data[nl]);
+        // 3D comb: the subcarrier inverts between adjacent frames, so for
+        // still content the temporal pair differences are pure modulated
+        // chroma, with no vertical resolution cost and full-bandwidth luma.
+        // The directional motion masks blend each column between the still
+        // temporal neighbours (both sides -> symmetric 3-tap, one side ->
+        // that frame pair) and the spatial comb where the picture moves.
+        // The selector, though, judges the ungated temporal estimate: the
+        // masks answer whether temporal data is safe, the selector whether
+        // it is worth anything -- feeding it the gated blend would let a
+        // half-raised mask erase the disagreement it needs to see.
+        float16_t cs_arr[19], ct_arr[19], pure_arr[19];
+        for (int n = 0; n < 19; n++) {
+            uint fc = uint(int(frame_col) + n - 9);
+            cs_arr[n] = chroma_sample(frame_line, next_line, fc);
+            float t = clamp((float(fc) - 94.0) / 910.0, 0.0, 1.0); // burst sits at ~column 94
+            float16_t rp = rotated_prev_pair(frame_line, fc, lerp_rotation(rot_p0, rot_p1, t));
+            float16_t rn = rotated_next_pair(frame_line, fc, lerp_rotation(rot_n0, rot_n1, t));
+            pure_arr[n] = 0.5hf * (rp + rn);
+            uint mc = uint(clamp(int(fc) - NTSC_FIELD_START_X, 0, NTSC_Y_BUF_WIDTH - 1));
+            float16_t wp = 1.hf - past_motion[mask_row][mc];
+            float16_t wf = 1.hf - future_motion[mask_row][mc];
+            float16_t sm = max(wp, wf);
+            ct_arr[n] = sm <= 0.hf ? cs_arr[n]
+                      : mix(cs_arr[n], (wp * rp + wf * rn) / (wp + wf), sm);
+        }
+        float16_t w_t = temporal_weight(cs_arr, pure_arr);
+        for (int n = 0; n < 19; n++)
+            c_src[n] = mix(cs_arr[n], ct_arr[n], w_t);
+
+        // Luma follows the same blend.  The temporal estimate is bandpassed
+        // around fsc before the subtraction (samples 2 apart on the 4 fsc
+        // grid are 180 degrees of subcarrier): still chroma passes in full,
+        // but low-frequency residue of sub-threshold motion or lighting
+        // flicker cancels, so it cannot ghost into the luma.  At w_t = 0
+        // this is exactly the classic 3-line comb luma, so vertically
+        // uniform content is untouched by the 3D path.
+        float16_t ct_band = 0.5hf * ct_arr[9] - 0.25hf * (ct_arr[7] + ct_arr[11]);
+        float16_t f0 = input_frame[frame_line][frame_col];
+        Y = f0 - mix(cs_arr[9], ct_band, w_t);
+    } else {
+        for (int n = 0; n < 19; n++)
+            c_src[n] = chroma_sample(frame_line, next_line, uint(int(frame_col) + n - 9));
+    }
+
+    f16vec2 c_demod = demodulated_chroma(c_src, frame_col);
     float16_t c_re = c_demod.x;
     float16_t c_im = c_demod.y;
 

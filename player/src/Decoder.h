@@ -35,6 +35,7 @@ public:
         FieldInterpolationMode field_interpolation_mode;
         bool redo_last_field;
         bool enable_non_linear;
+        bool use_3d_comb;
         DropoutMode dropout_mode;
         bool output_yuv;
     };
