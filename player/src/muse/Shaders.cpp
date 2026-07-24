@@ -100,56 +100,56 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
           })),
   m_audio_data(createMuseBuffer(88, MUSE_TOTAL_WIDTH * 3 / 4, eHostRead))
 {
-    m_apply_equalizer_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+    m_apply_equalizer_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "apply_equalizer",
             {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t),
             VulkanUtil::loadSpirv(executable_dir, "apply_equalizer.comp"),
             Size(MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT, 1, 1)));
-    m_apply_rescale_and_non_linear_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+    m_apply_rescale_and_non_linear_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "apply_rescale_and_non_linear",
             {eBuffer, eBuffer}, sizeof(float) * 3,
             VulkanUtil::loadSpirv(executable_dir, "apply_rescale_and_non_linear.comp"), Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)));
-    m_apply_dropout_compensation_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+    m_apply_dropout_compensation_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "apply_dropout_compensation",
             {eBuffer, eBuffer}, 4,
             VulkanUtil::loadSpirv(executable_dir, "apply_dropout_compensation.comp"), Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)));
-    m_apply_deemphasis_and_gamma_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+    m_apply_deemphasis_and_gamma_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "apply_deemphasis_and_gamma",
             {eBuffer, eBuffer}, 0,
             VulkanUtil::loadSpirv(executable_dir, "apply_deemphasis_and_gamma.comp"), Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)));
-    m_copy_y_for_interpolation_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+    m_copy_y_for_interpolation_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "copy_y_for_interpolation",
             {eBuffer, eBuffer}, sizeof(uint32_t) * 3,
             VulkanUtil::loadSpirv(executable_dir, "copy_y_for_interpolation.comp"), Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT), 8));
-    m_diamond_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+    m_diamond_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "diamond",
             {eBuffer, eBuffer}, sizeof(uint32_t) * 5,
             VulkanUtil::loadSpirv(executable_dir, "filter_diamond.comp"), Size(0), 4));
-    m_convert_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+    m_convert_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "convert_sample_rate",
             {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 12,
              VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
             Size(0), 5));
-    m_decode_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+    m_decode_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
                                                                   "decode_c",
                                                                   {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
                                                                   VulkanUtil::loadSpirv(executable_dir, "decode_c.comp"),
                                                                   Size(MUSE_C_BUF_WIDTH, MUSE_BUF_HEIGHT * 2), 4));
-    m_filter_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+    m_filter_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
                                                                   "filter_c",
                                                                   vector<MemoryObjectType>{eBuffer}, sizeof(uint32_t) * 2,
                                                                   VulkanUtil::loadSpirv(executable_dir, "filter_c.comp"),
                                                                   Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT), 2));
-    m_decode_c_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+    m_decode_c_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
                                                                                "decode_c_single_field",
                                                                                {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 2,
                                                                                VulkanUtil::loadSpirv(executable_dir, "decode_c_single_field.comp"),
                                                                                Size(MUSE_C_BUF_WIDTH, MUSE_BUF_HEIGHT / 2), 5));
-    m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+    m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "detect_motion",
             {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
             VulkanUtil::loadSpirv(executable_dir, "detect_motion.comp"), Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT)));
-    m_combine_still_and_moving_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager.getDevice(),
+    m_combine_still_and_moving_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "combine_still_and_moving",
             {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eImage, eBuffer, eBuffer, eBuffer},
             sizeof(uint32_t) * 4,
