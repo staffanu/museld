@@ -89,6 +89,15 @@ void NtscRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> decimated_lowpass_filter =
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(decimated_lowpass_filter_def.size()), decimated_lowpass_filter_def);
 
+    // Each shader is specialized to the longest filter and largest decimation it will be
+    // dispatched with, which is what its shared memory is then sized from.  input_fir_filter
+    // runs the band-pass twice without decimating; fir_filter runs the low-pass decimating by
+    // two and then the de-emphasis filter at the decimated rate.
+    const uint32_t input_fir_max_filter_size = bandpass_filter_def.size();
+    const uint32_t input_fir_max_decimation = 1;
+    const uint32_t fir_max_filter_size = std::max(lowpass_filter_def.size(), decimated_lowpass_filter_def.size());
+    const uint32_t fir_max_decimation = c_video_decimation_rate;
+
     // Create buffers for data
     const int input_buffer_size = c_sample_block_size + (int)bandpass_filter_def.size() - 1;
     const int analytic_buffer_size = c_sample_block_size + 1;
@@ -122,7 +131,8 @@ void NtscRfDemodulator::demodulate() {
     shared_ptr<ComputeShader> input_fir_filter_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager.getDevice(), "input_fir_filter",
                               {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "input_fir_filter.comp"), Size(0), 2));
+                              VulkanUtil::loadSpirv(m_executable_dir, "input_fir_filter.comp"), Size(0), 2,
+                              {input_fir_max_filter_size, input_fir_max_decimation}));
 
     input_fir_filter_shader->updateBufferDescriptorsInSet(0, {bandpass_filter_re, input_buffer, analytic_buffer_re});
     input_fir_filter_shader->updateBufferDescriptorsInSet(1, {bandpass_filter_im, input_buffer, analytic_buffer_im});
@@ -130,9 +140,14 @@ void NtscRfDemodulator::demodulate() {
     shared_ptr<ComputeShader> fir_filter_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager.getDevice(), "fir_filter",
                               {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 2));
+                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 2,
+                              {fir_max_filter_size, fir_max_decimation}));
 
     fir_filter_shader->updateBufferDescriptorsInSet(0, {lowpass_filter, lowpass_in_buffer, equalization_in_buffer});
+
+    checkFirShaderFits("input_fir_filter.comp", *input_fir_filter_shader,
+                       input_fir_max_filter_size, input_fir_max_decimation);
+    checkFirShaderFits("fir_filter.comp", *fir_filter_shader, fir_max_filter_size, fir_max_decimation);
 
     shared_ptr<ComputeShader> fm_quadrature_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager.getDevice(), "fm_quadrature",

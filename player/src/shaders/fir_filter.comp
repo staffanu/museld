@@ -28,13 +28,20 @@ layout(set = 0, binding = 2) buffer writeonly output_buffer {
     float output_data[];
 };
 
-// we assume that the workgroup size is at least MAX_FILTER_SIZE
-#define MAX_WORKGROUP_SIZE 1024
-#define MAX_FILTER_SIZE 64
-#define MAX_DECIMATION 4
+// The longest filter and largest decimation this pipeline will be dispatched with, set by the
+// host from the filters it actually built.  They cannot come from the push constants above:
+// shared memory is sized when the pipeline is created, while push constants vary per dispatch.
+// Specializing them instead of assuming a fixed upper bound keeps the shared block to what the
+// filters need -- an upper bound of 64 taps and a decimation of 4 would declare 16896 bytes at
+// a 1024-invocation workgroup, past the 16384 that maxComputeSharedMemorySize is only
+// guaranteed to be.  The workgroup size is a specialization constant too, so the block also
+// shrinks on devices that allow fewer invocations.
+layout (constant_id = 4) const uint max_filter_size = 64;
+layout (constant_id = 5) const uint max_decimation = 4;
 
-shared float shared_filter[MAX_FILTER_SIZE];
-shared float shared_input[MAX_WORKGROUP_SIZE * MAX_DECIMATION + MAX_FILTER_SIZE];
+// we assume that the workgroup size is at least max_filter_size
+shared float shared_filter[max_filter_size];
+shared float shared_input[gl_WorkGroupSize.x * max_decimation + max_filter_size];
 
 void main() {
     uint global_ix = gl_GlobalInvocationID.x;
@@ -48,7 +55,7 @@ void main() {
 
     for (int i = 0; i < decimation_rate; i++)
         shared_input[local_ix + i * local_size] = input_data[base_ix + local_ix + i * local_size];
-    if (local_ix < MAX_FILTER_SIZE)
+    if (local_ix < max_filter_size)
         shared_input[local_ix + decimation_rate * local_size] = input_data[base_ix + local_ix + decimation_rate * local_size];
 
     barrier();

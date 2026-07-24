@@ -17,7 +17,8 @@ namespace musevk {
                       int32_t push_constants_size,
                       const std::vector<uint32_t> &spirv,
                       const Size &workgroup_size,
-                      int max_descriptor_sets = 1);
+                      int max_descriptor_sets = 1,
+                      const std::vector<uint32_t> &specialization_constants = {});
 
         ComputeShader(vk::Device &device,
                       std::string name,
@@ -25,7 +26,8 @@ namespace musevk {
                       int32_t push_constants_size,
                       const std::vector<uint32_t> &spirv,
                       const Size &workgroup_size,
-                      int max_descriptor_sets = 1);
+                      int max_descriptor_sets = 1,
+                      const std::vector<uint32_t> &specialization_constants = {});
 
         ~ComputeShader();
 
@@ -53,6 +55,12 @@ namespace musevk {
 
         const std::vector<std::shared_ptr<VulkanMemoryObject>> &getMemoryObjects(int descriptor_set_index) {
             return m_buffers[descriptor_set_index];
+        }
+
+        // The workgroup size the shader was specialized to.  Shaders that size a shared array
+        // from it need this to work out how much shared memory they actually ask the device for.
+        const Size &getLocalWorkgroupSize() const {
+            return m_local_workgroup_size;
         }
 
     private:
@@ -97,6 +105,8 @@ namespace musevk {
         vk::Pipeline m_pipeline;
 
         std::vector<uint32_t> m_spirv;
+        // Values for specialization ids from 4 up; ids 1-3 are always the workgroup size.
+        std::vector<uint32_t> m_specialization_constants;
         Size m_workgroup_size;
         Size m_local_workgroup_size;
     };
