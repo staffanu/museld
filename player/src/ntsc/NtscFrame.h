@@ -52,6 +52,7 @@ public:
 private:
     int processVbiLine(int line);
 
+    Logger &m_log;
     int m_frame_no;
     long m_input_offset;
     double m_input_samples_per_sample;
