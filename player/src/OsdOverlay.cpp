@@ -13,6 +13,7 @@
 #include "ResultImages.h"
 #include "TextRenderer.h"
 #include "DiscInfo.h"
+#include "muse/MuseConstants.h"
 #include "musevk/CommandBuffer.h"
 
 std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
@@ -31,6 +32,12 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
     auto tl_y = [&](int y) { return vis_top + y / zoom; };
     auto comp_scale = [&](int s) { return std::max(1, s / zoom); };
 
+    // The glyph scale is tuned for MUSE's ~1032-line field; scale it down for
+    // lower-resolution inputs (NTSC is ~480 lines) so the overlay occupies a
+    // similar fraction of the picture instead of running off the screen.
+    constexpr int c_reference_height = 2 * MUSE_BUF_HEIGHT; // MUSE field height
+    const int osd_base = std::max(1, (4 * src.height + c_reference_height / 2) / c_reference_height);
+
     if (!state.osd_text.empty()) {
         if (state.paused && state.osd_text_remaining_frames)
             state.redo_last_field = true;
@@ -39,7 +46,7 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         state.osd_text.clear();
     }
     if (state.osd_text_remaining_frames) {
-        text_renderer.drawText(images.out_image, tl_x(90), tl_y(50), state.displayed_osd_text, comp_scale(4), command_buffer);
+        text_renderer.drawText(images.out_image, tl_x(90), tl_y(50), state.displayed_osd_text, comp_scale(osd_base), command_buffer);
         if (!--state.osd_text_remaining_frames) {
             state.redo_last_field = true;
             state.displayed_osd_text.clear();
@@ -70,12 +77,19 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
                             field_x, field_y, state.last_decoded.field_parity,
                             state.last_decoded.last_frame_buffer_input_offset,
                             state.last_decoded.input_samples_per_muse_sample)) {
+                    // Component formats report a luma (Y) sample; composite
+                    // formats (NTSC) carry a single CVBS sample instead,
+                    // distinguished here by the absent chroma offsets.
+                    const char *sample_label = offsets->cr && offsets->cb ? "Y" : "CVBS";
                     std::string offset_string = std::format(
-                            "{} {} {} Y {} Cr {} Cb {}",
+                            "{} {} {} {} {}",
                             state.last_decoded.last_frame_buffer_input_offset,
                             state.last_decoded.field_parity ? "ODD" : "EVEN",
                             offsets->field_start,
-                            offsets->y, offsets->cr, offsets->cb);
+                            sample_label,
+                            offsets->y);
+                    if (offsets->cr && offsets->cb)
+                        offset_string += std::format(" Cr {} Cb {}", *offsets->cr, *offsets->cb);
                     text_renderer.drawText(images.out_image, tl_x(10), vis_top + 34, offset_string, 1, command_buffer);
                     cursor_string += " " + offset_string;
                 }
@@ -89,7 +103,7 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         auto disc_info_strings = state.last_decoded.disc_info
                 ? state.last_decoded.disc_info->asStrings()
                 : std::vector<std::string>{"No disc info"};
-        const int disc_scale = comp_scale(2);
+        const int disc_scale = comp_scale(osd_base / 2);
         const int glyph_h = 24;
         const int bottom_margin = std::max(0, src.height - 955 - glyph_h * 2) / zoom;
         const int last_y = vis_top + vis_height - bottom_margin - glyph_h * disc_scale;

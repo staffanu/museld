@@ -26,8 +26,10 @@ public:
     struct PixelFileOffsets {
         long field_start;
         long y;
-        long cr;
-        long cb;
+        // Chroma sample offsets. Unset for composite formats (NTSC), whose file
+        // carries no separate Cr/Cb samples — there Y is the only real offset.
+        std::optional<long> cr;
+        std::optional<long> cb;
     };
 
     struct DecodeControls {
