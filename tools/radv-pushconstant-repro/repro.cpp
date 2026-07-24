@@ -23,18 +23,7 @@ int main(int argc, char **argv) {
     VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ici.pApplicationInfo = &app;
     VkInstance instance;
-    // First try with portability enumeration so MoltenVK devices show up on
-    // macOS; retry plain if the loader doesn't know the extension.
-    const char *portability_ext = "VK_KHR_portability_enumeration";
-    ici.flags = 0x00000001; // VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR
-    ici.enabledExtensionCount = 1;
-    ici.ppEnabledExtensionNames = &portability_ext;
-    if (vkCreateInstance(&ici, nullptr, &instance) != VK_SUCCESS) {
-        ici.flags = 0;
-        ici.enabledExtensionCount = 0;
-        ici.ppEnabledExtensionNames = nullptr;
-        CHECK(vkCreateInstance(&ici, nullptr, &instance));
-    }
+    CHECK(vkCreateInstance(&ici, nullptr, &instance));
 
     uint32_t ndev = 0;
     vkEnumeratePhysicalDevices(instance, &ndev, nullptr);
