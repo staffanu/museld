@@ -106,6 +106,12 @@ bool InputController::poll(GLFWwindow *window,
         m_log.info(eApplication | eVideo, "Inter-frame interpolation forced");
         state.osd_text = "MOTION NONE";
     }
+    if (checkKey(window, GLFW_KEY_4)) {
+        state.use_3d_comb = !state.use_3d_comb;
+        if (state.paused) state.redo_last_field = true;
+        m_log.info(eApplication | eVideo, state.use_3d_comb ? "3D comb enabled" : "3D comb disabled");
+        state.osd_text = state.use_3d_comb ? "3D COMB ON" : "3D COMB OFF";
+    }
     if (checkKey(window, GLFW_KEY_A)) {
         efm_audio = !efm_audio;
         reader.setEfmEnabled(efm_audio);

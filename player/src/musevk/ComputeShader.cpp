@@ -3,6 +3,7 @@
 
 #include <format>
 #include "ComputeShader.h"
+#include "VulkanManager.h"
 
 using namespace std;
 
@@ -10,36 +11,40 @@ namespace musevk {
     const Size ComputeShader::c_default_workgroup_size = Size(32, 2, 1);
     const Size ComputeShader::c_default_linear_workgroup_size = Size(1024, 1, 1);
 
-    ComputeShader::ComputeShader(vk::Device &device,
+    ComputeShader::ComputeShader(VulkanManager &vulkan_manager,
                                  std::string name,
                                  const std::vector<MemoryObjectType> &buffer_types,
                                  int32_t push_constants_size,
                                  const std::vector<uint32_t> &spirv,
                                  const Size &workgroup_size,
-                                 int max_descriptor_sets)
-    : m_device(device),
+                                 int max_descriptor_sets,
+                                 const std::vector<uint32_t> &specialization_constants)
+    : m_device(vulkan_manager.getDevice()),
       m_name(std::move(name)),
       m_descriptor_count(buffer_types.size()),
       m_push_constants_size(push_constants_size),
       m_spirv(spirv),
+      m_specialization_constants(specialization_constants),
       m_workgroup_size(workgroup_size),
       m_local_workgroup_size(Size(0)) {
 
-        initialize(buffer_types, max_descriptor_sets);
+        initialize(buffer_types, max_descriptor_sets, vulkan_manager.getPhysicalDeviceProperties().limits);
     }
 
-    ComputeShader::ComputeShader(vk::Device &device,
+    ComputeShader::ComputeShader(VulkanManager &vulkan_manager,
                                  std::string name,
                                  const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
                                  int32_t push_constants_size,
                                  const std::vector<uint32_t> &spirv,
                                  const Size &workgroup_size,
-                                 int max_descriptor_sets)
-    : m_device(device),
+                                 int max_descriptor_sets,
+                                 const std::vector<uint32_t> &specialization_constants)
+    : m_device(vulkan_manager.getDevice()),
       m_name(std::move(name)),
       m_descriptor_count(buffers.size()),
       m_push_constants_size(push_constants_size),
       m_spirv(spirv),
+      m_specialization_constants(specialization_constants),
       m_workgroup_size(workgroup_size),
       m_local_workgroup_size(Size(0)) {
 
@@ -48,19 +53,20 @@ namespace musevk {
         for (auto &buffer : buffers)
             buffer_types.push_back(buffer->getType());
 
-        initialize(buffer_types, max_descriptor_sets);
+        initialize(buffer_types, max_descriptor_sets, vulkan_manager.getPhysicalDeviceProperties().limits);
 
         updateBufferDescriptorsInSet(0, buffers);
     }
 
-    void ComputeShader::initialize(const std::vector<MemoryObjectType> &buffer_types, int max_descriptor_sets) {
+    void ComputeShader::initialize(const std::vector<MemoryObjectType> &buffer_types, int max_descriptor_sets,
+                                   const vk::PhysicalDeviceLimits &limits) {
 
         m_local_workgroup_size = m_workgroup_size.y_size == 1 && m_workgroup_size.z_size == 1 ?
                 c_default_linear_workgroup_size : c_default_workgroup_size;
 
         m_buffers.resize(max_descriptor_sets);
         createShaderModule();
-        createDescriptorLayout(max_descriptor_sets, buffer_types);
+        createDescriptorLayout(max_descriptor_sets, buffer_types, limits);
         createPipeline();
         updateDescriptorSet(0);
     }
@@ -81,7 +87,8 @@ namespace musevk {
         m_shader_module = m_device.createShaderModule(shaderModuleInfo);
     }
 
-    void ComputeShader::createDescriptorLayout(int number_of_descriptor_sets, const std::vector<MemoryObjectType> &buffer_types) {
+    void ComputeShader::createDescriptorLayout(int number_of_descriptor_sets, const std::vector<MemoryObjectType> &buffer_types,
+                                               const vk::PhysicalDeviceLimits &limits) {
         uint32_t number_of_storage_buffers = 0;
         uint32_t number_of_storage_images = 0;
         for (auto type : buffer_types) {
@@ -94,6 +101,27 @@ namespace musevk {
                     break;
             }
         }
+        // A shader's interface is fixed by its GLSL, so an interface wider than the device allows
+        // cannot be adapted to -- but it also is not reported: outside the validation layer,
+        // creating the pipeline layout simply succeeds.  Compare against what this device gives
+        // rather than a constant, since the guaranteed minimum (4 storage buffers) is far below
+        // what the decode shaders bind and every device of interest offers more.
+        if (number_of_storage_buffers > limits.maxPerStageDescriptorStorageBuffers
+            || number_of_storage_buffers > limits.maxDescriptorSetStorageBuffers)
+            throw std::runtime_error(std::format(
+                    "Unsupported hardware: shader {} binds {} storage buffers, but this device allows "
+                    "{} per stage and {} per descriptor set.",
+                    m_name, number_of_storage_buffers,
+                    limits.maxPerStageDescriptorStorageBuffers, limits.maxDescriptorSetStorageBuffers));
+
+        if (number_of_storage_images > limits.maxPerStageDescriptorStorageImages
+            || number_of_storage_images > limits.maxDescriptorSetStorageImages)
+            throw std::runtime_error(std::format(
+                    "Unsupported hardware: shader {} binds {} storage images, but this device allows "
+                    "{} per stage and {} per descriptor set.",
+                    m_name, number_of_storage_images,
+                    limits.maxPerStageDescriptorStorageImages, limits.maxDescriptorSetStorageImages));
+
         vector<vk::DescriptorPoolSize> descriptor_pool_sizes;
         if (number_of_storage_buffers != 0)
             descriptor_pool_sizes.emplace_back(vk::DescriptorType::eStorageBuffer,
@@ -140,20 +168,22 @@ namespace musevk {
     }
 
     void ComputeShader::createPipeline() {
-        struct Constants {
-            uint32_t size_x;
-            uint32_t size_y;
-            uint32_t size_z;
-        } constants { m_local_workgroup_size.x_size, m_local_workgroup_size.y_size, m_local_workgroup_size.z_size };
-        vector<vk::SpecializationMapEntry> specialization_map_entries {
-                vk::SpecializationMapEntry(1, offsetof(Constants, size_x), sizeof(constants.size_x)),
-                vk::SpecializationMapEntry(2, offsetof(Constants, size_y), sizeof(constants.size_y)),
-                vk::SpecializationMapEntry(3, offsetof(Constants, size_z), sizeof(constants.size_z)),
-        };
+        // Ids 1-3 are the workgroup size, declared by every shader through muse.h; any further
+        // values the caller supplied follow from id 4, which is where shaders that need one
+        // (the FIR filters size their shared memory from theirs) start counting.
+        vector<uint32_t> constants { m_local_workgroup_size.x_size,
+                                     m_local_workgroup_size.y_size,
+                                     m_local_workgroup_size.z_size };
+        constants.insert(constants.end(), m_specialization_constants.begin(), m_specialization_constants.end());
+
+        vector<vk::SpecializationMapEntry> specialization_map_entries;
+        for (uint32_t i = 0; i < constants.size(); i++)
+            specialization_map_entries.emplace_back(i + 1, i * sizeof(uint32_t), sizeof(uint32_t));
+
         vk::SpecializationInfo specialization_info(specialization_map_entries.size(),
                                                    specialization_map_entries.data(),
-                                                   sizeof(constants),
-                                                   &constants);
+                                                   constants.size() * sizeof(uint32_t),
+                                                   constants.data());
 
         vk::PipelineShaderStageCreateInfo shader_stage_info(vk::PipelineShaderStageCreateFlags(),
                                                             vk::ShaderStageFlagBits::eCompute,

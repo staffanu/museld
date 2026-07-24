@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <algorithm>
 #include <limits>
 #include <set>
 #define GLFW_INCLUDE_VULKAN
@@ -357,13 +358,17 @@ namespace musevk {
 
     vk::PresentModeKHR
     VulkanManager::chooseSwapPresentMode(const vector<vk::PresentModeKHR> &availablePresentModes) const {
-        for (const auto &availablePresentMode: availablePresentModes) {
-            if (availablePresentMode == vk::PresentModeKHR::eMailbox) {
-                //return availablePresentMode;
-            }
-        }
-        // FIXME: what to use?
-        return m_no_sync ? vk::PresentModeKHR::eImmediate : vk::PresentModeKHR::eFifo;
+        // With --no-sync we want a present mode that never blocks the decode loop.
+        // Immediate is not offered everywhere (e.g. GNOME Wayland without the
+        // tearing-control protocol), and requesting an unsupported mode is a spec
+        // violation that segfaults in Mesa's Wayland WSI, so fall back to mailbox,
+        // which is equally non-blocking.
+        if (m_no_sync)
+            for (auto preferred : {vk::PresentModeKHR::eImmediate, vk::PresentModeKHR::eMailbox})
+                if (find(availablePresentModes.begin(), availablePresentModes.end(), preferred)
+                        != availablePresentModes.end())
+                    return preferred;
+        return vk::PresentModeKHR::eFifo; // the only mode guaranteed to be supported
     }
 
     vk::Extent2D VulkanManager::chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capabilities) const {

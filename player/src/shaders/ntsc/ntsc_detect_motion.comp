@@ -1,0 +1,131 @@
+#version 450
+
+#include "muse.h"
+
+// Per-pixel directional motion masks for the de-interlacing combine and the
+// 3D comb, invoked twice with global invocation ids from (0, 0) until
+// (NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2): phase 1 computes the raw motion
+// values, phase 2 dilates them (with a decaying temporal persistence on the
+// past mask).
+//
+// The masks describe the displayed frame N = frames[1]; frames[0] is the
+// lookahead frame N+1.  The past mask covers motion before N's fields were
+// captured, the future mask motion after -- so the 3D comb can pick a still
+// temporal neighbour per side, and each field's weave can consult the window
+// that brackets its own staleness interval.
+//
+// The subcarrier phase inverts from one frame to the next (227.5 cycles per
+// line), so a plain adjacent-frame difference of still colored content is
+// twice the chroma, not zero.  Each direction therefore combines two
+// differences: the phase-aligned two-frame difference (valid everywhere,
+// but covering a two-frame window), and the adjacent-frame difference
+// through an 8-sample box whose nulls sit at fsc and its harmonics on the
+// 4 fsc grid, leaving low-frequency luma motion with single-frame span.
+// Comparing rows of the same frame index also means comparing fields of the
+// same parity, so still vertical detail never registers as motion.
+
+layout(push_constant) uniform PushConstants {
+    uint processing_phase;
+    uint use_prev_movement; // 0 on the first frame
+    float motion_none;      // difference at or below this is considered noise
+    float motion_full;      // difference at which the pixel is fully moving
+};
+
+layout(set = 0, binding = 0) buffer readonly restrict frame_next_buffer {
+    float16_t frame_next[][NTSC_TOTAL_WIDTH]; // N+1, the lookahead frame
+};
+
+layout(set = 0, binding = 1) buffer readonly restrict frame0_buffer {
+    float16_t frame0[][NTSC_TOTAL_WIDTH]; // N, the frame being decoded
+};
+
+layout(set = 0, binding = 2) buffer readonly restrict frame1_buffer {
+    float16_t frame1[][NTSC_TOTAL_WIDTH]; // N-1
+};
+
+layout(set = 0, binding = 3) buffer readonly restrict frame2_buffer {
+    float16_t frame2[][NTSC_TOTAL_WIDTH]; // N-2
+};
+
+layout(set = 0, binding = 4) buffer restrict raw_past_buffer {
+    float16_t raw_past[][NTSC_Y_BUF_WIDTH]; // phase 1 outputs
+};
+
+layout(set = 0, binding = 5) buffer restrict raw_future_buffer {
+    float16_t raw_future[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 6) buffer readonly restrict prev_past_movement_buffer {
+    float16_t prev_past_movement[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 7) buffer writeonly restrict past_out_buffer {
+    float16_t past_out[][NTSC_Y_BUF_WIDTH]; // values between 0 and 1
+};
+
+layout(set = 0, binding = 8) buffer writeonly restrict future_out_buffer {
+    float16_t future_out[][NTSC_Y_BUF_WIDTH];
+};
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= NTSC_FIELD_HEIGHT * 2 || col >= NTSC_Y_BUF_WIDTH)
+        return;
+
+    if (processing_phase == 1) {
+        // Even output rows hold the first field, odd rows the second; same
+        // mapping as the single-field decode.
+        uint line = 22 + row / 2 + ((row & 1u) != 0u ? 263u : 0u);
+        uint x = col + NTSC_FIELD_START_X;
+
+        float past_aligned = abs(float(frame0[line][x]) - float(frame2[line][x]));
+        float future_aligned = abs(float(frame_next[line][x]) - float(frame1[line][x]));
+
+        float past_lf = 0.0;
+        float future_lf = 0.0;
+        for (int i = -4; i < 4; i++) {
+            uint xx = uint(clamp(int(x) + i, 0, NTSC_TOTAL_WIDTH - 1));
+            past_lf += float(frame0[line][xx]) - float(frame1[line][xx]);
+            future_lf += float(frame_next[line][xx]) - float(frame0[line][xx]);
+        }
+        past_lf = abs(past_lf) * 0.125;
+        future_lf = abs(future_lf) * 0.125;
+
+        // Edges shimmer slightly with sampling jitter even when still, so
+        // raise the thresholds with the local gradient.  The vertical
+        // neighbours are the same field's adjacent lines (lines of one field
+        // are contiguous in the frame buffer).
+        float eh = abs(float(frame0[line][min(x + 2, NTSC_TOTAL_WIDTH - 1)])
+                       - float(frame0[line][max(int(x) - 2, 0)]));
+        float ev = abs(float(frame0[min(line + 1, NTSC_TOTAL_HEIGHT - 1)][x])
+                       - float(frame0[max(int(line) - 1, 0)][x]));
+        float edge = max(eh, ev);
+        float none = motion_none + 0.05 * edge;
+        float full = motion_full + 0.25 * edge;
+
+        float dp = max(past_aligned, past_lf);
+        float df = max(future_aligned, future_lf);
+        raw_past[row][col] = float16_t(clamp((dp - none) / (full - none), 0.0, 1.0));
+        raw_future[row][col] = float16_t(clamp((df - none) / (full - none), 0.0, 1.0));
+    } else {
+        // Dilate so the blend covers the surroundings of whatever moved.  The
+        // past mask also keeps a decaying memory of previous motion: a pixel
+        // that just stopped still has a stale opposite field to weave for one
+        // frame.  The future mask needs none -- its evidence is the lookahead.
+        float mp = 0.0;
+        float mf = 0.0;
+        for (int dr = -1; dr <= 1; dr++)
+            for (int dc = -2; dc <= 2; dc++) {
+                uint r = uint(clamp(int(row) + dr, 0, NTSC_FIELD_HEIGHT * 2 - 1));
+                uint c = uint(clamp(int(col) + dc, 0, NTSC_Y_BUF_WIDTH - 1));
+                mp = max(mp, float(raw_past[r][c]));
+                mf = max(mf, float(raw_future[r][c]));
+            }
+        if (use_prev_movement != 0)
+            mp = max(mp, 0.5 * float(prev_past_movement[row][col]));
+        past_out[row][col] = float16_t(mp);
+        future_out[row][col] = float16_t(mf);
+    }
+}

@@ -8,6 +8,9 @@
 #include <fstream>
 #include <format>
 #include <cassert>
+#include <stdexcept>
+#include <string_view>
+#include <cstdlib>
 #include <complex>
 #include <array>
 #include <algorithm>
@@ -53,6 +56,7 @@ public:
 
     bool initialize(int number_of_block_buffers) {
         m_input_reader = makeInputReader(m_filename, m_input_format, m_input_block_size);
+        m_input_reader->setDcBlocking(true); // RF carries no legitimate DC
         m_input_is_fifo = m_input_reader->is_fifo();
         m_input_reader->initialize();
 
@@ -65,7 +69,14 @@ public:
 #elif defined(linux)
             pthread_setname_np(pthread_self(), "museld-demod");
 #endif
-            demodulate();
+            // Nothing above this catches: an exception escaping the thread would otherwise
+            // terminate the process, burying the reason in the runtime's abort message.
+            try {
+                demodulate();
+            } catch (const std::exception &x) {
+                m_log.error(eInput, x.what());
+                std::exit(EXIT_FAILURE);
+            }
         });
         return true;
     }
@@ -133,6 +144,35 @@ public:
 
 protected:
     virtual void demodulate() = 0;
+
+    // fir_filter.comp and input_fir_filter.comp size their shared memory from the tap count and
+    // decimation they were specialized to, so how much they ask for is only known once they have
+    // been created -- and nothing outside the validation layer objects if it is more than the
+    // device has.  They also load the tap array with one invocation per tap, so a filter longer
+    // than the workgroup would be silently truncated.  Check both here, against what this device
+    // reports rather than the 16 KiB that maxComputeSharedMemorySize is merely guaranteed to be.
+    void checkFirShaderFits(std::string_view shader_name, const musevk::ComputeShader &shader,
+                            uint32_t max_filter_size, uint32_t max_decimation) const {
+        const uint32_t local_size = shader.getLocalWorkgroupSize().x_size;
+
+        if (max_filter_size > local_size)
+            throw std::runtime_error(std::format(
+                    "{} was given a {}-tap filter, more than the {} invocations in its workgroup, "
+                    "which load the taps one each. Filter lengths follow --sample-freq.",
+                    shader_name, max_filter_size, local_size));
+
+        const uint32_t needed = (2 * max_filter_size + local_size * max_decimation) * sizeof(float);
+        const uint32_t available = m_vulkan_manager.getPhysicalDeviceProperties().limits.maxComputeSharedMemorySize;
+        m_log.debug(eVideo, std::format(
+                "{}: {} taps, decimation {}, workgroup {} -> {} bytes of shared memory (device offers {})",
+                shader_name, max_filter_size, max_decimation, local_size, needed, available));
+        if (needed > available)
+            throw std::runtime_error(std::format(
+                    "Unsupported hardware: {} needs {} bytes of shared memory for a {}-tap filter "
+                    "decimating by {} at a workgroup of {}, but this device offers only {} "
+                    "(maxComputeSharedMemorySize).",
+                    shader_name, needed, max_filter_size, max_decimation, local_size, available));
+    }
 
     bool readFloats(float *out, size_t n) {
         assert(n == m_input_block_size);

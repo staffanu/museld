@@ -16,7 +16,8 @@ class Logger;
 
 class EfmDecoder {
 public:
-    explicit EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt = std::nullopt);
+    explicit EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt,
+                        std::optional<std::string> t_values_filename_opt);
     ~EfmDecoder();
 
     EfmDecoder(const EfmDecoder &) = delete;
@@ -26,6 +27,11 @@ public:
 
     std::vector<TwoChannelSampleWithErasureFlags> decode(const std::vector<float> &data, bool log_now);
     std::string reedSolomonStatistics();
+
+    // The Q-channel pre-emphasis flag (IEC 60908 clause 17.5).  The control field only changes
+    // during a pause of at least 2 s, so the CIRC delay between a frame's control byte and its
+    // audio samples needs no compensation.  A failed Q CRC leaves the last good value in place.
+    [[nodiscard]] bool preEmphasis() const { return m_subcode_q_use == Audio2ChannelWithPreEmphasis; }
 
 private:
     static constexpr int c_minimum_frames_before_c1_c2_valid = 97;
@@ -55,6 +61,14 @@ private:
 
     Logger &m_log;
     FILE *m_circ_debug_file;
+    // Run lengths between NRZI transitions, written as one u8 per value (the format
+    // used by ld-decode .efm files).  Values are kept in the EFM-legal range [3, 11]
+    // without changing the total bit count, so consumers never lose 588-bit frame
+    // alignment: a too-short run is carried into the following run, and a too-long
+    // run (dropout) is split into legal chunks.
+    FILE *m_t_values_file;
+    int m_t_value_run_length;
+    int m_t_value_carry;
     int m_total_bits;
     float m_prev_symbol;
     int m_shift_register;
@@ -83,6 +97,7 @@ private:
         Broadcasting
     };
     std::optional<SubcodePUse> m_subcode_q_use;
+    std::optional<int> m_subcode_q_undefined_control; // last out-of-spec control field warned about
 
     ReedSolomon<0x11d, 2> m_c1;
     ReedSolomon<0x11d, 2> m_c2;
