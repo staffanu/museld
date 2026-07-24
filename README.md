@@ -172,8 +172,8 @@ cd player/build-debug && ctest -V
 ## Quick start — museld
 
 ```console
-wget --directory-prefix ../data/muse https://madeye.org/muse-demo/makeup-muse-rf-62.5MHz-nofilter.raw
-./player/build-release/src/museld ../data/muse/makeup-muse-rf-62.5MHz-nofilter.raw
+wget https://madeye.org/ld-captures/public/MUSE-sony-test-disc-makeup-62.5MHz.rf.s16
+./player/build-release/src/museld MUSE-sony-test-disc-makeup-62.5MHz.rf.s16
 ```
 
 ![MUSE test picture](test-picture.png)
