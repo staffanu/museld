@@ -16,12 +16,14 @@ namespace musevk {
                                  int32_t push_constants_size,
                                  const std::vector<uint32_t> &spirv,
                                  const Size &workgroup_size,
-                                 int max_descriptor_sets)
+                                 int max_descriptor_sets,
+                                 const std::vector<uint32_t> &specialization_constants)
     : m_device(device),
       m_name(std::move(name)),
       m_descriptor_count(buffer_types.size()),
       m_push_constants_size(push_constants_size),
       m_spirv(spirv),
+      m_specialization_constants(specialization_constants),
       m_workgroup_size(workgroup_size),
       m_local_workgroup_size(Size(0)) {
 
@@ -34,12 +36,14 @@ namespace musevk {
                                  int32_t push_constants_size,
                                  const std::vector<uint32_t> &spirv,
                                  const Size &workgroup_size,
-                                 int max_descriptor_sets)
+                                 int max_descriptor_sets,
+                                 const std::vector<uint32_t> &specialization_constants)
     : m_device(device),
       m_name(std::move(name)),
       m_descriptor_count(buffers.size()),
       m_push_constants_size(push_constants_size),
       m_spirv(spirv),
+      m_specialization_constants(specialization_constants),
       m_workgroup_size(workgroup_size),
       m_local_workgroup_size(Size(0)) {
 
@@ -140,20 +144,22 @@ namespace musevk {
     }
 
     void ComputeShader::createPipeline() {
-        struct Constants {
-            uint32_t size_x;
-            uint32_t size_y;
-            uint32_t size_z;
-        } constants { m_local_workgroup_size.x_size, m_local_workgroup_size.y_size, m_local_workgroup_size.z_size };
-        vector<vk::SpecializationMapEntry> specialization_map_entries {
-                vk::SpecializationMapEntry(1, offsetof(Constants, size_x), sizeof(constants.size_x)),
-                vk::SpecializationMapEntry(2, offsetof(Constants, size_y), sizeof(constants.size_y)),
-                vk::SpecializationMapEntry(3, offsetof(Constants, size_z), sizeof(constants.size_z)),
-        };
+        // Ids 1-3 are the workgroup size, declared by every shader through muse.h; any further
+        // values the caller supplied follow from id 4, which is where shaders that need one
+        // (the FIR filters size their shared memory from theirs) start counting.
+        vector<uint32_t> constants { m_local_workgroup_size.x_size,
+                                     m_local_workgroup_size.y_size,
+                                     m_local_workgroup_size.z_size };
+        constants.insert(constants.end(), m_specialization_constants.begin(), m_specialization_constants.end());
+
+        vector<vk::SpecializationMapEntry> specialization_map_entries;
+        for (uint32_t i = 0; i < constants.size(); i++)
+            specialization_map_entries.emplace_back(i + 1, i * sizeof(uint32_t), sizeof(uint32_t));
+
         vk::SpecializationInfo specialization_info(specialization_map_entries.size(),
                                                    specialization_map_entries.data(),
-                                                   sizeof(constants),
-                                                   &constants);
+                                                   constants.size() * sizeof(uint32_t),
+                                                   constants.data());
 
         vk::PipelineShaderStageCreateInfo shader_stage_info(vk::PipelineShaderStageCreateFlags(),
                                                             vk::ShaderStageFlagBits::eCompute,
