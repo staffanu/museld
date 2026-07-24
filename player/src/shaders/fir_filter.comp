@@ -55,7 +55,11 @@ void main() {
 
     for (int i = 0; i < decimation_rate; i++)
         shared_input[local_ix + i * local_size] = input_data[base_ix + local_ix + i * local_size];
-    if (local_ix < max_filter_size)
+    // The tail beyond the workgroup's own samples is the filter's overlap, which is
+    // filter_size - decimation_rate samples long.  Bounding it by the specialized tap count
+    // instead read one sample past the end of the input buffer on the last workgroup, and on
+    // a dispatch decimating by less than the pipeline was specialized to, several.
+    if (local_ix + decimation_rate < filter_size)
         shared_input[local_ix + decimation_rate * local_size] = input_data[base_ix + local_ix + decimation_rate * local_size];
 
     barrier();
