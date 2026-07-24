@@ -76,7 +76,8 @@ about MUSE encoding.
 Standalone tool for streaming data from a Picoscope 5000-series oscilloscope to a file or FIFO,
 from either an analog channel or the digital ports (MSO models). Sample rate, ADC resolution,
 voltage range, coupling, channel, and capture length are set with command line options
-(see `picostream --help`).
+(see `picostream --help`). It can auto-stop when the analog input goes silent
+(`--stop-on-signal-loss`) and reports the min/max sample level and any ADC clipping on exit.
 Used to capture MUSE RF in real time for piping directly into museld.
 (The current tool I use to capture MUSE RF is [fx3usbadc](https://bitbucket.org/staffanulfberg/fx3usbadc).)
 
@@ -168,8 +169,8 @@ cd player/build-debug && ctest -V
 ## Quick start — museld
 
 ```console
-wget --directory-prefix ../data/muse https://madeye.org/muse-demo/makeup-muse-rf-62.5MHz-nofilter.raw
-./player/build-release/src/museld ../data/muse/makeup-muse-rf-62.5MHz-nofilter.raw
+wget https://madeye.org/ld-captures/public/MUSE-sony-test-disc-makeup-62.5MHz.rf.s16
+./player/build-release/src/museld MUSE-sony-test-disc-makeup-62.5MHz.rf.s16
 ```
 
 ![MUSE test picture](test-picture.png)

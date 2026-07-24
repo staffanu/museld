@@ -14,7 +14,7 @@ TextRenderer::TextRenderer(std::string const &executable_dir, VulkanManager &vul
   m_font_buffer(VulkanUtil::createDeviceBuffer(vulkan_manager, command_pool, Size(c_font_definition.size()),
                     std::vector<uint32_t>(c_font_definition.begin(), c_font_definition.end()))),
   m_render_text_shader(std::shared_ptr<ComputeShader>(
-          new ComputeShader(m_vulkan_manager.getDevice(),
+          new ComputeShader(m_vulkan_manager,
                             "render_text", {eBuffer, eImage}, sizeof(uint16_t) * 64,
                             musevk::VulkanUtil::loadSpirv(executable_dir, "render_text.comp"), musevk::Size(0)))) {
 }

@@ -4,6 +4,7 @@
 #include <string>
 #include <map>
 #include <chrono>
+#include <cmath>
 #include <format>
 #include "musevk/VulkanManager.h"
 #include "musevk/TimestampQueryPool.h"
@@ -33,6 +34,11 @@ MuseDecoder::MuseDecoder(
   m_decode_audio(decode_audio),
   m_timestamp_query_pool(timestamp_query_pool),
   m_rescale{-1, -1},
+  m_noise{-1, -1, -1, -1},
+  m_clamp_mean_avg(0),
+  m_clamp_mean_sq_avg(0),
+  m_noise_psd{},
+  m_noise_psd_windows(0),
   m_first_stage_complete_semaphore(manager.getDevice().createSemaphore(vk::SemaphoreCreateInfo())),
   m_first_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
   m_second_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
@@ -41,7 +47,7 @@ MuseDecoder::MuseDecoder(
   m_field_index(0),
   m_total_elapsed_time_us(0),
   m_audio_decoder(log),
-  m_efm_decoder(log),
+  m_efm_decoder(log, std::nullopt, std::nullopt),
   m_efm_pcm_processor(log),
   m_equalizer(log, eq_mode, eq_alpha),
   m_frame_buffers() {
@@ -143,13 +149,79 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // gives the same flat-region anchors as estimating it on the EQ'd buffer.
         m_equalizer.updateFromFrame(input_float, m_frame_no, phase_c);
 
-        auto rescale_estimate = FrameBuffer::EstimateRescale(input_float);
-        if (m_rescale.first == -1 && m_rescale.second == -1)
-            m_rescale = rescale_estimate;
-        else
-            m_rescale = {m_rescale.first * 0.9 + rescale_estimate.first * 0.1, m_rescale.second * 0.9 + rescale_estimate.second * 0.1};
+        auto noise_estimate = FrameBuffer::EstimateNoise(input_float);
+
+        // A dropout covering more than half of a reference window defeats even
+        // the median-based EstimateRescale, but it also makes the window's
+        // robust sigma explode -- so skip the rescale update on such frames.
+        // The noise EWMA below is not gated, so after a genuine change in noise
+        // level the gate reopens by itself once the EWMA has caught up.
+        bool reference_windows_clean =
+                m_noise.sigma_clamp < 0 ||
+                (noise_estimate.sigma_clamp < 4.0f * m_noise.sigma_clamp &&
+                 noise_estimate.sigma_high < 4.0f * m_noise.sigma_high &&
+                 noise_estimate.sigma_low < 4.0f * m_noise.sigma_low);
+        if (reference_windows_clean) {
+            auto rescale_estimate = FrameBuffer::EstimateRescale(input_float);
+            if (m_rescale.first == -1 && m_rescale.second == -1)
+                m_rescale = rescale_estimate;
+            else
+                m_rescale = {m_rescale.first * 0.9 + rescale_estimate.first * 0.1, m_rescale.second * 0.9 + rescale_estimate.second * 0.1};
+        } else {
+            m_log.debug(eDecoder, std::format(
+                    "rescale update skipped: reference window σ spike (clamp {:.1f}/{:.1f}, high {:.1f}/{:.1f}, low {:.1f}/{:.1f})",
+                    noise_estimate.sigma_clamp, m_noise.sigma_clamp,
+                    noise_estimate.sigma_high, m_noise.sigma_high,
+                    noise_estimate.sigma_low, m_noise.sigma_low));
+        }
+        if (m_noise.sigma_clamp < 0) {
+            m_noise = noise_estimate;
+            m_clamp_mean_avg = noise_estimate.clamp_mean;
+            m_clamp_mean_sq_avg = (double)noise_estimate.clamp_mean * noise_estimate.clamp_mean;
+        } else {
+            m_noise.sigma_clamp = m_noise.sigma_clamp * 0.9f + noise_estimate.sigma_clamp * 0.1f;
+            m_noise.sigma_high = m_noise.sigma_high * 0.9f + noise_estimate.sigma_high * 0.1f;
+            m_noise.sigma_low = m_noise.sigma_low * 0.9f + noise_estimate.sigma_low * 0.1f;
+            m_clamp_mean_avg = m_clamp_mean_avg * 0.9 + noise_estimate.clamp_mean * 0.1;
+            m_clamp_mean_sq_avg = m_clamp_mean_sq_avg * 0.9 + (double)noise_estimate.clamp_mean * noise_estimate.clamp_mean * 0.1;
+        }
+        m_noise_psd_windows += FrameBuffer::AccumulateNoisePsd(input_float, m_noise_psd.data());
         if (m_frame_no % 30 == 0) {
             m_log.info(eDecoder, std::format("rescale: {}, {}", m_rescale.first, m_rescale.second));
+            if (m_rescale.first > 0 && m_noise.sigma_clamp > 0) {
+                float sigma_levels = m_noise.sigma_clamp / m_rescale.first;
+                double wander_var = m_clamp_mean_sq_avg - m_clamp_mean_avg * m_clamp_mean_avg;
+                m_log.info(eDecoder, std::format(
+                        "noise: SNR {:.1f} dB over the 16-239 video range "
+                        "(σ = {:.2f} levels at clamp, {:.2f} at high, {:.2f} at low; clamp wander σ = {:.2f})",
+                        20.0f * log10(223.0f / sigma_levels),
+                        sigma_levels,
+                        m_noise.sigma_high / m_rescale.first,
+                        m_noise.sigma_low / m_rescale.first,
+                        sqrt(max(0.0, wander_var)) / m_rescale.first));
+                if (m_noise_psd_windows > 0) {
+                    // The linear de-emphasis kernel from apply_deemphasis_and_gamma.comp,
+                    // evaluated on the accumulated noise spectrum.  The non-linear stage
+                    // is identity within the 16-239 range and does not affect noise.
+                    double total = 0, deemphasized = 0;
+                    for (int k = 0; k < 256; k++) {
+                        double w = 2 * M_PI * k / 256;
+                        double h = 0.5 + 5.0 / 16 * cos(w) + 1.0 / 8 * cos(2 * w) + 1.0 / 16 * cos(3 * w);
+                        double p = m_noise_psd[k] / m_noise_psd_windows;
+                        total += p;
+                        deemphasized += p * h * h;
+                    }
+                    total /= 256;
+                    deemphasized /= 256;
+                    double sigma_de = sqrt(deemphasized) / m_rescale.first;
+                    m_log.info(eDecoder, std::format(
+                            "noise spectrum: SNR after de-emphasis {:.1f} dB "
+                            "(de-emphasis gain {:.1f} dB; spectrum total σ = {:.2f} levels)",
+                            20.0 * log10(223.0 / sigma_de),
+                            10.0 * log10(total / deemphasized),
+                            sqrt(total) / m_rescale.first));
+                }
+            }
             const char *mode_str = m_equalizer.mode() == MuseAdaptiveEqualizer::Mode::eOff    ? "off"
                                  : m_equalizer.mode() == MuseAdaptiveEqualizer::Mode::eAdapt  ? "adapt"
                                                                                               : "frozen";
@@ -237,7 +309,7 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
     if (m_decode_audio && m_field_index == 0) {
         if (efm_audio && input_block != nullptr) {
             auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
-            for (const auto &s : m_efm_pcm_processor.processSamples(raw)) {
+            for (const auto &s : m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis())) {
                 if (out.audio_sample_count >= MAX_AUDIO_OUTPUT_SAMPLES) break;
                 out.audio_samples[out.audio_sample_count].samples[0] = s.samples[0];
                 out.audio_samples[out.audio_sample_count].samples[1] = s.samples[1];

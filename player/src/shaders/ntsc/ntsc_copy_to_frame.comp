@@ -8,13 +8,17 @@
 #include "muse.h"
 
 layout(push_constant) uniform PushConstants {
-    uint dropout_mode; // 0: normal, 1: disabled, 2: highlight
+    uint dropout_mode;  // 0: normal, 1: disabled, 2: highlight
+    float level_offset; // measured blanking level in reader voltage units
+    float level_scale;  // output units per volt: 1 / (white - blanking)
 };
 
 layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
     float frame_in[][NTSC_TOTAL_WIDTH];
 };
 
+// The extended dropout plane prepared by ntsc_extend_dropouts.comp (never
+// flagged in the vertical interval).
 layout(set = 0, binding = 1) buffer readonly dropout_data_buffer {
     uint8_t dropout_data[][NTSC_TOTAL_WIDTH];
 };
@@ -23,6 +27,95 @@ layout(set = 0, binding = 2) buffer writeonly frame_out_buffer {
     float16_t frame_out[][NTSC_TOTAL_WIDTH];
 };
 
+// Motion masks of the previous frame (this frame's are not computed yet);
+// their future side covers the differences against this frame, which is
+// exactly the evidence needed: a real dropout's garbage never matches the
+// neighbouring frames, so it always registers as motion there, while a
+// false detection on static content (subtitle strokes) shows none -- and
+// concealing those from the surrounding lines damages the picture more
+// than the marginal defect it was flagged for.
+layout(set = 0, binding = 3) buffer readonly past_motion_buffer {
+    float16_t past_motion[][NTSC_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 4) buffer readonly future_motion_buffer {
+    float16_t future_motion[][NTSC_Y_BUF_WIDTH];
+};
+
+float motion_at(int r, int c) {
+    int field = r >= 263 ? 1 : 0;
+    int fr = r - 22 - 263 * field;
+    if (fr < 0 || fr >= NTSC_FIELD_HEIGHT)
+        return 1.0; // outside the picture rows: keep the old behavior
+    int orow = fr * 2 + field;
+    int oc = clamp(c - NTSC_FIELD_START_X, 0, NTSC_Y_BUF_WIDTH - 1);
+    return max(float(past_motion[orow][oc]), float(future_motion[orow][oc]));
+}
+
+// LaserVision video de-emphasis (IEC 60857 Figure 9): flat to omega1 = 1/320 ns,
+// -6 dB/octave to omega2 = 1/120 ns, -8.5 dB above.  Bilinear transform of
+// D(s) = (1 + s 120ns)/(1 + s 320ns) on the line-locked 4 fsc grid (which makes
+// the taps independent of the capture sample rate), with the impulse response
+// truncated to 24 taps and renormalized to unity DC gain.  The emphasis was
+// applied to the whole composite signal, so no area gating -- and the filter
+// must run before the clamp below, while emphasis overshoots are still intact.
+const float deemphasis[24] = float[](
+    0.43809204, 0.11129277, 0.08939259, 0.07180192, 0.05767274, 0.04632390,
+    0.03720828, 0.02988644, 0.02400539, 0.01928161, 0.01548737, 0.01243977,
+    0.00999187, 0.00802567, 0.00644638, 0.00517786, 0.00415896, 0.00334056,
+    0.00268321, 0.00215520, 0.00173110, 0.00139046, 0.00111684, 0.00089707);
+
+bool is_dropout(int r, int c) {
+    int cc = clamp(c, 0, NTSC_TOTAL_WIDTH - 1);
+    // A flag without temporal deviation is content, not a dropout.  The gate
+    // sits low: shallow real dropouts deviate modestly, while static content
+    // (subtitle text) measures essentially zero.
+    return dropout_data[r][cc] != 0 && motion_at(r, cc) > 0.1;
+}
+
+// Donor lines are only refused for core detections (1), not for the
+// precautionary extension (2) around them.
+bool is_core_dropout(int r, int c) {
+    return dropout_data[r][clamp(c, 0, NTSC_TOTAL_WIDTH - 1)] == 1;
+}
+
+// Reads the raw composite with dropout concealment.  Concealment substitutes
+// the nearest lines with the same subcarrier phase: the adjacent lines are
+// 180 degrees out of phase, so they would invert the colour in the patch --
+// two lines away is in phase.
+float composite_sample(int r, int c) {
+    float v = frame_in[r][c];
+    if (dropout_mode == 1 || !is_dropout(r, c))
+        return v;
+    // Search outward for clean lines; a dropout often also covers the nearest
+    // in-phase neighbours.
+    float up_v = 0.0;
+    float down_v = 0.0;
+    bool up_ok = false;
+    bool down_ok = false;
+    for (int k = 2; k <= 8 && !up_ok; k += 2) {
+        int rr = max(r - k, 0);
+        if (!is_core_dropout(rr, c)) {
+            up_v = frame_in[rr][c];
+            up_ok = true;
+        }
+    }
+    for (int k = 2; k <= 8 && !down_ok; k += 2) {
+        int rr = min(r + k, NTSC_TOTAL_HEIGHT - 1);
+        if (!is_core_dropout(rr, c)) {
+            down_v = frame_in[rr][c];
+            down_ok = true;
+        }
+    }
+    if (up_ok && down_ok)
+        return 0.5 * (up_v + down_v);
+    if (up_ok)
+        return up_v;
+    if (down_ok)
+        return down_v;
+    return v;
+}
+
 void main() {
     uint row = gl_GlobalInvocationID.y;
     uint col = gl_GlobalInvocationID.x;
@@ -30,11 +123,32 @@ void main() {
     if (row >= NTSC_TOTAL_HEIGHT || col >= NTSC_TOTAL_WIDTH)
         return;
 
-    // TODO: handle dropouts, and maybe de-emphasis
+    // The causal filter reads backwards in time; rows are contiguous in time,
+    // so before column 0 it continues on the tail of the previous row.  The
+    // sync pulse is replaced by blanking level so that the settling tail of
+    // the channel's imperfectly inverted sync edge cannot reach the colour
+    // burst.  (Measured effect on the Video Essentials capture: none -- the
+    // full-cycle burst correlation already rejects the smooth transient --
+    // but this makes the burst reference immune to worse sync edges.)  Only
+    // columns before the burst can see the pulse, so the picture is
+    // unaffected.
+    float v = 0.0;
+    for (int n = 0; n < 24; n++) {
+        int c = int(col) - n;
+        int r = int(row);
+        if (c < 0) {
+            c += NTSC_TOTAL_WIDTH;
+            r--;
+            if (r < 0) {
+                r = 0;
+                c = 0;
+            }
+        }
+        v += deemphasis[n] * (c < 74 ? level_offset : composite_sample(r, c));
+    }
 
-    float16_t v = float16_t(frame_in[row][col]);
-
-    v = clamp((v - 0.3hf) * 1.43hf, 0.hf, 1.hf);
-
-    frame_out[row][col] = v;
+    // A loose clamp: the picture path re-clamps to 0..1 at the end, and the
+    // colour burst swings below blanking level -- clipping it would corrupt the
+    // burst phase and amplitude reference.
+    frame_out[row][col] = clamp(float16_t((v - level_offset) * level_scale), -0.5hf, 1.5hf);
 }

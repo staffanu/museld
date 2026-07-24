@@ -1,0 +1,80 @@
+#version 450
+
+// Turns the raw per-sample dropout flags into the frame's dropout plane,
+// with run extension after ld-decode's recipe: bridge short gaps between
+// flagged samples, extend trailing edges in proportion to the run length
+// (dropouts ramp out slowly), and pad every region a little.  The vertical
+// interval is never flagged: concealment there would corrupt the white flag
+// and the picture number codes.
+//
+// This shader should be invoked with global invocation ids ranging from
+// (0, 0) to (NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT).
+
+#include "muse.h"
+
+layout(set = 0, binding = 0) buffer readonly dropout_in_buffer {
+    uint8_t dropout_in[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 1) buffer writeonly dropout_out_buffer {
+    uint8_t dropout_out[][NTSC_TOTAL_WIDTH];
+};
+
+// Flags outside the active picture columns are ignored: the detector also
+// fires around sync and burst, and extending those runs would leak into the
+// picture edges.
+bool raw_flag(uint row, int c) {
+    if (c < NTSC_FIELD_START_X || c >= NTSC_FIELD_START_X + NTSC_Y_BUF_WIDTH)
+        return false;
+    return dropout_in[row][c] != 0;
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+
+    if (row >= NTSC_TOTAL_HEIGHT || col >= NTSC_TOTAL_WIDTH)
+        return;
+
+    if (row % 263 < 21) {
+        dropout_out[row][col] = uint8_t(0);
+        return;
+    }
+
+    // The plane distinguishes core detections (1) from the precautionary
+    // extension around them (2): concealment repairs both but only refuses
+    // donor lines carrying a core detection -- refusing the soft skirts too
+    // was observed to push donors out of reach and leave dropouts uncorrected.
+
+    // core: fixed pad around a detection
+    bool core = false;
+    for (int i = -4; i <= 4 && !core; i++)
+        core = raw_flag(row, int(col) + i);
+
+    // bridge: flags on both sides within a short gap
+    bool soft = false;
+    if (!core) {
+        bool left = false;
+        bool right = false;
+        for (int i = 1; i <= 12; i++) {
+            left = left || raw_flag(row, int(col) - i);
+            right = right || raw_flag(row, int(col) + i);
+        }
+        soft = left && right;
+    }
+
+    // proportional trailing extension: the more flagged samples just before
+    // this one, the further the run is allowed to reach (capped)
+    if (!core && !soft) {
+        int count = 0;
+        int last = 1000;
+        for (int i = 1; i <= 34; i++)
+            if (raw_flag(row, int(col) - i)) {
+                count++;
+                last = min(last, i);
+            }
+        soft = last <= min(count, 24);
+    }
+
+    dropout_out[row][col] = uint8_t(core ? 1 : soft ? 2 : 0);
+}

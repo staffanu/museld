@@ -91,7 +91,7 @@ void VideoFileWriter::addVideoFrameWithAudio(
         // correct before writing, so decoding errors cannot desync the streams
         const int in_rate = audioModeSampleRate(audio_mode);
         const int64_t scheduled =
-                (m_video_stream.next_pts - m_audio_anchor_frame) * in_rate / m_video_frame_rate;
+                (m_video_stream.next_pts - m_audio_anchor_frame) * in_rate * m_video_fps_den / m_video_fps_num;
         const int64_t deficit = scheduled - (m_audio_in_samples + number_of_samples);
 
         int skip = 0;
@@ -209,7 +209,7 @@ void VideoFileWriter::cleanup() {
     // end together even if audio was lost at the end of the recording
     if (m_encode_audio && m_swr_ctx) {
         int in_rate = audioModeSampleRate(m_audio_input_mode);
-        int64_t deficit = (m_video_stream.next_pts - m_audio_anchor_frame) * in_rate / m_video_frame_rate
+        int64_t deficit = (m_video_stream.next_pts - m_audio_anchor_frame) * in_rate * m_video_fps_den / m_video_fps_num
                           - m_audio_in_samples;
         if (deficit > in_rate * SYNC_DEAD_BAND_MS / 1000)
             insertSilence(deficit, in_rate);
@@ -283,7 +283,7 @@ void VideoFileWriter::initVideo(const PresetSpec &spec) {
     AVCodecContext *c = m_video_stream.codec_context;
     c->width = m_video_width;   // Resolution must be a multiple of two.
     c->height = m_video_height;
-    m_video_stream.stream->time_base = (AVRational) {1, m_video_frame_rate};
+    m_video_stream.stream->time_base = (AVRational) {m_video_fps_den, m_video_fps_num};
     c->time_base = m_video_stream.stream->time_base;
     c->pix_fmt = spec.pix_fmt;
     c->thread_count = 0; // auto

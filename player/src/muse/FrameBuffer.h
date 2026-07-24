@@ -21,6 +21,21 @@ public:
 
     static std::pair<float, float> EstimateRescale(float const *data);
 
+    // Robust noise sigmas measured on the flat reference regions of the raw frame,
+    // in raw sample units (divide by the rescale slope to get 8-bit digital levels).
+    struct NoiseEstimate {
+        float sigma_clamp; // clamp periods of lines 563 and 1125 (level 128)
+        float sigma_high;  // line 1 calibration level (239)
+        float sigma_low;   // line 2 calibration level (16)
+        float clamp_mean;  // robust clamp level, for tracking frame-to-frame wander
+    };
+    static NoiseEstimate EstimateNoise(float const *data);
+
+    // Accumulates the power spectrum of the detrended clamp-window residuals into
+    // psd[256] (bin k = k/256 × 16.2 MHz; for white noise of variance σ² every bin
+    // converges to σ²).  Returns the number of windows added (2, one per clamp line).
+    static int AccumulateNoisePsd(float const *data, double *psd);
+
     // VITS mono-pulses live on lines 1 and 2 (1-based) — that is rows 0 and 1 (0-based).
     // Pulse is at 1-based sample 264 (0-based index 263) in phase-C-0 frames, and one
     // 32.4 MHz cycle to the left of that in phase-C-1 frames (see MUSE－ハイビジョン伝送方式

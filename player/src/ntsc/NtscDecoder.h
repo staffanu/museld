@@ -4,6 +4,7 @@
 #ifndef MUSECPP_NTSCDECODER_H
 #define MUSECPP_NTSCDECODER_H
 
+#include <array>
 #include <deque>
 #include "musevk/TimestampStatistics.h"
 #include "efm/EfmDecoder.h"
@@ -30,6 +31,7 @@ public:
             Logger &log, FrameReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
             musevk::CommandPool &command_pool, std::string const &executable_dir,
             bool decode_video, bool decode_all_fields, bool decode_audio,
+            float tint_degrees, float saturation,
             musevk::TimestampQueryPool *timestamp_query_pool);
     ~NtscDecoder();
     NtscDecoder(const NtscDecoder&) = delete;
@@ -58,6 +60,19 @@ private:
     musevk::TimestampQueryPool *m_timestamp_query_pool; // if set we use it
 
     std::pair<float, float> m_eq;
+    float m_rot_re; // chroma rotation/gain for the decode shader; set in the constructor
+    float m_rot_im;
+    NtscFrame::NoiseEstimate m_noise; // EWMA-smoothed, reader voltage units
+    double m_blanking_avg;            // EWMA of the per-frame blanking level ...
+    double m_blanking_sq_avg;         // ... and of its square, for the wander σ
+    double m_white_avg;               // EWMA of the white flag level, -1 until first seen
+    long m_white_flag_frames;         // frames whose white flag qualified
+    float m_level_offset_v;           // rescale applied by the copy shader:
+    float m_level_scale;              // out = (v - offset) * scale
+    double m_prev_burst_phase;        // last frame's burst phase, NAN before the first
+    double m_burst_coherence_avg;     // EWMA of the frame-to-frame burst phase error, -1 until seeded
+    std::array<double, 256> m_noise_psd; // cumulative blank-VBI-line power spectrum
+    long m_noise_psd_windows;
     vk::Semaphore m_first_stage_complete_semaphore;
     std::shared_ptr<musevk::CommandBuffer> m_reset_timestamp_query_pool_command_buffer;
     std::shared_ptr<musevk::CommandBuffer> m_first_stage_command_buffer;
@@ -68,7 +83,14 @@ private:
     long m_total_elapsed_time_us;
     EfmDecoder m_efm_decoder;
     EfmPcmProcessor m_efm_pcm_processor;
-    std::deque<NtscFrame *> m_frames; // The front (index 0) is the newest received frame; we keep three frames.
+    // Audio decoded from the newest read block, held back one frame so it
+    // stays in sync with the picture (which displays one frame behind the
+    // read for the 3D comb lookahead)
+    std::vector<AudioFrame> m_pending_audio;
+    AudioMode m_pending_audio_mode;
+    // The front (index 0) is the newest received frame N+1 (the lookahead);
+    // index 1 is the frame being decoded, 2 and 3 its history.
+    std::deque<NtscFrame *> m_frames;
 };
 
 

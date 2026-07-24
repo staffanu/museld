@@ -1,12 +1,15 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <vector>
 #include "NtscFrame.h"
+#include "NtscConstants.h"
 #include "NtscFieldView.h"
 #include "NtscInputBlock.h"
 #include "musevk/VulkanBuffer.h"
 #include "musevk/VulkanManager.h"
 #include "musevk/HalfFloatUtil.h"
+#include "util/RobustNoise.h"
 
 NtscFrame::NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager)
 : m_frame_no(frame_no),
@@ -18,14 +21,118 @@ NtscFrame::NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager)
         m_burst_phase_data(std::make_unique<musevk::VulkanBuffer>(
                 manager, musevk::Size(NtscInputBlock::c_total_video_lines), 4 /* 2 * sizeof(float16) */,
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostNone)),
-        m_y_data(std::make_unique<musevk::VulkanBuffer>(
-                manager, musevk::Size(NtscInputBlock::c_samples_per_video_line, NtscInputBlock::c_total_video_lines), 2 /* sizeof(float16) */,
+        m_dropout_data(std::make_unique<musevk::VulkanBuffer>(
+                manager, musevk::Size(NtscInputBlock::c_samples_per_video_line, NtscInputBlock::c_total_video_lines), sizeof(uint8_t),
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostNone)),
-        m_c_data(std::make_unique<musevk::VulkanBuffer>(
-                manager, musevk::Size(NtscInputBlock::c_samples_per_video_line, NtscInputBlock::c_total_video_lines), 2 /* sizeof(float16) */,
-                vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostNone)),
-        m_fields({NtscFieldView(log, frame_no, m_data, m_burst_phase_data, m_y_data, m_c_data, 0),
-                  NtscFieldView(log, frame_no, m_data, m_burst_phase_data, m_y_data, m_c_data, 1) }) {
+        m_fields({NtscFieldView(log, frame_no, m_data, m_burst_phase_data, m_dropout_data, 0),
+                  NtscFieldView(log, frame_no, m_data, m_burst_phase_data, m_dropout_data, 1) }) {
+}
+
+NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data) {
+    // Back porch windows sit after the colour burst (which reaches ~column 112)
+    // and before active video at column NTSC_FIELD_START_X = 129; sync tip
+    // windows inside the ~67-sample horizontal sync pulse.  Rows 40-250 and
+    // 303-513 keep clear of vertical sync and the VBI code lines (white flag,
+    // picture numbers).
+    NoiseEstimate est{};
+    std::vector<float> porch_residuals, sync_residuals, centers;
+    porch_residuals.reserve(422 * 16);
+    sync_residuals.reserve(422 * 48);
+    centers.reserve(422);
+    for (int field_start : {40, 303}) {
+        for (int row = field_start; row <= field_start + 210; row++) {
+            float center;
+            RobustNoise::appendDetrendedResiduals(data + row * NTSC_TOTAL_WIDTH + 113, 16, porch_residuals, &center);
+            centers.push_back(center);
+            RobustNoise::appendDetrendedResiduals(data + row * NTSC_TOTAL_WIDTH + 8, 48, sync_residuals);
+        }
+    }
+    est.sigma_blanking = RobustNoise::robustSigma(porch_residuals);
+    est.sigma_sync = RobustNoise::robustSigma(sync_residuals);
+    est.blanking_level = RobustNoise::median(centers);
+
+    // White flag: a full flat line at 100 IRE in the vertical interval (IEC
+    // 60857 writes it on line 11/274 to mark the first field of a film frame,
+    // but mastering varies, so scan the same candidate rows as the noise
+    // spectrum).  A window qualifies when it is flat (rejects Philips code
+    // pulses, which detrend to σ ≈ 0.5) and sits at the nominal 0.7 V above
+    // the blanking level just measured (rejects blank lines and captions).
+    // It is the only trustworthy gain reference on this medium: sync depth
+    // measures ~14 % off its 40 IRE definition on real captures.
+    std::vector<float> white_centers;
+    float sigma_gate = std::max(3.0f * est.sigma_blanking, 0.02f);
+    for (int row : {8, 10, 11, 12, 13, 14, 270, 272, 273, 274, 275, 276}) {
+        float row_centers[2];
+        bool qualified = true;
+        for (int w = 0; w < 2; w++) {
+            std::vector<float> residuals;
+            RobustNoise::appendDetrendedResiduals(
+                    data + row * NTSC_TOTAL_WIDTH + (w == 0 ? 150 : 425), 256, residuals, &row_centers[w]);
+            if (std::abs(row_centers[w] - est.blanking_level - 0.7f) > 0.15f ||
+                RobustNoise::robustSigma(residuals) > sigma_gate)
+                qualified = false;
+        }
+        if (qualified && std::abs(row_centers[0] - row_centers[1]) < 0.05f)
+            white_centers.push_back(0.5f * (row_centers[0] + row_centers[1]));
+    }
+    est.white_flag_level = white_centers.empty() ? -1.0f : RobustNoise::median(white_centers);
+
+    // Burst phase: correlate the colour burst window (columns 78..110, 8
+    // subcarrier cycles on the 4 fsc grid) against the quadrature pair per
+    // line.  The burst inverts line to line, so odd lines are flipped before
+    // the amplitude-weighted circular statistics.
+    {
+        static constexpr float lut_cos[4] = {1, 0, -1, 0};
+        static constexpr float lut_sin[4] = {0, 1, 0, -1};
+        std::vector<std::pair<float, float>> line_vecs;
+        line_vecs.reserve(422);
+        double sum_i = 0, sum_q = 0;
+        for (int field_start : {40, 303}) {
+            for (int row = field_start; row <= field_start + 210; row++) {
+                float bi = 0, bq = 0;
+                for (int x = 78; x < 110; x++) {
+                    float v = data[row * NTSC_TOTAL_WIDTH + x];
+                    bi += v * lut_cos[x % 4];
+                    bq += v * lut_sin[x % 4];
+                }
+                if (row & 1) { bi = -bi; bq = -bq; }
+                line_vecs.emplace_back(bi, bq);
+                sum_i += bi;
+                sum_q += bq;
+            }
+        }
+        est.burst_phase = (float)atan2(sum_q, sum_i);
+        double var_sum = 0, w_sum = 0;
+        for (auto [bi, bq] : line_vecs) {
+            double a = std::hypot(bi, bq);
+            if (a <= 0)
+                continue;
+            double d = std::remainder(atan2(bq, bi) - est.burst_phase, 2 * M_PI);
+            var_sum += a * d * d;
+            w_sum += a;
+        }
+        est.burst_phase_sigma = w_sum > 0 ? (float)sqrt(var_sum / w_sum) : 0.0f;
+    }
+    return est;
+}
+
+int NtscFrame::AccumulateNoisePsd(float const *data, double *psd, float max_sigma) {
+    // Candidate blank VBI rows.  Discs differ in which lines carry the white
+    // flag, picture numbers, and captions, so every window must qualify
+    // instead: level close to blanking (rejects the white flag and active
+    // video) and sigma below the gate (a Philips code line measures ~0.5).
+    int windows = 0;
+    for (int row : {8, 10, 11, 12, 13, 14, 270, 272, 273, 274, 275, 276})
+        for (int col : {150, 425}) {
+            std::vector<float> residuals;
+            float center;
+            RobustNoise::appendDetrendedResiduals(data + row * NTSC_TOTAL_WIDTH + col, 256, residuals, &center);
+            if (std::abs(center - 0.3f) > 0.1f || RobustNoise::robustSigma(residuals) > max_sigma)
+                continue;
+            RobustNoise::accumulateDetrendedWindowPsd(data + row * NTSC_TOTAL_WIDTH + col, 256, psd);
+            windows++;
+        }
+    return windows;
 }
 
 void NtscFrame::set_frame_no(int frame_no, long input_offset, double input_samples_per_sample) {
@@ -48,17 +155,14 @@ std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::data() {
     return m_data;
 }
 
+std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::dropout_data() {
+    return m_dropout_data;
+}
+
 std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::burst_phase_data() {
     return m_burst_phase_data;
 }
 
-std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::y_data() {
-    return m_y_data;
-}
-
-std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::c_data() {
-    return m_c_data;
-}
 
 NtscFieldView &NtscFrame::get_field(int parity) {
     return m_fields[parity];

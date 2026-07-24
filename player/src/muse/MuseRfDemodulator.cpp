@@ -1,6 +1,7 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <bit>
 #include <chrono>
 #include <cstring>
 #include <thread>
@@ -85,6 +86,15 @@ void MuseRfDemodulator::demodulate() {
     std::reverse(rrc_filter_def.begin(), rrc_filter_def.end()); // symmetric, but the shader correlates
     const int rrc_filter_size = (int)rrc_filter_def.size();
 
+    // Each shader is specialized to the longest filter and largest decimation it will be
+    // dispatched with, which is what its shared memory is then sized from.  input_fir_filter
+    // runs the band-pass twice without decimating; fir_filter runs the low-pass decimating by
+    // two and then the root raised cosine at the decimated rate.
+    const uint32_t input_fir_max_filter_size = bandpass_filter_size;
+    const uint32_t input_fir_max_decimation = 1;
+    const uint32_t fir_max_filter_size = std::max(lowpass_filter_size, rrc_filter_size);
+    const uint32_t fir_max_decimation = MuseDemodulatedBlock::c_video_decimation_rate;
+
     shared_ptr<VulkanBuffer> rrc_filter =
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(rrc_filter_size), rrc_filter_def);
 
@@ -126,29 +136,35 @@ void MuseRfDemodulator::demodulate() {
 
     // Create shaders
     shared_ptr<ComputeShader> input_fir_filter_shader = unique_ptr<ComputeShader>(
-            new ComputeShader(m_vulkan_manager.getDevice(), "input_fir_filter",
+            new ComputeShader(m_vulkan_manager, "input_fir_filter",
                               {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "input_fir_filter.comp"), Size(0), 2));
+                              VulkanUtil::loadSpirv(m_executable_dir, "input_fir_filter.comp"), Size(0), 2,
+                              {input_fir_max_filter_size, input_fir_max_decimation}));
 
     input_fir_filter_shader->updateBufferDescriptorsInSet(0, {bandpass_filter_re, input_buffer, analytic_buffer_re});
     input_fir_filter_shader->updateBufferDescriptorsInSet(1, {bandpass_filter_im, input_buffer, analytic_buffer_im});
 
     shared_ptr<ComputeShader> fir_filter_shader = unique_ptr<ComputeShader>(
-            new ComputeShader(m_vulkan_manager.getDevice(), "fir_filter",
+            new ComputeShader(m_vulkan_manager, "fir_filter",
                               {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 2));
+                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 2,
+                              {fir_max_filter_size, fir_max_decimation}));
 
     fir_filter_shader->updateBufferDescriptorsInSet(0, {lowpass_filter, lowpass_in_buffer, rrc_in_buffer});
 
+    checkFirShaderFits("input_fir_filter.comp", *input_fir_filter_shader,
+                       input_fir_max_filter_size, input_fir_max_decimation);
+    checkFirShaderFits("fir_filter.comp", *fir_filter_shader, fir_max_filter_size, fir_max_decimation);
+
     shared_ptr<ComputeShader> fm_quadrature_shader = unique_ptr<ComputeShader>(
-            new ComputeShader(m_vulkan_manager.getDevice(), "fm_quadrature",
+            new ComputeShader(m_vulkan_manager, "fm_quadrature",
                               {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer}, 7 * sizeof(float),
                               VulkanUtil::loadSpirv(m_executable_dir, "fm_quadrature.comp"), Size(MuseDemodulatedBlock::c_sample_block_size)));
 
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
-            new ComputeShader(m_vulkan_manager.getDevice(),
+            new ComputeShader(m_vulkan_manager,
                               "detect_dropouts",
-                              {lowpass_in_buffer, dropout_buffer}, 4 * sizeof(uint32_t),
+                              {lowpass_in_buffer, dropout_buffer}, 6 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts.comp"), Size(MuseDemodulatedBlock::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
@@ -296,10 +312,13 @@ void MuseRfDemodulator::demodulate() {
                 {(uint32_t)rrc_filter_size, MuseDemodulatedBlock::c_video_block_size,
                  /* out offset */ 0, /* decimation */ 1}, 1);
 
-        // Detect dropouts
+        // Detect dropouts.  The MUSE range is 0..255 with grey at 128; the
+        // pre-emphasis overshoots reach far outside it, so the legal window is
+        // -2.2 and +5.5 half-ranges around grey.
         command_buffer->enqueueComputeShader<uint32_t>(
                 detect_dropouts_shader, {MuseDemodulatedBlock::c_video_block_size,
-                                         (uint32_t)lowpass_filter_size - 1, (uint32_t)c_dropout_delay, MuseDemodulatedBlock::c_video_decimation_rate});
+                                         (uint32_t)lowpass_filter_size - 1, (uint32_t)c_dropout_delay, MuseDemodulatedBlock::c_video_decimation_rate,
+                                         std::bit_cast<uint32_t>(-2.2f * 112.f + 128.f), std::bit_cast<uint32_t>(5.5f * 112.f + 128.f)});
 
         // Barrier: ensure all compute shader writes are visible to the subsequent transfer operations
         command_buffer->enqueueBarrier(vk::AccessFlagBits::eShaderWrite,
