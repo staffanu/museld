@@ -63,13 +63,22 @@ its API does not pass standard library types across the boundary.
 
 `vulkaninfo` on V3D 7.1 reports, against what the code assumes:
 
-| Feature or limit | V3D | museld assumes |
+| Feature or limit | V3D | museld assumed at the time |
 |---|---|---|
 | `shaderFloat16`, `shaderInt16`, `shaderInt8` | not supported | required by `checkDeviceFeaturesSupport` |
 | `maxComputeWorkGroupInvocations` | 256 | `c_default_linear_workgroup_size` is 1024 |
-| `maxComputeSharedMemorySize` | 16384 | one shader uses 16896 |
-| `maxPerStageDescriptorStorageBuffers` | 8 | one pipeline layout uses 10 |
+| `maxComputeSharedMemorySize` | 16384 | one shader used 16896 — since fixed |
+| `maxPerStageDescriptorStorageBuffers` | 8 | one pipeline layout uses 10 — now diagnosed |
 | memory types | one, `DeviceLocal\|HostVisible\|HostCoherent` | `eHostCached` on every host-read path |
+
+Two of these were portability bugs rather than Pi quirks, and were fixed on master after this
+investigation. The FIR shaders now size their shared memory from specialization constants set
+to the filters actually being run, which brings the block to 4-8 KiB and inside the 16 KiB that
+`maxComputeSharedMemorySize` is guaranteed to be — so that row no longer applies to any device.
+`ComputeShader` now also compares each shader's descriptor counts against what the device
+reports and refuses to run rather than exceeding them silently, which is what a V3D would now
+hit on `combine_still_and_moving.comp`. The remaining rows are genuine V3D limitations, and the
+patches described below are what works around them.
 
 Without the `shaderFloat16` exception, `checkDeviceFeaturesSupport` rejects V3D outright and
 museld silently falls back to llvmpipe — which is what happens on an unpatched build, and is
@@ -97,9 +106,13 @@ two devices computing at *different* precision — fp32 on V3D against genuine f
 llvmpipe — which is what promotion predicts.
 
 So **no fp32 shader port is needed for the Pi**. The same applies to the `Int8` capability.
-The code is formally out of spec on V3D, along with the shared-memory and storage-buffer
-overruns in the table above; all four are silent today and would be worth fixing on
-portability grounds, since another constrained GPU need not be as forgiving.
+Declaring these without the feature leaves the code formally out of spec on V3D, but harmlessly
+so: it only matters where the decode shaders are wanted at all, and any device fast enough to
+run them has real fp16.
+
+The shared-memory and storage-buffer overruns validation reported alongside these were a
+different matter — silent, and not specific to this board — and have since been fixed on
+master, as noted above.
 
 ## Where the time goes
 
@@ -157,6 +170,10 @@ diagnostic scaffolding, not a proposed Pi 5 port:
   offers no `eHostCached` type at all.
 - `MuseRfDemodulator` — break the recorded-time figure down by phase, which is how the
   command buffer recording cost above was located.
+
+This branch predates the two portability fixes it prompted, so it does not carry them. Rebasing
+it onto a master that has them would drop nothing here: they address different limits than the
+four patches above, which remain the ones V3D needs.
 
 ## If this is revisited
 
