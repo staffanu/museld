@@ -44,6 +44,8 @@ void LdfInputReader::seek(off_t no_samples) {
 int LdfInputReader::readFloats(float *f) {
     std::scoped_lock<std::mutex> lock(m_fd_mutex);
     int filled_floats = 0;
+    float dc = dcOffset();
+    double sum = 0;
     while (filled_floats < m_block_size) {
         if (m_flac_block_read_count == m_flac_used_size) {
             // notice this triggers also the first time, when both are zero
@@ -55,9 +57,13 @@ int LdfInputReader::readFloats(float *f) {
             }
         }
         int n = std::min(m_block_size - filled_floats, m_flac_used_size - m_flac_block_read_count);
-        for (int i = 0; i < n; i++)
-            f[filled_floats++] = (int16_t)m_decoded_samples[m_flac_block_read_count++];
+        for (int i = 0; i < n; i++) {
+            float v = (float)(int16_t)m_decoded_samples[m_flac_block_read_count++];
+            sum += v;
+            f[filled_floats++] = v - dc;
+        }
     }
+    updateDc(sum / m_block_size);
     m_sample_position += m_block_size;
     return m_block_size;
 }

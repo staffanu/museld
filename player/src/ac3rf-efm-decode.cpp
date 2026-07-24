@@ -362,7 +362,9 @@ int main(int argc, char *argv[]) {
                 log.debug(eApplication, std::format("ac3rf-decode version {}", AC3RF_DECODE_VERSION));
                 log.info(eApplication, std::format("Processing input file {}", filename));
                 processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
-                    makeInputReader(filename, input_format, block_size), block_size, out_fd, use_simd,
+                    [&] { auto r = makeInputReader(filename, input_format, block_size);
+                          r->setDcBlocking(true); // RF carries no legitimate DC
+                          return r; }(), block_size, out_fd, use_simd,
                     efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,
                     efm_t_values_output_filename, efm_circ_debug_filename, concealment_impl, target_sample_frequency);
 

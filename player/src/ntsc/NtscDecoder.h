@@ -65,6 +65,12 @@ private:
     NtscFrame::NoiseEstimate m_noise; // EWMA-smoothed, reader voltage units
     double m_blanking_avg;            // EWMA of the per-frame blanking level ...
     double m_blanking_sq_avg;         // ... and of its square, for the wander σ
+    double m_white_avg;               // EWMA of the white flag level, -1 until first seen
+    long m_white_flag_frames;         // frames whose white flag qualified
+    float m_level_offset_v;           // rescale applied by the copy shader:
+    float m_level_scale;              // out = (v - offset) * scale
+    double m_prev_burst_phase;        // last frame's burst phase, NAN before the first
+    double m_burst_coherence_avg;     // EWMA of the frame-to-frame burst phase error, -1 until seeded
     std::array<double, 256> m_noise_psd; // cumulative blank-VBI-line power spectrum
     long m_noise_psd_windows;
     vk::Semaphore m_first_stage_complete_semaphore;
@@ -77,7 +83,14 @@ private:
     long m_total_elapsed_time_us;
     EfmDecoder m_efm_decoder;
     EfmPcmProcessor m_efm_pcm_processor;
-    std::deque<NtscFrame *> m_frames; // The front (index 0) is the newest received frame; we keep three frames.
+    // Audio decoded from the newest read block, held back one frame so it
+    // stays in sync with the picture (which displays one frame behind the
+    // read for the 3D comb lookahead)
+    std::vector<AudioFrame> m_pending_audio;
+    AudioMode m_pending_audio_mode;
+    // The front (index 0) is the newest received frame N+1 (the lookahead);
+    // index 1 is the frame being decoded, 2 and 3 its history.
+    std::deque<NtscFrame *> m_frames;
 };
 
 
