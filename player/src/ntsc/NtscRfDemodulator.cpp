@@ -120,7 +120,7 @@ void NtscRfDemodulator::demodulate() {
 
     // Create shaders
     shared_ptr<ComputeShader> input_fir_filter_shader = unique_ptr<ComputeShader>(
-            new ComputeShader(m_vulkan_manager.getDevice(), "input_fir_filter",
+            new ComputeShader(m_vulkan_manager, "input_fir_filter",
                               {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "input_fir_filter.comp"), Size(0), 2));
 
@@ -128,19 +128,19 @@ void NtscRfDemodulator::demodulate() {
     input_fir_filter_shader->updateBufferDescriptorsInSet(1, {bandpass_filter_im, input_buffer, analytic_buffer_im});
 
     shared_ptr<ComputeShader> fir_filter_shader = unique_ptr<ComputeShader>(
-            new ComputeShader(m_vulkan_manager.getDevice(), "fir_filter",
+            new ComputeShader(m_vulkan_manager, "fir_filter",
                               {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 2));
 
     fir_filter_shader->updateBufferDescriptorsInSet(0, {lowpass_filter, lowpass_in_buffer, equalization_in_buffer});
 
     shared_ptr<ComputeShader> fm_quadrature_shader = unique_ptr<ComputeShader>(
-            new ComputeShader(m_vulkan_manager.getDevice(), "fm_quadrature",
+            new ComputeShader(m_vulkan_manager, "fm_quadrature",
                               {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer}, 7 * sizeof(float),
                               VulkanUtil::loadSpirv(m_executable_dir, "fm_quadrature.comp"), Size(c_sample_block_size)));
 
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
-            new ComputeShader(m_vulkan_manager.getDevice(),
+            new ComputeShader(m_vulkan_manager,
                               "detect_dropouts_envelope",
                               {analytic_buffer_re, analytic_buffer_im, dropout_buffer}, 5 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts_envelope.comp"), Size(NtscRfDemodulatorConstants::c_video_block_size)));

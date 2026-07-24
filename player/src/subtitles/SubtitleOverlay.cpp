@@ -47,7 +47,7 @@ SubtitleOverlay::SubtitleOverlay(std::vector<SubtitleEntry> entries,
         musevk::eHostWrite);
 
     m_shader = std::make_shared<musevk::ComputeShader>(
-        m_vulkan_manager.getDevice(),
+        m_vulkan_manager,
         "render_subtitle",
         std::vector<musevk::MemoryObjectType>{musevk::eBuffer, musevk::eBuffer, musevk::eImage},
         sizeof(PushBlock),
