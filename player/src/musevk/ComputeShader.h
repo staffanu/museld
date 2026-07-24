@@ -9,9 +9,12 @@
 #include "Size.h"
 
 namespace musevk {
+    // VulkanManager.h reaches this header through CommandBuffer.h, so it can only be named here.
+    class VulkanManager;
+
     class ComputeShader {
     public:
-        ComputeShader(vk::Device &device,
+        ComputeShader(VulkanManager &vulkan_manager,
                       std::string name,
                       const std::vector<MemoryObjectType> &buffer_types,
                       int32_t push_constants_size,
@@ -19,7 +22,7 @@ namespace musevk {
                       const Size &workgroup_size,
                       int max_descriptor_sets = 1);
 
-        ComputeShader(vk::Device &device,
+        ComputeShader(VulkanManager &vulkan_manager,
                       std::string name,
                       const std::vector<std::shared_ptr<VulkanMemoryObject>> &buffers,
                       int32_t push_constants_size,
@@ -60,10 +63,12 @@ namespace musevk {
         static const Size c_default_workgroup_size;
         static const Size c_default_linear_workgroup_size;
 
-        void initialize(const std::vector<MemoryObjectType> &buffer_types, int max_descriptor_sets);
+        void initialize(const std::vector<MemoryObjectType> &buffer_types, int max_descriptor_sets,
+                        const vk::PhysicalDeviceLimits &limits);
 
         void createShaderModule();
-        void createDescriptorLayout(int number_of_descriptor_sets, const std::vector<MemoryObjectType> &buffer_types);
+        void createDescriptorLayout(int number_of_descriptor_sets, const std::vector<MemoryObjectType> &buffer_types,
+                                    const vk::PhysicalDeviceLimits &limits);
         void updateDescriptorSet(int set_index);
         void createPipeline();
         void bindPipelineAndDescriptorSets(const vk::CommandBuffer &commandBuffer, int descriptor_set_index);
