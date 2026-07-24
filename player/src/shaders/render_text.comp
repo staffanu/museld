@@ -4,24 +4,36 @@
 
 // To be invoked with indices [0, 0] to (n_characters * font_width * scale, font_height * scale).
 
+// The text itself lives in the text_buffer SSBO, not in the push constants: RADV on GCN
+// (observed on a Renoir/Lucienne iGPU, Mesa 25.2.8) miscompiles push constant array loads
+// at divergent indices -- every lane gets the element the first active lane addressed,
+// garbling the glyph selection whenever a wavefront spans more than one character pair.
+// The same divergent loads from an SSBO work correctly. The scalar fields below are read
+// at uniform offsets and are unaffected.
 layout(push_constant) uniform PushConstants {
     uint16_t top_left_x;
     uint16_t top_left_y;
     uint16_t scale;
     uint16_t glyph_width; // spacing between characters -- if less than 16 we render the left (most significant) bits
     uint16_t glyph_height;
-    uint16_t n_characters; // max 2*58 characters for a total of 128 bytes push constants (which is guaranteed)
-    uint16_t text[58]; // coded as byte indices in the font, so 0 means codepoint c_font_codepoint_begin, 2 per item
+    uint16_t n_characters;
+    uint16_t text_word_offset; // start of this string in text_buffer
 };
 
-// uint32_t instead of uint16_t: some AMD drivers (observed on Ryzen integrated GPU) produce
-// corrupted reads from uint16_t SSBOs, causing font pixels to appear byte-swapped. The font
-// data fits in the lower 16 bits of each uint and the bit manipulation below is unaffected.
+// uint32_t instead of uint16_t: 16-bit access has been seen corrupted on the same AMD
+// drivers (font pixels appeared byte-swapped). The font data fits in the lower 16 bits
+// of each uint and the bit manipulation below is unaffected.
 layout(set = 0, binding = 0) buffer readonly font_buffer {
     uint font[];
 };
 
-layout(set = 0, binding = 1, rgba32f) uniform writeonly image2D frame_out_image;
+// Glyph indices for the strings drawn this frame; two 8-bit indices per 16-bit half,
+// so four characters per word. 0 means codepoint c_font_codepoint_begin.
+layout(set = 0, binding = 1) buffer readonly text_buffer {
+    uint text_words[];
+};
+
+layout(set = 0, binding = 2, rgba32f) uniform writeonly image2D frame_out_image;
 
 void main() {
     uint y = gl_GlobalInvocationID.y;
@@ -31,8 +43,9 @@ void main() {
         return;
 
     uint char_index = x / glyph_width / scale;
-    uint text_chars = text[char_index / 2];
-    uint glyph_index = (char_index & 1u) == 0 ? text_chars >> 8 : text_chars & 0xffu;
+    uint text_word = text_words[uint(text_word_offset) + char_index / 4];
+    uint text_chars = (char_index & 2u) == 0 ? text_word & 0xffffu : text_word >> 16;
+    uint glyph_index = (char_index & 1u) == 0 ? (text_chars >> 8) & 0xffu : text_chars & 0xffu;
 
     uint x_in_glyph = x - char_index * glyph_width * scale;
 
