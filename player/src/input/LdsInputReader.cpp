@@ -55,12 +55,23 @@ int LdsInputReader::readFloats(float *f) {
         filled_bytes += (size_t)read_count;
     }
 
+    // Center the unsigned 10-bit samples on zero; the container's midpoint is
+    // exact for this format.  Residual hardware offsets are handled by the
+    // adaptive DC blocking in the base class (see setDcBlocking).
+    float dc = 512.0f + dcOffset();
+    double sum = 0;
     for (uint32_t s = 0, d = 0; d < m_block_size; s += 5, d += 4) {
-        f[d] = (float)((m_buffer[s] << 2) | (m_buffer[s + 1] >> 6));
-        f[d + 1] = (float)(((m_buffer[s + 1] & 0x3f) << 4) | (m_buffer[s + 2] >> 4));
-        f[d + 2] = (float)(((m_buffer[s + 2] & 0x0f) << 6) | (m_buffer[s + 3] >> 2));
-        f[d + 3] = (float)(((m_buffer[s + 3] & 0x03) << 8) | m_buffer[s + 4]);
+        uint32_t v0 = (m_buffer[s] << 2) | (m_buffer[s + 1] >> 6);
+        uint32_t v1 = ((m_buffer[s + 1] & 0x3f) << 4) | (m_buffer[s + 2] >> 4);
+        uint32_t v2 = ((m_buffer[s + 2] & 0x0f) << 6) | (m_buffer[s + 3] >> 2);
+        uint32_t v3 = ((m_buffer[s + 3] & 0x03) << 8) | m_buffer[s + 4];
+        sum += (double)(v0 + v1 + v2 + v3);
+        f[d] = (float)v0 - dc;
+        f[d + 1] = (float)v1 - dc;
+        f[d + 2] = (float)v2 - dc;
+        f[d + 3] = (float)v3 - dc;
     }
+    updateDc(sum / m_block_size - 512.0);
 
     return m_block_size;
 }

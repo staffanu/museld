@@ -65,9 +65,12 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--write-muse16 <file>` | Re-encode input to the 16.2 MHz format (see below) |
 | `--write <file>` | Write decoded video and audio to a media file (requires FFmpeg ≥ 7.1) |
 | `--write-preset <preset>` | Media file preset: `standard` (H.264 + AAC in MP4, default) or `archival` (lossless FFV1 16-bit + PCM in Matroska). Container and codecs come from the preset, not the filename extension. |
+| `--write-duration <seconds>` | Stop after writing this much video and finalize the file (default: run to the end of the input) |
 | `--log <spec>` | Log level per category, e.g. `A3V4` (Audio=Info, Video=Debug). Categories: M P A V D I O; levels 0–4 = Off Error Warn Info Debug |
 | `--benchmark-shaders` | Print GPU shader timing statistics |
 | `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |
+| `--field-interpolation <mode>` | Initial de-interlacing mode: `normal` (motion-adaptive), `intra-field`, or `inter-frame` — same as keys 1/2/3 |
+| `--no-3d-comb` | NTSC: start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4 |
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
 | `--saturation <factor>` | NTSC: scale the chroma gain (default 1.0, applied on top of the burst-referenced AGC) |
 | `--subtitles <file.srt>` | Display SRT subtitles synced to the disc's own time code |
@@ -77,6 +80,24 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 picture lines. `--no-dropout` leaves them untouched; `--highlight-dropout` paints them red
 (dropout in the luminance area) or green (dropout in the color area). The D key cycles between
 the three modes during playback.
+
+**NTSC Y/C separation and de-interlacing**: the decoder banks four composite frames and displays
+one frame behind the input (audio is delayed to match). Per-pixel directional motion masks select,
+for each side, between temporal Y/C separation against the still neighbouring frames (a 3D comb:
+full vertical resolution, no dot crawl) and the 3-line spatial comb where the picture moves. The
+same masks drive motion-adaptive de-interlacing: still parts weave the previous field, moving
+parts are interpolated from the current field (keys 1/2/3 select adaptive/bob/weave).
+
+**NTSC level calibration**: video levels are calibrated automatically against references in the
+signal. Black (0 IRE) tracks the measured back porch blanking level; the gain (100 IRE) is taken
+from the white flag — a flat 100 IRE line in the vertical interval that most discs carry — when
+one is found, and stays at the nominal FM deviation mapping otherwise. The measured levels are
+logged with the noise figures (`--log D3`).
+
+**Display rendering**: for display and PNG export, both the MUSE and NTSC paths convert the
+decoded signal to linear light (CRT law, gamma 2.2) with SMPTE C primaries mapped to sRGB;
+the sRGB swapchain then encodes it for the monitor. The `--write` output is unaffected — it
+stays in the signal domain as Y'CbCr, tagged with the source's color metadata.
 
 **`--write-muse16`** writes the input stream in the 16.2 MHz format (each sample stored ×4 as a
 little-endian 16-bit value), which is what `--input-type muse-16` reads. This is useful for cutting
@@ -100,6 +121,7 @@ also given, which is the mode to use for batch rendering.
 | 1 | Normal field interpolation (motion detection) |
 | 2 | Force intra-field interpolation (treat everything as motion) |
 | 3 | Force inter-frame interpolation (treat everything as still) |
+| 4 | NTSC: toggle the 3D comb (temporal Y/C separation on still parts) |
 | D | Cycle dropout handling: conceal → ignore → highlight (red = luminance dropout, green = color dropout) |
 | A | Toggle audio between MUSE and EFM (RF input only) |
 | V | Toggle disc code / chapter / frame display (TOC reading is not implemented) |
@@ -115,7 +137,9 @@ decoded picture (1122×1032). When playback is paused and intra-field interpolat
 the field start (the start of the sound data, i.e. the third line of the field), and the Y, Cr, and
 Cb sample offsets. This is useful for locating a dropout in the input RF file when working on
 dropout detection — the offsets are off by something like a thousand samples for unknown reasons,
-but usually close enough to find the dropout.
+but usually close enough to find the dropout.  For NTSC the offsets are line-accurate (the frame
+start is tracked to the input sample), and Y, Cr, and Cb are the same offset since the composite
+carries no separate chroma samples.
 
 ## Architecture
 

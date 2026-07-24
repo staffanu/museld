@@ -17,7 +17,11 @@ layout(push_constant) uniform PushConstants {
     uint source_offset;
     uint dest_offset;
     uint video_decimation_rate;
-    float ratio_squared; // flag when local envelope² < ratio² × long average
+    uint line_period; // one video line in raw samples
+    float line_ratio_squared; // envelope condition: local² < ratio² × line reference
+    float deep_ratio_squared; // envelope condition: local² < ratio² × long average
+    uint demod_offset; // index of the first new sample in the demodulated buffer
+    float slew_threshold; // noise condition: max sample-to-sample step nearby
 };
 
 layout(set = 0, binding = 0) buffer readonly analytic_re_buffer {
@@ -32,11 +36,23 @@ layout(set = 0, binding = 2) buffer writeonly dest_buffer {
     uint8_t dest[];
 };
 
+layout(set = 0, binding = 3) buffer readonly demodulated_buffer {
+    float demodulated[];
+};
+
 float envelope_squared(int i) {
     i = clamp(i, 0, int(source_offset + dest_size * video_decimation_rate) - 1);
     float re = analytic_re[i];
     float im = analytic_im[i];
     return re * re + im * im;
+}
+
+// local envelope over ±4 raw samples around i
+float local_envelope(int i) {
+    float sum = 0.0;
+    for (int k = -4; k <= 4; k++)
+        sum += envelope_squared(i + k);
+    return sum / 9.0;
 }
 
 void main() {
@@ -46,19 +62,56 @@ void main() {
         return;
 
     int center = int(source_offset + ix * video_decimation_rate);
+    float local_avg = local_envelope(center);
 
-    // local envelope over ±4 raw samples
-    float local_sum = 0.0;
-    for (int i = -4; i <= 4; i++)
-        local_sum += envelope_squared(center + i);
-    float local_avg = local_sum / 9.0;
+    // Brightness-matched reference: the same horizontal position on the
+    // neighbouring lines.  The envelope legitimately varies with the picture
+    // level (disc MTF is lower at the bright end of the deviation range), but
+    // picture content is vertically correlated, so the healthiest of the four
+    // neighbours is a fair estimate of what this sample's envelope should be.
+    // A dropout is a horizontal event and rarely hits the same position on
+    // neighbouring lines too.
+    int H = int(line_period);
+    float line_ref = max(max(local_envelope(center - H), local_envelope(center + H)),
+                         max(local_envelope(center - 2 * H), local_envelope(center + 2 * H)));
 
     // carrier reference: 32 samples strided over ±4096 raw samples (~200 µs),
-    // long enough that even a maximum-length 100 µs dropout cannot drag it down
+    // long enough that even a maximum-length 100 µs dropout cannot drag it
+    // down; catches dropouts that do span several lines
     float long_sum = 0.0;
     for (int i = -16; i < 16; i++)
         long_sum += envelope_squared(center + i * 256 + 128);
     float long_avg = long_sum / 32.0;
 
-    dest[dest_offset + ix] = uint8_t(local_avg < ratio_squared * long_avg ? 1 : 0);
+    // A collapse below the deep ratio is confident on its own; the more
+    // sensitive line-referenced condition additionally requires the noise
+    // corroboration below.
+    bool deep_low = local_avg < deep_ratio_squared * long_avg;
+    bool envelope_low = local_avg < line_ratio_squared * line_ref;
+
+    // An envelope transient criterion after ld-decode's differential RF
+    // detector was tried here and removed again: their 10 MHz highpass keys
+    // on above-carrier spectral content that a legitimate signal cannot
+    // contain, but an envelope derivative also sees legitimate picture edges
+    // through the disc MTF, and no threshold separated dropout edges from
+    // subtitle edges.  A true above-band highpass path would be needed.
+
+    // Second factor: a real dropout also turns the demodulated signal into
+    // noise, with sample-to-sample steps far beyond what the bandlimited
+    // legal signal can produce.  Bright picture detail (text) lowers the
+    // envelope too -- the disc MTF is lower at the bright end of the
+    // deviation range -- but demodulates cleanly, and would otherwise be
+    // flagged whenever its line neighbours are dark.
+    bool noisy = false;
+    if (envelope_low && !deep_low) {
+        int dc = int(demod_offset + ix * video_decimation_rate);
+        int limit = int(demod_offset + dest_size * video_decimation_rate) - 1;
+        for (int i = -16; i <= 16; i++) {
+            int j = clamp(dc + i, 1, limit);
+            if (abs(demodulated[j] - demodulated[j - 1]) > slew_threshold)
+                noisy = true;
+        }
+    }
+
+    dest[dest_offset + ix] = uint8_t(deep_low || (envelope_low && noisy) ? 1 : 0);
 }
