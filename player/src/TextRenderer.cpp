@@ -9,35 +9,51 @@ using namespace musevk;
 
 TextRenderer::TextRenderer(std::string const &executable_dir, VulkanManager &vulkan_manager, CommandPool &command_pool)
 : m_vulkan_manager(vulkan_manager),
-  // Font data is widened to uint32_t to avoid corrupted reads on some AMD drivers (observed on
-  // Ryzen integrated GPU). See matching comment in render_text.comp.
+  // Font data is widened to uint32_t: 16-bit access has been seen corrupted on some AMD
+  // drivers (Ryzen integrated GPUs). See matching comment in render_text.comp.
   m_font_buffer(VulkanUtil::createDeviceBuffer(vulkan_manager, command_pool, Size(c_font_definition.size()),
                     std::vector<uint32_t>(c_font_definition.begin(), c_font_definition.end()))),
+  // The strings drawn each frame go through this ring buffer instead of the push
+  // constants; see the RADV divergent-indexing comment in render_text.comp.
+  m_text_buffer(std::make_shared<VulkanBuffer>(vulkan_manager, Size(c_text_ring_words), sizeof(uint32_t),
+                    vk::BufferUsageFlagBits::eStorageBuffer, eHostWrite)),
   m_render_text_shader(std::shared_ptr<ComputeShader>(
           new ComputeShader(m_vulkan_manager,
-                            "render_text", {eBuffer, eImage}, sizeof(uint16_t) * 64,
+                            "render_text", {eBuffer, eBuffer, eImage}, sizeof(uint16_t) * 64,
                             musevk::VulkanUtil::loadSpirv(executable_dir, "render_text.comp"), musevk::Size(0)))) {
 }
 
 void TextRenderer::drawText(std::shared_ptr<VulkanImage> const &image, int x, int y, std::string s, int scale, CommandBuffer &command_buffer) {
+    // Two glyph-index pairs per word; each string starts on a word boundary in the ring.
+    const int n_words = ((int)s.length() + 3) / 4;
+    if (m_text_ring_offset + n_words > c_text_ring_words)
+        m_text_ring_offset = 0;
+
     std::vector<uint16_t> push_constants = {
             (uint16_t)x,     // top_left_x
             (uint16_t)y,     // top_left_y
             (uint16_t)scale, // scale
             c_glyph_width,   // font_width
             c_glyph_height,  // font_height
-            (uint16_t)s.size() // n_characters
+            (uint16_t)s.size(), // n_characters
+            (uint16_t)m_text_ring_offset // text_word_offset
     };
+    push_constants.resize(64);
 
+    uint32_t *text_words = m_text_buffer->data<uint32_t>() + m_text_ring_offset;
     for (int i = 0; i < s.length(); i += 2) {
         char c1 = s[i];
         char c2 = i + 1 < s.length() ? s[i + 1] : ' ';
         int glyph_index1 = c1 >= c_font_codepoint_begin && c1 < c_font_codepoint_end ? c1 - c_font_codepoint_begin : 0;
         int glyph_index2 = c2 >= c_font_codepoint_begin && c2 < c_font_codepoint_end ? c2 - c_font_codepoint_begin : 0;
-        push_constants.push_back((glyph_index1 << 8) | glyph_index2);
+        uint32_t pair = (glyph_index1 << 8) | glyph_index2;
+        if (i % 4 == 0)
+            text_words[i / 4] = pair;
+        else
+            text_words[i / 4] |= pair << 16;
     }
-    assert(push_constants.size() <= 64); // max push constant size that is guaranteed
-    push_constants.resize(64);
+    m_text_ring_offset += n_words;
+    m_text_buffer->synchronizeHostWrites(command_buffer);
 
     image->enqueueTransitionLayout(command_buffer, vk::ImageLayout::eGeneral,
                                    vk::PipelineStageFlagBits::eTopOfPipe,
@@ -49,8 +65,8 @@ void TextRenderer::drawText(std::shared_ptr<VulkanImage> const &image, int x, in
     // more than one text on the same image. (So, if we ever want to write to two different
     // images using the same command buffer, we need to remove the hard coded descriptor set 0.)
     auto currentBuffers = m_render_text_shader->getBuffersForDescriptorSet(0);
-    if (currentBuffers.size() != 2 || currentBuffers[1] != image)
-        m_render_text_shader->updateBufferDescriptorsInSet(0, {m_font_buffer, image});
+    if (currentBuffers.size() != 3 || currentBuffers[2] != image)
+        m_render_text_shader->updateBufferDescriptorsInSet(0, {m_font_buffer, m_text_buffer, image});
 
     m_render_text_shader->updateWorkgroup(Size(c_glyph_width * s.length() * scale, c_glyph_height * scale));
     command_buffer.enqueueComputeShader(m_render_text_shader, push_constants);

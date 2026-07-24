@@ -23,9 +23,15 @@ private:
     static const int c_font_codepoint_begin = 32;
     static const int c_font_codepoint_end = 127; // exclusive
     static const std::vector<uint16_t> c_font_definition;
+    // Must be large enough for all strings drawn in one frame (the command buffer is
+    // fence-waited every frame, so only intra-frame overlap is possible), and its word
+    // offsets must fit the uint16 text_word_offset push constant.
+    static constexpr int c_text_ring_words = 4096;
 
     musevk::VulkanManager &m_vulkan_manager;
     std::shared_ptr<musevk::VulkanBuffer> m_font_buffer;
+    std::shared_ptr<musevk::VulkanBuffer> m_text_buffer;
+    int m_text_ring_offset = 0;
     std::shared_ptr<musevk::ComputeShader> m_render_text_shader;
 };
 
