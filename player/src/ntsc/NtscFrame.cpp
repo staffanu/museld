@@ -1,6 +1,7 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <format>
 #include <vector>
 #include "NtscFrame.h"
 #include "NtscConstants.h"
@@ -12,7 +13,8 @@
 #include "util/RobustNoise.h"
 
 NtscFrame::NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager)
-: m_frame_no(frame_no),
+: m_log(log),
+        m_frame_no(frame_no),
         m_input_offset(-1),
         m_input_samples_per_sample(0),
         m_data(std::make_unique<musevk::VulkanBuffer>(
@@ -175,15 +177,21 @@ std::shared_ptr<VbiData> NtscFrame::getVbiData() const {
 void NtscFrame::processVbi() {
     m_vbi_data = nullptr;
 
-    int vbi16 = processVbiLine(16);
-    int vbi17 = processVbiLine(17);
-    int vbi18 = processVbiLine(18);
-    int vbi279 = processVbiLine(279);
-    int vbi280 = processVbiLine(280);
-    int vbi281 = processVbiLine(281);
+    // The Philips VBI codes appear on lines 16/17/18 of each field.  In this
+    // frame's line numbering the second field sits 262 lines below the first
+    // (its first line is buffer line 263), so field 2's line-16 is 278 — not
+    // 279.  Validated against ve-colorbars (CAV): chapter on 17/18, picture
+    // number on 279/280.
+    constexpr int c_field2_offset = 262;
+    int f1_16 = processVbiLine(16);
+    int f1_17 = processVbiLine(17);
+    int f1_18 = processVbiLine(18);
+    int f2_16 = processVbiLine(16 + c_field2_offset);
+    int f2_17 = processVbiLine(17 + c_field2_offset);
+    int f2_18 = processVbiLine(18 + c_field2_offset);
 
-    int is_lead_in = (vbi17 == 0x88FFFF) + (vbi18 == 0x88FFFF) + (vbi280 == 0x88FFFF) + (vbi281 == 0x88FFFF) >= 3;
-    int is_lead_out = (vbi17 == 0x80EEEE) + (vbi18 == 0x80EEEE) + (vbi280 == 0x80EEEE) + (vbi281 == 0x80EEEE) >= 3;
+    int is_lead_in = (f1_17 == 0x88FFFF) + (f1_18 == 0x88FFFF) + (f2_17 == 0x88FFFF) + (f2_18 == 0x88FFFF) >= 3;
+    int is_lead_out = (f1_17 == 0x80EEEE) + (f1_18 == 0x80EEEE) + (f2_17 == 0x80EEEE) + (f2_18 == 0x80EEEE) >= 3;
 
     int is_clv = false;
     bool is_stop_code = false;
@@ -191,40 +199,46 @@ void NtscFrame::processVbi() {
     int chapter_data = -1;
     int programme_status_data = -1;
     std::optional<int> cav_picture_number = std::nullopt;
-    if (vbi17 == 0x87ffff) {
+    // CLV is flagged by the single-line 87FFFF CLV code (§10.1.7), always present
+    // on a CLV disc.  It is inserted on the field that does NOT carry the
+    // programme time code — the time code (§10.1.6) and CLV picture number
+    // (§10.1.10) are both on the first field of the picture — so when the marker
+    // is on one field the time code is on the opposite one.  Chapter (§10.1.5)
+    // and programme status (§10.1.8) share the marker's field.
+    if (f1_17 == 0x87ffff) {
         is_clv = true;
-        if (vbi280 == vbi281)
-            clv_time_data = vbi280;
-        chapter_data = vbi18;
-        programme_status_data = vbi16;
-    } else if (vbi280 == 0x87ffff) {
+        if (f2_17 == f2_18)
+            clv_time_data = f2_17;
+        chapter_data = f1_18;
+        programme_status_data = f1_16;
+    } else if (f2_17 == 0x87ffff) {
         is_clv = true;
-        if (vbi17 == vbi18)
-            clv_time_data = vbi17;
-        chapter_data = vbi281;
-        programme_status_data = vbi279;
+        if (f1_17 == f1_18)
+            clv_time_data = f1_17;
+        chapter_data = f2_18;
+        programme_status_data = f2_16;
     } else {
         // CAV
-        if (vbi16 == 0x82CFFF && vbi17 == 0x82CFFF || vbi279 == 0x82CFFF && vbi280 == 0x82CFFF)
+        if (f1_16 == 0x82CFFF && f1_17 == 0x82CFFF || f2_16 == 0x82CFFF && f2_17 == 0x82CFFF)
             is_stop_code = true;
 
-        if (vbi17 == vbi18 && (vbi17 & 0xf00fff) == 0x800ddd)
-            chapter_data = vbi17;
-        else if (vbi280 == vbi281 && (vbi280 & 0xf00fff) == 0x800ddd)
-            chapter_data = vbi280;
+        if (f1_17 == f1_18 && (f1_17 & 0xf00fff) == 0x800ddd)
+            chapter_data = f1_17;
+        else if (f2_17 == f2_18 && (f2_17 & 0xf00fff) == 0x800ddd)
+            chapter_data = f2_17;
 
         int cav_picture_number_data = -1;
-        if (vbi17 == vbi18 && (vbi17 & 0xf00000) == 0xf00000)
-            cav_picture_number_data = vbi17;
-        else if (vbi280 == vbi281 && (vbi280 & 0xf00000) == 0xf00000)
-            cav_picture_number_data = vbi280;
+        if (f1_17 == f1_18 && (f1_17 & 0xf00000) == 0xf00000)
+            cav_picture_number_data = f1_17;
+        else if (f2_17 == f2_18 && (f2_17 & 0xf00000) == 0xf00000)
+            cav_picture_number_data = f2_17;
 
         if (cav_picture_number_data != -1)
-            cav_picture_number = ((clv_time_data & 0xf0000) >> 16) * 10000 + ((clv_time_data & 0xf000) >> 12) * 1000 +
-                ((clv_time_data & 0xf00) >> 8) * 100 + ((clv_time_data & 0xf0) >> 4) * 10 + (clv_time_data & 0xf);
+            cav_picture_number = ((cav_picture_number_data & 0xf0000) >> 16) * 10000 + ((cav_picture_number_data & 0xf000) >> 12) * 1000 +
+                ((cav_picture_number_data & 0xf00) >> 8) * 100 + ((cav_picture_number_data & 0xf0) >> 4) * 10 + (cav_picture_number_data & 0xf);
 
-        if (vbi16 == vbi279)
-            programme_status_data = vbi16;
+        if (f1_16 == f2_16)
+            programme_status_data = f1_16;
     }
 
 
@@ -240,11 +254,15 @@ void NtscFrame::processVbi() {
         int time_seconds_tmp = (clv_time_data & 0xf0ff00) == 0xf0dd00 ?
             ((clv_time_data & 0xf0000) >> 16) * 3600 + ((clv_time_data & 0xf0) >> 4) * 600 + (clv_time_data & 0xf) * 60 : -1;
 
+        // CLV picture number (IEC 60857 §10.1.10): "8 X1 E X3 X4 X5", where the
+        // E in the third nibble distinguishes it from the users code ("...D...",
+        // §10.1.9).  X1/X3 carry the seconds; without this the time has only the
+        // hours/minutes from the programme time code, i.e. seconds stuck at :00.
         int clv_picture_number_data = -1;
-        if ((vbi16 & 0xf0f000) == 0x80d000)
-            clv_picture_number_data = vbi16;
-        else if ((vbi279 & 0xf0f000) == 0x80d000)
-            clv_picture_number_data = vbi279;
+        if ((f1_16 & 0xf0f000) == 0x80e000)
+            clv_picture_number_data = f1_16;
+        else if ((f2_16 & 0xf0f000) == 0x80e000)
+            clv_picture_number_data = f2_16;
 
         if (clv_picture_number_data != -1) {
             int second = (((clv_picture_number_data & 0xf0000) >> 16) - 10) * 10 + ((clv_picture_number_data & 0xf00) >> 8);
@@ -286,30 +304,39 @@ void NtscFrame::processVbi() {
         bool x51 = (x5 & 8) != 0;
         bool x52 = (x5 & 4) != 0;
         bool x53 = (x5 & 2) != 0;
-        if (x41 ^ x42 ^ x44 ^ x51 || x41 ^ x43 ^ x44 ^ x52 || x42 ^ x43 ^ x44 ^ x53) {
-            printf("Parity error X4 X5!\n");
-        }
+        if (x41 ^ x42 ^ x44 ^ x51 || x41 ^ x43 ^ x44 ^ x52 || x42 ^ x43 ^ x44 ^ x53)
+            m_log.debug(eDecoder, "VBI programme status: X4/X5 parity error");
     }
 
     m_vbi_data = std::make_shared<VbiData>(is_lead_in, is_lead_out, is_clv, is_stop_code, chapter,
         clv_time_seconds, clv_picture_number, cav_picture_number, cx_enabled);
 
-    printf("%x %x %x %x %x %x  %s|%s\n",
-        processVbiLine(16), processVbiLine(17), processVbiLine(18),
-        processVbiLine(279), processVbiLine(280), processVbiLine(281),
-        m_vbi_data != nullptr ? m_vbi_data -> asStrings()[0].c_str() : "",
-        m_vbi_data != nullptr ? m_vbi_data -> asStrings()[1].c_str() : "");
+    if (m_log.isEnabled(eDebug, eDecoder)) {
+        auto strings = m_vbi_data->asStrings();
+        m_log.debug(eDecoder, std::format("VBI {:06x} {:06x} {:06x} {:06x} {:06x} {:06x}  {}|{}",
+            f1_16 & 0xffffff, f1_17 & 0xffffff, f1_18 & 0xffffff,
+            f2_16 & 0xffffff, f2_17 & 0xffffff, f2_18 & 0xffffff,
+            strings[0], strings[1]));
+    }
 }
 
 // Notice line starts at 1
 int NtscFrame::processVbiLine(int line) {
-    // The start of VBI information is at 0.188 H or 0.172 H. We start searching a bit earlier.
+    // The code starts at ~0.172 H (spec: 0.172 H or 0.188 H).  Sample 0 is at
+    // 0H within a sample or two (measured from the colour burst, which starts
+    // ~0.083 H; the sync tip itself is clamped out of this buffer), so the code's
+    // rising edge really does land near 0.166 H here — a hair earlier on some
+    // discs.  We begin the search at 0.15 H, in clean back porch: the burst ends
+    // ~0.123 H and the first code bit rises ~0.166 H, so 0.15 H sits between them
+    // (~24 samples clear of the burst).  0.165 H was too late — it coincided with
+    // the code's own rising edge and failed the gate (alien1 lines 16/17 — the
+    // programme status and CLV marker).
     int16_t *vbi = m_data->data<int16_t>() +
         (line - 1) * NtscInputBlock::c_samples_per_video_line +
-            (int)(0.165 * NtscInputBlock::c_samples_per_video_line);
+            (int)(0.15 * NtscInputBlock::c_samples_per_video_line);
 
-    if (HalfFloatUtil::half_to_float(vbi[0]) > 0.3) {
-        printf("VBI error: not zero before start\n");
+    if (HalfFloatUtil::half_to_float(vbi[0]) > 0.5) {
+        m_log.debug(eDecoder, std::format("VBI line {}: signal present before code start", line));
         return -1;
     }
 
@@ -339,18 +366,18 @@ int NtscFrame::processVbiLine(int line) {
         }
 
         if (t < samples_per_half_bit * 3 / 4) {
-            printf("VBI error: transition time too short\n");
+            m_log.debug(eDecoder, std::format("VBI line {}: transition time too short", line));
             return -1;
         } else if (t < samples_per_half_bit * 5 / 4) {
             half_bits = (half_bits << 1) | prev;
         } else if (t < samples_per_half_bit * 7 / 4) {
-            printf("VBI error: transition time not one or two half bits\n");
+            m_log.debug(eDecoder, std::format("VBI line {}: transition time not one or two half bits", line));
             return -1;
         } else if (t < samples_per_half_bit * 9 / 4) {
             half_bits = (half_bits << 2) | ((1 - prev) << 1) | prev;
             i++;
         } else {
-            printf("VBI error: transition time too long\n");
+            m_log.debug(eDecoder, std::format("VBI line {}: transition time too long", line));
             return -1;
         }
     }
@@ -365,7 +392,7 @@ int NtscFrame::processVbiLine(int line) {
             case 0b10:
                 break;
             default:
-                printf("VBI error: invalid two bit pair bit %d: %lx\n", i, half_bits);
+                m_log.debug(eDecoder, std::format("VBI line {}: invalid two-bit pair at bit {}: {:x}", line, i, half_bits));
                 return -1;
         }
     }
