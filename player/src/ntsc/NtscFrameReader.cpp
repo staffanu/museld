@@ -261,7 +261,15 @@ bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
     auto *output = output_block->video_data->data<float>();
     auto *dropout_output = output_block->dropout_data->data<uint8_t>();
 
-    m_frame_start_offset = m_input_sub_buffer_input_offsets[((size_t)m_t & c_input_buffer_size_mask) >> c_input_sub_buffer_size_bits];
+    // Line-accurate frame start: the sub-buffer's input offset plus the
+    // resampler position within it (in input samples).  The sub-buffer
+    // granularity alone is half a megasample, useless for locating a pixel
+    // in the input file.
+    {
+        size_t pos = (size_t)m_t & c_input_buffer_size_mask;
+        m_frame_start_offset = m_input_sub_buffer_input_offsets[pos >> c_input_sub_buffer_size_bits]
+                + (long)((pos & (c_input_sub_buffer_size - 1)) * m_input_samples_decimation_rate);
+    }
 
     float sample;
     uint8_t dropout;

@@ -354,9 +354,22 @@ Decoder::SourceDimensions NtscDecoder::getSourceDimensions() const {
 }
 
 std::optional<Decoder::PixelFileOffsets> NtscDecoder::computePixelFileOffsets(
-        int /*field_x*/, int /*field_y*/, int /*field_parity*/,
-        long /*buffer_file_offset*/, double /*input_samples_per_muse_sample*/) const {
-    return std::nullopt;
+        int field_x, int field_y, int field_parity,
+        long buffer_file_offset, double input_samples_per_muse_sample) const {
+    // Composite frame buffer coordinates: field rows start at line 22 (line
+    // 285 for the second field), picture columns at NTSC_FIELD_START_X on
+    // the 910-sample 4 fsc grid.  The composite carries no separate chroma
+    // samples, so Cr and Cb equal the Y offset.
+    constexpr int c_field_start_x = 129; // NTSC_FIELD_START_X in the shaders
+    long line = 22 + field_y + 263 * (long)field_parity;
+    PixelFileOffsets r;
+    r.field_start = buffer_file_offset
+            + (long)((22 + 263 * (long)field_parity) * NTSC_TOTAL_WIDTH * input_samples_per_muse_sample);
+    r.y = buffer_file_offset
+            + (long)((line * NTSC_TOTAL_WIDTH + c_field_start_x + field_x) * input_samples_per_muse_sample);
+    r.cr = r.y;
+    r.cb = r.y;
+    return r;
 }
 
 void NtscDecoder::outputBenchmarkResults() {

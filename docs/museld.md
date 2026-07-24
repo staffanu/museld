@@ -137,7 +137,9 @@ decoded picture (1122×1032). When playback is paused and intra-field interpolat
 the field start (the start of the sound data, i.e. the third line of the field), and the Y, Cr, and
 Cb sample offsets. This is useful for locating a dropout in the input RF file when working on
 dropout detection — the offsets are off by something like a thousand samples for unknown reasons,
-but usually close enough to find the dropout.
+but usually close enough to find the dropout.  For NTSC the offsets are line-accurate (the frame
+start is tracked to the input sample), and Y, Cr, and Cb are the same offset since the composite
+carries no separate chroma samples.
 
 ## Architecture
 
