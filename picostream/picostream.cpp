@@ -280,16 +280,16 @@ void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sa
   struct timeval start, end;
   gettimeofday(&start, NULL);
 
-  // Poll-cadence diagnostics: the driver hands us the samples produced since the last
-  // poll, so if a poll gap exceeds the driver buffer span the circular buffer wrapped
-  // and samples were lost.  We compare delivered vs. elapsed*rate to spot that.
+  // Poll-cadence diagnostics: samples produced (elapsed*rate) but not yet delivered are
+  // sitting in the driver's circular buffer, so that difference is the buffer's current
+  // fill level.  Its peak shows how close we came to a wrap (100% = full = samples lost).
   const double rate = 1e9 / sampleInterval;              // samples per second
   const double bufSpanSec = (double)bufferSize / rate;   // time the driver buffer holds
   auto tStream = std::chrono::steady_clock::now();
   auto tLast = tStream;
   auto tLastWarn = tStream;
   long long totalDelivered = 0;
-  double maxDeficitSamples = 0;
+  double maxDeviceBufferFill = 0;                        // peak occupancy of the driver buffer, in samples
   double maxGapSec = 0;
   long wrapWarnings = 0;
 
@@ -311,8 +311,8 @@ void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sa
       totalSamples += n_write;
       totalDelivered += g_sampleCount;
 
-      double deficit = std::chrono::duration<double>(now - tStream).count() * rate - (double)totalDelivered;
-      if (deficit > maxDeficitSamples) maxDeficitSamples = deficit;
+      double fill = std::chrono::duration<double>(now - tStream).count() * rate - (double)totalDelivered;
+      if (fill > maxDeviceBufferFill) maxDeviceBufferFill = fill;
 
       // Returned far fewer samples than were produced during the gap -> the driver's
       // circular buffer wrapped over unread data.  Rate-limited so a burst is one line.
@@ -424,8 +424,9 @@ void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sa
   {
     int usedMax = writer.poolCount - writer.vacantMin;
     printf("Write buffers: peak %d/%d used, overruns %ld\n", usedMax, writer.poolCount, writer.overruns);
-    printf("Poll timing: max gap %.1f ms (buffer holds %.1f ms), max deficit %.0f samples (%.1f ms)\n",
-	   maxGapSec * 1e3, bufSpanSec * 1e3, maxDeficitSamples, maxDeficitSamples / rate * 1e3);
+    printf("Poll timing: max poll gap %.1f ms; peak device-buffer fill %.0f%% (%.1f of %.1f ms)\n",
+	   maxGapSec * 1e3, 100.0 * maxDeviceBufferFill / bufferSize,
+	   maxDeviceBufferFill / rate * 1e3, bufSpanSec * 1e3);
     if (writer.overruns > 0)
       printf("*** DATA LOST: %ld write-buffer overrun(s) -- writer fell behind; raise --buffers or use a faster disk ***\n",
 	     writer.overruns);
