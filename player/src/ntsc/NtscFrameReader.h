@@ -41,6 +41,8 @@ private:
     // takes output_block as parameter in order to fill in efm data when getting a new demodulated block
     bool readInput(std::unique_ptr<NtscInputBlock> const &output_block);
 
+    void updateFrameStartOffset();
+
     [[nodiscard]] bool process(std::unique_ptr<NtscInputBlock> const &output_block);
     void setUnlocked();
 
@@ -110,6 +112,9 @@ private:
     PercentileFilter m_lower_percentile_filter;
     int m_consecutive_good_syncs;
     int m_missed_half_line_vert_sync_patterns;
+    // Set when the lock landed on field 2's vertical interval, so the frame
+    // being filled has no field 1 and must not be handed on
+    bool m_first_field_incomplete;
     long m_frame_start_offset;
 
     static constexpr int c_sample_history_size = 16;

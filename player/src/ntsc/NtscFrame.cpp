@@ -1,6 +1,7 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <algorithm>
 #include <format>
 #include <vector>
 #include "NtscFrame.h"
@@ -177,68 +178,78 @@ std::shared_ptr<VbiData> NtscFrame::getVbiData() const {
 void NtscFrame::processVbi() {
     m_vbi_data = nullptr;
 
-    // The Philips VBI codes appear on lines 16/17/18 of each field.  In this
-    // frame's line numbering the second field sits 262 lines below the first
-    // (its first line is buffer line 263), so field 2's line-16 is 278 — not
-    // 279.  Validated against ve-colorbars (CAV): chapter on 17/18, picture
-    // number on 279/280.
-    constexpr int c_field2_offset = 262;
-    int f1_16 = processVbiLine(16);
-    int f1_17 = processVbiLine(17);
-    int f1_18 = processVbiLine(18);
-    int f2_16 = processVbiLine(16 + c_field2_offset);
-    int f2_17 = processVbiLine(17 + c_field2_offset);
-    int f2_18 = processVbiLine(18 + c_field2_offset);
+    // The Philips VBI codes appear on lines 16/17/18 of each field, and this
+    // frame's buffer holds the two fields back to back: field 1 from line 1 and
+    // field 2 from line 264, so field 2's code lines are 279/280/281.
+    //
+    // That layout holds only because NtscFrameReader identifies the field from
+    // the phase of the vertical sync pattern and always starts a frame on field
+    // 1; a frame started on field 2 would put the second field's codes one line
+    // earlier.  Rather than depend on that, we probe every candidate line and
+    // identify each code by its content — the IEC 60857 §10.1 codes all have
+    // distinct nibble patterns, and nothing downstream needs to know which field
+    // a code came from.  Probing 278 as well covers a frame that starts on the
+    // wrong field, so a lock that slips cannot turn a CLV disc into a CAV one by
+    // losing the 87FFFF marker.
+    std::vector<int> codes;
+    for (int line : {16, 17, 18, 278, 279, 280, 281}) {
+        int code = processVbiLine(line);
+        if (code >= 0)
+            codes.push_back(code);
+    }
 
-    int is_lead_in = (f1_17 == 0x88FFFF) + (f1_18 == 0x88FFFF) + (f2_17 == 0x88FFFF) + (f2_18 == 0x88FFFF) >= 3;
-    int is_lead_out = (f1_17 == 0x80EEEE) + (f1_18 == 0x80EEEE) + (f2_17 == 0x80EEEE) + (f2_18 == 0x80EEEE) >= 3;
+    // How many of the probed lines carry exactly this code, and the first line
+    // matching a mask/pattern (-1 when absent).
+    auto count = [&codes](int code) {
+        return static_cast<int>(std::count(codes.begin(), codes.end(), code));
+    };
+    auto find = [&codes](int mask, int pattern) {
+        auto it = std::find_if(codes.begin(), codes.end(),
+            [mask, pattern](int code) { return (code & mask) == pattern; });
+        return it == codes.end() ? -1 : *it;
+    };
+    // The five BCD digits of a picture number must all be 0-9.  This is what
+    // separates a CAV picture number (§10.1.4) from a CLV programme time code
+    // (§10.1.6): both start with an F, but the time code's "DD" is not BCD.
+    auto isBcdPictureNumber = [](int code) {
+        if ((code & 0xf00000) != 0xf00000) return false;
+        for (int shift = 0; shift < 20; shift += 4)
+            if (((code >> shift) & 0xf) > 9) return false;
+        return true;
+    };
 
-    int is_clv = false;
-    bool is_stop_code = false;
-    int clv_time_data = -1;
-    int chapter_data = -1;
+    // Lead-in/out sit on lines 17/18 of both fields, so all four probes agree;
+    // accept three to survive a dropout on one line.
+    int is_lead_in = count(0x88FFFF) >= 3;
+    int is_lead_out = count(0x80EEEE) >= 3;
+
+    // CLV is flagged by the single-line 87FFFF CLV code (§10.1.7), always
+    // present on a CLV disc, on the field that does NOT carry the programme
+    // time code.
+    int is_clv = count(0x87ffff) >= 1;
+    // The stop code (§10.1.11) is on lines 16 and 17 of one field.
+    bool is_stop_code = count(0x82CFFF) >= 2;
+
+    int clv_time_data = is_clv ? find(0xf0ff00, 0xf0dd00) : -1;
+    int chapter_data = find(0xf00fff, 0x800ddd);
     int programme_status_data = -1;
+    if (int cx_on = find(0xfff000, 0x8dc000); cx_on != -1)
+        programme_status_data = cx_on;
+    else if (int cx_off = find(0xfff000, 0x8ba000); cx_off != -1)
+        programme_status_data = cx_off;
+
+    // Only four bits of the picture number are fixed, so unlike the other codes
+    // it is not really validated by its pattern; require the two lines that
+    // carry it (17 and 18 of the field) to agree, as they always do on a clean
+    // read.  Both are inside the probe set under either alignment.
     std::optional<int> cav_picture_number = std::nullopt;
-    // CLV is flagged by the single-line 87FFFF CLV code (§10.1.7), always present
-    // on a CLV disc.  It is inserted on the field that does NOT carry the
-    // programme time code — the time code (§10.1.6) and CLV picture number
-    // (§10.1.10) are both on the first field of the picture — so when the marker
-    // is on one field the time code is on the opposite one.  Chapter (§10.1.5)
-    // and programme status (§10.1.8) share the marker's field.
-    if (f1_17 == 0x87ffff) {
-        is_clv = true;
-        if (f2_17 == f2_18)
-            clv_time_data = f2_17;
-        chapter_data = f1_18;
-        programme_status_data = f1_16;
-    } else if (f2_17 == 0x87ffff) {
-        is_clv = true;
-        if (f1_17 == f1_18)
-            clv_time_data = f1_17;
-        chapter_data = f2_18;
-        programme_status_data = f2_16;
-    } else {
-        // CAV
-        if (f1_16 == 0x82CFFF && f1_17 == 0x82CFFF || f2_16 == 0x82CFFF && f2_17 == 0x82CFFF)
-            is_stop_code = true;
-
-        if (f1_17 == f1_18 && (f1_17 & 0xf00fff) == 0x800ddd)
-            chapter_data = f1_17;
-        else if (f2_17 == f2_18 && (f2_17 & 0xf00fff) == 0x800ddd)
-            chapter_data = f2_17;
-
-        int cav_picture_number_data = -1;
-        if (f1_17 == f1_18 && (f1_17 & 0xf00000) == 0xf00000)
-            cav_picture_number_data = f1_17;
-        else if (f2_17 == f2_18 && (f2_17 & 0xf00000) == 0xf00000)
-            cav_picture_number_data = f2_17;
-
-        if (cav_picture_number_data != -1)
-            cav_picture_number = ((cav_picture_number_data & 0xf0000) >> 16) * 10000 + ((cav_picture_number_data & 0xf000) >> 12) * 1000 +
-                ((cav_picture_number_data & 0xf00) >> 8) * 100 + ((cav_picture_number_data & 0xf0) >> 4) * 10 + (cav_picture_number_data & 0xf);
-
-        if (f1_16 == f2_16)
-            programme_status_data = f1_16;
+    if (!is_clv) {
+        auto it = std::find_if(codes.begin(), codes.end(), [&](int code) {
+            return isBcdPictureNumber(code) && count(code) >= 2;
+        });
+        if (it != codes.end())
+            cav_picture_number = ((*it & 0xf0000) >> 16) * 10000 + ((*it & 0xf000) >> 12) * 1000 +
+                ((*it & 0xf00) >> 8) * 100 + ((*it & 0xf0) >> 4) * 10 + (*it & 0xf);
     }
 
 
@@ -258,11 +269,7 @@ void NtscFrame::processVbi() {
         // E in the third nibble distinguishes it from the users code ("...D...",
         // §10.1.9).  X1/X3 carry the seconds; without this the time has only the
         // hours/minutes from the programme time code, i.e. seconds stuck at :00.
-        int clv_picture_number_data = -1;
-        if ((f1_16 & 0xf0f000) == 0x80e000)
-            clv_picture_number_data = f1_16;
-        else if ((f2_16 & 0xf0f000) == 0x80e000)
-            clv_picture_number_data = f2_16;
+        int clv_picture_number_data = find(0xf0f000, 0x80e000);
 
         if (clv_picture_number_data != -1) {
             int second = (((clv_picture_number_data & 0xf0000) >> 16) - 10) * 10 + ((clv_picture_number_data & 0xf00) >> 8);
@@ -313,10 +320,10 @@ void NtscFrame::processVbi() {
 
     if (m_log.isEnabled(eDebug, eDecoder)) {
         auto strings = m_vbi_data->asStrings();
-        m_log.debug(eDecoder, std::format("VBI {:06x} {:06x} {:06x} {:06x} {:06x} {:06x}  {}|{}",
-            f1_16 & 0xffffff, f1_17 & 0xffffff, f1_18 & 0xffffff,
-            f2_16 & 0xffffff, f2_17 & 0xffffff, f2_18 & 0xffffff,
-            strings[0], strings[1]));
+        std::string code_list;
+        for (int code : codes)
+            code_list += std::format("{:06x} ", code & 0xffffff);
+        m_log.debug(eDecoder, std::format("VBI {} {}|{}", code_list, strings[0], strings[1]));
     }
 }
 
