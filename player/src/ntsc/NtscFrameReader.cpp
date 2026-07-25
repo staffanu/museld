@@ -49,6 +49,7 @@ NtscFrameReader::NtscFrameReader(
           m_lower_percentile_filter(NtscInputBlock::c_samples_per_video_line * NtscInputBlock::c_total_video_lines, 0.005f, 0.f),
           m_consecutive_good_syncs(0),
           m_missed_half_line_vert_sync_patterns(0),
+          m_first_field_incomplete(false),
           m_frame_start_offset(0L),
           m_sample_history{},
           m_sample_history_ix(0),
@@ -261,15 +262,7 @@ bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
     auto *output = output_block->video_data->data<float>();
     auto *dropout_output = output_block->dropout_data->data<uint8_t>();
 
-    // Line-accurate frame start: the sub-buffer's input offset plus the
-    // resampler position within it (in input samples).  The sub-buffer
-    // granularity alone is half a megasample, useless for locating a pixel
-    // in the input file.
-    {
-        size_t pos = (size_t)m_t & c_input_buffer_size_mask;
-        m_frame_start_offset = m_input_sub_buffer_input_offsets[pos >> c_input_sub_buffer_size_bits]
-                + (long)((pos & (c_input_sub_buffer_size - 1)) * m_input_samples_decimation_rate);
-    }
+    updateFrameStartOffset();
 
     float sample;
     uint8_t dropout;
@@ -308,6 +301,7 @@ bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
                     else {
                         m_log.warn(eInput, std::format("Missed line pulses: New state eSearching at line {}", m_line));
                         m_state = eSearching;
+                        m_first_field_incomplete = false;
                     }
                 }
             }
@@ -327,9 +321,34 @@ bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
                     m_vert_sync_half_line_pattern = (m_vert_sync_half_line_pattern << 2) | 0b00;
 
                 if ((m_vert_sync_half_line_pattern & 0xfffffffff) == 0b010101010101111111111111010101010101L) {
-                    m_log.info(eInput, std::format("New state eLocked at line {}", m_line));
+                    // Both fields carry the same six-EQ / six-broad / six-EQ
+                    // sequence, so the pattern alone does not say which field
+                    // this is — but its phase does.  Field 1's vertical interval
+                    // starts at the top of line 1 and so ends flush with the end
+                    // of line 9; field 2's starts half a line later (mid 263) and
+                    // ends in the middle of line 272.  We are therefore in field
+                    // 1 when the pattern completes on a line boundary and in
+                    // field 2 when it completes mid-line.  Without this the
+                    // reader locks onto whichever interval it happens to see
+                    // first and, on a field-2 lock, files field 2 where field 1
+                    // belongs: the frame pairs the two fields the wrong way
+                    // round, the whole picture is displaced one line vertically,
+                    // and the second field's VBI code lines land 262 rather than
+                    // 263 lines down.
                     m_state = eLocked;
-                    m_line = 9;
+                    if (right_half) {
+                        m_line = 9;
+                        m_log.info(eInput, "New state eLocked on field 1 at line 9");
+                    } else {
+                        // Mid-line 272: the rest of this line is the second half
+                        // of field 2's last blanking line, and the following line
+                        // is 273.  This frame's first field region keeps whatever
+                        // the search left there, so skip emitting it and start
+                        // clean on the next field 1.
+                        m_line = 272;
+                        m_first_field_incomplete = true;
+                        m_log.info(eInput, "New state eLocked on field 2 at line 272 (first frame suppressed)");
+                    }
                     // TODO: in the MUSE version, we copy the first four lines to to make the frame complete -- any point doing this here?
                 }
             }
@@ -382,6 +401,7 @@ bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
                     m_log.info(eInput, "Locked horizontally, but frame pulses not found");
                 }
                 m_state = eSearching;
+                m_first_field_incomplete = false;
                 m_line = 3;
                 m_sample_ix = 263; // "random", start search from new position
             }
@@ -395,16 +415,32 @@ bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
                 m_line++;
             else {
                 m_line = 1;
-                if (m_state == eLocked)
-                    return true;
+                if (m_state == eLocked) {
+                    if (!m_first_field_incomplete)
+                        return true;
+                    // Locked part-way into field 2: this frame has no field 1.
+                    // Keep filling and hand over the next, complete one.
+                    m_first_field_incomplete = false;
+                    updateFrameStartOffset();
+                }
             }
         }
     }
     return false;
 }
 
+// Line-accurate frame start: the sub-buffer's input offset plus the resampler
+// position within it (in input samples).  The sub-buffer granularity alone is
+// half a megasample, useless for locating a pixel in the input file.
+void NtscFrameReader::updateFrameStartOffset() {
+    size_t pos = (size_t)m_t & c_input_buffer_size_mask;
+    m_frame_start_offset = m_input_sub_buffer_input_offsets[pos >> c_input_sub_buffer_size_bits]
+            + (long)((pos & (c_input_sub_buffer_size - 1)) * m_input_samples_decimation_rate);
+}
+
 void NtscFrameReader::setUnlocked() {
     m_state = eSearching;
+    m_first_field_incomplete = false;
     m_line = 333; // make sure we do not recognize old data and immediately re-lock
     m_log.info(eInput, "state externally set to eSearching");
 }
