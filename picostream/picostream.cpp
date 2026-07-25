@@ -1,5 +1,10 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE // for sync_file_range
+#endif
 #include <stdio.h>
 #include <sys/time.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -15,6 +20,10 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <deque>
 
 #include <libps5000a/ps5000aApi.h>
 
@@ -33,11 +42,16 @@
  *
  * od -w2 -t d2 -v <filename>
  *
+ * Disk writes run on a separate thread fed by a pool of buffers (--buffers), with Linux
+ * writeback managed so dirty pages never stall the capture; the end-of-capture report
+ * flags any write-buffer overrun or driver-buffer wrap (i.e. lost samples).
+ *
  * Digital mode (--digital, MSO models only): each sample is one byte holding
  * D0-D7 (--bits 8), or one little-endian 16 bit word holding D0-D15 (--bits 16).
  *
  * On exit (analog mode) the min/max sample values are reported in both integer and volt
- * form, together with how many samples reached the ADC full-scale limit.  With
+ * form, together with how many samples reached the ADC full-scale limit and the 99/99.9/
+ * 99.99th |sample| percentiles (a noise-robust amplitude gauge for picking --range).  With
  * --stop-on-signal-loss the capture stops automatically once the input goes silent.
  */
 
@@ -61,6 +75,8 @@ size_t g_bytesPerSample = 2;
 PS5000A_CHANNEL g_channel = PS5000A_CHANNEL_A;
 double g_rangeVolts = 0.1; // full-scale voltage of the selected --range
 int g_maxAdcValue = 32767;  // ADC reading at full scale (from ps5000aMaximumValue)
+int g_writeBuffers = 64;    // number of 1 MiB write buffers absorbing disk-write stalls
+uint32_t g_deviceBufferSize = 4000000; // driver circular buffer in samples (~64 ms at 62.5 MS/s)
 
 int16_t *driverBuffers[2];
 int16_t *appBuffer;
@@ -98,16 +114,124 @@ void PREF4 callBackStreaming(int16_t handle, int32_t n_samples, uint32_t startIn
   }
 }
 
+/*
+ * Disk writes run on a dedicated thread fed by a pool of fixed-size buffers, so a stall
+ * in write() never blocks the polling loop (which would let the driver's circular buffer
+ * wrap over unread samples).  On Linux, writeback of each completed window is started
+ * eagerly and the previous window is waited on and evicted, so dirty pages never pile up
+ * enough for the kernel to throttle write() in balance_dirty_pages() -- the ~200 ms stalls
+ * that throttling causes are what silently overrun capture buffers on this hardware.
+ * Ported from fx3usbadc/usbstream's BulkTransfer.
+ */
+struct WriteBlock { uint8_t *data; size_t len; };
+
+struct Writer {
+  int fd = -1;
+  bool regular = false;               // apply writeback management only to real files
+  size_t blockCap = 1u << 20;         // 1 MiB per buffer
+  static constexpr long window = 8L << 20; // writeback window (8 blocks)
+
+  std::deque<WriteBlock> vacant, filled;
+  std::mutex mtx;
+  std::condition_variable cvFilled;
+  bool running = false;
+
+  long writeOffset = 0, flushedOffset = 0;
+
+  int poolCount = 0;
+  int vacantMin = 0;                  // low-water of vacant buffers -> high-water of usage
+  long overruns = 0;                  // times the pool was empty and a chunk was dropped
+  WriteBlock cur{nullptr, 0};         // buffer the producer is currently filling
+};
+
+static void writerThread(Writer *w)
+{
+  for (;;) {
+    WriteBlock b{nullptr, 0};
+    {
+      std::unique_lock<std::mutex> lock(w->mtx);
+      w->cvFilled.wait(lock, [w] { return !w->running || !w->filled.empty(); });
+      if (!w->running && w->filled.empty())
+	break;
+      b = w->filled.front();
+      w->filled.pop_front();
+    }
+
+    for (size_t off = 0; off < b.len; ) {
+      ssize_t n = write(w->fd, b.data + off, b.len - off);
+      if (n < 0) {
+	fprintf(stderr, "\nwrite failed: %s\n", strerror(errno));
+	exit(1);
+      }
+      off += n;
+    }
+
+    {
+      std::unique_lock<std::mutex> lock(w->mtx);
+      w->vacant.push_back(b);
+    }
+
+    if (w->regular) {
+      w->writeOffset += b.len;
+      while (w->writeOffset - w->flushedOffset >= Writer::window) {
+	sync_file_range(w->fd, w->flushedOffset, Writer::window, SYNC_FILE_RANGE_WRITE);
+	if (w->flushedOffset >= Writer::window) {
+	  long prev = w->flushedOffset - Writer::window;
+	  sync_file_range(w->fd, prev, Writer::window,
+			  SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER);
+	  posix_fadvise(w->fd, prev, Writer::window, POSIX_FADV_DONTNEED);
+	}
+	w->flushedOffset += Writer::window;
+      }
+    }
+  }
+}
+
+// Append `len` bytes to the write pool, enqueueing full blocks to the writer thread.
+// If the pool is empty (writer can't keep up), the remaining bytes are dropped and an
+// overrun is counted -- dropping keeps the poll loop alive rather than stalling it into
+// a driver-buffer overrun.
+static void produce(Writer &w, const uint8_t *src, size_t len)
+{
+  while (len > 0) {
+    if (w.cur.data == nullptr) {
+      std::unique_lock<std::mutex> lock(w.mtx);
+      w.vacantMin = std::min(w.vacantMin, (int)w.vacant.size());
+      if (w.vacant.empty()) {
+	w.overruns++;
+	return;
+      }
+      w.cur = w.vacant.front();
+      w.vacant.pop_front();
+      w.cur.len = 0;
+    }
+    size_t n = std::min(len, w.blockCap - w.cur.len);
+    memcpy(w.cur.data + w.cur.len, src, n);
+    w.cur.len += n;
+    src += n;
+    len -= n;
+    if (w.cur.len == w.blockCap) {
+      std::unique_lock<std::mutex> lock(w.mtx);
+      w.filled.push_back(w.cur);
+      w.cvFilled.notify_one();
+      w.cur = WriteBlock{nullptr, 0};
+    }
+  }
+}
+
 void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sampleInterval, long n_total_samples,
 			       SignalLossDetector *detector, bool reportStats)
 {
-  uint32_t bufferSize = 2000000;
+  uint32_t bufferSize = g_deviceBufferSize; // driver circular buffer; poll-gap slack = bufferSize / rate
   int hasOverflow = 0;
   bool signalLost = false;
 
   int sampleMin = INT_MAX;
   int sampleMax = INT_MIN;
   long long clippedSamples = 0;
+  std::vector<long long> absHist; // |sample| histogram for exact amplitude percentiles
+  if (reportStats)
+    absHist.assign(g_maxAdcValue + 2, 0);
 
   /* Trigger disabled */
   CHECK_CALL(ps5000aSetSimpleTrigger(handle, 0, PS5000A_CHANNEL_A, 0, PS5000A_RISING, 0, 0),
@@ -127,11 +251,20 @@ void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sa
     printf("Streaming Data for %ld samples to %s\n", n_total_samples, filename);
   else
     printf("Streaming Data to %s until interrupted (Ctrl-C)\n", filename);
-  FILE *fp = fopen(filename, "w");
-  if (!fp) {
-    printf("Cannot open the file %s for writing.\n", filename);
+  Writer writer;
+  writer.fd = open(filename, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+  if (writer.fd == -1) {
+    fprintf(stderr, "Cannot open the file %s for writing: %s\n", filename, strerror(errno));
     exit(1);
   }
+  struct stat st;
+  writer.regular = fstat(writer.fd, &st) == 0 && S_ISREG(st.st_mode);
+  writer.poolCount = std::max(2, g_writeBuffers);
+  writer.vacantMin = writer.poolCount;
+  for (int i = 0; i < writer.poolCount; i++)
+    writer.vacant.push_back(WriteBlock{(uint8_t *)malloc(writer.blockCap), 0});
+  writer.running = true;
+  std::thread writerThreadHandle(writerThread, &writer);
 
   uint32_t requestedInterval = sampleInterval;
   CHECK_CALL(ps5000aRunStreaming(handle, &sampleInterval, PS5000A_NS,
@@ -147,22 +280,62 @@ void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sa
   struct timeval start, end;
   gettimeofday(&start, NULL);
 
+  // Poll-cadence diagnostics: the driver hands us the samples produced since the last
+  // poll, so if a poll gap exceeds the driver buffer span the circular buffer wrapped
+  // and samples were lost.  We compare delivered vs. elapsed*rate to spot that.
+  const double rate = 1e9 / sampleInterval;              // samples per second
+  const double bufSpanSec = (double)bufferSize / rate;   // time the driver buffer holds
+  auto tStream = std::chrono::steady_clock::now();
+  auto tLast = tStream;
+  auto tLastWarn = tStream;
+  long long totalDelivered = 0;
+  double maxDeficitSamples = 0;
+  double maxGapSec = 0;
+  long wrapWarnings = 0;
+
   long totalSamples = 0;
   while (!g_stop && (totalSamples < n_total_samples || n_total_samples == 0)) {
     g_ready = 0;
     CHECK_CALL(ps5000aGetStreamingLatestValues(handle, callBackStreaming, NULL),
 	       "ps5000aGetStreamingLatestValues");
 
+    auto now = std::chrono::steady_clock::now();
+    double gap = std::chrono::duration<double>(now - tLast).count();
+    tLast = now;
+    if (gap > maxGapSec) maxGapSec = gap;
+
     if (g_ready && g_sampleCount > 0) { /* Can be ready and have no data, if autoStop has fired */
       long n_write = g_sampleCount;
       if (n_total_samples != 0)
 	n_write = std::min(n_write, n_total_samples - totalSamples); // exact requested sample count
       totalSamples += n_write;
-      printf("Collected %7d samples, index = %7u, Total: %11ld samples %s         \r",
-	     g_sampleCount, g_startIndex, totalSamples, g_overflow ? " OVERFLOW" : "");
+      totalDelivered += g_sampleCount;
+
+      double deficit = std::chrono::duration<double>(now - tStream).count() * rate - (double)totalDelivered;
+      if (deficit > maxDeficitSamples) maxDeficitSamples = deficit;
+
+      // Returned far fewer samples than were produced during the gap -> the driver's
+      // circular buffer wrapped over unread data.  Rate-limited so a burst is one line.
+      double expectedThisGap = gap * rate;
+      if (gap > bufSpanSec && totalDelivered > bufferSize) {
+	wrapWarnings++;
+	if (std::chrono::duration<double>(now - tLastWarn).count() > 0.5) {
+	  fprintf(stderr,
+		  "\nWARNING: driver returned %d samples but ~%.0f were produced in the %.1f ms since the "
+		  "last poll -- buffer wrapped, ~%.0f samples lost\n",
+		  g_sampleCount, expectedThisGap, gap * 1e3, expectedThisGap - g_sampleCount);
+	  tLastWarn = now;
+	}
+      }
+
+      int used;
+      { std::unique_lock<std::mutex> lock(writer.mtx); used = writer.poolCount - (int)writer.vacant.size(); }
+      printf("\rCollected %7d samples, index = %7u, Total: %11ld  buf %2d/%d ovr %ld%s\033[K",
+	     g_sampleCount, g_startIndex, totalSamples, used, writer.poolCount, writer.overruns,
+	     g_overflow ? " OVERFLOW" : "");
       fflush(stdout);
       hasOverflow |= g_overflow;
-      fwrite((uint8_t *)appBuffer + g_startIndex * g_bytesPerSample, g_bytesPerSample, n_write, fp);
+      produce(writer, (uint8_t *)appBuffer + g_startIndex * g_bytesPerSample, (size_t)n_write * g_bytesPerSample);
 
       if (reportStats) { // stats on the raw ADC value (over the written samples) so they convert to volts
 	const int16_t *src = driverBuffers[0] + g_startIndex;
@@ -170,7 +343,9 @@ void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sa
 	  int value = src[i];
 	  if (value < sampleMin) sampleMin = value;
 	  if (value > sampleMax) sampleMax = value;
-	  if (std::abs(value) >= g_maxAdcValue) clippedSamples++; // saturated at the ADC rail
+	  int mag = std::abs(value);
+	  if (mag >= g_maxAdcValue) clippedSamples++; // saturated at the ADC rail
+	  absHist[std::min(mag, (int)absHist.size() - 1)]++;
 	}
       }
 
@@ -180,6 +355,24 @@ void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sa
       }
     }
   }
+
+  // Flush the partially-filled block, then drain and stop the writer thread.
+  if (writer.cur.data) {
+    std::unique_lock<std::mutex> lock(writer.mtx);
+    if (writer.cur.len > 0) {
+      writer.filled.push_back(writer.cur);
+      writer.cvFilled.notify_one();
+    } else {
+      writer.vacant.push_back(writer.cur);
+    }
+    writer.cur = WriteBlock{nullptr, 0};
+  }
+  {
+    std::unique_lock<std::mutex> lock(writer.mtx);
+    writer.running = false;
+    writer.cvFilled.notify_one();
+  }
+  writerThreadHandle.join();
 
   gettimeofday(&end, NULL);
   long millis = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
@@ -206,10 +399,44 @@ void collectStreamingImmediate(int16_t handle, const char *filename, uint32_t sa
 	     clippedSamples, 100.0 * clippedSamples / totalSamples, totalSamples);
     else
       printf("Out of range: none\n");
+
+    // High-|sample| percentiles: a noise-robust amplitude gauge for picking --range,
+    // unlike min/max which are single worst-case samples inflated by range-scaled noise.
+    auto percentile = [&] (double p) -> int {
+      long long target = std::max<long long>(1, llround(p * totalSamples));
+      long long cum = 0;
+      for (size_t v = 0; v < absHist.size(); v++) {
+	cum += absHist[v];
+	if (cum >= target)
+	  return (int)v;
+      }
+      return (int)absHist.size() - 1;
+    };
+    printf("Amplitude (|sample|):");
+    for (double p : {0.99, 0.999, 0.9999}) {
+      int adc = percentile(p);
+      printf("  %.4g%% = %d (%.4g V)", p * 100, adc, (double)adc * g_rangeVolts / g_maxAdcValue);
+    }
+    printf("\n");
+  }
+
+  // Capture-integrity report: write-buffer pressure and poll-cadence gaps.
+  {
+    int usedMax = writer.poolCount - writer.vacantMin;
+    printf("Write buffers: peak %d/%d used, overruns %ld\n", usedMax, writer.poolCount, writer.overruns);
+    printf("Poll timing: max gap %.1f ms (buffer holds %.1f ms), max deficit %.0f samples (%.1f ms)\n",
+	   maxGapSec * 1e3, bufSpanSec * 1e3, maxDeficitSamples, maxDeficitSamples / rate * 1e3);
+    if (writer.overruns > 0)
+      printf("*** DATA LOST: %ld write-buffer overrun(s) -- writer fell behind; raise --buffers or use a faster disk ***\n",
+	     writer.overruns);
+    if (wrapWarnings > 0)
+      printf("*** DATA LOST: %ld driver-buffer wrap(s) -- poll loop stalled longer than the buffer span ***\n",
+	     wrapWarnings);
   }
 
   ps5000aStop(handle);
-  fclose(fp);
+  close(writer.fd);
+  while (!writer.vacant.empty()) { free(writer.vacant.front().data); writer.vacant.pop_front(); }
 
   for (int i = 0; i < n_buffers; i++) {
     PS5000A_CHANNEL source = g_digital ? (PS5000A_CHANNEL)(PS5000A_DIGITAL_PORT0 + i) : g_channel;
@@ -332,6 +559,16 @@ int32_t main(int argc, char *argv[])
     signal_loss_threshold = stod(nextArg());
     if (signal_loss_threshold <= 0 || signal_loss_threshold >= 1)
       throw std::runtime_error("Signal loss threshold must be between 0 and 1 (exclusive)");
+  }});
+  options.push_back({"--buffers", "<n>: number of 1 MiB write buffers absorbing disk-write stalls (default 64)", [&] () -> void {
+    g_writeBuffers = stoi(nextArg());
+    if (g_writeBuffers < 2)
+      throw std::runtime_error("Need at least 2 write buffers");
+  }});
+  options.push_back({"--device-buffer-size", "<n>: driver circular buffer in samples (default 4000000; set low to test wrap detection)", [&] () -> void {
+    g_deviceBufferSize = stoul(nextArg());
+    if (g_deviceBufferSize < 1000)
+      throw std::runtime_error("Device buffer size must be at least 1000 samples");
   }});
   options.push_back({"--help", "show this help", [&] () -> void {
     usage();
