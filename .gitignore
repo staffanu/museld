@@ -9,5 +9,6 @@ build-muse/
 player/build-*/
 fl2kmuse/build-*/
 picostream/build-*/
+ldconv/build-*/
 .claude/
 .cache/

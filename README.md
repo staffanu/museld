@@ -81,6 +81,15 @@ voltage range, coupling, channel, and capture length are set with command line o
 Used to capture MUSE RF in real time for piping directly into museld.
 (The current tool I use to capture MUSE RF is [fx3usbadc](https://bitbucket.org/staffanulfberg/fx3usbadc).)
 
+### ldconv
+
+Standalone converter between the sample formats laserdisc RF captures come in: the packed
+10-bit `.lds` of the Domesday Duplicator, the FLAC-compressed `.ldf`, and raw files such as
+`.s16`. It does what `ld-compress` and `ld-lds-converter` do, byte for byte, in a single
+program and about ten times faster, and can cut a range out of a capture while converting.
+
+See **[ldconv/README.md](ldconv/README.md)**.
+
 ## Building
 
 All components require CMake 3.22+ and a C++23 compiler.
@@ -155,6 +164,13 @@ cmake --build fl2kmuse/build-release
 ```bash
 cmake -DCMAKE_BUILD_TYPE=Release -S picostream -B picostream/build-release
 cmake --build picostream/build-release
+```
+
+### ldconv (standalone, requires FLAC++)
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release -S ldconv -B ldconv/build-release
+cmake --build ldconv/build-release
 ```
 
 ## Running tests
