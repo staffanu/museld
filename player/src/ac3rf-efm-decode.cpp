@@ -28,6 +28,7 @@
 #include "efm/EfmDecoder.h"
 #include "efm/TwoChannelSample.h"
 #include "efm/EfmPcmProcessor.h"
+#include "CliOptions.h"
 #include "Version.h"
 
 enum Operation {
@@ -194,71 +195,84 @@ int main(int argc, char *argv[]) {
     const std::vector<std::string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
 
-    std::vector<std::pair<std::string, std::function<void ()>>> options;
+    CliOptions options;
 
-    auto usage = [&options] () -> void {
-        std::cerr << "usage: ac3rf-decode ";
-        for (auto o: options)
-            std::cerr << "[" << o.first << "] ";
-        std::cerr << "<input_file>" << std::endl;
-        exit(EXIT_FAILURE);
+    auto usage = [&options] (std::ostream &out, int status) -> void {
+        options.printHelp(out, "ac3rf-efm-decode [options] [<input_file> ...]");
+        out << "\nInput is read from stdin when no file is given, and the output is written to\n"
+               "stdout unless --output-filename says otherwise.  Several input files can be given,\n"
+               "with options in between; each one is decoded with the options in effect where it\n"
+               "appears.  An argument starting with ! is ignored, which is practical for disabling\n"
+               "an option in a saved command line.\n";
+        exit(status);
     };
 
-    options.emplace_back("--input-format", [&] () mutable -> void {
-        input_format_option = inputFormatFromString(*(it++));
-    });
-    options.emplace_back("--seek", [&] () mutable -> void {
-        initial_seek_seconds = stod(*(it++));
-    });
-    options.emplace_back("--duration", [&] () mutable -> void {
-        duration_seconds = stod(*(it++));
-    });
-    options.emplace_back("--sample-freq", [&] () mutable  -> void {
-        input_sample_frequency = stod(*(it++));
-    });
-    options.emplace_back("--simd", [&] () mutable  -> void {
-        use_simd = true;
-    });
-    options.emplace_back("--no-simd", [&] () mutable  -> void {
-        use_simd = false;
-    });
-    options.emplace_back("--ac3", [&] () mutable  -> void {
+    options.section("Modes:");
+    options.flag("--ac3", "Decode AC3-RF surround audio (the default)", [&] () -> void {
         operation = Ac3;
     });
-    options.emplace_back("--efm", [&] () mutable  -> void {
+    options.flag("--efm", "Decode EFM audio from a baseband capture, as taken from the EFM output "
+                          "of some players", [&] () -> void {
         operation = Efm;
     });
-    options.emplace_back("--efm-rf", [&] () mutable  -> void {
+    options.flag("--efm-rf", "Decode EFM audio from an RF capture (bandpass and envelope detection "
+                             "first)", [&] () -> void {
         operation = EfmRf;
     });
-    options.emplace_back("--efm-t-values", [&] () mutable  -> void {
+    options.flag("--efm-t-values", "Decode ld-decode EFM t-values, the run lengths between NRZI "
+                                   "transitions (implies --input-format u8)", [&] () -> void {
         input_format_option = std::make_optional(eUint8);
         operation = EfmTValues;
     });
-    options.emplace_back("--resample", [&] () mutable  -> void {
+    options.option("--resample", "HZ", "Resample the input to HZ and write it as raw u8; no audio "
+                                       "is decoded", [&] () -> void {
         target_sample_frequency = stod(*(it++));
         operation = Resample;
     });
-    options.emplace_back("--decimation", [&] () mutable  -> void {
+
+    options.section("Input options:");
+    options.option("--input-format", "FMT",
+                   "Input sample type: u8, s8, u16, s16, u16be, s16be, lds, flac, ldf "
+                   "(default: from the filename extension; required for stdin)", [&] () -> void {
+        input_format_option = inputFormatFromString(*(it++));
+    });
+    options.option("--sample-freq", "HZ",
+                   "Input sample rate, written as 40e6 rather than 40 (default 40e6)", [&] () -> void {
+        input_sample_frequency = stod(*(it++));
+    });
+    options.option("--seek", "SECONDS", "Skip this much input before decoding", [&] () -> void {
+        initial_seek_seconds = stod(*(it++));
+    });
+    options.option("--duration", "SECONDS", "Stop after decoding this much audio", [&] () -> void {
+        duration_seconds = stod(*(it++));
+    });
+
+    options.section("Decoding options:");
+    options.option("--decimation", "N",
+                   "Log2 of the decimation applied before EFM decoding (default: the most that "
+                   "keeps the rate before the fractional resampler above 8 MHz)", [&] () -> void {
         efm_log2_decimation = stoi(*(it++));
         if (efm_log2_decimation < 0)
             throw std::runtime_error("Invalid decimation specification");
     });
-    options.emplace_back("--adaptive-filter-size", [&] () mutable  -> void {
+    options.option("--adaptive-filter-size", "N",
+                   "Adaptive FIR filter size for the EFM signal (default 3, 0 disables it); try 9 "
+                   "or 11 when a distorted signal causes many errors", [&] () -> void {
         efm_adaptive_filter_size = stoi(*(it++));
         if (efm_adaptive_filter_size < 0 || efm_adaptive_filter_size > 100)
             throw std::runtime_error("Invalid adaptive filter size");
     });
-    options.emplace_back("--reclock-debug-filename", [&] () mutable  -> void {
-        efm_retiming_debug_filename = *(it++);
+    options.flag("--simd", "Use SIMD (AVX/NEON) FIR filtering, which is the default where the CPU "
+                           "supports it", [&] () -> void {
+        use_simd = true;
     });
-    options.emplace_back("--t-values-output-filename", [&] () mutable  -> void {
-        efm_t_values_output_filename = *(it++);
+    options.flag("--no-simd", "Do not use SIMD FIR filtering", [&] () -> void {
+        use_simd = false;
     });
-    options.emplace_back("--circ-debug-filename", [&] () mutable  -> void {
-        efm_circ_debug_filename = *(it++);
-    });
-    options.emplace_back("--error-concealment", [&] () mutable  -> void {
+    options.option("--error-concealment", "MODE",
+                   "Erasure concealment: none, repeat (previous sample), li (linear interpolation), "
+                   "ar (autoregressive, the default), sar (slower, more advanced autoregressive)",
+                   [&] () -> void {
         std::string concealment_impl_name = *(it++);
         if (concealment_impl_name == "none")
             concealment_impl = ErasureConcealer::None;
@@ -273,11 +287,14 @@ int main(int argc, char *argv[]) {
         else
             throw std::runtime_error("Invalid error concealment model");
     });
-    options.emplace_back("--output-filename", [&] () mutable  -> void {
+    options.section("Output options:");
+    options.option("--output-filename", "FILE",
+                   "Write the decoded audio to FILE instead of stdout; \"-\" writes to stdout even "
+                   "when it is a terminal", [&] () -> void {
         auto output_filename = *it++;
         if (out_fd != 1)
             close(out_fd);
-        if (*it == "-") {
+        if (output_filename == "-") {
             out_fd = STDOUT_FILENO;
             force_stdout = true;
         } else {
@@ -288,7 +305,9 @@ int main(int argc, char *argv[]) {
                 throw std::runtime_error(std::format("Unable to open output file {}: {}", output_filename, strerror(errno)));
         }
     });
-    options.emplace_back("--log", [&] () mutable -> void {
+    options.section("Logging and debugging:");
+    options.option("--log", "LEVEL", "Log verbosity: 0 off, 1 error, 2 warn (the default), 3 info, "
+                                     "4 debug", [&] () -> void {
         int level_number = stod(*it++);
         std::map<LogCategoryFlags, LogPriority> level;
         switch (level_number) {
@@ -311,7 +330,7 @@ int main(int argc, char *argv[]) {
         }
         log_selection = level;
     });
-    options.emplace_back("--log-filename", [&] () mutable  -> void {
+    options.option("--log-filename", "FILE", "Write the log to FILE instead of stderr", [&] () -> void {
         auto log_filename = *it++;
         if (log_stream != &std::cerr) {
             delete log_stream;
@@ -322,11 +341,25 @@ int main(int argc, char *argv[]) {
             throw std::runtime_error(std::format("Unable to open log file {}", log_filename));
         log_stream = file_stream;
     });
-    options.emplace_back("--help", [&] () mutable -> void {
-        usage();
-        did_show_help_or_version = true;
+    options.option("--reclock-debug-filename", "FILE",
+                   "Write the EFM timing recovery data to FILE as binary float pairs: the symbol "
+                   "sample and the computed timing error", [&] () -> void {
+        efm_retiming_debug_filename = *(it++);
     });
-    options.emplace_back("--version", [&] () mutable -> void {
+    options.option("--t-values-output-filename", "FILE",
+                   "Write the EFM t-values to FILE, one unsigned byte per run length, in the same "
+                   "format as ld-decode .efm files", [&] () -> void {
+        efm_t_values_output_filename = *(it++);
+    });
+    options.option("--circ-debug-filename", "FILE",
+                   "Write the CIRC decoder's frame-by-frame dump (data and erasure flags around C1 "
+                   "and C2) to FILE", [&] () -> void {
+        efm_circ_debug_filename = *(it++);
+    });
+    options.flag("--help", "This text", [&] () -> void {
+        usage(std::cout, EXIT_SUCCESS);
+    });
+    options.flag("--version", "Print the version and exit", [&] () -> void {
         std::cerr << "ac3rf-decode version " << AC3RF_DECODE_VERSION << std::endl;
         did_show_help_or_version = true;
     });
@@ -334,17 +367,16 @@ int main(int argc, char *argv[]) {
     try {
         bool filename_found = false; // If no filename given, we read from stdin
         while (it != args.cend()) {
-            auto option = std::find_if(options.cbegin(), options.cend(),
-                                    [it](const std::pair<std::string, std::function<void()>> &pair) -> bool {
-                                        return *it == pair.first;
-                                    });
-            if (option != options.cend()) {
+            if (const CliOptions::Option *option = options.find(*it)) {
                 it++;
-                option->second();
+                if (option->takesArgument() && it == args.cend())
+                    throw std::runtime_error(std::format("{} needs an argument ({})", option->name, option->argument));
+                option->action();
             } else if (it->find("!", 0) == 0) {
                 it++; // used to ignore options (to easily enable/disable options in debug settings etc.)
             } else if (it->find("-", 0) == 0) {
-                usage();
+                std::cerr << "Unknown option: " << *it << std::endl;
+                usage(std::cerr, EXIT_FAILURE);
             } else {
                 filename_found = true;
                 auto filename = *it;
