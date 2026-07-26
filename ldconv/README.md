@@ -3,7 +3,7 @@
 Converts between the sample formats laserdisc RF captures come in: the packed 10-bit
 `.lds` of the Domesday Duplicator, the FLAC-compressed `.ldf`, and raw files such as
 `.s16`. One program in place of the `ld-lds-converter` + `ffmpeg` + `flac` pipelines
-that `ld-compress` runs, and about ten times faster.
+that `ld-compress` runs.
 
 ```
 ldconv capture.lds capture.ldf        # compress, as ld-compress -c does
@@ -60,11 +60,16 @@ a 40 MHz capture) on 8 cores:
 | `ldconv --lpc-order 32 --blocksize 16384 capture.lds capture.ldf` | 69 s | 561 MB |
 | `ld-compress -c capture.lds` | 70 s | 577 MB |
 
-The default trades about 2% of file size for ten times the speed. `--lpc-order 32
---blocksize 16384` gives FLAC a longer predictor and fewer, larger frames to amortize
-it over: same time as `ld-compress`, smallest file of the three. Uncompressing is
-disk-bound at about 8 seconds either way, though `ld-compress` spends three times the
+Most of the difference in the first row is that the default compresses less hard than
+`ld-compress` does: a file about 2% larger, in roughly a sixth of the time. Asking for
+comparable compression with `--lpc-order 32 --blocksize 16384` — a longer predictor,
+and larger frames to amortize its coefficients over — takes about as long as
+`ld-compress` and gives the smallest file of the three. Uncompressing is disk-bound
+and takes about the same time either way, though `ld-compress` spends three times the
 CPU on it.
+
+These are single measurements on one machine and one capture, so treat them as rough:
+how much the higher predictor order buys depends on the disc and the capture hardware.
 
 ## Building
 
