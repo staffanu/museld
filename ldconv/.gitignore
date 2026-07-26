@@ -4,11 +4,4 @@ cmake-build-relwithdebinfo/
 build-debug/
 build-release/
 build-relwithdebinfo/
-build-muse/
 .idea/
-player/build-*/
-fl2kmuse/build-*/
-picostream/build-*/
-ldconv/build-*/
-.claude/
-.cache/

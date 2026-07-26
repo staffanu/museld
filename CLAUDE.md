@@ -41,6 +41,7 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
   cmake/           — CMake helpers (ac3rfConfig.cmake.in, modules/FindLIBAV.cmake, etc.)
 fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device
 picostream/        — Standalone: Picoscope oscilloscope capture tool (analog + MSO digital)
+ldconv/            — Standalone: converter between capture formats (.lds/.ldf/.s16/...)
 octave/            — Octave/Matlab scripts for filter design and algorithm exploration
 tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parseQ.awk)
 packaging/         — Scripts and per-package READMEs for the Windows/macOS downloads
@@ -98,6 +99,18 @@ cmake --build fl2kmuse/build-release
 cmake -DCMAKE_BUILD_TYPE=Release -S picostream -B picostream/build-release
 cmake --build picostream/build-release
 ```
+
+### ldconv (standalone — requires libFLAC++)
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release -S ldconv -B ldconv/build-release
+cmake --build ldconv/build-release
+ldconv/tests/roundtrip.sh ldconv/build-release/ldconv   # lossless round-trip checks
+```
+
+Converts between `.lds`, `.ldf`, `.s16` and the other capture formats, replacing
+`ld-compress` and `ld-lds-converter`. The conversions are byte-exact against those
+tools; `ldconv/README.md` records the format conventions and the measured speeds.
 
 ## Running Tests
 
