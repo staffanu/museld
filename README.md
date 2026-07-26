@@ -92,7 +92,7 @@ See **[ldconv/README.md](ldconv/README.md)**.
 
 ## Building
 
-All components require CMake 3.22+ and a C++23 compiler.
+All components require CMake 3.22+ and a C++20 compiler.
 
 ### museld + ac3rf-efm-decode (default)
 

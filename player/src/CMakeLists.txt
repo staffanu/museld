@@ -34,7 +34,7 @@ add_library(ac3rf STATIC
     efm/EfmPcmProcessor.cpp efm/EfmPcmProcessor.h
 )
 
-target_compile_features(ac3rf PUBLIC cxx_std_23)
+target_compile_features(ac3rf PUBLIC cxx_std_20)
 
 # The library is installed and exported for external use, so it may be linked
 # into a shared object, which requires position-independent code on Linux.
