@@ -77,9 +77,10 @@ run --input-format lds --output-format s16 - - < "$WORK/src.lds" > "$WORK/pipe.s
 check "stdin -> stdout" "$WORK/a.s16" "$WORK/pipe.s16"
 
 # --- ranges ------------------------------------------------------------------
-# 1000 samples from sample 4000, against the same bytes cut out with dd.
+# 1000 samples from sample 4000, against the same bytes cut out by hand.  Done
+# with tail/head rather than dd, whose status=none is not portable.
 run -s 4000 -n 1000 "$WORK/a.s16" "$WORK/range.s16"
-dd if="$WORK/a.s16" of="$WORK/range-expected.s16" bs=2 skip=4000 count=1000 status=none
+tail -c +8001 "$WORK/a.s16" | head -c 2000 > "$WORK/range-expected.s16"
 check "s16 range" "$WORK/range-expected.s16" "$WORK/range.s16"
 
 # The same range out of the packed format, where the start is not on a group
