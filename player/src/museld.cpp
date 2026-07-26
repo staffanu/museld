@@ -595,6 +595,7 @@ int main(int argc, char *argv[]) {
     });
 
     try {
+        bool input_file_given = false;
         while (it != args.cend()) {
             if (const CliOptions::Option *option = options.find(*it)) {
                 it++;
@@ -607,6 +608,7 @@ int main(int argc, char *argv[]) {
                 cerr << "Unknown option: " << *it << endl;
                 usage(cerr, EXIT_FAILURE);
             } else {
+                input_file_given = true;
                 if (initial_seek_seconds != 0 && filesystem::is_fifo(*it)) {
                     cerr << "Initial seek is not compatible with reading from fifo" << endl;
                     exit(EXIT_FAILURE);
@@ -677,6 +679,12 @@ int main(int argc, char *argv[]) {
                 }
                 it++;
             }
+        }
+        // Nothing to play is not an error, but say so: an empty command line
+        // otherwise looks just like the player failing to start
+        if (!input_file_given) {
+            cerr << "No input file given -- museld plays a capture file, so it needs one to play." << endl;
+            cerr << "Run \"museld --help\" for the options, or give a filename:  museld capture.lds" << endl;
         }
     } catch (const exception &x) {
         StreamLogger log(StreamLogger::c_log_all, std::cerr, true);
