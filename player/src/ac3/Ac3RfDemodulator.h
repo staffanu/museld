@@ -4,6 +4,7 @@
 #ifndef AC3RF_DECODE_AC3RFDEMODULATOR_H
 #define AC3RF_DECODE_AC3RFDEMODULATOR_H
 
+#include <cstdint>
 #include <complex>
 #include <string>
 #include "logging/Logger.h"

@@ -4,6 +4,7 @@
 #ifndef MUSECPP_MUSERFDEMODULATOR_H
 #define MUSECPP_MUSERFDEMODULATOR_H
 
+#include <cstdint>
 #include <fcntl.h>
 #include <unistd.h>
 #include <fstream>

@@ -4,6 +4,8 @@
 #ifndef MUSECPP_HALFFLOATUTIL_H
 #define MUSECPP_HALFFLOATUTIL_H
 
+#include <cstdint>
+
 class HalfFloatUtil {
 public:
     // Algorithm from "Accuracy and performance of the lattice Boltzmann method with 64-bit, 32-bit, and customized 16-bit number formats"

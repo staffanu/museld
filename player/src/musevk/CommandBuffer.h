@@ -4,6 +4,7 @@
 #ifndef MUSECPP_COMMANDBUFFER_H
 #define MUSECPP_COMMANDBUFFER_H
 
+#include <cstdint>
 #include <vulkan/vulkan.hpp>
 #include "ComputeShader.h"
 #include "Queue.h"

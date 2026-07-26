@@ -4,6 +4,7 @@
 #ifndef AC3RF_DECODE_AC3DECODER_H
 #define AC3RF_DECODE_AC3DECODER_H
 
+#include <cstdint>
 #include <array>
 #include <string>
 #include <vector>

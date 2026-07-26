@@ -1,6 +1,7 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <cstdint>
 #include <algorithm>
 #include <format>
 #include <vector>

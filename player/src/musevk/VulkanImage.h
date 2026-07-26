@@ -4,6 +4,7 @@
 #ifndef MUSECPP_VULKANIMAGE_H
 #define MUSECPP_VULKANIMAGE_H
 
+#include <cstdint>
 #include <vulkan/vulkan.hpp>
 #include "VulkanMemoryObject.h"
 #include "CommandBuffer.h"

@@ -4,6 +4,7 @@
 #ifndef MUSECPP_MEMORYALLOCATOR_H
 #define MUSECPP_MEMORYALLOCATOR_H
 
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <vulkan/vulkan.hpp>

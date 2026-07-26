@@ -4,6 +4,7 @@
 #ifndef MUSECPP_RESAMPLINGFRAMEREADER_H
 #define MUSECPP_RESAMPLINGFRAMEREADER_H
 
+#include <cstdint>
 #include <memory>
 #include "FrameReader.h"
 #include "MuseRfDemodulator.h"

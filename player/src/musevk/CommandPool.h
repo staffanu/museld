@@ -4,6 +4,7 @@
 #ifndef MUSECPP_COMMANDPOOL_H
 #define MUSECPP_COMMANDPOOL_H
 
+#include <cstdint>
 #include "CommandBuffer.h"
 #include "VulkanManager.h"
 

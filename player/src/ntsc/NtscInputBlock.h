@@ -4,6 +4,7 @@
 #ifndef MUSECPP_NTSCINPUTBLOCK_H
 #define MUSECPP_NTSCINPUTBLOCK_H
 
+#include <cstdint>
 #include <array>
 #include "musevk/VulkanBuffer.h"
 #include "InputBlockBase.h"

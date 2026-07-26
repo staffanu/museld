@@ -4,6 +4,7 @@
 #ifndef AC3RF_DECODE_LDFINPUTREADER_H
 #define AC3RF_DECODE_LDFINPUTREADER_H
 
+#include <cstdint>
 #include "InputReader.h"
 #include <FLAC++/decoder.h>
 

@@ -4,6 +4,7 @@
 #ifndef AC3RF_DECODE_AC3BLOCKHANDLER_H
 #define AC3RF_DECODE_AC3BLOCKHANDLER_H
 
+#include <cstdint>
 #include <array>
 #include <optional>
 #include <string>

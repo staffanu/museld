@@ -4,6 +4,7 @@
 #ifndef AC3RF_DECODE_ARERASURECONCEALER_H
 #define AC3RF_DECODE_ARERASURECONCEALER_H
 
+#include <cstdint>
 #include <deque>
 
 #include "ErasureConcealer.h"

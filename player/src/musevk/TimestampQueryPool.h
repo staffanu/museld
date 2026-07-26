@@ -4,6 +4,7 @@
 #ifndef MUSECPP_TIMESTAMPQUERYPOOL_H
 #define MUSECPP_TIMESTAMPQUERYPOOL_H
 
+#include <cstdint>
 #include <vector>
 #include <string>
 #include <vulkan/vulkan.hpp>

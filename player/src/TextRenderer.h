@@ -4,6 +4,7 @@
 #ifndef MUSECPP_TEXTRENDERER_H
 #define MUSECPP_TEXTRENDERER_H
 
+#include <cstdint>
 #include "musevk/VulkanBuffer.h"
 #include "musevk/VulkanManager.h"
 #include "musevk/CommandPool.h"

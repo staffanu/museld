@@ -4,6 +4,7 @@
 #ifndef MUSECPP_AUDIODECODER_H
 #define MUSECPP_AUDIODECODER_H
 
+#include <cstdint>
 #include <array>
 #include <deque>
 #include <map>
