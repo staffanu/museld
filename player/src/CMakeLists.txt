@@ -118,6 +118,7 @@ if(BUILD_AC3RF_DECODE)
 
     add_executable(ac3rf-efm-decode
         ac3rf-efm-decode.cpp
+        CliOptions.h
         Version.h
         input/InputReader.h
         input/InputReaderFactory.cpp input/InputReaderFactory.h
@@ -161,6 +162,7 @@ if(BUILD_MUSE)
 
     add_executable(museld
         museld.cpp
+        CliOptions.h
         AudioDefs.h
         input/InputReader.h
         input/InputReaderFactory.cpp input/InputReaderFactory.h

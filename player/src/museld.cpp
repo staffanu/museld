@@ -31,6 +31,7 @@
 #include "ntsc/NtscFrameReader.h"
 #include "ntsc/NtscDecoder.h"
 #include "VideoWriterOptions.h"
+#include "CliOptions.h"
 
 #ifdef HAVE_LIBAV
 # include "VideoFileWriter.h"
@@ -399,23 +400,25 @@ int main(int argc, char *argv[]) {
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
 
-    vector<pair<string, function<void ()>>> options;
+    CliOptions options;
 
-    auto usage = [&options] () -> void {
-        cerr << "usage: museld ";
-        for (auto o: options)
-            cerr << "[" << o.first << "] ";
-        cerr << "<input_file> ..." << endl;
-        exit(EXIT_FAILURE);
+    auto usage = [&options] (ostream &out, int status) -> void {
+        options.printHelp(out, "museld [options] <input_file> ...");
+        out << "\nSeveral input files can be given, with options in between; each one is played with\n"
+               "the options in effect where it appears.  An argument starting with ! is ignored,\n"
+               "which is practical for disabling an option in a saved command line.\n";
+        exit(status);
     };
 
-    options.emplace_back("--input-format", [&] () mutable -> void {
+    options.section("Input options:");
+    options.option("--input-format", "FMT",
+                   "Input sample type: u8, s8, u16, s16, u16be, s16be, lds, flac, ldf "
+                   "(default: from the filename extension)", [&] () -> void {
         input_format_option = inputFormatFromString(*(it++));
     });
-    options.emplace_back("--sample-freq", [&] () mutable  -> void {
-        input_sample_frequency = stod(*(it++));
-    });
-    options.emplace_back("--input-type", [&] () mutable -> void {
+    options.option("--input-type", "TYPE",
+                   "muse-rf (default) or ntsc-rf for RF captures, muse-16 for phase correct "
+                   "16.2 MHz MUSE baseband, muse-os for oversampled MUSE baseband", [&] () -> void {
         const auto &name = *(it++);
         if      (name == "muse-rf")  input_type = eMuseRf;
         else if (name == "ntsc-rf")  input_type = eNtscRf;
@@ -423,72 +426,136 @@ int main(int argc, char *argv[]) {
         else if (name == "muse-os")  input_type = eMuseOversampled;
         else throw std::runtime_error(std::format("Unknown input type {}", name));
     });
-    options.emplace_back("--full-frames-only", [&] () mutable -> void {
-        decode_all_fields = false;
+    options.option("--sample-freq", "HZ",
+                   "Input sample rate, written as 62.5e6 rather than 62.5 (default 62.5e6, "
+                   "the MUSE RF rate; NTSC RF captures are usually 40e6)", [&] () -> void {
+        input_sample_frequency = stod(*(it++));
     });
-    options.emplace_back("--all-fields", [&] () mutable -> void {
-        decode_all_fields = true;
-    });
-    options.emplace_back("--full-screen", [&] () mutable -> void {
-        full_screen = true;
-    });
-    options.emplace_back("--seek", [&] () mutable -> void {
+    options.option("--seek", "SECONDS", "Seek to this position before playing", [&] () -> void {
         initial_seek_seconds = stod(*(it++));
     });
-    options.emplace_back("--field-interpolation", [&] () mutable -> void {
+
+    options.section("Playback options:");
+    options.flag("--full-screen", "Start full screen", [&] () -> void {
+        full_screen = true;
+    });
+    options.flag("--pause", "Start paused", [&] () -> void {
+        start_paused = true;
+    });
+    options.flag("--no-video", "Do not decode video", [&] () -> void {
+        decode_video = false;
+    });
+    options.flag("--no-audio", "Do not decode audio", [&] () -> void {
+        decode_audio = false;
+    });
+    options.flag("--efm", "Take the audio from the EFM (CD) track instead of the MUSE audio "
+                          "(RF input only)", [&] () -> void {
+        efm_audio = true;
+    });
+    options.flag("--all-fields", "Update the display once per field, at 60 Hz (default)", [&] () -> void {
+        decode_all_fields = true;
+    });
+    options.flag("--full-frames-only", "Update the display once per frame, which halves the CPU "
+                                       "and GPU load", [&] () -> void {
+        decode_all_fields = false;
+    });
+    options.option("--field-interpolation", "MODE",
+                   "Initial de-interlacing, as keys 1/2/3: normal (motion adaptive, default), "
+                   "intra-field, inter-frame", [&] () -> void {
         const auto &name = *(it++);
         if      (name == "normal")      field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
         else if (name == "intra-field") field_interpolation_mode = Decoder::FieldInterpolationMode::eForceIntraField;
         else if (name == "inter-frame") field_interpolation_mode = Decoder::FieldInterpolationMode::eForceInterFrame;
         else throw std::runtime_error(std::format("Unknown --field-interpolation {} (expected normal|intra-field|inter-frame)", name));
     });
-    options.emplace_back("--no-3d-comb", [&] () mutable -> void {
+    options.flag("--no-3d-comb", "NTSC: start with the temporal Y/C separation off, as key 4", [&] () -> void {
         use_3d_comb = false;
     });
-    options.emplace_back("--pause", [&] () mutable -> void {
-        start_paused = true;
+    options.flag("--no-dropout", "Leave detected dropouts untouched instead of concealing them", [&] () -> void {
+        dropout_mode = DropoutMode::eDisabled;
     });
-    options.emplace_back("--export-frame", [&] () mutable -> void {
+    options.flag("--highlight-dropout", "Paint dropouts red (luminance) or green (color) instead "
+                                        "of concealing them", [&] () -> void {
+        dropout_mode = DropoutMode::eHighlight;
+    });
+    options.option("--eq", "MODE",
+                   "MUSE adaptive equalizer: on (default, taps adapt continuously), frozen "
+                   "(keep the current taps), off (bypass)", [&] () -> void {
+        const auto &name = *(it++);
+        if      (name == "off")    eq_mode = MuseAdaptiveEqualizer::Mode::eOff;
+        else if (name == "on")     eq_mode = MuseAdaptiveEqualizer::Mode::eAdapt;
+        else if (name == "frozen") eq_mode = MuseAdaptiveEqualizer::Mode::eFrozen;
+        else throw std::runtime_error(std::format("Unknown --eq mode {} (expected off|on|frozen)", name));
+    });
+    options.option("--tint", "DEGREES", "NTSC: rotate the chroma hue, like a TV's tint control "
+                                        "(default 0)", [&] () -> void {
+        tint_degrees = (float)stod(*(it++));
+    });
+    options.option("--saturation", "FACTOR", "NTSC: scale the chroma gain (default 1.0)", [&] () -> void {
+        saturation = (float)stod(*(it++));
+    });
+    options.option("--subtitles", "FILE", "Display the SRT subtitles in FILE, synced to the disc's "
+                                          "own time code", [&] () -> void {
+        subtitles_path = *(it++);
+        if (!filesystem::exists(*subtitles_path)) {
+            cerr << "Subtitle file not found: " << *subtitles_path << endl;
+            exit(EXIT_FAILURE);
+        }
+    });
+    options.option("--subtitle-font", "FILE", "TrueType font for the subtitles (default: the "
+                                              "bundled Noto Sans JP)", [&] () -> void {
+        subtitle_font_path = *(it++);
+        if (!filesystem::exists(*subtitle_font_path)) {
+            cerr << "Subtitle font not found: " << *subtitle_font_path << endl;
+            exit(EXIT_FAILURE);
+        }
+    });
+    options.flag("--no-sync", "Decode as fast as the machine allows instead of at playback speed",
+                 [&] () -> void {
+        no_sync = true;
+    });
+
+    options.section("Output options:");
+    options.option("--export-frame", "FILE", "Save one decoded frame as PNG to FILE and quit", [&] () -> void {
         export_frame_filename = *(it++);
     });
-    options.emplace_back("--export-frame-at", [&] () mutable -> void {
+    options.option("--export-frame-at", "SECONDS",
+                   "Stream position of the frame saved by --export-frame, which also gives the "
+                   "decoder a warm-up run (default: the first decoded frame)", [&] () -> void {
         export_frame_at_seconds = stod(*(it++));
     });
-    options.emplace_back("--write-muse16", [&] () mutable -> void {
-        muse_output_filename = *(it++);
-    });
-    options.emplace_back("--write", [&] () mutable -> void {
+    options.option("--write", "FILE", "Write the decoded video and audio to a media file "
+                                      "(requires FFmpeg)", [&] () -> void {
 #ifdef HAVE_LIBAV
         output_filename = *(it++);
 #else
         throw std::runtime_error("FFMPEG is not available");
 #endif
     });
-    options.emplace_back("--write-preset", [&] () mutable -> void {
+    options.option("--write-preset", "PRESET",
+                   "Media file preset: standard (H.264 + AAC in MP4, default) or archival "
+                   "(lossless FFV1 16-bit + PCM in Matroska)", [&] () -> void {
         const auto &name = *(it++);
         if      (name == "standard") write_preset = VideoWriterPreset::eStandard;
         else if (name == "archival") write_preset = VideoWriterPreset::eArchival;
         else throw std::runtime_error(std::format("Unknown --write-preset {} (expected standard|archival)", name));
     });
-    options.emplace_back("--write-duration", [&] () mutable -> void {
+    options.option("--write-duration", "SECONDS",
+                   "Finalize the media file after this much video (default: run to the end of "
+                   "the input)", [&] () -> void {
         write_duration_seconds = stod(*(it++));
     });
-    options.emplace_back("--no-video", [&] () mutable -> void {
-        decode_video = false;
+    options.option("--write-muse16", "FILE",
+                   "Re-encode the input to the 16.2 MHz MUSE format that --input-type muse-16 "
+                   "reads", [&] () -> void {
+        muse_output_filename = *(it++);
     });
-    options.emplace_back("--no-dropout", [&] () mutable -> void {
-        dropout_mode = DropoutMode::eDisabled;
-    });
-    options.emplace_back("--highlight-dropout", [&] () mutable -> void {
-        dropout_mode = DropoutMode::eHighlight;
-    });
-    options.emplace_back("--no-audio", [&] () mutable -> void {
-        decode_audio = false;
-    });
-    options.emplace_back("--efm", [&] () mutable -> void {
-        efm_audio = true;
-    });
-    options.emplace_back("--log", [&] () mutable -> void {
+
+    options.section("Diagnostics:");
+    options.option("--log", "SPEC",
+                   "Log level per category, e.g. A3V4.  Categories are MPAVDIO (Main, "
+                   "Performance, Audio, Video, Decoder, Input, Output) and levels 0-4 "
+                   "(off, error, warn, info, debug; default 2)", [&] () -> void {
         // Logging is specified with a string with a letter corresponding to the category
         // (MPAVDIO for Main(Application), Performance, Audio, Video, Decoder, Input, and Output, respectively,
         // and a number corresponding to the amount of logging. 0-4 imples Off, Error, Warn, Info, Debug.
@@ -519,56 +586,26 @@ int main(int argc, char *argv[]) {
         }
         it++;
     });
-    options.emplace_back("--benchmark-shaders", [&] () mutable -> void {
+    options.flag("--benchmark-shaders", "Print GPU shader timing statistics when playback ends",
+                 [&] () -> void {
         benchmark_shaders = true;
     });
-    options.emplace_back("--eq", [&] () mutable -> void {
-        const auto &name = *(it++);
-        if      (name == "off")    eq_mode = MuseAdaptiveEqualizer::Mode::eOff;
-        else if (name == "on")     eq_mode = MuseAdaptiveEqualizer::Mode::eAdapt;
-        else if (name == "frozen") eq_mode = MuseAdaptiveEqualizer::Mode::eFrozen;
-        else throw std::runtime_error(std::format("Unknown --eq mode {} (expected off|on|frozen)", name));
-    });
-    options.emplace_back("--tint", [&] () mutable -> void {
-        tint_degrees = (float)stod(*(it++));
-    });
-    options.emplace_back("--saturation", [&] () mutable -> void {
-        saturation = (float)stod(*(it++));
-    });
-    options.emplace_back("--no-sync", [&] () mutable -> void {
-        no_sync = true;
-    });
-    options.emplace_back("--subtitles", [&] () mutable -> void {
-        subtitles_path = *(it++);
-        if (!filesystem::exists(*subtitles_path)) {
-            cerr << "Subtitle file not found: " << *subtitles_path << endl;
-            exit(EXIT_FAILURE);
-        }
-    });
-    options.emplace_back("--subtitle-font", [&] () mutable -> void {
-        subtitle_font_path = *(it++);
-        if (!filesystem::exists(*subtitle_font_path)) {
-            cerr << "Subtitle font not found: " << *subtitle_font_path << endl;
-            exit(EXIT_FAILURE);
-        }
-    });
-    options.emplace_back("--help", [&] () mutable -> void {
-        usage();
+    options.flag("--help", "This text", [&] () -> void {
+        usage(cout, EXIT_SUCCESS);
     });
 
     try {
         while (it != args.cend()) {
-            auto option = std::find_if(options.cbegin(), options.cend(),
-                                    [it](const pair<string, function<void()>> &pair) -> bool {
-                                        return *it == pair.first;
-                                    });
-            if (option != options.cend()) {
+            if (const CliOptions::Option *option = options.find(*it)) {
                 it++;
-                option->second();
+                if (option->takesArgument() && it == args.cend())
+                    throw runtime_error(std::format("{} needs an argument ({})", option->name, option->argument));
+                option->action();
             } else if (it->find("!", 0) == 0) {
                 it++; // used to ignore options (to easily enable/disable options in CLion debug settings)
             } else if (it->find("-", 0) == 0) {
-                usage();
+                cerr << "Unknown option: " << *it << endl;
+                usage(cerr, EXIT_FAILURE);
             } else {
                 if (initial_seek_seconds != 0 && filesystem::is_fifo(*it)) {
                     cerr << "Initial seek is not compatible with reading from fifo" << endl;
