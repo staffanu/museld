@@ -214,7 +214,8 @@ jobs:
         with:
           msystem: UCRT64
           update: true
-          install: git
+          # diffutils supplies the cmp that ldconv's round-trip test compares with
+          install: git diffutils
           pacboy: >-
             gcc:p cmake:p ninja:p pkgconf:p flac:p catch:p
 
