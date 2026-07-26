@@ -4,6 +4,7 @@
 #ifndef MUSECPP_VULKANUTIL_H
 #define MUSECPP_VULKANUTIL_H
 
+#include <cstdint>
 #include <vector>
 #include "VulkanBuffer.h"
 #include "VulkanManager.h"

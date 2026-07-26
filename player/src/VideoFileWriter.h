@@ -4,6 +4,7 @@
 #ifndef MUSECPP_VIDEOFILEWRITER_H
 #define MUSECPP_VIDEOFILEWRITER_H
 
+#include <cstdint>
 #include <string>
 #include <format>
 #include "musevk/VulkanImage.h"

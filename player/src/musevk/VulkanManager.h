@@ -5,6 +5,7 @@
 #define MUSECPP_VULKANMANAGER_H
 
 #define GLFW_INCLUDE_VULKAN
+#include <cstdint>
 #include <string>
 #include <optional>
 #include <GLFW/glfw3.h>

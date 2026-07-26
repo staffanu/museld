@@ -8,6 +8,7 @@
 #define MA_NO_RESOURCE_MANAGER
 #define MA_NO_ENGINE
 #define MA_NO_NODE_GRAPH
+#include <cstdint>
 #include <miniaudio.h>
 
 #include <algorithm>

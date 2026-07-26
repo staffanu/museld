@@ -4,6 +4,7 @@
 #ifndef MUSECPP_VULKANBUFFER_H
 #define MUSECPP_VULKANBUFFER_H
 
+#include <cstdint>
 #include <vulkan/vulkan.hpp>
 #include <memory>
 #include "VulkanMemoryObject.h"

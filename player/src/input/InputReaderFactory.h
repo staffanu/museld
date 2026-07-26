@@ -4,6 +4,7 @@
 #ifndef AC3RF_DECODE_INPUTREADERFACTORY_H
 #define AC3RF_DECODE_INPUTREADERFACTORY_H
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>

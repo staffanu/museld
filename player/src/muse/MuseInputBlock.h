@@ -4,6 +4,7 @@
 #ifndef MUSECPP_MUSEINPUTBLOCK_H
 #define MUSECPP_MUSEINPUTBLOCK_H
 
+#include <cstdint>
 #include <array>
 #include <unistd.h>
 #include "musevk/VulkanBuffer.h"

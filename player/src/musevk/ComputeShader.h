@@ -4,6 +4,7 @@
 #ifndef MUSECPP_COMPUTESHADER_H
 #define MUSECPP_COMPUTESHADER_H
 
+#include <cstdint>
 #include <vulkan/vulkan.hpp>
 #include "VulkanMemoryObject.h"
 #include "Size.h"

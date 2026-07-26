@@ -4,6 +4,7 @@
 #ifndef MUSECPP_EFMDECODER_H
 #define MUSECPP_EFMDECODER_H
 
+#include <cstdint>
 #include <array>
 #include <deque>
 #include <span>

@@ -4,6 +4,7 @@
 #ifndef MUSELD_SUBTITLE_OVERLAY_H
 #define MUSELD_SUBTITLE_OVERLAY_H
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>

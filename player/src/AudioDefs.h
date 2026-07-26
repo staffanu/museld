@@ -4,6 +4,8 @@
 #ifndef MUSECPP_AUDIODEFS_H
 #define MUSECPP_AUDIODEFS_H
 
+#include <cstdint>
+
 #define MAX_AUDIO_OUTPUT_SAMPLES 2048
 
 enum AudioMode { MODE_A, MODE_B, MODE_EFM, MODE_UNKNOWN };

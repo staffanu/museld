@@ -4,6 +4,7 @@
 #ifndef MUSECPP_RFDEMODULATOR_H
 #define MUSECPP_RFDEMODULATOR_H
 
+#include <cstdint>
 #include <pthread.h>
 #include <fstream>
 #include <format>

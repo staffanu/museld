@@ -4,6 +4,7 @@
 #ifndef MUSECPP_NTSCFRAMEREADER_H
 #define MUSECPP_NTSCFRAMEREADER_H
 
+#include <cstdint>
 #include "FrameReader.h"
 #include "NtscRfDemodulator.h"
 #include "input/InputReader.h"

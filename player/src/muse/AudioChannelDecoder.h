@@ -4,6 +4,7 @@
 #ifndef MUSECPP_AUDIOCHANNELDECODER_H
 #define MUSECPP_AUDIOCHANNELDECODER_H
 
+#include <cstdint>
 #include <ios>
 #include <fstream>
 

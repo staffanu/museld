@@ -4,6 +4,7 @@
 #ifndef AC3RF_DECODE_INPUTREADER_H
 #define AC3RF_DECODE_INPUTREADER_H
 
+#include <cstdint>
 #include <string.h>
 #include <unistd.h>
 #include <chrono>
