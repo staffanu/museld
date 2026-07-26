@@ -41,6 +41,13 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      - name: Build and test ldconv
+        run: |
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
+            -S ldconv -B build-ldconv
+          cmake --build build-ldconv
+          ctest --test-dir build-ldconv --output-on-failure
+
   macos:
     name: macOS (museld + ac3rf-efm-decode + tests)
     runs-on: macos-latest
@@ -62,6 +69,13 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      - name: Build and test ldconv
+        run: |
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
+            -S ldconv -B build-ldconv
+          cmake --build build-ldconv
+          ctest --test-dir build-ldconv --output-on-failure
 
   # Homebrew only has libraries for the architecture it is installed on, so each
   # architecture is built where it is native and the two are joined with lipo in
@@ -222,6 +236,15 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      # Also the only place ldconv's Windows-only file handling (_fseeki64,
+      # binary mode on the standard streams) gets compiled at all.
+      - name: Build and test ldconv
+        run: |
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
+            -S ldconv -B build-ldconv
+          cmake --build build-ldconv
+          ctest --test-dir build-ldconv --output-on-failure
 
       # The packages are built at a baseline below AVX, so the AVX filter path is
       # reachable only through runtime detection -- and if that detection breaks,
