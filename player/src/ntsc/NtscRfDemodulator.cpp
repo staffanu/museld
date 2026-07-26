@@ -213,22 +213,21 @@ void NtscRfDemodulator::demodulate() {
         }
     });
 
-    // When EFM is enabled the input samples are read into this heap staging buffer and copied to
-    // the mapped Vulkan buffer, so that the EFM path never reads back from the mapping -- host
-    // reads of a non-host-cached (write-combined) mapping are very slow on some hardware.
-    std::vector<float> efm_staging;
+    // The samples are always read into this heap buffer and copied into the mapping in one go,
+    // never written to the mapping directly.  The mapping is not host-cached, and writing it is
+    // only fast when whole cache lines arrive at once: a reader that interleaves its stores with
+    // other work -- the FLAC readers decode a frame between every 4096 samples -- leaves the CPU's
+    // few write-combining buffers flushing partial lines, which more than doubles the time a
+    // compressed input spends here.  It also keeps the EFM path from reading back from the mapping.
+    std::vector<float> input_staging;
 
     while (!m_stop_request) {
         const bool efm_enabled = m_efm_enabled;
         float *input_samples = input_buffer->data<float>() + bandpass_filter_def.size() - 1;
-        if (efm_enabled) {
-            efm_staging.resize(c_sample_block_size);
-            if (!readFloats(efm_staging.data(), c_sample_block_size))
-                break;
-            memcpy(input_samples, efm_staging.data(), c_sample_block_size * sizeof(float));
-        } else if (!readFloats(input_samples, c_sample_block_size)) {
+        input_staging.resize(c_sample_block_size);
+        if (!readFloats(input_staging.data(), c_sample_block_size))
             break;
-        }
+        memcpy(input_samples, input_staging.data(), c_sample_block_size * sizeof(float));
 
         // First get a free output block to write to
         unique_ptr<NtscDemodulatedBlock> block = nullptr;
@@ -334,7 +333,7 @@ void NtscRfDemodulator::demodulate() {
         // this iteration's samples and reclaims the block's old buffer for the next read, so no
         // data is copied and nothing is read back from the mapped input buffer.
         if (efm_enabled)
-            std::swap(block->efm_input, efm_staging);
+            std::swap(block->efm_input, input_staging);
         else
             block->efm_input.clear();
 
