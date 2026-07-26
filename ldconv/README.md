@@ -52,7 +52,7 @@ instead; the samples are unaffected either way.
 ## Speed
 
 Encoding uses every core. Converting a 1 GB `.lds` (839 M samples, about 21 seconds of
-a 40 MHz capture) on 8 cores:
+a 40 MHz capture) on a laptop i7-1185G7, four cores with SMT:
 
 | | Time | Output |
 |---|---|---|
