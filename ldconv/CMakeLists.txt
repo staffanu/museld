@@ -38,5 +38,13 @@ install(TARGETS ldconv RUNTIME DESTINATION bin)
 
 if(BUILD_TESTING)
     enable_testing()
-    add_test(NAME roundtrip COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/roundtrip.sh $<TARGET_FILE:ldconv>)
+    # Invoked through bash by name: Windows cannot execute a script by its
+    # shebang, so handing the path straight to ctest fails there.
+    find_program(BASH_EXECUTABLE bash)
+    if(BASH_EXECUTABLE)
+        add_test(NAME roundtrip
+                COMMAND ${BASH_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/roundtrip.sh $<TARGET_FILE:ldconv>)
+    else()
+        message(WARNING "bash not found; the round-trip test will not be run")
+    endif()
 endif()
