@@ -85,8 +85,9 @@ Used to capture MUSE RF in real time for piping directly into museld.
 
 Standalone converter between the sample formats laserdisc RF captures come in: the packed
 10-bit `.lds` of the Domesday Duplicator, the FLAC-compressed `.ldf`, and raw files such as
-`.s16`. It does what `ld-compress` and `ld-lds-converter` do, byte for byte, in a single
-program and about ten times faster, and can cut a range out of a capture while converting.
+`.s16`. It does what `ld-compress` and `ld-lds-converter` do, byte for byte, but as a single
+program rather than a shell pipeline, and it can cut a range out of a capture while
+converting.
 
 See **[ldconv/README.md](ldconv/README.md)**.
 
