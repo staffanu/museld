@@ -60,7 +60,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--seek <seconds>` | Seek to position before starting playback |
 | `--pause` | Start paused |
 | `--export-frame <file>` | Save one decoded frame as PNG to `<file>` and quit. Combine with `--export-frame-at` to give the decoder (DPLL, adaptive equaliser, motion detection) a warm-up run from the `--seek` position. |
-| `--export-frame-at <seconds>` | Stream position of the frame saved by `--export-frame` (same units as `--seek`). Default: the first decoded frame. |
+| `--export-frame-at <seconds>` | Stream position of the frame saved by `--export-frame` (absolute, same units as `--seek` — not a delay after it). Default: the first decoded frame. |
 | `--no-dropout` / `--highlight-dropout` | Disable dropout concealment, or highlight dropouts instead of concealing them (see below) |
 | `--write-muse16 <file>` | Re-encode input to the 16.2 MHz format (see below) |
 | `--write <file>` | Write decoded video and audio to a media file (requires FFmpeg ≥ 7.1) |
