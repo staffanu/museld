@@ -522,8 +522,9 @@ int main(int argc, char *argv[]) {
         export_frame_filename = *(it++);
     });
     options.option("--export-frame-at", "SECONDS",
-                   "Stream position of the frame saved by --export-frame, which also gives the "
-                   "decoder a warm-up run (default: the first decoded frame)", [&] () -> void {
+                   "Stream position of the frame saved by --export-frame (absolute, like --seek, "
+                   "not a delay after it), which also gives the decoder a warm-up run "
+                   "(default: the first decoded frame)", [&] () -> void {
         export_frame_at_seconds = stod(*(it++));
     });
     options.option("--write", "FILE", "Write the decoded video and audio to a media file "
@@ -635,6 +636,13 @@ int main(int argc, char *argv[]) {
                 musevk::VulkanManager manager(log);
 
                 const double export_frame_after_seconds = max(0.0, export_frame_at_seconds - initial_seek_seconds);
+                if (export_frame_filename && initial_seek_seconds > 0 && export_frame_at_seconds <= initial_seek_seconds)
+                    cerr << std::format(
+                            "Warning: --export-frame will save the first decoded frame, which comes out black "
+                            "(the decoder has not locked yet). --export-frame-at takes the absolute stream "
+                            "position of the frame to save -- not a delay after --seek -- and must lie beyond "
+                            "the seek position ({} s) to give the decoder a warm-up run.",
+                            initial_seek_seconds) << endl;
 
                 switch (input_type) {
                     case eNtscRf: {
