@@ -384,7 +384,9 @@ int main(int argc, char *argv[]) {
     optional<string> muse_output_filename; // always written as little endian unsigned short values
     optional<string> output_filename; // container/codec selected by --write-preset
     VideoWriterPreset write_preset = VideoWriterPreset::eStandard;
-    double write_duration_seconds = std::numeric_limits<double>::infinity();
+    // "Run to the end" is a finite sentinel: infinity does not exist under -ffast-math,
+    // and comparing against it is undefined there (same trap as NaN sentinels).
+    double write_duration_seconds = std::numeric_limits<double>::max();
     bool decode_video = true;
     DropoutMode dropout_mode = DropoutMode::eNormal;
     bool decode_audio = true;
