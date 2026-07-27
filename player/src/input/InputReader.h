@@ -51,8 +51,9 @@ public:
     // analytic bandpass.  The estimate is applied with one block of lag so
     // the conversion loops never re-read their output, which may live in
     // write-combined (GPU staging) memory.  Must stay off for baseband
-    // inputs, where absolute levels carry the picture.
-    void setDcBlocking(bool enabled) {
+    // inputs, where absolute levels carry the picture.  Virtual so that
+    // PrefetchingInputReader can forward it to the reader it wraps.
+    virtual void setDcBlocking(bool enabled) {
         m_dc_block = enabled;
     }
 

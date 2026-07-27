@@ -124,6 +124,7 @@ if(BUILD_AC3RF_DECODE)
         input/InputReaderFactory.cpp input/InputReaderFactory.h
         input/LdsInputReader.cpp input/LdsInputReader.h
         input/LdfInputReader.cpp input/LdfInputReader.h
+        input/PrefetchingInputReader.cpp input/PrefetchingInputReader.h
     )
 
     target_include_directories(ac3rf-efm-decode PRIVATE ${FLAC_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
@@ -168,6 +169,7 @@ if(BUILD_MUSE)
         input/InputReaderFactory.cpp input/InputReaderFactory.h
         input/LdsInputReader.cpp input/LdsInputReader.h
         input/LdfInputReader.cpp input/LdfInputReader.h
+        input/PrefetchingInputReader.cpp input/PrefetchingInputReader.h
         AudioPlayback.cpp AudioPlayback.h
         FrameReader.h FrameReader.impl.h
         InputBlockBase.h

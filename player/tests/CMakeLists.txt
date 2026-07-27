@@ -4,8 +4,10 @@ add_executable(museld-tests
     ReedSolomonTest.cpp
     BchDecoderTest.cpp
     FilterSimdParityTest.cpp
+    PrefetchingInputReaderTest.cpp
     SrtParserTest.cpp
     ../src/bch/BchDecoder.cpp
+    ../src/input/PrefetchingInputReader.cpp
     ../src/subtitles/SrtParser.cpp
 )
 

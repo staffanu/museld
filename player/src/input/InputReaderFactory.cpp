@@ -9,6 +9,7 @@
 #include "InputReaderFactory.h"
 #include "LdfInputReader.h"
 #include "LdsInputReader.h"
+#include "PrefetchingInputReader.h"
 
 #ifndef O_BINARY
 #  define O_BINARY 0
@@ -28,7 +29,11 @@ static std::unique_ptr<InputReader> makeInputReaderForFd(int fd, bool is_fifo, I
         case eSint16BE: return std::make_unique<InputReaderImpl<int16_t, true>>(fd, block_size, is_fifo);
         case eLds:     return std::make_unique<LdsInputReader>(fd, block_size, is_fifo);
         case eFlac:
-        case eFlacOgg: return std::make_unique<LdfInputReader>(fd, block_size, is_fifo, format);
+        case eFlacOgg:
+            // FLAC decoding costs milliseconds per block, too much to leave in series with
+            // a real-time consumer's other work, so decode ahead on a separate thread.
+            return std::make_unique<PrefetchingInputReader>(
+                std::make_unique<LdfInputReader>(fd, block_size, is_fifo, format));
     }
     throw std::runtime_error("Unsupported input format");
 }
