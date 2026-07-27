@@ -180,6 +180,25 @@ float16_t rotated_next_pair(uint fl, uint fc, f16vec2 r) {
     return c0 * r.x + 0.5hf * (cm - cp) * r.y;
 }
 
+// The absolute burst reference drifts across the line for the same reason
+// the pair rotations do, so interpolate it per column between this line's
+// burst and the next line's (structural 180 removed).  The magnitudes carry
+// the burst-referenced AGC gain, so the plain complex lerp interpolates the
+// gain alongside the phase (the chord shortening is negligible at these
+// angles).  Fall back to the line's own burst when the neighbour is
+// achromatic or implausibly far off: a dropout through the burst window, or
+// the clamped last line, where the "neighbour" is the line itself and the
+// negation lands 180 degrees away.
+f16vec2 interpolated_burst(f16vec2 b0, f16vec2 b1, float t) {
+    vec2 v0 = vec2(b0);
+    vec2 v1 = -vec2(b1); // adjacent lines are 180 degrees apart
+    float g0 = dot(v0, v0);
+    float g1 = dot(v1, v1);
+    if (g0 < 1e-4 || g1 < 1e-4 || dot(v0, v1) < 0.5 * sqrt(g0 * g1))
+        return b0;
+    return f16vec2(mix(v0, v1, t));
+}
+
 
 
 // The spatial and temporal estimates fail differently: the spatial comb
@@ -306,7 +325,8 @@ void main() {
     // motion-gated per column, so a moving column degenerates to spatial and
     // pulls the weight down with it).
     float16_t c_src[19];
-    f16vec2 burst_ref = phase_data[frame_line];
+    float t_burst = clamp((float(frame_col) - 94.0) / 910.0, 0.0, 1.0); // burst sits at ~column 94
+    f16vec2 burst_ref = interpolated_burst(phase_data[frame_line], phase_data[next_line], t_burst);
     if (donor != 0) {
         for (int n = 0; n < 19; n++) {
             uint fc = uint(int(frame_col) + n - 9);
@@ -315,7 +335,8 @@ void main() {
         }
         Y = donor < 0 ? comb_luma_prev(frame_line, next_line, frame_col)
                       : comb_luma_next(frame_line, next_line, frame_col);
-        burst_ref = donor < 0 ? prev_phase_data[frame_line] : next_phase_data[frame_line];
+        burst_ref = donor < 0 ? interpolated_burst(prev_phase_data[frame_line], prev_phase_data[next_line], t_burst)
+                              : interpolated_burst(next_phase_data[frame_line], next_phase_data[next_line], t_burst);
     } else if (temporal) {
         f16vec2 rot_p0 = pair_rotation(prev_phase_data[frame_line], phase_data[frame_line]);
         f16vec2 rot_n0 = pair_rotation(next_phase_data[frame_line], phase_data[frame_line]);
