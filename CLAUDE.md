@@ -111,6 +111,8 @@ ldconv/tests/roundtrip.sh ldconv/build-release/ldconv   # lossless round-trip ch
 Converts between `.lds`, `.ldf`, `.s16` and the other capture formats, replacing
 `ld-compress` and `ld-lds-converter`. The conversions are byte-exact against those
 tools; `ldconv/README.md` records the format conventions and the measured speeds.
+The one exception is `--bits N`, which rounds samples to N bits of resolution to
+make a capture compress smaller (`--info` reports the resolution a file uses).
 
 ## Running Tests
 

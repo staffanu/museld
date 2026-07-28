@@ -67,6 +67,34 @@ run "$WORK/a.s16" "$WORK/h.rf"
 run "$WORK/h.rf"  "$WORK/h.s16"
 check "s16 -> f32 -> s16" "$WORK/a.s16" "$WORK/h.s16"
 
+# --- --bits, the one lossy option -------------------------------------------
+# A .lds sample scaled to 16 bits already has six zero bits under it, so asking
+# for ten changes nothing at all, and neither does asking for more than there is.
+run --bits 10 "$WORK/src.lds" "$WORK/keep10.s16"
+check "--bits 10 keeps a 10-bit capture" "$WORK/a.s16" "$WORK/keep10.s16"
+
+run --bits 16 "$WORK/a.s16" "$WORK/keep16.s16"
+check "--bits 16 keeps a 16-bit stream" "$WORK/a.s16" "$WORK/keep16.s16"
+
+run --bits 20 "$WORK/a.s16" "$WORK/keep20.s16"
+check "--bits past the output width" "$WORK/a.s16" "$WORK/keep20.s16"
+
+# Rounding to a step leaves values already on one alone, so a second pass at the
+# same width is a no-op -- and going through the packed 10-bit format, whose
+# codes are those same steps, has to agree with it.
+run --bits 8 "$WORK/a.s16"      "$WORK/drop8.s16"
+run --bits 8 "$WORK/drop8.s16"  "$WORK/drop8-again.s16"
+check "--bits 8 twice is --bits 8 once" "$WORK/drop8.s16" "$WORK/drop8-again.s16"
+
+run --bits 8 "$WORK/a.s16"     "$WORK/drop8.lds"
+run          "$WORK/drop8.lds" "$WORK/drop8-lds.s16"
+check "--bits 8 agrees with lds" "$WORK/drop8.s16" "$WORK/drop8-lds.s16"
+
+# And it survives the compressor: FLAC is lossless whatever the samples are.
+run --bits 8 "$WORK/a.s16"     "$WORK/drop8.ldf"
+run          "$WORK/drop8.ldf" "$WORK/drop8-ldf.s16"
+check "--bits 8 through ldf" "$WORK/drop8.s16" "$WORK/drop8-ldf.s16"
+
 # --- containers are recognized by their header, not their name ---------------
 cp "$WORK/c.flac" "$WORK/native.ldf"   # native FLAC wearing the Ogg extension
 run "$WORK/native.ldf" "$WORK/native.lds"

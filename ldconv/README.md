@@ -49,6 +49,58 @@ FLAC cannot express a 40 MHz sample rate, so the rate is stored in the header in
 40 MHz becomes 40000 Hz, as `ld-compress` does it. `--rate 62.5e6` records 62500 Hz
 instead; the samples are unaffected either way.
 
+## Resolution
+
+`--bits N` rounds every sample to `N` bits before it is written. It is the only lossy
+thing ldconv does, and it is there because the compressed size of an RF capture is
+mostly the cost of storing noise: FLAC's predictor cannot predict the low bits, so
+each one of them costs about a bit per sample. Dropping the ones that carry no
+signal makes the file smaller and changes nothing that a decoder can see.
+
+`N` counts against the output format's full scale, not against the capture's own
+range, so it means the same thing whatever went in. A capture that sits in the low
+bits of a 16-bit file rather than filling it — 12-bit samples stored as 0..4095, say —
+is 12 bits of signal in a range that `--bits` measures as 16, and needs either a
+`--gain 16` to line it up first or an `N` four higher to mean the same thing. The
+`Values` line from `--info` shows which kind a file is.
+
+The samples stay in the same 16-bit domain — the low bits are zeroed, not removed —
+so the output is an ordinary `.ldf` that `ld-decode` and museld read as usual. FLAC
+notices that a whole frame shares those zero bits and stores the narrower width, so
+the saving is real rather than a pile of zeros.
+
+`--info` reports how much resolution a file actually uses, which is what says how far
+`--bits` can go for free:
+
+```
+$ ldconv --info capture.ldf
+  Values: -20288..25856 in the first 4194304 samples
+  Resolution: 10 bit; the low 6 bits of every sample are zero, so
+              --bits 10 costs nothing and --bits 9 is the first that rounds
+              real capture away
+```
+
+A Domesday Duplicator capture is 10-bit, so `--bits 10` and anything above it produce
+the identical file. Below that, on 5 seconds of a 40 MHz NTSC capture (200 M samples,
+400 MB as `.s16`):
+
+| | Output | Bits/sample | vs 10-bit |
+|---|---|---|---|
+| `--bits 10` (or none) | 117 MB | 4.66 | — |
+| `--bits 9` | 98 MB | 3.91 | −16% |
+| `--bits 8` | 83 MB | 3.30 | −29% |
+| `--bits 7` | 75 MB | 3.01 | −36% |
+
+The first bit dropped is the one that pays best, because it is the most random; by the
+seventh the predictor is already tracking what is left. A 12-bit capture whose lowest
+two bits are below its own noise floor should therefore lose rather more than 16% each
+from the first two, but that depends on the capture, so measure yours before committing
+to it — the original cannot be recovered.
+
+Rounding is to nearest, and a sample already on a step is left where it is, so
+`--bits` twice is `--bits` once and re-encoding an already-reduced capture costs
+nothing further.
+
 ## Speed
 
 Encoding uses every core. Converting a 1 GB `.lds` (839 M samples, about 21 seconds of
