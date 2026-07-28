@@ -5,6 +5,15 @@
 #include <format>
 #include <functional>
 #include <chrono>
+
+#ifdef _WIN32
+#  define WIN32_LEAN_AND_MEAN
+#  define NOMINMAX
+#  include <windows.h>
+#elif defined(__APPLE__)
+#  include <mach-o/dyld.h>
+#endif
+
 #include "musevk/TimestampQueryPool.h"
 #include "musevk/VulkanManager.h"
 #include "musevk/CommandPool.h"
@@ -366,9 +375,43 @@ enum InputType {
     eMuseOversampled,
 };
 
+// The directory holding shaders/ and fonts/, i.e. the one containing the running
+// executable. argv[0] alone is not enough: it has no directory part when the
+// binary is invoked by bare name (through PATH, or in cmd.exe from the current
+// directory), so ask the OS and keep argv[0] only as a last resort.
+static string get_executable_dir(const char *argv0) {
+#if defined(_WIN32)
+    std::vector<wchar_t> buffer(MAX_PATH);
+    while (buffer.size() <= 65536) {
+        DWORD length = GetModuleFileNameW(nullptr, buffer.data(), (DWORD)buffer.size());
+        if (length == 0)
+            break;
+        if (length < buffer.size())
+            return std::filesystem::path(buffer.data()).parent_path().string();
+        buffer.resize(2 * buffer.size()); // truncated
+    }
+#elif defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> buffer(size);
+    if (size > 0 && _NSGetExecutablePath(buffer.data(), &size) == 0) {
+        std::error_code ec;
+        auto path = std::filesystem::weakly_canonical(buffer.data(), ec);
+        if (!ec)
+            return path.parent_path().string();
+    }
+#else
+    std::error_code ec;
+    auto path = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (!ec)
+        return path.parent_path().string();
+#endif
+    return std::filesystem::path(argv0).parent_path().string();
+}
+
 int main(int argc, char *argv[]) {
     auto log_selection = StreamLogger::c_log_warn;
-    std::string executable_dir = std::filesystem::path(argv[0]).parent_path().string();
+    std::string executable_dir = get_executable_dir(argv[0]);
     bool decode_all_fields = true;
     bool full_screen = false;
     bool no_sync = false;
