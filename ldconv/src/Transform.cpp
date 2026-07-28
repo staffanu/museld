@@ -16,9 +16,20 @@ int exactLog2(double value) {
 } // namespace
 
 Transform::Transform(int32_t src_zero, int32_t dst_zero, double gain,
-                     int32_t min_code, int32_t max_code)
+                     int32_t min_code, int32_t max_code, int drop_bits)
     : m_gain(gain), m_src_zero(src_zero), m_dst_zero(dst_zero),
       m_min(min_code), m_max(max_code) {
+    if (drop_bits > 0) {
+        m_drop = drop_bits;
+        // Rounding may push a sample past the end of the range, so it is
+        // clamped to the last whole step instead.  That is the quantizer
+        // saturating rather than the conversion clipping, so it is not
+        // counted: nothing that fits in the destination is being lost.
+        const int32_t step = (int32_t)1 << drop_bits;
+        m_quant_max = dst_zero + (int32_t)(((int64_t)max_code - dst_zero) / step) * step;
+        m_quant_min = dst_zero - (int32_t)(((int64_t)dst_zero - min_code) / step) * step;
+    }
+
     const int log2_gain = exactLog2(gain);
     if (log2_gain == 0)
         m_mode = src_zero == dst_zero ? Mode::Copy : Mode::ShiftLeft;
@@ -82,4 +93,20 @@ void Transform::apply(int32_t *samples, size_t count) {
     }
 
     m_clipped += clipped;
+
+    if (m_drop != 0)
+        quantize(samples, count);
+}
+
+void Transform::quantize(int32_t *samples, size_t count) const {
+    // The same half-step bias and arithmetic shift as Mode::ShiftRight, only
+    // shifted back up again afterwards so the value stays in the destination's
+    // domain: the low bits are zeroed rather than removed.  FLAC notices that
+    // a whole frame shares them and stores the sample width less those bits.
+    const int64_t half = (int64_t)1 << (m_drop - 1);
+    for (size_t i = 0; i < count; i++) {
+        const int64_t offset = (int64_t)samples[i] - m_dst_zero;
+        const int64_t rounded = (((offset + half) >> m_drop) << m_drop) + m_dst_zero;
+        samples[i] = (int32_t)std::clamp<int64_t>(rounded, m_quant_min, m_quant_max);
+    }
 }

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -41,6 +42,7 @@ struct Options {
     std::optional<Format> input_format;
     std::optional<Format> output_format;
     std::optional<double> gain;
+    std::optional<int> bits;
     uint64_t start = 0;
     std::optional<uint64_t> length;
     double rate = 40e6;
@@ -79,6 +81,13 @@ struct Options {
         "  -g, --gain FACTOR        Sample scale factor (default: match full scale,\n"
         "                           which is x64 from 10-bit to 16-bit, as ld-decode does)\n"
         "      --no-scale           Copy code values unchanged (same as --gain 1)\n"
+        "  -b, --bits N             Keep only the N most significant bits of each\n"
+        "                           sample, rounding the rest away.  Lossy, and the\n"
+        "                           only lossy option here: it is for captures whose\n"
+        "                           lowest bits are noise, where dropping them takes\n"
+        "                           about a bit per sample off the compressed size\n"
+        "                           for every bit dropped.  Measure first (--info\n"
+        "                           reports the resolution a file actually uses)\n"
         "  -s, --start N            Skip N samples, or a duration such as 1.5s or 200ms\n"
         "  -n, --length N           Convert only N samples, or a duration\n"
         "  -r, --rate HZ            Capture rate for durations and for the FLAC header,\n"
@@ -264,6 +273,7 @@ Options parseArguments(int argc, char **argv) {
         else if (arg == "--output-format")                options.output_format = parseFormat(next("--output-format"));
         else if (arg == "-g" || arg == "--gain")          options.gain = strtod(next("--gain").c_str(), nullptr);
         else if (arg == "--no-scale")                     options.gain = 1.0;
+        else if (arg == "-b" || arg == "--bits")          options.bits = atoi(next("--bits").c_str());
         else if (arg == "-r" || arg == "--rate")          options.rate = strtod(next("--rate").c_str(), nullptr);
         else if (arg == "-l" || arg == "--level")         options.flac_level = atoi(next("--level").c_str());
         else if (arg == "--blocksize")                    options.flac_blocksize = (unsigned)atoi(next("--blocksize").c_str());
@@ -300,6 +310,8 @@ Options parseArguments(int argc, char **argv) {
         throw std::runtime_error("--blocksize must be between 16 and 65535");
     if (options.gain && !(*options.gain > 0))
         throw std::runtime_error("--gain must be positive");
+    if (options.bits && (*options.bits < 2 || *options.bits > 32))
+        throw std::runtime_error("--bits must be between 2 and 32");
 
     if (options.info) {
         if (positional.size() != 1)
@@ -330,6 +342,53 @@ void printInfo(const Options &options) {
                (double)total / options.rate, options.rate / 1e6);
     else
         printf("  Samples: unknown (the stream carries no length)\n");
+
+    // How much of that width the samples actually use.  A 12-bit capture kept
+    // in a 16-bit file leaves the low bits at zero, and knowing how many are
+    // already zero is what says how much --bits can round away for free.
+    constexpr size_t k_scan = 1u << 22;
+    std::vector<int32_t> buffer(std::min<size_t>(k_scan, k_block_samples));
+    const int32_t zero = source->zero();
+    uint32_t used = 0;
+    int32_t low = 0, high = 0;
+    size_t scanned = 0;
+    while (scanned < k_scan) {
+        const size_t got = source->read(buffer.data(), std::min(buffer.size(), k_scan - scanned));
+        if (got == 0)
+            break;
+        for (size_t i = 0; i < got; i++) {
+            const int32_t v = buffer[i];
+            used |= (uint32_t)(v - zero);
+            if (scanned == 0 && i == 0) {
+                low = high = v;
+            } else {
+                low = std::min(low, v);
+                high = std::max(high, v);
+            }
+        }
+        scanned += got;
+    }
+
+    if (scanned == 0) {
+        printf("  Values: none, the stream is empty\n");
+        return;
+    }
+
+    printf("  Values: %d..%d in the first %zu samples\n", low, high, scanned);
+    if (used == 0) {
+        printf("  Resolution: none, every sample sits at the zero level\n");
+        return;
+    }
+    const int spare = std::countr_zero(used);
+    if (spare == 0)
+        printf("  Resolution: %d bit, every bit in use\n", source->bits());
+    else
+        printf("  Resolution: %d bit; the low %d bit%s of every sample %s zero, so\n"
+               "              --bits %d costs nothing and --bits %d is the first that rounds\n"
+               "              real capture away\n",
+               source->bits() - spare, spare, spare == 1 ? "" : "s",
+               spare == 1 ? "is" : "are",
+               source->bits() - spare, source->bits() - spare - 1);
 }
 
 int convert(const Options &options) {
@@ -375,12 +434,27 @@ int convert(const Options &options) {
         ? *options.gain
         : std::ldexp(1.0, sink->bits() - source->bits());
     const auto &sink_info = formatInfo(output_format);
-    Transform transform(source->zero(), sink->zero(), gain, sink_info.min_code, sink_info.max_code);
+
+    // Asking to keep more bits than the output holds is not an error: it is
+    // what a --bits meant for 16-bit output does when pointed at a .lds, and
+    // it simply leaves every bit there is.
+    const int drop_bits = options.bits ? std::max(0, sink->bits() - *options.bits) : 0;
+
+    Transform transform(source->zero(), sink->zero(), gain,
+                        sink_info.min_code, sink_info.max_code, drop_bits);
 
     if (!options.quiet) {
         fprintf(stderr, "%s (%s, %d bit) -> %s (%s, %d bit), gain %g\n",
                 options.input.c_str(), formatInfo(source->format()).name, source->bits(),
                 options.output.c_str(), sink_info.name, sink->bits(), gain);
+        if (options.bits) {
+            if (drop_bits != 0)
+                fprintf(stderr, "  keeping %d of the %d bits, rounding the low %d away\n",
+                        *options.bits, sink->bits(), drop_bits);
+            else
+                fprintf(stderr, "  --bits %d keeps everything a %d-bit output has\n",
+                        *options.bits, sink->bits());
+        }
     }
 
     if (options.start != 0)
