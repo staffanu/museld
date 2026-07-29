@@ -372,16 +372,32 @@ void main() {
         for (int n = 0; n < 19; n++)
             c_src[n] = mix(cs_arr[n], ct_arr[n], w_t);
 
-        // Luma follows the same blend.  The temporal estimate is bandpassed
-        // around fsc before the subtraction (samples 2 apart on the 4 fsc
-        // grid are 180 degrees of subcarrier): still chroma passes in full,
-        // but low-frequency residue of sub-threshold motion or lighting
-        // flicker cancels, so it cannot ghost into the luma.  At w_t = 0
-        // this is exactly the classic 3-line comb luma, so vertically
-        // uniform content is untouched by the 3D path.
+        // Temporal luma noise averaging: each neighbour frame's own 3-line
+        // comb luma is an independent estimate of the same still luma, so
+        // the motion-gated (0.25, 0.5, 0.25) frame average carries ~4 dB
+        // less noise where both neighbours are still (~2.5 dB with one),
+        // and the vertical chroma residue -- hanging dots -- alternates
+        // sign with the frame-to-frame subcarrier inversion and cancels.
+        // Subtracting the temporal chroma estimate instead would not help:
+        // f0 - ct trades the comb's vertical averaging for an identical
+        // temporal one, same weights, same variance (measured: 0.08 dB).
+        // A neighbour is refused when its motion mask is raised or its
+        // dropout plane flags this spot (concealed composite is not a
+        // noise sample).  Where the spatial comb leaks vertical detail
+        // (w_t high) the fsc-bandpassed temporal estimate replaces the
+        // still average, full-resolution as before; the bandpass keeps
+        // low-frequency residue of sub-threshold motion out of the luma.
+        float16_t wp = prev_dropout[frame_line][frame_col] != 0
+                           ? 0.hf : 1.hf - past_motion[mask_row][col];
+        float16_t wf = next_dropout[frame_line][frame_col] != 0
+                           ? 0.hf : 1.hf - future_motion[mask_row][col];
+        float16_t y_avg = (0.5hf * Y
+                           + 0.25hf * (wp * comb_luma_prev(frame_line, next_line, frame_col)
+                                       + wf * comb_luma_next(frame_line, next_line, frame_col)))
+                          / (0.5hf + 0.25hf * (wp + wf));
         float16_t ct_band = 0.5hf * ct_arr[9] - 0.25hf * (ct_arr[7] + ct_arr[11]);
         float16_t f0 = input_frame[frame_line][frame_col];
-        Y = f0 - mix(cs_arr[9], ct_band, w_t);
+        Y = mix(y_avg, f0 - ct_band, w_t);
     } else {
         for (int n = 0; n < 19; n++)
             c_src[n] = chroma_sample(frame_line, next_line, uint(int(frame_col) + n - 9));
