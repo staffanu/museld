@@ -71,6 +71,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |
 | `--field-interpolation <mode>` | Initial de-interlacing mode: `normal` (motion-adaptive), `intra-field`, or `inter-frame` — same as keys 1/2/3 |
 | `--no-3d-comb` | NTSC: start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4 |
+| `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
 | `--saturation <factor>` | NTSC: scale the chroma gain (default 1.0, applied on top of the burst-referenced AGC) |
 | `--subtitles <file.srt>` | Display SRT subtitles synced to the disc's own time code |
@@ -87,6 +88,25 @@ for each side, between temporal Y/C separation against the still neighbouring fr
 full vertical resolution, no dot crawl) and the 3-line spatial comb where the picture moves. The
 same masks drive motion-adaptive de-interlacing: still parts weave the previous field, moving
 parts are interpolated from the current field (keys 1/2/3 select adaptive/bob/weave).
+
+**NTSC reverse telecine (film mode)**: film-sourced discs carry 24 fps film as a 3:2 field
+cadence, where one field in five repeats the same-parity field of the previous frame. The decoder
+detects that cadence from the picture itself (the VBI white flag is written on every frame on real
+discs and carries no cadence information) and, while locked, pairs each field with the field it
+shares a film frame with: full vertical resolution with none of the motion-adaptive compromises.
+Fields that start a new film frame re-show the previous, completed film frame — the presentation
+3:2 timing asks for anyway — at the cost of one field of latency. The lock engages after about
+half a second of unambiguous cadence, coasts through cuts and static scenes, drops within two
+missed repeats when the cadence breaks (film/video splices), and any frame whose expected repeat
+is missing falls back to the motion-adaptive path on its own. Lock transitions are logged at
+`--log D3`. Key 5 switches between auto and off; it is only active in the `normal` de-interlacing
+mode with all fields decoded. The disc code overlay (V key) shows the state: `Film: off`,
+`Film: auto` (watching, nothing detected), or `Film: 3:2` while locked. When paused, the locked
+line also shows what the displayed field is, e.g. `Film: 3:2 A weave` — the letter is the film
+frame within the (A1A2)(A3B1)(B2C1)(C2C3)(D1D2) pulldown cycle the output currently shows (step
+with N to watch its 3, 2, 3, 2 rhythm), `hold` marks the fields that re-show the previous film
+frame, and `adapt` a locked frame whose missing repeat made it fall back to the motion-adaptive
+path.
 
 **NTSC level calibration**: video levels are calibrated automatically against references in the
 signal. Black (0 IRE) tracks the measured back porch blanking level; the gain (100 IRE) is taken
@@ -122,9 +142,10 @@ also given, which is the mode to use for batch rendering.
 | 2 | Force intra-field interpolation (treat everything as motion) |
 | 3 | Force inter-frame interpolation (treat everything as still) |
 | 4 | NTSC: toggle the 3D comb (temporal Y/C separation on still parts) |
+| 5 | NTSC: film mode auto / off (reverse-telecine weave on a 3:2 cadence lock) |
 | D | Cycle dropout handling: conceal → ignore → highlight (red = luminance dropout, green = color dropout) |
 | A | Toggle audio between MUSE and EFM (RF input only) |
-| V | Toggle disc code / chapter / frame display (TOC reading is not implemented) |
+| V | Toggle disc code / chapter / frame display, plus the NTSC film mode status (TOC reading is not implemented) |
 | C | Show cursor coordinates and input-file offsets (see below) |
 | L | Toggle non-linear de-emphasis processing |
 | Z | Cycle zoom: 1× → 2× → 4× (arrow keys pan when zoomed) |

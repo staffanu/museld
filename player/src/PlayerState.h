@@ -16,6 +16,7 @@ struct PlayerState {
     bool export_frame = false;
     bool enable_non_linear = true;
     bool use_3d_comb = true; // NTSC: temporal Y/C separation on still parts
+    bool film_mode = true;   // NTSC: reverse-telecine weave on a 3:2 cadence lock
     bool enable_cursor = false;
     bool show_disc_code = false;
     int zoom_factor = 1;

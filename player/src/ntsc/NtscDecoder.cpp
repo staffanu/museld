@@ -52,6 +52,8 @@ NtscDecoder::NtscDecoder(
   m_frame_no(-1),
   m_field_index(0),
   m_total_elapsed_time_us(0),
+  m_cadence(log),
+  m_field_buffer_frame_no{-100, -100},
   m_efm_decoder(log, std::nullopt, std::nullopt),
   m_efm_pcm_processor(log),
   m_pending_audio(),
@@ -275,6 +277,54 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         float sigma_out = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.52f : 0.02f;
         float level_floor = -max(0.02f, 2.5f * sigma_out);
         float level_ceiling = 1.4f;
+        // With a film cadence locked, the field's pairing is known exactly:
+        // weave unconditionally when the previously decoded field belongs to
+        // the same film frame, and when this field starts a new film frame
+        // (whose other half is not decoded yet), show the previous film
+        // frame once more -- that is what its 3:2 timing asks for anyway,
+        // at the cost of one field of latency.
+        auto action = NtscCadenceTracker::FieldAction::eAdaptive;
+        if (controls.film_mode && m_decode_all_fields
+            && field_interpolation_mode == FieldInterpolationMode::eNormal) {
+            int displayed = m_frame_no - 1;
+            action = m_cadence.actionForField(displayed, decoded_field_index);
+            // A weave reads the partner field from the other parity's buffer
+            // set; a starvation-skipped field decode leaves that buffer older
+            // than the cadence assumes.  (Holds read only the held output
+            // image, which is always just "the previous output".)
+            if (action == NtscCadenceTracker::FieldAction::eWeave) {
+                bool partner_ok = decoded_field_index == 0
+                        ? m_field_buffer_frame_no[1] == displayed - 1
+                        : m_field_buffer_frame_no[0] == displayed;
+                if (!partner_ok)
+                    action = NtscCadenceTracker::FieldAction::eAdaptive;
+            }
+        }
+
+        // Status line for the disc info overlay (V key).  The letter is the
+        // film frame within the (A1A2)(A3B1)(B2C1)(C2C3)(D1D2) cycle the
+        // output shows -- its runs of 3, 2, 3, 2 fields make the pulldown
+        // rhythm visible; a hold re-shows the previous film frame.
+        if (!controls.film_mode || !m_decode_all_fields
+            || field_interpolation_mode != FieldInterpolationMode::eNormal) {
+            out.film_status = "Film: off";
+            out.film_status_detail.clear();
+        } else if (int phase = m_cadence.phaseForFrame(m_frame_no - 1); phase < 0) {
+            out.film_status = "Film: auto";
+            out.film_status_detail.clear();
+        } else {
+            out.film_status = "Film: 3:2";
+            if (action == NtscCadenceTracker::FieldAction::eAdaptive) {
+                out.film_status_detail = "adapt"; // locked, but this frame's repeat is missing
+            } else {
+                static constexpr char c_film_frame[5][2] = {
+                        {'D', 'A'}, {'A', 'A'}, {'B', 'B'}, {'C', 'C'}, {'C', 'D'}};
+                out.film_status_detail = std::format("{} {}",
+                        c_film_frame[phase][decoded_field_index],
+                        action == NtscCadenceTracker::FieldAction::eWeave ? "weave" : "hold");
+            }
+        }
+
         // Selector noise floor: |cs - ct| accumulated over the 19-sample
         // window is ~sigma per sample for plain noise; 15 sigma keeps noise
         // from flipping the comb choice on flat areas.
@@ -284,12 +334,26 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                                     m_frames[2]->dropout_data(), m_frames[0]->dropout_data(),
                                     dropout_mode, use_3d_comb, m_rot_re, m_rot_im, level_floor, level_ceiling,
                                     15.0f * sigma_out);
-        // Weaving the still parts needs the previous field's decode, which
-        // only exists when all fields are decoded
-        m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
-                field_interpolation_mode == FieldInterpolationMode::eForceIntraField || !m_decode_all_fields,
-                field_interpolation_mode == FieldInterpolationMode::eForceInterFrame,
-                decoded_field_index, output_yuv);
+        m_field_buffer_frame_no[decoded_field_index] = m_frame_no - 1;
+        if (action == NtscCadenceTracker::FieldAction::eHold) {
+            // Re-show the previous film frame from the held copy of the last
+            // combine output.  The YUV buffers are left as they are, so
+            // --write repeats the previous frame -- which is exactly the 3:2
+            // presentation.  The field itself was still decoded above: the
+            // next field's weave needs it.
+            m_shaders.restoreHeldOutput(*m_second_stage_command_buffer);
+        } else {
+            // Weaving the still parts needs the previous field's decode,
+            // which only exists when all fields are decoded
+            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
+                    field_interpolation_mode == FieldInterpolationMode::eForceIntraField || !m_decode_all_fields,
+                    field_interpolation_mode == FieldInterpolationMode::eForceInterFrame
+                            || action == NtscCadenceTracker::FieldAction::eWeave,
+                    decoded_field_index, output_yuv);
+            // Keep a clean copy (no OSD or subtitles drawn yet) for a
+            // following hold to re-show
+            m_shaders.saveCombinedOutput(*m_second_stage_command_buffer);
+        }
     }
 
     m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});
@@ -298,6 +362,21 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     if (input_block != nullptr) {
         m_frames[0]->processVbi();
+
+        // Film cadence evidence: the per-field differences between the frame
+        // just read and its predecessor (both synchronized for host reads, as
+        // the VBI processing needs).  The decision this feeds is always about
+        // the DISPLAYED frame m_frames[1], so running one frame behind the
+        // read costs nothing.
+        if (m_decode_video && m_decode_all_fields && m_frame_no > 1) {
+            auto diffs = NtscCadenceTracker::MeasureFieldDiffs(
+                    m_frames[0]->data()->data<int16_t>(), m_frames[1]->data()->data<int16_t>());
+            // Predicted per-sample sigma of the frame buffer data: the raw
+            // blanking sigma through the calibrated rescale and the ~0.55
+            // attenuation of the frame-domain de-emphasis
+            float sigma = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.55f : -1.0f;
+            m_cadence.update(m_frame_no, diffs.d0, diffs.d1, sigma);
+        }
     }
 
     if (m_decode_audio && m_field_index == 0) {

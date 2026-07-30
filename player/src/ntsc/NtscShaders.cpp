@@ -31,8 +31,16 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
 
   m_image_out(make_unique<VulkanImage>(m_vulkan_manager,
                                        NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2,
-                                       vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc,
+                                       vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc
+                                       | vk::ImageUsageFlagBits::eTransferDst,
                                        eHostNone)),
+  // eStorage only because VulkanImage always creates an image view, which
+  // transfer-only usage would not permit
+  m_image_held(make_unique<VulkanImage>(m_vulkan_manager,
+                                        NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2,
+                                        vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc
+                                        | vk::ImageUsageFlagBits::eTransferDst,
+                                        eHostNone)),
   m_image_Y_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_image_U_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_Y_BUF_WIDTH / 2, NTSC_FIELD_HEIGHT), 2,
@@ -157,6 +165,43 @@ void NtscShaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field
     m_image_U_out->synchronizeForHostRead(sq);
     m_image_V_out->synchronizeForHostRead(sq);
   }
+}
+
+namespace {
+    vk::ImageBlit fullImageBlit() {
+        vk::ImageBlit region;
+        region.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+        region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+        region.srcOffsets[1] = vk::Offset3D{NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2, 1};
+        region.dstOffsets[1] = vk::Offset3D{NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2, 1};
+        return region;
+    }
+}
+
+void NtscShaders::saveCombinedOutput(CommandBuffer &sq) {
+  m_image_out->enqueueTransitionLayout(sq, vk::ImageLayout::eTransferSrcOptimal,
+                                       vk::PipelineStageFlagBits::eComputeShader,
+                                       vk::PipelineStageFlagBits::eTransfer,
+                                       vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead);
+  m_image_held->enqueueTransitionLayout(sq, vk::ImageLayout::eTransferDstOptimal,
+                                        vk::PipelineStageFlagBits::eTransfer,
+                                        vk::PipelineStageFlagBits::eTransfer,
+                                        vk::AccessFlagBits::eTransferRead, vk::AccessFlagBits::eTransferWrite);
+  sq.enqueueBlitImage(m_image_out->image(), vk::ImageLayout::eTransferSrcOptimal,
+                      m_image_held->image(), vk::ImageLayout::eTransferDstOptimal, fullImageBlit());
+}
+
+void NtscShaders::restoreHeldOutput(CommandBuffer &sq) {
+  m_image_held->enqueueTransitionLayout(sq, vk::ImageLayout::eTransferSrcOptimal,
+                                        vk::PipelineStageFlagBits::eTransfer,
+                                        vk::PipelineStageFlagBits::eTransfer,
+                                        vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eTransferRead);
+  m_image_out->enqueueTransitionLayout(sq, vk::ImageLayout::eTransferDstOptimal,
+                                       vk::PipelineStageFlagBits::eTransfer,
+                                       vk::PipelineStageFlagBits::eTransfer,
+                                       vk::AccessFlagBits::eTransferRead, vk::AccessFlagBits::eTransferWrite);
+  sq.enqueueBlitImage(m_image_held->image(), vk::ImageLayout::eTransferSrcOptimal,
+                      m_image_out->image(), vk::ImageLayout::eTransferDstOptimal, fullImageBlit());
 }
 
 ResultImages NtscShaders::getResultImages() {
