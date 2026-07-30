@@ -5,6 +5,7 @@
 #define MUSECPP_DECODER_H
 
 #include <optional>
+#include <string>
 #include "AudioDefs.h"
 #include "DropoutMode.h"
 #include "DiscInfo.h"
@@ -38,6 +39,7 @@ public:
         bool redo_last_field;
         bool enable_non_linear;
         bool use_3d_comb;
+        bool film_mode; // NTSC: weave by the film cadence when a 3:2 pulldown lock holds
         DropoutMode dropout_mode;
         bool output_yuv;
     };
@@ -55,6 +57,11 @@ public:
         long last_frame_buffer_input_offset;
         double input_samples_per_muse_sample;
         std::shared_ptr<DiscInfo> disc_info;
+        // Film mode status for the disc info overlay; empty for decoders
+        // without film mode (MUSE).  The detail part changes per field, so
+        // the overlay only appends it while paused, where it can be read.
+        std::string film_status;
+        std::string film_status_detail;
     };
 
     Decoder(const Decoder&) = delete;

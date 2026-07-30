@@ -61,6 +61,13 @@ public:
   void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only,
                                   unsigned int field_parity, bool output_yuv);
 
+  // Keep a copy of the combine's output image, and bring it back.  A film
+  // mode hold re-shows the previous film frame this way: the copy is taken
+  // before the OSD and subtitles draw into the output image, and restoring
+  // is idempotent, so a paused field can be redone any number of times.
+  void saveCombinedOutput(musevk::CommandBuffer &sq);
+  void restoreHeldOutput(musevk::CommandBuffer &sq);
+
   ResultImages getResultImages();
 
 private:
@@ -91,6 +98,7 @@ private:
 
   // used for final result
   std::shared_ptr<musevk::VulkanImage> m_image_out;
+  std::shared_ptr<musevk::VulkanImage> m_image_held; // previous combine output, for film mode holds
   std::shared_ptr<musevk::VulkanBuffer> m_image_Y_out; // only used if writing to file using ffmpeg
   std::shared_ptr<musevk::VulkanBuffer> m_image_U_out; // ..
   std::shared_ptr<musevk::VulkanBuffer> m_image_V_out; // ..

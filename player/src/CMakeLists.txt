@@ -212,6 +212,7 @@ if(BUILD_MUSE)
         ntsc/NtscFrameReader.cpp ntsc/NtscFrameReader.h
         ntsc/NtscInputBlock.h
         ntsc/NtscConstants.h
+        ntsc/NtscCadenceTracker.cpp ntsc/NtscCadenceTracker.h
         ntsc/NtscDecoder.cpp ntsc/NtscDecoder.h
         ntsc/NtscShaders.cpp ntsc/NtscShaders.h
         ntsc/NtscFrame.cpp ntsc/NtscFrame.h

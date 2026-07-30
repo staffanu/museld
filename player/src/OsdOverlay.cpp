@@ -103,6 +103,14 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         auto disc_info_strings = state.last_decoded.disc_info
                 ? state.last_decoded.disc_info->asStrings()
                 : std::vector<std::string>{"No disc info"};
+        if (!state.last_decoded.film_status.empty()) {
+            std::string film_line = state.last_decoded.film_status;
+            // The detail changes per field -- unreadable at speed, so only
+            // append it while paused (where N steps through the cadence)
+            if (state.paused && !state.last_decoded.film_status_detail.empty())
+                film_line += " " + state.last_decoded.film_status_detail;
+            disc_info_strings.push_back(film_line);
+        }
         const int disc_scale = comp_scale(osd_base / 2);
         const int glyph_h = 24;
         const int bottom_margin = std::max(0, src.height - 955 - glyph_h * 2) / zoom;

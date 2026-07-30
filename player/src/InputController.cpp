@@ -112,6 +112,12 @@ bool InputController::poll(GLFWwindow *window,
         m_log.info(eApplication | eVideo, state.use_3d_comb ? "3D comb enabled" : "3D comb disabled");
         state.osd_text = state.use_3d_comb ? "3D COMB ON" : "3D COMB OFF";
     }
+    if (checkKey(window, GLFW_KEY_5)) {
+        state.film_mode = !state.film_mode;
+        if (state.paused) state.redo_last_field = true;
+        m_log.info(eApplication | eVideo, state.film_mode ? "Film mode auto" : "Film mode off");
+        state.osd_text = state.film_mode ? "FILM MODE AUTO" : "FILM MODE OFF";
+    }
     if (checkKey(window, GLFW_KEY_A)) {
         efm_audio = !efm_audio;
         reader.setEfmEnabled(efm_audio);

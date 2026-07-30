@@ -12,6 +12,7 @@
 #include "musevk/CommandPool.h"
 #include "NtscInputBlock.h"
 #include "Decoder.h"
+#include "NtscCadenceTracker.h"
 #include "NtscFrame.h"
 #include "NtscShaders.h"
 
@@ -81,6 +82,12 @@ private:
     int m_frame_no;
     int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field
     long m_total_elapsed_time_us;
+    NtscCadenceTracker m_cadence;
+    // Which displayed frame each per-parity field buffer set in NtscShaders
+    // currently holds: input starvation can skip a field decode, and a
+    // cadence weave/hold must not touch a buffer one frame older than the
+    // cadence assumes
+    std::array<int, 2> m_field_buffer_frame_no;
     EfmDecoder m_efm_decoder;
     EfmPcmProcessor m_efm_pcm_processor;
     // Audio decoded from the newest read block, held back one frame so it
