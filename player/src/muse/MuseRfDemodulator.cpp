@@ -164,9 +164,9 @@ void MuseRfDemodulator::demodulate() {
 
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager,
-                              "detect_dropouts",
-                              {lowpass_in_buffer, dropout_buffer}, 6 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts.comp"), Size(MuseDemodulatedBlock::c_video_block_size)));
+                              "detect_dropouts_envelope",
+                              {analytic_buffer_re, analytic_buffer_im, dropout_buffer, lowpass_in_buffer}, 10 * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts_envelope.comp"), Size(MuseDemodulatedBlock::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
     // will have undefined output otherwise.
@@ -312,13 +312,51 @@ void MuseRfDemodulator::demodulate() {
                 {(uint32_t)rrc_filter_size, MuseDemodulatedBlock::c_video_block_size,
                  /* out offset */ 0, /* decimation */ 1}, 1);
 
-        // Detect dropouts.  The MUSE range is 0..255 with grey at 128; the
-        // pre-emphasis overshoots reach far outside it, so the legal window is
-        // -2.2 and +5.5 half-ranges around grey.
+        // Detect dropouts from the RF envelope, against two references: the same
+        // position on the neighbouring lines (brightness-matched, since the disc
+        // MTF lowers the envelope at the bright end of the deviation range) and
+        // the surrounding ~200 us average, strict enough for dropouts spanning
+        // several lines.  A MUSE line is MUSE_TOTAL_WIDTH samples at 16.2 MHz.
+        // The analytic signal is written with offset 1 into its buffers, and the
+        // flags are delayed like the video to compensate the filter chain.
+        //
+        // The ratios are much stricter than the NTSC path's 0.49 / 0.25, and have
+        // to be: MUSE's deviation is wide enough that picture content alone moves
+        // the envelope a long way.  Measured on blue1-fx3-62.5MHz.ldf, the median
+        // envelope power at peak white is about half that at black, and over the
+        // whole disc the local envelope never fell below 0.156 of the surrounding
+        // median -- all of it explained by content, since that capture has no
+        // dropouts to speak of.  NTSC's 0.49 therefore sits in the middle of the
+        // legal content range here, which is why the value-threshold detector this
+        // replaced (and a straight port of the NTSC constants) concealed white
+        // titles away as if they were dropouts.
+        //
+        // The gap to a real dropout is wide, so the thresholds do not have to be
+        // a compromise: the dropouts around 55.5-56.1 s of makeup-muse-rf-62.5MHz
+        // (a disc blemish struck once per revolution, 0.1-0.7 us each) take the
+        // envelope down to 0.0036 of the surrounding median, more than an order of
+        // magnitude below the 0.156 that content alone reaches.
+        const uint32_t line_period = (uint32_t)lround(MUSE_TOTAL_WIDTH * m_sample_frequency / 16.2e6);
+        constexpr float c_line_ratio_squared = 0.12f; // vs the neighbouring lines, with the noise corroboration
+        constexpr float c_deep_ratio_squared = 0.10f; // vs the long average, confident on its own
+        // The noise corroboration is in the demodulator's own units, where one
+        // half-range (grey to white) is 112.  The legal sample-to-sample step
+        // scales with the sample interval; MUSE carries roughly twice the video
+        // bandwidth of NTSC, so it is allowed twice the step at the same rate.
+        // The envelope conditions dominate: the flag count is unchanged between
+        // 2 and 8 half-ranges here.
+        const float slew_threshold = 4.0f * 112.f * 40e6f / m_sample_frequency;
+        // 32 taps spanning ~205 us, so a maximum-length dropout cannot drag the
+        // carrier reference down with it (256 samples at the NTSC path's 40 MHz)
+        const uint32_t long_stride = (uint32_t)lround(6.4e-6 * m_sample_frequency);
         command_buffer->enqueueComputeShader<uint32_t>(
-                detect_dropouts_shader, {MuseDemodulatedBlock::c_video_block_size,
-                                         (uint32_t)lowpass_filter_size - 1, (uint32_t)c_dropout_delay, MuseDemodulatedBlock::c_video_decimation_rate,
-                                         std::bit_cast<uint32_t>(-2.2f * 112.f + 128.f), std::bit_cast<uint32_t>(5.5f * 112.f + 128.f)});
+                detect_dropouts_shader, {MuseDemodulatedBlock::c_video_block_size, 1u, (uint32_t)c_dropout_delay,
+                                         MuseDemodulatedBlock::c_video_decimation_rate,
+                                         line_period,
+                                         std::bit_cast<uint32_t>(c_line_ratio_squared),
+                                         std::bit_cast<uint32_t>(c_deep_ratio_squared),
+                                         (uint32_t)lowpass_filter_size - 1, std::bit_cast<uint32_t>(slew_threshold),
+                                         long_stride});
 
         // Barrier: ensure all compute shader writes are visible to the subsequent transfer operations
         command_buffer->enqueueBarrier(vk::AccessFlagBits::eShaderWrite,
