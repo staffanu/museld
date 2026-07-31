@@ -19,6 +19,10 @@ element for all lanes (GCN/Renoir)
 - Kernel 6.17.0-41-generic, x86_64
 - glslc from shaderc 2025.2
 
+Control: the same binary and SPIR-V pass on lavapipe from the *same* Mesa build
+(`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json ./repro repro.spv` → PASS), so the
+shader, the host program and the common NIR path are all fine and this is RADV-specific.
+
 ## Description
 
 In a compute shader, reading an element of a push constant array with an index that
@@ -26,9 +30,10 @@ differs per invocation (divergent) returns the element addressed by the first ac
 lane of the wavefront for *all* lanes, instead of each lane's own element. The identical
 access pattern through an SSBO returns correct results.
 
-Observed on both compiler backends (default ACO and `RADV_DEBUG=llvm`), which suggests
-the lowering shared by both (push constant load lowering in NIR) assumes the offset is
-uniform.
+Observed on both compiler backends (default ACO and `RADV_DEBUG=llvm`, LLVM 20.1.8), while
+lavapipe from the same Mesa build is correct. That combination points at RADV's own NIR
+lowering of `nir_load_push_constant` — the part ACO and LLVM share but lavapipe does not —
+assuming the offset is uniform, rather than at either backend or at common NIR.
 
 No extensions or optional features are involved: core Vulkan 1.1, plain `uint` array,
 fixed `local_size_x = 64`, one `vkCmdDispatch(1, 1, 1)`. The same wrong results are also
@@ -61,8 +66,8 @@ The host program fills both `pc_data` and `ssbo_data` with `0x1000 + i`, dispatc
 
 ## Expected
 
-`outv[x] == 0x1000 + x / 2` for all 64 threads (this is what the SSBO control column
-produces, and what other implementations produce).
+`outv[x] == 0x1000 + x / 2` for all 64 threads. This is what the SSBO control column
+produces on the same dispatch, and what lavapipe produces for the push constant column.
 
 ## Actual
 
