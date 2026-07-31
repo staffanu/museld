@@ -528,7 +528,9 @@ int main(int argc, char *argv[]) {
     auto usage = [&options] (ostream &out, int status) -> void {
         options.printHelp(out, "museld [options] <input_file> ...");
         out << "\nSeveral input files can be given, with options in between; each one is played with\n"
-               "the options in effect where it appears.  An argument starting with ! is ignored,\n"
+               "the options in effect where it appears.  Options therefore apply to the files that\n"
+               "follow them: one placed after a filename does not affect that file, and options\n"
+               "after the last filename do nothing at all.  An argument starting with ! is ignored,\n"
                "which is practical for disabling an option in a saved command line.\n";
         exit(status);
     };
@@ -733,12 +735,16 @@ int main(int argc, char *argv[]) {
 
     try {
         bool input_file_given = false;
+        // Options apply to the input files that follow them, so any left over when
+        // the arguments run out did nothing.  Remember them to say so afterwards.
+        vector<string> trailing_options;
         while (it != args.cend()) {
             if (const CliOptions::Option *option = options.find(*it)) {
                 it++;
                 if (option->takesArgument() && it == args.cend())
                     throw runtime_error(std::format("{} needs an argument ({})", option->name, option->argument));
                 option->action();
+                trailing_options.push_back(option->name);
             } else if (it->find("!", 0) == 0) {
                 it++; // used to ignore options (to easily enable/disable options in CLion debug settings)
             } else if (it->find("-", 0) == 0) {
@@ -746,6 +752,7 @@ int main(int argc, char *argv[]) {
                 usage(cerr, EXIT_FAILURE);
             } else {
                 input_file_given = true;
+                trailing_options.clear(); // these applied to this file
                 if (initial_seek_seconds != 0 && filesystem::is_fifo(*it)) {
                     cerr << "Initial seek is not compatible with reading from fifo" << endl;
                     exit(EXIT_FAILURE);
@@ -847,6 +854,20 @@ int main(int argc, char *argv[]) {
                 }
                 it++;
             }
+        }
+        // Options are applied to the files that follow them, so trailing ones were
+        // parsed and then never used.  That is legal syntax -- it is how a second
+        // file is given different settings -- so it cannot be an error, but it is
+        // almost always a mistake worth pointing out.
+        if (input_file_given && !trailing_options.empty()) {
+            string names;
+            for (const auto &name : trailing_options)
+                names += (names.empty() ? "" : " ") + name;
+            cerr << std::format("Warning: {} came after the last input file and had no effect: {}\n"
+                                "Options apply to the input files that follow them, so they belong "
+                                "before the file they are meant for.",
+                                trailing_options.size() == 1 ? "this option" : "these options", names)
+                 << endl;
         }
         // Nothing to play is not an error, but say so: an empty command line
         // otherwise looks just like the player failing to start
