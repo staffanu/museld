@@ -42,6 +42,23 @@ options in between; each file is played with the most recent options in effect, 
 different formats can be played back to back. An argument starting with `!` is ignored, which is
 practical for temporarily disabling options when reusing long command lines.
 
+Because the options in effect are the ones seen so far, **every option must come before the file
+it applies to**. An option placed after a filename applies only to later files, and options after
+the last filename have no effect at all. That cannot be an error, since it is the same syntax that
+gives a second file different settings, so museld plays the files and warns about the leftovers
+afterwards:
+
+```console
+# both files play with --no-dropout; the second one is also NTSC at 40 MHz
+museld --no-dropout muse.ldf --input-type ntsc-rf --sample-freq 40e6 ntsc.ldf
+
+# WRONG: --no-dropout comes too late, and museld says so
+museld muse.ldf --no-dropout
+#   Warning: this option came after the last input file and had no effect: --no-dropout
+```
+
+An argument disabled with a leading `!` is not reported, since ignoring it is the point.
+
 If an input file is a FIFO (named pipe), museld assumes the data is produced in real time, e.g. by
 a capture program such as picostream. Playback speed then follows the incoming data rate: an empty
 pipe means waiting rather than end of file, a field is dropped if the input buffers fill up, and
