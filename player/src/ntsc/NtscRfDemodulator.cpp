@@ -159,7 +159,7 @@ void NtscRfDemodulator::demodulate() {
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager,
                               "detect_dropouts_envelope",
-                              {analytic_buffer_re, analytic_buffer_im, dropout_buffer, lowpass_in_buffer}, 9 * sizeof(uint32_t),
+                              {analytic_buffer_re, analytic_buffer_im, dropout_buffer, lowpass_in_buffer}, 10 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts_envelope.comp"), Size(NtscRfDemodulatorConstants::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
@@ -296,11 +296,15 @@ void NtscRfDemodulator::demodulate() {
         // lowpass.
         const uint32_t line_period = (uint32_t)lround(m_sample_frequency / (30000.0 / 1001.0 * 525.0));
         const float slew_threshold = 1.0f * 40e6f / m_sample_frequency; // legal slew scales with the sample interval
+        // 32 taps spanning ~205 us, so a maximum-length dropout cannot drag the
+        // carrier reference down with it
+        const uint32_t long_stride = (uint32_t)lround(6.4e-6 * m_sample_frequency);
         command_buffer->enqueueComputeShader<uint32_t>(
                 detect_dropouts_shader, {NtscRfDemodulatorConstants::c_video_block_size, 1u, (uint32_t)dropout_delay, c_video_decimation_rate,
                                          line_period,
                                          std::bit_cast<uint32_t>(0.49f), std::bit_cast<uint32_t>(0.25f),
-                                         (uint32_t)lowpass_filter_def.size() - 1, std::bit_cast<uint32_t>(slew_threshold)});
+                                         (uint32_t)lowpass_filter_def.size() - 1, std::bit_cast<uint32_t>(slew_threshold),
+                                         long_stride});
 
         // Barrier: ensure all compute shader writes are visible to the subsequent transfer operations
         command_buffer->enqueueBarrier(vk::AccessFlagBits::eShaderWrite,

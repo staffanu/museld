@@ -83,6 +83,26 @@ picture lines. `--no-dropout` leaves them untouched; `--highlight-dropout` paint
 (dropout in the luminance area) or green (dropout in the color area). The D key cycles between
 the three modes during playback.
 
+Both MUSE and NTSC detect dropouts from the RF envelope (`detect_dropouts_envelope.comp`), the way
+hardware players do: a dropout is a collapse of the carrier amplitude, whatever the demodulated
+value happens to be. The local envelope is compared against the same position on the neighbouring
+lines and against a long strided average, so no absolute threshold or per-capture gain calibration
+is needed; the more sensitive line-referenced condition additionally requires the demodulated
+signal to have gone noisy.
+
+The two paths use quite different thresholds, because the legal envelope variation is
+format-specific. MUSE deviates far enough that picture content alone roughly halves the envelope
+power between black and peak white, so its ratios are set well below NTSC's — see the comment in
+`MuseRfDemodulator.cpp` for the measurements behind them. MUSE previously used a plain value
+threshold on the demodulated signal, which could not tell bright detail from a dropout and
+concealed white-on-black titles away as if they were dropouts.
+
+There is a lot of room between the two cases, so the thresholds are not a compromise: content
+takes the envelope down to about 0.16 of the local median at worst, while the real dropouts in
+`makeup-muse-rf-62.5MHz-nofilter.raw` (around 55.5–56.1 s) reach 0.0036. That capture is the one
+to reach for when working on dropout handling — it has a disc blemish that is struck once per
+revolution for about 18 frames.
+
 **NTSC Y/C separation and de-interlacing**: the decoder banks four composite frames and displays
 one frame behind the input (audio is delayed to match). Per-pixel directional motion masks select,
 for each side, between temporal Y/C separation against the still neighbouring frames (a 3D comb:

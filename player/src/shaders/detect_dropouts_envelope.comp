@@ -22,6 +22,7 @@ layout(push_constant) uniform PushConstants {
     float deep_ratio_squared; // envelope condition: local² < ratio² × long average
     uint demod_offset; // index of the first new sample in the demodulated buffer
     float slew_threshold; // noise condition: max sample-to-sample step nearby
+    uint long_stride; // spacing of the 32 carrier-reference taps, in raw samples
 };
 
 layout(set = 0, binding = 0) buffer readonly analytic_re_buffer {
@@ -75,12 +76,13 @@ void main() {
     float line_ref = max(max(local_envelope(center - H), local_envelope(center + H)),
                          max(local_envelope(center - 2 * H), local_envelope(center + 2 * H)));
 
-    // carrier reference: 32 samples strided over ±4096 raw samples (~200 µs),
-    // long enough that even a maximum-length 100 µs dropout cannot drag it
-    // down; catches dropouts that do span several lines
+    // carrier reference: 32 samples strided over ±16 × long_stride raw samples,
+    // which the caller sizes to ~200 µs -- long enough that even a maximum-length
+    // 100 µs dropout cannot drag it down; catches dropouts spanning several lines
     float long_sum = 0.0;
+    int stride = int(long_stride);
     for (int i = -16; i < 16; i++)
-        long_sum += envelope_squared(center + i * 256 + 128);
+        long_sum += envelope_squared(center + i * stride + stride / 2);
     float long_avg = long_sum / 32.0;
 
     // A collapse below the deep ratio is confident on its own; the more
