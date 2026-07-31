@@ -81,15 +81,14 @@ FLAC__StreamDecoderReadStatus LdfInputReader::read_callback(FLAC__byte buffer[],
 }
 
 FLAC__StreamDecoderWriteStatus LdfInputReader::write_callback(const FLAC__Frame *frame, const FLAC__int32 *const buffer[]) {
-    if (m_decoded_samples == nullptr) {
-        m_decoded_samples = new uint16_t[frame->header.blocksize];
-        m_flac_allocated_size = frame->header.blocksize;
-    } else if ( frame->header.blocksize > m_flac_allocated_size) {
+    // A block shorter than the buffer is not a sign of trouble: a seek that lands inside a
+    // frame makes libFLAC hand back only that frame's tail, and the last frame of a stream
+    // may be short as well.  Only the capacity matters here.
+    if (frame->header.blocksize > m_flac_allocated_size) {
         delete[] m_decoded_samples;
         m_decoded_samples = new uint16_t[frame->header.blocksize];
         m_flac_allocated_size = frame->header.blocksize;
-    } else if (m_flac_allocated_size != m_flac_used_size)
-        throw std::runtime_error("Unexpected call to write_callback");
+    }
 
     for (int i = 0; i < frame->header.blocksize; i++)
         m_decoded_samples[i] = buffer[0][i];
