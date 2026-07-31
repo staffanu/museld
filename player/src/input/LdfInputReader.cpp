@@ -20,6 +20,27 @@ LdfInputReader::~LdfInputReader() {
     delete[] m_decoded_samples;
 }
 
+void LdfInputReader::recordError(std::string message) {
+    if (m_failure.empty())
+        m_failure = std::move(message);
+}
+
+void LdfInputReader::throwIfFailed() const {
+    if (!m_failure.empty())
+        throw std::runtime_error(m_failure);
+}
+
+// Runs one decoding step and reports a callback failure, a step that failed without one, or
+// nothing at all.  Every use of process_single goes through here.
+void LdfInputReader::processSingleChecked() {
+    const bool ok = process_single();
+    // A recorded failure names the actual cause, so it wins over libFLAC's resulting state.
+    throwIfFailed();
+    if (!ok)
+        throw std::runtime_error(std::format("libFLAC++ process_single: {}",
+            FLAC__StreamDecoderStateString[get_state()]));
+}
+
 void LdfInputReader::initialize() {
     auto status = m_format == eFlac ? init() : init_ogg();
     if (status != FLAC__STREAM_DECODER_INIT_STATUS_OK)
@@ -28,34 +49,33 @@ void LdfInputReader::initialize() {
     // Perform first processing so we can seek before readFloats is called
     FLAC__StreamDecoderState s;
     while (s = get_state(), s != FLAC__STREAM_DECODER_READ_FRAME && s != FLAC__STREAM_DECODER_SEARCH_FOR_FRAME_SYNC && s != FLAC__STREAM_DECODER_END_OF_STREAM)
-        if (!process_single())
-            throw std::runtime_error(std::format("libFLAC++ process_single: {}",
-                FLAC__StreamDecoderErrorStatusString[get_state()]));
+        processSingleChecked();
 }
 
 void LdfInputReader::seek(off_t no_samples) {
     if (m_is_fifo)
         return;
     std::scoped_lock<std::mutex> lock(m_fd_mutex);
-    if (!seek_absolute(m_sample_position + no_samples))
+    throwIfFailed();
+    const bool ok = seek_absolute(m_sample_position + no_samples);
+    throwIfFailed();
+    if (!ok)
         throw std::runtime_error("libflac: seek_absolute failed");
     m_sample_position += no_samples;
 }
 
 int LdfInputReader::readFloats(float *f) {
     std::scoped_lock<std::mutex> lock(m_fd_mutex);
+    throwIfFailed();
     int filled_floats = 0;
     float dc = dcOffset();
     double sum = 0;
     while (filled_floats < m_block_size) {
         if (m_flac_block_read_count == m_flac_used_size) {
             // notice this triggers also the first time, when both are zero
-            if (!process_single()) {
-                throw std::runtime_error(std::format("libFLAC++ process_single: {}",
-                    FLAC__StreamDecoderErrorStatusString[get_state()]));
-            } else if (get_state() == FLAC__STREAM_DECODER_END_OF_STREAM) {
+            processSingleChecked();
+            if (get_state() == FLAC__STREAM_DECODER_END_OF_STREAM)
                 return 0;
-            }
         }
         int n = std::min(m_block_size - filled_floats, m_flac_used_size - m_flac_block_read_count);
         for (int i = 0; i < n; i++) {
@@ -71,8 +91,11 @@ int LdfInputReader::readFloats(float *f) {
 
 FLAC__StreamDecoderReadStatus LdfInputReader::read_callback(FLAC__byte buffer[], size_t *bytes) {
     const auto r = read(m_fd, buffer, *bytes);
-    if (r == -1)
-        throw std::runtime_error(std::format("Error reading from file: {}", strerror(errno)));
+    if (r == -1) {
+        recordError(std::format("Error reading from file: {}", strerror(errno)));
+        *bytes = 0;
+        return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
+    }
     *bytes = r;
     if (r == 0)
         return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
@@ -101,16 +124,16 @@ FLAC__StreamDecoderWriteStatus LdfInputReader::write_callback(const FLAC__Frame 
 void LdfInputReader::metadata_callback(const ::FLAC__StreamMetadata *metadata) {
     if (metadata->type == FLAC__METADATA_TYPE_STREAMINFO) {
         if (metadata->data.stream_info.channels != 1)
-            throw std::runtime_error("LDF files should have only one channel");
+            recordError("LDF files should have only one channel");
         if (metadata->data.stream_info.bits_per_sample == 8 || metadata->data.stream_info.bits_per_sample == 16)
             m_bits_per_sample = metadata->data.stream_info.bits_per_sample;
         else
-            throw std::runtime_error("LDF files should have 8 or 16 bits per sample");
+            recordError("LDF files should have 8 or 16 bits per sample");
     }
 }
 
 void LdfInputReader::error_callback(::FLAC__StreamDecoderErrorStatus status) {
-    throw std::runtime_error(std::format("libFLAC++ error_callback: {}", FLAC__StreamDecoderErrorStatusString[status]));
+    recordError(std::format("libFLAC++ error_callback: {}", FLAC__StreamDecoderErrorStatusString[status]));
 }
 
 FLAC__StreamDecoderTellStatus LdfInputReader::tell_callback(FLAC__uint64 *absolute_byte_offset) {
