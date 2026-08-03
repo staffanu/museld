@@ -168,6 +168,17 @@ bool InputController::poll(GLFWwindow *window,
         state.osd_text = "EQ RESET";
         m_log.info(eApplication | eVideo, "Adaptive equaliser taps reset to identity");
     }
+    auto cycleSubtitleSlot = [&](int &slot, const char *osd_prefix) {
+        const int n = static_cast<int>(state.subtitle_track_names.size());
+        if (n == 0) return;
+        slot = slot + 1 >= n ? -1 : slot + 1;
+        state.osd_text = slot < 0 ? std::format("{} OFF", osd_prefix)
+                                  : std::format("{} {}", osd_prefix, state.subtitle_track_names[slot]);
+    };
+    if (checkKey(window, GLFW_KEY_LEFT_BRACKET))
+        cycleSubtitleSlot(state.subtitle_primary, "SUBTITLES");
+    if (checkKey(window, GLFW_KEY_RIGHT_BRACKET))
+        cycleSubtitleSlot(state.subtitle_secondary, "SUBTITLES 2");
     if (checkKey(window, GLFW_KEY_Z)) {
         state.zoom_factor = (state.zoom_factor * 2) % 7;
         state.zoom_center.first = std::max(0.5 / state.zoom_factor,

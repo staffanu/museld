@@ -1,10 +1,12 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <algorithm>
 #include <filesystem>
 #include <format>
 #include <functional>
 #include <chrono>
+#include <utility>
 
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
@@ -56,6 +58,40 @@ void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "Error %d: %s\n", error, description); // FIXME: use logging framework
 }
 
+// The subtitle files available for one input file; the [ and ] keys cycle the
+// primary (bottom) and secondary (top) display slots through these.
+struct SubtitleSetup {
+    std::vector<std::pair<std::string, std::string>> files; // {OSD label, path}, alphabetical
+    int primary_index = -1; // initial primary track
+    std::optional<std::string> font_path;
+};
+
+// Find the .srt files next to the input whose names start with the input's own
+// name minus its extension: capture.raw matches capture.srt, capture.ja.srt,
+// capture.ja-hira.srt, ...  The label is what follows the shared stem ("ja"
+// for capture.ja.srt).
+static std::vector<std::pair<std::string, std::string>> discoverSubtitleFiles(
+        const std::filesystem::path &input_path) {
+    std::vector<std::pair<std::string, std::string>> found;
+    const std::string stem = input_path.stem().string();
+    std::filesystem::path dir = input_path.parent_path();
+    if (dir.empty()) dir = ".";
+    std::error_code ec;
+    for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (!entry.is_regular_file()) continue;
+        const std::string name = entry.path().filename().string();
+        if (name.size() <= 4 || name.compare(name.size() - 4, 4, ".srt") != 0) continue;
+        if (name.compare(0, stem.size(), stem) != 0) continue;
+        std::string label = name.substr(stem.size(), name.size() - stem.size() - 4);
+        while (!label.empty() && label.front() == '.') label.erase(label.begin());
+        if (label.empty()) label = "DEFAULT";
+        found.emplace_back(std::move(label), entry.path().string());
+    }
+    std::sort(found.begin(), found.end(),
+              [](const auto &a, const auto &b) { return a.second < b.second; });
+    return found;
+}
+
 static void runPlayer(Logger &log,
                       musevk::VulkanManager &manager,
                       Decoder &decoder,
@@ -73,8 +109,7 @@ static void runPlayer(Logger &log,
                       const std::unique_ptr<VideoFileWriter> &vfw,
                       AudioPlayback *audio_playback,
                       const std::string &executable_dir,
-                      const std::optional<std::string> &subtitles_path,
-                      const std::optional<std::string> &subtitle_font_path,
+                      const SubtitleSetup &subtitle_setup,
                       const std::optional<std::string> &export_frame_filename,
                       double export_frame_after_seconds,
                       double write_duration_seconds,
@@ -104,25 +139,43 @@ static void runPlayer(Logger &log,
         InputController input(log);
         FrameExporter frame_exporter(log, manager, command_pool);
 
-        std::unique_ptr<SubtitleOverlay> subtitle_overlay;
-        if (subtitles_path) {
+        // All tracks are parsed and warmed into the shared glyph atlas up front,
+        // so the [ and ] keys can switch tracks without any loading hitch.
+        std::unique_ptr<SubtitleOverlay> subtitle_primary_overlay;
+        std::unique_ptr<SubtitleOverlay> subtitle_secondary_overlay;
+        if (!subtitle_setup.files.empty()) {
             try {
-                auto entries = parseSrt(*subtitles_path);
-                log.info(eApplication, std::format("Loaded {} subtitle entries from {}", entries.size(), *subtitles_path));
-                std::filesystem::path font_path = subtitle_font_path
-                    ? std::filesystem::path(*subtitle_font_path)
+                auto tracks = std::make_shared<std::vector<SubtitleTrack>>();
+                for (const auto &[label, path] : subtitle_setup.files) {
+                    auto entries = parseSrt(path);
+                    log.info(eApplication, std::format("Loaded {} subtitle entries from {} [{}]",
+                                                       entries.size(), path, label));
+                    tracks->push_back({label, std::move(entries)});
+                }
+                std::filesystem::path font_path = subtitle_setup.font_path
+                    ? std::filesystem::path(*subtitle_setup.font_path)
                     : std::filesystem::path(executable_dir) / "fonts" / "NotoSansJP-Regular.ttf";
                 const int frame_h = (int)decoder.getResultImages().out_image->getHeight();
                 const int pixel_height = std::max(20, frame_h / 18);
-                auto font = std::make_unique<SubtitleFont>(font_path, pixel_height, manager, command_pool);
-                for (const auto &e : entries)
-                    for (const auto &line : e.lines)
-                        font->warmUpLine(utf8ToCodepoints(line));
+                auto font = std::make_shared<SubtitleFont>(font_path, pixel_height, manager, command_pool);
+                for (const auto &track : *tracks)
+                    for (const auto &e : track.entries)
+                        for (const auto &line : e.lines)
+                            font->warmUpLine(utf8ToCodepoints(line));
                 font->finalizeAtlas(command_pool);
-                subtitle_overlay = std::make_unique<SubtitleOverlay>(
-                    std::move(entries), std::move(font), executable_dir, manager, command_pool);
+                subtitle_primary_overlay = std::make_unique<SubtitleOverlay>(
+                    tracks, font, false, executable_dir, manager, command_pool);
+                subtitle_secondary_overlay = std::make_unique<SubtitleOverlay>(
+                    tracks, font, true, executable_dir, manager, command_pool);
+                for (const auto &[label, path] : subtitle_setup.files)
+                    state.subtitle_track_names.push_back(label);
+                state.subtitle_primary = subtitle_setup.primary_index;
             } catch (const std::exception &x) {
                 log.error(eApplication, std::format("Subtitles disabled: {}", x.what()));
+                subtitle_primary_overlay.reset();
+                subtitle_secondary_overlay.reset();
+                state.subtitle_track_names.clear();
+                state.subtitle_primary = state.subtitle_secondary = -1;
             }
         }
 
@@ -194,8 +247,12 @@ static void runPlayer(Logger &log,
 
             command_buffer->begin();
             state.last_cursor_string = osd.render(*command_buffer, images, state, decoder, window, text_renderer);
-            if (subtitle_overlay)
-                subtitle_overlay->render(*command_buffer, images, state, decoder);
+            if (subtitle_primary_overlay)
+                subtitle_primary_overlay->render(*command_buffer, images, state, decoder,
+                                                 state.subtitle_primary);
+            if (subtitle_secondary_overlay)
+                subtitle_secondary_overlay->render(*command_buffer, images, state, decoder,
+                                                   state.subtitle_secondary);
             blitter.present(*command_buffer, images, state, src_dims,
                             swap_chain_image, manager.getSwapChainExtent(), manager,
                             image_available_semaphore);
@@ -240,8 +297,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   float tint_degrees, float saturation,
                   optional<string> const &output_filename,
                   [[maybe_unused]] VideoWriterPreset write_preset,
-                  optional<string> const &subtitles_path,
-                  optional<string> const &subtitle_font_path,
+                  const SubtitleSetup &subtitle_setup,
                   optional<string> const &export_frame_filename,
                   double export_frame_after_seconds,
                   double write_duration_seconds) {
@@ -352,7 +408,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   field_interpolation_mode, use_3d_comb, film_mode, dropout_mode, efm_audio, benchmark_shaders,
                   output_filename.has_value(),
                   vfw, audio_playback.get(), executable_dir,
-                  subtitles_path, subtitle_font_path,
+                  subtitle_setup,
                   export_frame_filename, export_frame_after_seconds, write_duration_seconds, seconds_per_iteration);
     }
 
@@ -443,7 +499,8 @@ int main(int argc, char *argv[]) {
     constexpr float eq_alpha = 0.005f;
     float tint_degrees = 0.0f;
     float saturation = 1.0f;
-    optional<string> subtitles_path;
+    bool subtitles_enabled = false;
+    optional<string> subtitles_file;
     optional<string> subtitle_font_path;
 
     const vector<string> args(argv + 1, argv + argc);
@@ -548,11 +605,19 @@ int main(int argc, char *argv[]) {
     options.option("--saturation", "FACTOR", "NTSC: scale the chroma gain (default 1.0)", [&] () -> void {
         saturation = (float)stod(*(it++));
     });
-    options.option("--subtitles", "FILE", "Display the SRT subtitles in FILE, synced to the disc's "
-                                          "own time code", [&] () -> void {
-        subtitles_path = *(it++);
-        if (!filesystem::exists(*subtitles_path)) {
-            cerr << "Subtitle file not found: " << *subtitles_path << endl;
+    options.flag("--subtitles", "Display SRT subtitles synced to the disc's own time code.  The "
+                                "tracks are the .srt files next to the input file whose names "
+                                "start with the input's name minus its extension "
+                                "(capture.ja.srt for capture.raw); the first one alphabetically "
+                                "starts as the primary track, and the [ and ] keys cycle the "
+                                "primary and secondary track", [&] () -> void {
+        subtitles_enabled = true;
+    });
+    options.option("--subtitles-file", "FILE", "Start with the SRT subtitles in FILE as the "
+                                               "primary track (implies --subtitles)", [&] () -> void {
+        subtitles_file = *(it++);
+        if (!filesystem::exists(*subtitles_file)) {
+            cerr << "Subtitle file not found: " << *subtitles_file << endl;
             exit(EXIT_FAILURE);
         }
     });
@@ -683,6 +748,30 @@ int main(int argc, char *argv[]) {
                     exit(EXIT_FAILURE);
                 }
 
+                SubtitleSetup subtitle_setup;
+                subtitle_setup.font_path = subtitle_font_path;
+                if (subtitles_enabled)
+                    subtitle_setup.files = discoverSubtitleFiles(*it);
+                if (subtitles_file) {
+                    // If the discovery also found the file, keep the discovered entry
+                    // (with its short label); otherwise add it, labeled by filename.
+                    std::error_code ec;
+                    const auto canon = filesystem::weakly_canonical(*subtitles_file, ec);
+                    for (size_t i = 0; i < subtitle_setup.files.size(); i++)
+                        if (filesystem::weakly_canonical(subtitle_setup.files[i].second, ec) == canon)
+                            subtitle_setup.primary_index = (int)i;
+                    if (subtitle_setup.primary_index < 0) {
+                        subtitle_setup.files.emplace_back(
+                                filesystem::path(*subtitles_file).stem().string(), *subtitles_file);
+                        subtitle_setup.primary_index = (int)subtitle_setup.files.size() - 1;
+                    }
+                } else if (!subtitle_setup.files.empty()) {
+                    subtitle_setup.primary_index = 0;
+                }
+                if (subtitles_enabled && subtitle_setup.files.empty())
+                    cerr << "No .srt files matching " << filesystem::path(*it).stem().string()
+                         << "*.srt found next to " << *it << endl;
+
                 StreamLogger log(log_selection, std::cerr, true);
 
                 musevk::VulkanManager manager(log);
@@ -706,7 +795,7 @@ int main(int argc, char *argv[]) {
                                                      full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
                                                      efm_audio,
                                                      benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
-                                     subtitles_path, subtitle_font_path,
+                                     subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds);
                         delete reader;
                         break;
@@ -717,7 +806,7 @@ int main(int argc, char *argv[]) {
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
                                      efm_audio, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
-                                     subtitles_path, subtitle_font_path,
+                                     subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds);
                         delete reader;
                         break;
@@ -731,7 +820,7 @@ int main(int argc, char *argv[]) {
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
                                      efm_audio, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
-                                     subtitles_path, subtitle_font_path,
+                                     subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds);
                         delete reader;
                         break;

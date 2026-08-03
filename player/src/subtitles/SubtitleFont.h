@@ -87,9 +87,11 @@ public:
 
     // Lay out one cue. `lines` is one string per visible line (line breaks come from
     // the SRT's own newlines). `max_width` is the wrapping width; lines wider than it
-    // are word-wrapped. `frame_w` / `frame_h` set the anchor (bottom-center of frame).
+    // are word-wrapped. `frame_w` / `frame_h` set the anchor (bottom-center of frame,
+    // or top-center with `anchor_top`, used for the secondary subtitle track).
     LaidSubtitle layout(const std::vector<std::string> &lines,
-                        int frame_w, int frame_h, int max_width) const;
+                        int frame_w, int frame_h, int max_width,
+                        bool anchor_top = false) const;
 
     [[nodiscard]] int pixelHeight() const { return m_pixel_height; }
     [[nodiscard]] int lineHeight() const { return m_line_height; }
