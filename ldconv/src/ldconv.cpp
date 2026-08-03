@@ -457,6 +457,29 @@ int convert(const Options &options) {
         }
     }
 
+    // Will it fit?  Exact for the raw formats; for FLAC an estimate of 0.6x
+    // the bits of resolution being kept, calibrated against the measurements
+    // in the README (a 10-bit capture lands at 4.7-5.6 bits per sample).  A
+    // warning rather than an error: space may be being freed while this runs,
+    // and a particular capture can compress better than the estimate.
+    if (options.output != "-" && to_convert != 0) {
+        uint64_t needed;
+        if (sink_info.bytes_per_group != 0)
+            needed = (to_convert + sink_info.samples_per_group - 1)
+                     / sink_info.samples_per_group * (uint64_t)sink_info.bytes_per_group;
+        else {
+            const int resolution = std::min(source->bits(), sink->bits() - drop_bits);
+            needed = (uint64_t)((double)to_convert * std::max(resolution, 1) * 0.6 / 8.0);
+        }
+        std::error_code ec;
+        const auto space = std::filesystem::space(options.output, ec);
+        if (!ec && space.available < needed)
+            fprintf(stderr, "warning: the output needs %s%s but the destination has %s free\n",
+                    sink_info.bytes_per_group != 0 ? "" : "an estimated ",
+                    humanBytes((double)needed).c_str(),
+                    humanBytes((double)space.available).c_str());
+    }
+
     if (options.start != 0)
         source->skip(options.start);
 
