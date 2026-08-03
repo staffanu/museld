@@ -43,7 +43,8 @@ fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB devic
 picostream/        — Standalone: Picoscope oscilloscope capture tool (analog + MSO digital)
 ldconv/            — Standalone: converter between capture formats (.lds/.ldf/.s16/...)
 octave/            — Octave/Matlab scripts for filter design and algorithm exploration
-tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parseQ.awk)
+tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parseQ.awk,
+                     srt-furigana.py for beginner-friendly Japanese subtitle variants)
 packaging/         — Scripts and per-package READMEs for the Windows/macOS downloads
 docs/              — Reference documentation (player, CLI, AC3-RF decoding, packaging)
 ```
