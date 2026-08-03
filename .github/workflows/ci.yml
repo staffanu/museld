@@ -63,7 +63,7 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkg install -y cmake ninja pkgconf \
+            pkg install -y git cmake ninja pkgconf \
               vulkan-headers vulkan-loader glfw shaderc \
               flac ffmpeg catch2
           run: |
