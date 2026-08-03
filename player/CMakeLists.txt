@@ -3,6 +3,12 @@ project(museld LANGUAGES CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# The threading library is linked explicitly. On glibc/Linux libpthread symbols
+# are pulled in transitively, but FreeBSD (and a strict linker generally) needs
+# an explicit -lpthread, so link Threads::Threads into the targets that use it.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 # Building for the CPU doing the build is right for local use, but a binary that
 # is distributed has to target a baseline the audience actually has: set this to
 # e.g. x86-64-v3 (AVX2, Haswell/Zen and later), which still enables the AVX filter

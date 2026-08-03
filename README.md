@@ -131,6 +131,13 @@ Windows (MSYS2, UCRT64 environment — museld builds, but runtime is not yet wel
 pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,flac,catch,vulkan-headers,vulkan-loader,glfw,shaderc}
 ```
 
+FreeBSD (pkg — a secondary platform, built and tested by CI but without prebuilt
+downloads; `ffmpeg` and `catch2` are only needed for `--write` and the tests):
+
+```bash
+sudo pkg install cmake pkgconf vulkan-headers vulkan-loader glfw shaderc flac ffmpeg catch2
+```
+
 Then build with:
 
 ```bash

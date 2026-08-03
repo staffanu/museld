@@ -5,6 +5,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <pthread.h>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -189,7 +190,7 @@ void NtscRfDemodulator::demodulate() {
     std::thread efm_thread([&]() {
 #ifdef __APPLE__
         pthread_setname_np("museld-efm");
-#elif defined(linux)
+#elif defined(linux) || defined(__FreeBSD__)
         pthread_setname_np(pthread_self(), "museld-efm");
 #endif
         while (true) {
