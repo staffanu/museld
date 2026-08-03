@@ -180,6 +180,7 @@ static void runPlayer(Logger &log,
         }
 
         auto t0 = chrono::high_resolution_clock::now();
+        int disc_code_logged_minute = 0; // minute 0 is not logged: the decoder is still locking
 
         auto make_controls = [&](bool redo) {
             return Decoder::DecodeControls{
@@ -203,6 +204,22 @@ static void runPlayer(Logger &log,
             if (!state.paused && state.last_decoded.decoded)
                 state.field_count++;
             state.redo_last_field = false;
+
+            // Once a minute of stream time, log the decoded field count against the
+            // disc's own time code.  The offset is what to shift .srt files made from
+            // a --write render by (whisper times are file-relative), and a changing
+            // offset means playback and disc time are drifting apart.
+            if (const double stream_seconds = state.field_count * seconds_per_iteration;
+                static_cast<int>(stream_seconds / 60.0) != disc_code_logged_minute
+                && state.last_decoded.disc_info) {
+                disc_code_logged_minute = static_cast<int>(stream_seconds / 60.0);
+                if (auto disc_seconds = state.last_decoded.disc_info->playbackTimeSeconds()) {
+                    log.info(eApplication,
+                             std::format("Stream {:.2f} s ({} fields), disc code {:.2f} s, offset {:+.2f} s",
+                                         stream_seconds, state.field_count, *disc_seconds,
+                                         *disc_seconds - stream_seconds));
+                }
+            }
 
             // Scripted export: decode until the requested stream position is reached
             bool scripted_export = false;
