@@ -48,6 +48,36 @@ jobs:
           cmake --build build-ldconv
           ctest --test-dir build-ldconv --output-on-failure
 
+  # FreeBSD is a secondary platform with no prebuilt downloads, but the build is
+  # kept working here. GitHub has no FreeBSD runner, so the job runs inside a VM
+  # on the Linux runner; the checkout lives on the host and is shared in, so the
+  # build commands run under /home/runner/work just like the other jobs.
+  freebsd:
+    name: FreeBSD (museld + ac3rf-efm-decode + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in a FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y cmake ninja pkgconf \
+              vulkan-headers vulkan-loader glfw shaderc \
+              flac ffmpeg catch2
+          run: |
+            set -e
+            cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
+              -S player -B build
+            cmake --build build
+            ctest --test-dir build --output-on-failure
+
+            cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
+              -S ldconv -B build-ldconv
+            cmake --build build-ldconv
+            ctest --test-dir build-ldconv --output-on-failure
+
   macos:
     name: macOS (museld + ac3rf-efm-decode + tests)
     runs-on: macos-latest

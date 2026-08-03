@@ -51,7 +51,7 @@ bool FrameReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>
     m_reader_thread = new std::thread([this]() {
 #ifdef __APPLE__
         pthread_setname_np("museld-reader");
-#elif defined(linux)
+#elif defined(linux) || defined(__FreeBSD__)
         pthread_setname_np(pthread_self(), "museld-reader");
 #endif
         threadFunc();

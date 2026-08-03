@@ -36,6 +36,10 @@ add_library(ac3rf STATIC
 
 target_compile_features(ac3rf PUBLIC cxx_std_20)
 
+# StreamLogger and the input readers use std::thread/std::mutex; link the platform
+# threading library PUBLIC-ly so it propagates to everything that links ac3rf.
+target_link_libraries(ac3rf PUBLIC Threads::Threads)
+
 # The library is installed and exported for external use, so it may be linked
 # into a shared object, which requires position-independent code on Linux.
 set_target_properties(ac3rf PROPERTIES POSITION_INDEPENDENT_CODE ON)

@@ -32,7 +32,7 @@ void PrefetchingInputReader::initialize() {
 void PrefetchingInputReader::produce() {
 #ifdef __APPLE__
     pthread_setname_np("input-prefetch");
-#elif defined(linux)
+#elif defined(linux) || defined(__FreeBSD__)
     pthread_setname_np(pthread_self(), "input-prefetch");
 #endif
     std::unique_lock<std::mutex> lock(m_mutex);

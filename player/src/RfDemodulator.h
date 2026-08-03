@@ -67,7 +67,7 @@ public:
         m_demodulator_thread = new std::thread([this]() {
 #ifdef __APPLE__
             pthread_setname_np("museld-demod");
-#elif defined(linux)
+#elif defined(linux) || defined(__FreeBSD__)
             pthread_setname_np(pthread_self(), "museld-demod");
 #endif
             // Nothing above this catches: an exception escaping the thread would otherwise
