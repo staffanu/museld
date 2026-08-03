@@ -31,13 +31,15 @@ struct PushBlock {
 };
 } // namespace
 
-SubtitleOverlay::SubtitleOverlay(std::vector<SubtitleEntry> entries,
-                                 std::unique_ptr<SubtitleFont> font,
+SubtitleOverlay::SubtitleOverlay(std::shared_ptr<const std::vector<SubtitleTrack>> tracks,
+                                 std::shared_ptr<SubtitleFont> font,
+                                 bool anchor_top,
                                  const std::string &executable_dir,
                                  musevk::VulkanManager &vulkan_manager,
                                  musevk::CommandPool & /*command_pool*/)
-    : m_entries(std::move(entries)),
+    : m_tracks(std::move(tracks)),
       m_font(std::move(font)),
+      m_anchor_top(anchor_top),
       m_vulkan_manager(vulkan_manager) {
 
     m_quad_buffer = std::make_shared<musevk::VulkanBuffer>(
@@ -70,30 +72,34 @@ void SubtitleOverlay::writeQuad(uint32_t *dst, int dst_x, int dst_y, int w, int 
 void SubtitleOverlay::render(musevk::CommandBuffer &command_buffer,
                              ResultImages &images,
                              PlayerState &state,
-                             const Decoder & /*decoder*/) {
-    if (m_entries.empty() || !state.last_decoded.disc_info) return;
+                             const Decoder & /*decoder*/,
+                             int track_index) {
+    if (track_index < 0 || track_index >= static_cast<int>(m_tracks->size())) return;
+    const auto &entries = (*m_tracks)[track_index].entries;
+    if (entries.empty() || !state.last_decoded.disc_info) return;
     auto t_opt = state.last_decoded.disc_info->playbackTimeSeconds();
     if (!t_opt) return;
     const double t = *t_opt;
 
     int active = -1;
     {
-        auto it = std::upper_bound(m_entries.begin(), m_entries.end(), t,
+        auto it = std::upper_bound(entries.begin(), entries.end(), t,
             [](double v, const SubtitleEntry &e) { return v < e.start_seconds; });
-        if (it != m_entries.begin()) {
+        if (it != entries.begin()) {
             auto cand = std::prev(it);
-            if (t < cand->end_seconds) active = static_cast<int>(cand - m_entries.begin());
+            if (t < cand->end_seconds) active = static_cast<int>(cand - entries.begin());
         }
     }
     if (active < 0) return;
 
-    if (active != m_last_entry_index) {
+    if (active != m_last_entry_index || track_index != m_last_track_index) {
+        m_last_track_index = track_index;
         m_last_entry_index = active;
         const auto &img = images.out_image;
         const int frame_w = static_cast<int>(img->getWidth());
         const int frame_h = static_cast<int>(img->getHeight());
         const int max_width = static_cast<int>(frame_w * 0.8);
-        m_last_laid = m_font->layout(m_entries[active].lines, frame_w, frame_h, max_width);
+        m_last_laid = m_font->layout(entries[active].lines, frame_w, frame_h, max_width, m_anchor_top);
     }
     if (m_last_laid.lines.empty()) return;
 

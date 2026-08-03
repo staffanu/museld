@@ -6,6 +6,7 @@
 
 #include <string>
 #include <utility>
+#include <vector>
 #include "Decoder.h"
 
 struct PlayerState {
@@ -26,6 +27,12 @@ struct PlayerState {
     int osd_text_remaining_frames = 0;
     int field_count = 0;
     std::string last_cursor_string;
+
+    // Loaded subtitle track labels, and which track each of the two display
+    // slots shows (-1 = off).  The [ and ] keys cycle the slots.
+    std::vector<std::string> subtitle_track_names;
+    int subtitle_primary = -1;   // bottom of the frame
+    int subtitle_secondary = -1; // top of the frame
 
     Decoder::DecodedField last_decoded{};
 };

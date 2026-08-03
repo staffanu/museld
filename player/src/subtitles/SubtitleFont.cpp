@@ -197,7 +197,8 @@ void SubtitleFont::finalizeAtlas(musevk::CommandPool &command_pool) {
 }
 
 LaidSubtitle SubtitleFont::layout(const std::vector<std::string> &lines,
-                                  int frame_w, int frame_h, int max_width) const {
+                                  int frame_w, int frame_h, int max_width,
+                                  bool anchor_top) const {
     LaidSubtitle out;
 
     // 1) Build the visible line set by soft-wrapping any line that doesn't fit.
@@ -332,5 +333,16 @@ LaidSubtitle SubtitleFont::layout(const std::vector<std::string> &lines,
 
     // Restore top-to-bottom order for callers / rendering.
     std::reverse(out.lines.begin(), out.lines.end());
+
+    // The block is laid out bottom-anchored; for a top anchor, shift it so the
+    // first plate's top sits inter_line_gap below the top of the frame.
+    if (anchor_top && !out.lines.empty()) {
+        const int shift = inter_line_gap - out.lines.front().bg_y;
+        for (auto &ll : out.lines) {
+            ll.bg_y += shift;
+            for (auto &g : ll.glyphs)
+                g.dst_y += shift;
+        }
+    }
     return out;
 }

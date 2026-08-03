@@ -74,7 +74,8 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
 | `--saturation <factor>` | NTSC: scale the chroma gain (default 1.0, applied on top of the burst-referenced AGC) |
-| `--subtitles <file.srt>` | Display SRT subtitles synced to the disc's own time code |
+| `--subtitles` | Display SRT subtitles synced to the disc's own time code. The available tracks are the `.srt` files next to the input file whose names start with the input's name minus its extension (`capture.srt`, `capture.ja.srt`, … for `capture.raw`). The first one alphabetically starts as the primary (bottom) track; the `[` and `]` keys cycle the primary and secondary (top) track through all of them |
+| `--subtitles-file <file.srt>` | Start with this file as the primary subtitle track (implies `--subtitles`; the file need not match the naming pattern) |
 | `--subtitle-font <file.ttf>` | Override the default subtitle font (bundled Noto Sans JP) |
 
 **Dropouts** (RF input): the default is to conceal detected dropouts by averaging the surrounding
@@ -150,6 +151,8 @@ also given, which is the mode to use for batch rendering.
 | L | Toggle non-linear de-emphasis processing |
 | Z | Cycle zoom: 1× → 2× → 4× (arrow keys pan when zoomed) |
 | S | Export the displayed frame to a timestamped PNG in the current directory (without OSD text and subtitles) |
+| [ | Cycle the primary subtitle track (bottom of the frame) through the available tracks and off |
+| ] | Cycle the secondary subtitle track (top of the frame) through the available tracks and off |
 | Print Screen | Copy the displayed cursor/offset text to the clipboard |
 
 The C key overlay shows the cursor position both in single-field coordinates (374×516) and in the
