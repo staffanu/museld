@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/staffanu/museld/actions/workflows/ci.yml/badge.svg)](https://github.com/staffanu/museld/actions/workflows/ci.yml)
 
-This repository contains a real-time decoder for Hi-Vision MUSE and NTSC (experimental support)
+This repository contains a real-time decoder for Hi-Vision MUSE and NTSC
 laserdiscs, along with a reusable library and CLI for decoding AC3-RF surround audio and EFM CD
 audio from laserdisc RF captures.
 
@@ -27,9 +27,9 @@ universal, running natively on both Apple Silicon and Intel, and need macOS 15 o
 | `ac3rf-efm-decode-windows-x86_64.zip`<br>`ac3rf-efm-decode-macos-universal.zip` | The decoder CLI on its own, if you don't want the player. |
 
 museld needs a GPU with Vulkan support and current graphics drivers; on macOS it reaches
-the GPU through the bundled MoltenVK. Note that the Windows and macOS builds of museld are
-**experimental**: they compile and link, but have had little testing on real machines.
-`ac3rf-efm-decode` is in better shape.
+the GPU through the bundled MoltenVK. The Windows build has been tested against real
+captures; the macOS build of museld is still **experimental** and has had little testing on
+real machines. `ac3rf-efm-decode` is in better shape.
 
 Neither download is signed with a paid certificate, so both systems object the first time.
 On macOS, clear the quarantine tag once with `xattr -cr <folder>`, or download with `curl`
@@ -49,7 +49,7 @@ builds them, and how to make a release.
 ### museld
 
 A real-time [MUSE](https://en.wikipedia.org/wiki/Multiple_sub-Nyquist_sampling_encoding)
-and NTSC (experimental support) laserdisc decoder. Video filtering runs on the GPU via Vulkan
+and NTSC laserdisc decoder. Video filtering runs on the GPU via Vulkan
 and GLSL compute shaders. Audio is output via the bundled [miniaudio](https://miniaud.io/) library.
 
 See **[docs/museld.md](docs/museld.md)** for the full player reference.
