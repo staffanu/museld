@@ -132,7 +132,8 @@ library:
   Vulkan device is needed and so works on a runner without a GPU.
 
 What this does not prove is that museld actually renders anything: no CI runner has a
-usable GPU. Both Windows and macOS museld builds remain experimental for that reason.
+usable GPU — that has to be checked by hand. The Windows build has been exercised that way
+against real captures; the macOS museld build remains experimental for want of it.
 
 ## Code signing
 
