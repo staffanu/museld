@@ -38,6 +38,7 @@ add_compile_definitions(_FILE_OFFSET_BITS=64)
 option(BUILD_AC3RF_DECODE "Build the ac3rf-efm-decode CLI executable"                           ON)
 option(BUILD_MUSE         "Build the MUSE/NTSC decoder (needs Vulkan/GLFW)"                     ON)
 option(USE_LIBAV          "Use FFmpeg for video file output (--write), if a new enough one is found" ON)
+option(USE_OCR            "Build the subtitle OCR support (needs ONNX Runtime)"                  OFF)
 
 add_subdirectory(src)
 if(BUILD_TESTING)
