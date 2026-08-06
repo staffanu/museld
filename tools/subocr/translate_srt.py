@@ -19,6 +19,7 @@ Usage: translate_srt.py ja.srt [--out en.srt] [--model NAME] [--context N]
 """
 
 import argparse
+import os
 import re
 import sys
 import time
@@ -73,11 +74,12 @@ def make_anthropic_backend(model):
     return translate, model
 
 
-def make_openai_backend(base_url, model, think=False):
+def make_openai_backend(base_url, model, think=False, api_key=None):
     base = base_url.rstrip("/")
     if not base.endswith("/v1"):
         base += "/v1"
-    http = httpx.Client(timeout=120.0)
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    http = httpx.Client(timeout=120.0, headers=headers)
     if not model:
         models = http.get(f"{base}/models").json()
         model = models["data"][0]["id"]
@@ -110,6 +112,9 @@ def main():
     ap.add_argument("--context", type=int, default=8, help="previous cues kept as context")
     ap.add_argument("--think", action="store_true",
                     help="openai backend: leave the model's thinking mode enabled")
+    ap.add_argument("--api-key", default=os.environ.get("OPENAI_API_KEY"),
+                    help="openai backend: bearer token for hosted endpoints "
+                         "(default: $OPENAI_API_KEY; local servers need none)")
     args = ap.parse_args()
 
     cues = parse_srt(args.srt.read_text(encoding="utf-8"))
@@ -122,7 +127,8 @@ def main():
     else:
         if not args.base_url:
             sys.exit("--backend openai requires --base-url")
-        translate, model = make_openai_backend(args.base_url, args.model, args.think)
+        translate, model = make_openai_backend(args.base_url, args.model, args.think,
+                                               args.api_key)
     print(f"backend={args.backend} model={model}")
 
     history = []       # (ja, en) dialogue pairs for the rolling context
