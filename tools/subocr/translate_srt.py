@@ -36,6 +36,8 @@ SYSTEM = (
     "breaks if the cue has two lines."
 )
 
+JAPANESE_RE = re.compile(r"[ぁ-ゖァ-ヺー々〆一-鿿]")
+
 CUE_RE = re.compile(
     r"(\d+)\s*\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\s*\n(.*?)(?:\n\n|\Z)",
     re.DOTALL,
@@ -123,7 +125,8 @@ def main():
         translate, model = make_openai_backend(args.base_url, args.model, args.think)
     print(f"backend={args.backend} model={model}")
 
-    history = []  # (ja, en) pairs
+    history = []       # (ja, en) dialogue pairs for the rolling context
+    translations = []  # one English text per cue, for the output file
     total_ms = 0.0
     for i, cue in enumerate(cues):
         ctx_lines = []
@@ -135,17 +138,32 @@ def main():
             prompt += "Recent dialogue:\n" + "\n".join(ctx_lines) + "\n\n"
         prompt += f"New cue to translate:\n{cue['text']}"
 
+        # Nothing to translate (credits, OCR garbage): pass through unchanged,
+        # and keep it out of the rolling context
+        if not JAPANESE_RE.search(cue["text"]):
+            translations.append(cue["text"])
+            print(f"[{cue['start']}] {'':>8} {cue['text']!r} (passed through)")
+            continue
+
         t0 = time.perf_counter()
         en = translate(prompt).strip()
         ms = (time.perf_counter() - t0) * 1000
         total_ms += ms
+        # A meta-response ("please provide the cue...") instead of a translation
+        # is always much longer than the source line; keep the Japanese then
+        if len(en) > max(80, 5 * len(cue["text"])):
+            print(f"[{cue['start']}] {ms:5.0f} ms  rejected response {en[:60]!r}...")
+            en = cue["text"]
         history.append((cue["text"], en))
+        translations.append(en)
         print(f"[{cue['start']}] {ms:5.0f} ms  {cue['text']!r} -> {en!r}")
 
     with open(out, "w", encoding="utf-8") as f:
-        for i, (cue, (_, en)) in enumerate(zip(cues, history), 1):
+        for i, (cue, en) in enumerate(zip(cues, translations), 1):
             f.write(f"{i}\n{cue['start']} --> {cue['end']}\n{en}\n\n")
-    print(f"\n{len(cues)} cues, avg {total_ms / len(cues):.0f} ms/cue -> {out}")
+    n_translated = len(history)
+    print(f"\n{len(cues)} cues ({n_translated} translated), "
+          f"avg {total_ms / max(1, n_translated):.0f} ms/cue -> {out}")
 
 
 if __name__ == "__main__":
