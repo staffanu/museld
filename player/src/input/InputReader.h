@@ -4,6 +4,7 @@
 #ifndef AC3RF_DECODE_INPUTREADER_H
 #define AC3RF_DECODE_INPUTREADER_H
 
+#include <algorithm>
 #include <cstdint>
 #include <string.h>
 #include <unistd.h>
@@ -114,7 +115,10 @@ public:
             return;
         std::scoped_lock<std::mutex> lock(m_fd_mutex);
         off_t bytes_to_seek = no_samples * sizeof(*m_buffer);
-        lseek(m_fd, bytes_to_seek, SEEK_CUR);
+        // Clamp at the start of the file: without it a backward seek that would
+        // land before the start fails outright and the position doesn't move
+        off_t current = lseek(m_fd, 0, SEEK_CUR);
+        lseek(m_fd, std::max<off_t>(0, current + bytes_to_seek), SEEK_SET);
     }
 
     int readFloats(float *f) override {
