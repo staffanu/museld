@@ -13,6 +13,7 @@ Usage: subocr.py FRAMES_DIR [--fps N] [--out ja.srt] [--score]
 import argparse
 import difflib
 import json
+import re
 import sys
 import time
 from collections import Counter
@@ -25,6 +26,11 @@ BAND_FRAC = 0.28          # bottom fraction of the frame that may hold subtitles
 MASK_DIFF_THRESH = 0.15   # relative mask change that triggers a fresh OCR
 SIM_THRESH = 0.55         # difflib ratio above which two readings are one cue
 MIN_CUE_FRAMES = 2        # ignore cues shorter than this many sampled frames
+FURIGANA_FRAC = 0.62      # boxes shorter than this fraction of the tallest box
+                          # are furigana ruby glosses, not subtitle lines
+MERGE_GAP_SECONDS = 0.7   # bridge flicker: merge same-text cues split by a gap
+
+JAPANESE_RE = re.compile(r"[ぁ-ゖァ-ヺー々〆一-鿿]")
 
 
 def text_mask(band):
@@ -49,6 +55,44 @@ def mask_changed(prev, cur):
     if max(a, b) < 200:            # both essentially empty
         return (a > 200) != (b > 200)
     return (prev ^ cur).sum() / max(a, b) > MASK_DIFF_THRESH
+
+
+def ocr_band_lines(ocr, band, japanese_only):
+    """OCR the band and return subtitle lines, top to bottom.
+
+    Drops furigana ruby glosses (boxes much shorter than the main text) and,
+    unless japanese_only is off, lines with no Japanese script (film credits,
+    detector garbage).  The detector sometimes splits one subtitle line into
+    several side-by-side boxes, so boxes are clustered into rows by vertical
+    position and concatenated left to right within each row."""
+    res = ocr(np.asarray(band))
+    if res is None or not res.txts:
+        return []
+    boxes = res.boxes  # N x 4 x 2 (x, y) quadrilaterals, same order as res.txts
+    heights = [float(b[:, 1].max() - b[:, 1].min()) for b in boxes]
+    max_h = max(heights)
+    detections = []
+    for box, h, text in zip(boxes, heights, res.txts):
+        if h < FURIGANA_FRAC * max_h:
+            continue
+        if japanese_only and not JAPANESE_RE.search(text):
+            continue
+        detections.append((float(box[:, 1].mean()), float(box[:, 0].min()), text))
+    detections.sort()
+
+    rows = []  # each: [y_center of first member, [(x, text), ...]]
+    for y, x, text in detections:
+        if rows and y - rows[-1][0] < 0.5 * max_h:
+            rows[-1][1].append((x, text))
+        else:
+            rows.append([y, [(x, text)]])
+    lines = []
+    for _, members in rows:
+        members.sort()
+        # No separator for Japanese text; spaces between Latin fragments
+        sep = "" if all(JAPANESE_RE.search(t) for _, t in members) else " "
+        lines.append(sep.join(t for _, t in members))
+    return lines
 
 
 def norm(s):
@@ -76,6 +120,8 @@ def main():
     ap.add_argument("--fps", type=float, default=None)
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--score", action="store_true")
+    ap.add_argument("--any-script", action="store_true",
+                    help="keep lines with no Japanese script (credits, on-screen text)")
     args = ap.parse_args()
 
     gt_path = args.frames_dir / "ground_truth.json"
@@ -103,9 +149,7 @@ def main():
             if m.sum() < 200:
                 last_text = ""
             else:
-                res = ocr(np.asarray(band))
-                lines = [t for t in (res.txts or [])] if res is not None else []
-                last_text = "\n".join(lines)
+                last_text = "\n".join(ocr_band_lines(ocr, band, not args.any_script))
             ocr_time += time.perf_counter() - t0
             n_ocr += 1
         prev_mask = m
@@ -138,6 +182,20 @@ def main():
         result.append({"start": c["start_i"] / fps,
                        "end": (c["end_i"] + 1) / fps,
                        "text": text})
+
+    # Bridge flicker: a cue briefly lost to noise (a mask dropout or a bad OCR
+    # frame) comes back as a separate near-identical cue -- merge across small gaps
+    merged = []
+    for r in result:
+        if (merged and r["start"] - merged[-1]["end"] <= MERGE_GAP_SECONDS
+                and similar(r["text"], merged[-1]["text"]) >= SIM_THRESH):
+            prev = merged[-1]
+            if len(r["text"]) > len(prev["text"]):
+                prev["text"] = r["text"]  # keep the more complete reading
+            prev["end"] = r["end"]
+        else:
+            merged.append(r)
+    result = merged
 
     write_srt(result, out)
     print(f"{len(frames)} frames, {n_ocr} OCR calls ({ocr_time / max(n_ocr, 1) * 1000:.0f} ms avg), "
