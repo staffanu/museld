@@ -297,3 +297,28 @@ if(BUILD_MUSE)
     add_custom_target(SubtitleFontAsset DEPENDS ${MUSELD_FONT_DST})
     add_dependencies(museld SubtitleFontAsset)
 endif()
+
+# ============================================================================
+# Subtitle OCR (USE_OCR) — PP-OCR text detection/recognition on ONNX Runtime.
+# subocr-test is the standalone harness; the museld integration builds on the
+# same OcrEngine.
+# ============================================================================
+
+if(USE_OCR)
+    find_path(ONNXRUNTIME_INCLUDE_DIR onnxruntime_cxx_api.h PATH_SUFFIXES onnxruntime)
+    find_library(ONNXRUNTIME_LIBRARY onnxruntime)
+    if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIBRARY)
+        message(FATAL_ERROR "USE_OCR is on but ONNX Runtime was not found")
+    endif()
+
+    add_library(museld-ocr STATIC ocr/OcrEngine.cpp ocr/OcrEngine.h)
+    target_compile_features(museld-ocr PUBLIC cxx_std_20)
+    target_include_directories(museld-ocr
+        PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+        PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+    target_link_libraries(museld-ocr PUBLIC ${ONNXRUNTIME_LIBRARY} Threads::Threads)
+
+    add_executable(subocr-test ocr/subocr-test.cpp)
+    target_include_directories(subocr-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/stb)
+    target_link_libraries(subocr-test PRIVATE museld-ocr ac3rf)
+endif()
