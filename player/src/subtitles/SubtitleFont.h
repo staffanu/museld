@@ -9,8 +9,10 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
+#include "logging/Logger.h"
 #include "musevk/VulkanBuffer.h"
 #include "musevk/VulkanManager.h"
 #include "musevk/CommandPool.h"
@@ -63,11 +65,14 @@ struct LaidSubtitle {
 // once at startup and the atlas is then immutable.
 class SubtitleFont {
 public:
-    static constexpr int c_atlas_width = 1024;
-    static constexpr int c_atlas_height = 1024;
+    // Sized for a film's worth of distinct kanji (live OCR tracks rasterize
+    // glyphs incrementally over the whole runtime)
+    static constexpr int c_atlas_width = 2048;
+    static constexpr int c_atlas_height = 2048;
 
     // Throws std::runtime_error on failure.
-    SubtitleFont(const std::filesystem::path &ttf_path,
+    SubtitleFont(Logger &log,
+                 const std::filesystem::path &ttf_path,
                  int pixel_height,
                  musevk::VulkanManager &vulkan_manager,
                  musevk::CommandPool &command_pool);
@@ -79,11 +84,18 @@ public:
     // cue). Cheap to call repeatedly: skips already-rasterized codepoints.
     void warmUpLine(const std::vector<uint32_t> &codepoints);
 
-    // Upload the (currently CPU-side) atlas to GPU as a storage buffer. After this,
-    // no further warmUp() calls should be made. Also computes reference ascent /
-    // descent metrics (the 90th percentile over all rasterized glyphs) used to
-    // size the background plates consistently across lines.
+    // Upload the CPU-side atlas to GPU as a storage buffer, and compute the
+    // reference ascent / descent metrics (the 90th percentile over all
+    // rasterized glyphs) used to size the background plates consistently
+    // across lines.  Lines warmed up later (live OCR text) are picked up by
+    // refreshAtlasIfDirty().
     void finalizeAtlas(musevk::CommandPool &command_pool);
+
+    // Re-upload the atlas if warmUpLine() rasterized new glyphs since the last
+    // upload.  Call from the render thread between frames; the overlay fetches
+    // atlasBuffer() every render, so the new buffer takes effect immediately.
+    // Returns whether an upload happened.
+    bool refreshAtlasIfDirty(musevk::CommandPool &command_pool);
 
     // Lay out one cue. `lines` is one string per visible line (line breaks come from
     // the SRT's own newlines). `max_width` is the wrapping width; lines wider than it
@@ -103,6 +115,7 @@ public:
 
 private:
     bool rasterizeCodepoint(uint32_t codepoint);
+    void uploadAtlas(musevk::CommandPool &command_pool);
 
     int m_pixel_height;
     double m_scale = 0.0;
@@ -116,8 +129,10 @@ private:
     int m_ref_ascent = 0;
     int m_ref_descent = 0;
 
-    // CPU-side atlas storage (R8 coverage). Uploaded once in finalizeAtlas().
+    // CPU-side atlas storage (R8 coverage). Kept after upload so glyphs can be
+    // added incrementally for live OCR text.
     std::vector<uint8_t> m_atlas_cpu;
+    bool m_atlas_dirty = false;
     // Shelf-packer state.
     int m_shelf_x = 0;
     int m_shelf_y = 0;
@@ -133,6 +148,9 @@ private:
     std::vector<int> m_line_descents;
     // Codepoint reserved for the "missing glyph" fallback (rasterized into slot 0).
     uint32_t m_fallback_codepoint = '?';
+    Logger &m_log;
+    int m_atlas_full_glyphs = 0; // glyphs dropped because the atlas ran out of space
+    std::unordered_set<uint32_t> m_missing_logged;
 
     // Opaque holder for stbtt_fontinfo to avoid leaking stb_truetype.h into the header.
     struct StbHolder;

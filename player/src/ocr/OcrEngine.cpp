@@ -23,6 +23,10 @@ constexpr int c_det_max_side = 960;   // longest side fed to the detector
 constexpr int c_det_min_box_side = 3; // in probability-map pixels
 constexpr int c_rec_height = 48;      // recognizer input height
 constexpr int c_rec_max_width = 1280;
+// Recognitions below this confidence are noise (scene content read as text);
+// a single stray character needs to be much more convincing than a line
+constexpr float c_rec_score_thresh = 0.6f;
+constexpr float c_rec_single_char_score_thresh = 0.85f;
 
 // Same ranges as JAPANESE_RE in tools/subocr/subocr.py: kana, kana marks, CJK
 bool isJapaneseCodepoint(uint32_t cp) {
@@ -241,7 +245,14 @@ std::vector<OcrDetection> OcrEngine::recognize(const uint8_t *rgb, int width, in
         d.score = conf_count ? (float)(conf_sum / conf_count) : 0.0f;
     }
 
-    std::erase_if(detections, [](const OcrDetection &d) { return d.text.empty(); });
+    std::erase_if(detections, [](const OcrDetection &d) {
+        if (d.text.empty() || d.score < c_rec_score_thresh) return true;
+        // Count codepoints: a lone character must clear a higher bar
+        size_t codepoints = 0;
+        for (char c : d.text)
+            codepoints += (c & 0xc0) != 0x80;
+        return codepoints <= 1 && d.score < c_rec_single_char_score_thresh;
+    });
     return detections;
 }
 

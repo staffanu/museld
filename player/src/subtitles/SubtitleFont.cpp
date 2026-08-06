@@ -2,6 +2,7 @@
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
 #include <cstdint>
+#include <format>
 #include "SubtitleFont.h"
 
 #include <algorithm>
@@ -43,13 +44,15 @@ std::vector<uint32_t> utf8ToCodepoints(const std::string &s) {
     return out;
 }
 
-SubtitleFont::SubtitleFont(const std::filesystem::path &ttf_path,
+SubtitleFont::SubtitleFont(Logger &log,
+                           const std::filesystem::path &ttf_path,
                            int pixel_height,
                            musevk::VulkanManager &vulkan_manager,
                            musevk::CommandPool & /*command_pool*/)
     : m_pixel_height(pixel_height),
       m_atlas_cpu(static_cast<size_t>(c_atlas_width) * c_atlas_height, 0),
       m_stb(std::make_unique<StbHolder>()),
+      m_log(log),
       m_vulkan_manager(vulkan_manager) {
     std::ifstream in(ttf_path, std::ios::binary);
     if (!in) throw std::runtime_error("Could not open font file: " + ttf_path.string());
@@ -91,7 +94,12 @@ bool SubtitleFont::rasterizeCodepoint(uint32_t codepoint) {
 
     const int glyph_index = stbtt_FindGlyphIndex(&m_stb->info, static_cast<int>(codepoint));
     if (glyph_index == 0 && codepoint != m_fallback_codepoint) {
-        // Mark as missing; lookups will resolve to the fallback.
+        // Lookups will resolve to the fallback '?'.  Live OCR text can contain
+        // characters outside the font (e.g. simplified-Chinese variants from
+        // the recognizer), so say which
+        if (m_missing_logged.insert(codepoint).second)
+            m_log.warn(eApplication,
+                       std::format("Font has no glyph for U+{:04X}; showing '?'", codepoint));
         return false;
     }
 
@@ -125,8 +133,13 @@ bool SubtitleFont::rasterizeCodepoint(uint32_t codepoint) {
         }
         if (m_shelf_y + h > c_atlas_height) {
             // Atlas full: render as empty so we still advance the pen correctly.
+            // This shows up as blank gaps in the subtitles, so be loud about it.
             gi.width = 0;
             gi.height = 0;
+            if (m_atlas_full_glyphs++ % 50 == 0)
+                m_log.warn(eApplication,
+                           std::format("Subtitle glyph atlas full: {} glyphs dropped so far "
+                                       "(codepoint U+{:04X})", m_atlas_full_glyphs, codepoint));
         } else {
             gi.atlas_x = m_shelf_x;
             gi.atlas_y = m_shelf_y;
@@ -137,6 +150,7 @@ bool SubtitleFont::rasterizeCodepoint(uint32_t codepoint) {
                                   glyph_index);
             m_shelf_x += w + 1;
             if (h > m_shelf_h) m_shelf_h = h;
+            m_atlas_dirty = true;
         }
     }
 
@@ -166,7 +180,7 @@ void SubtitleFont::warmUpLine(const std::vector<uint32_t> &codepoints) {
     }
 }
 
-void SubtitleFont::finalizeAtlas(musevk::CommandPool &command_pool) {
+void SubtitleFont::uploadAtlas(musevk::CommandPool &command_pool) {
     // Upload as a buffer of uint32_t (one pixel per element, low byte = coverage 0..255).
     // Wasteful 4x but matches the existing storage-buffer pattern used by TextRenderer,
     // and the GPU can index it directly with [y * width + x].
@@ -176,10 +190,19 @@ void SubtitleFont::finalizeAtlas(musevk::CommandPool &command_pool) {
     m_atlas_buffer = musevk::VulkanUtil::createDeviceBuffer(
         m_vulkan_manager, command_pool,
         musevk::Size(packed.size()), packed);
+    m_atlas_dirty = false;
+}
 
-    // Free CPU-side data; we don't need it after upload.
-    m_atlas_cpu.clear();
-    m_atlas_cpu.shrink_to_fit();
+bool SubtitleFont::refreshAtlasIfDirty(musevk::CommandPool &command_pool) {
+    if (!m_atlas_dirty || !m_atlas_buffer) return false;
+    uploadAtlas(command_pool);
+    return true;
+}
+
+void SubtitleFont::finalizeAtlas(musevk::CommandPool &command_pool) {
+    uploadAtlas(command_pool);
+    // The CPU-side atlas stays around: live OCR tracks warm up new glyphs
+    // during playback, re-uploaded by refreshAtlasIfDirty()
 
     // Reference metrics: 90th percentile of per-line max ascent and descent.
     // Most Latin lines contain at least one descender (g/p/y/, etc.), so the
