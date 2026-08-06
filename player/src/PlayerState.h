@@ -26,6 +26,12 @@ struct PlayerState {
     std::string displayed_osd_text;
     int osd_text_remaining_frames = 0;
     int field_count = 0;
+    double stream_seconds = 0.0;             // playback position derived from field_count,
+                                             // adjusted for interactive seeks; relative to
+                                             // the --seek position (can go negative when
+                                             // seeking back across it)
+    double stream_seek_offset_seconds = 0.0; // accumulated left/right-arrow seek deltas
+    double stream_start_seconds = 0.0;       // the initial --seek position in the input
     std::string last_cursor_string;
 
     // Loaded subtitle track labels, and which track each of the two display

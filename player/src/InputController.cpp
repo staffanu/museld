@@ -61,6 +61,12 @@ bool InputController::poll(GLFWwindow *window,
                                                state.zoom_center.first - zoom_step / state.zoom_factor);
         } else {
             reader.seek(-10);
+            // Keep the stream clock (subtitle fallback time base) in step.  The
+            // input readers clamp backward seeks at the start of the input, so
+            // clamp the clock the same way; stream_seconds goes negative when
+            // seeking back across the initial --seek position, matching the file.
+            state.stream_seek_offset_seconds +=
+                    std::max(-10.0, -(state.stream_start_seconds + state.stream_seconds));
             if (state.paused) {
                 state.paused = false;
                 state.paused_countdown = 5;
@@ -73,6 +79,7 @@ bool InputController::poll(GLFWwindow *window,
                                                state.zoom_center.first + zoom_step / state.zoom_factor);
         } else {
             reader.seek(10);
+            state.stream_seek_offset_seconds += 10.0;
             if (state.paused) {
                 state.paused = false;
                 state.paused_countdown = 5;

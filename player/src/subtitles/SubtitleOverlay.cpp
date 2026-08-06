@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <optional>
 
 #include "Decoder.h"
 #include "DiscInfo.h"
@@ -31,15 +32,19 @@ struct PushBlock {
 };
 } // namespace
 
-SubtitleOverlay::SubtitleOverlay(std::shared_ptr<const std::vector<SubtitleTrack>> tracks,
+SubtitleOverlay::SubtitleOverlay(Logger &log,
+                                 std::shared_ptr<const std::vector<SubtitleTrack>> tracks,
                                  std::shared_ptr<SubtitleFont> font,
                                  bool anchor_top,
+                                 double offset_seconds,
                                  const std::string &executable_dir,
                                  musevk::VulkanManager &vulkan_manager,
                                  musevk::CommandPool & /*command_pool*/)
-    : m_tracks(std::move(tracks)),
+    : m_log(log),
+      m_tracks(std::move(tracks)),
       m_font(std::move(font)),
       m_anchor_top(anchor_top),
+      m_offset_seconds(offset_seconds),
       m_vulkan_manager(vulkan_manager) {
 
     m_quad_buffer = std::make_shared<musevk::VulkanBuffer>(
@@ -76,10 +81,27 @@ void SubtitleOverlay::render(musevk::CommandBuffer &command_buffer,
                              int track_index) {
     if (track_index < 0 || track_index >= static_cast<int>(m_tracks->size())) return;
     const auto &entries = (*m_tracks)[track_index].entries;
-    if (entries.empty() || !state.last_decoded.disc_info) return;
-    auto t_opt = state.last_decoded.disc_info->playbackTimeSeconds();
-    if (!t_opt) return;
-    const double t = *t_opt;
+    if (entries.empty()) return;
+    std::optional<double> t_opt;
+    if (state.last_decoded.disc_info)
+        t_opt = state.last_decoded.disc_info->playbackTimeSeconds();
+    if (t_opt) {
+        m_disc_time_seen = true;
+    } else if (!m_disc_time_seen) {
+        // No disc code on this capture (a player's baseband output strips it):
+        // fall back to the decoded-stream clock.  Once disc time has been seen,
+        // stick with it -- momentary decode failures should not flip the clock.
+        t_opt = state.stream_seconds;
+        if (!m_fallback_logged) {
+            m_fallback_logged = true;
+            m_log.warn(eApplication,
+                       "No disc code in the stream -- syncing subtitles to the playback "
+                       "position instead (align with --subtitle-offset if needed)");
+        }
+    } else {
+        return;
+    }
+    const double t = *t_opt - m_offset_seconds;
 
     int active = -1;
     {

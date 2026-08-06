@@ -64,6 +64,7 @@ struct SubtitleSetup {
     std::vector<std::pair<std::string, std::string>> files; // {OSD label, path}, alphabetical
     int primary_index = -1; // initial primary track
     std::optional<std::string> font_path;
+    double offset_seconds = 0.0; // delays the subtitles (negative shows them earlier)
 };
 
 // Find the .srt files next to the input whose names start with the input's own
@@ -113,7 +114,8 @@ static void runPlayer(Logger &log,
                       const std::optional<std::string> &export_frame_filename,
                       double export_frame_after_seconds,
                       double write_duration_seconds,
-                      double seconds_per_iteration) {
+                      double seconds_per_iteration,
+                      double initial_seek_seconds) {
     vk::Device &device = manager.getDevice();
 
     vk::SemaphoreCreateInfo semaphoreInfo{};
@@ -129,6 +131,7 @@ static void runPlayer(Logger &log,
         const auto src_dims = decoder.getSourceDimensions();
 
         PlayerState state;
+        state.stream_start_seconds = initial_seek_seconds;
         state.paused_countdown = start_paused ? 5 : 0;
         state.field_interpolation_mode = initial_field_interpolation_mode;
         state.use_3d_comb = initial_use_3d_comb;
@@ -164,9 +167,9 @@ static void runPlayer(Logger &log,
                             font->warmUpLine(utf8ToCodepoints(line));
                 font->finalizeAtlas(command_pool);
                 subtitle_primary_overlay = std::make_unique<SubtitleOverlay>(
-                    tracks, font, false, executable_dir, manager, command_pool);
+                    log, tracks, font, false, subtitle_setup.offset_seconds, executable_dir, manager, command_pool);
                 subtitle_secondary_overlay = std::make_unique<SubtitleOverlay>(
-                    tracks, font, true, executable_dir, manager, command_pool);
+                    log, tracks, font, true, subtitle_setup.offset_seconds, executable_dir, manager, command_pool);
                 for (const auto &[label, path] : subtitle_setup.files)
                     state.subtitle_track_names.push_back(label);
                 state.subtitle_primary = subtitle_setup.primary_index;
@@ -203,6 +206,8 @@ static void runPlayer(Logger &log,
             // --export-frame-at fire early and the frame rate below flattering.
             if (!state.paused && state.last_decoded.decoded)
                 state.field_count++;
+            state.stream_seconds = state.field_count * seconds_per_iteration
+                                   + state.stream_seek_offset_seconds;
             state.redo_last_field = false;
 
             // Once a minute of stream time, log the decoded field count against the
@@ -317,7 +322,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   const SubtitleSetup &subtitle_setup,
                   optional<string> const &export_frame_filename,
                   double export_frame_after_seconds,
-                  double write_duration_seconds) {
+                  double write_duration_seconds,
+                  double initial_seek_seconds) {
     glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -426,7 +432,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   output_filename.has_value(),
                   vfw, audio_playback.get(), executable_dir,
                   subtitle_setup,
-                  export_frame_filename, export_frame_after_seconds, write_duration_seconds, seconds_per_iteration);
+                  export_frame_filename, export_frame_after_seconds, write_duration_seconds, seconds_per_iteration,
+                  initial_seek_seconds);
     }
 
 #ifdef HAVE_LIBAV
@@ -519,6 +526,7 @@ int main(int argc, char *argv[]) {
     bool subtitles_enabled = false;
     optional<string> subtitles_file;
     optional<string> subtitle_font_path;
+    double subtitle_offset_seconds = 0.0;
 
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -624,7 +632,9 @@ int main(int argc, char *argv[]) {
     options.option("--saturation", "FACTOR", "NTSC: scale the chroma gain (default 1.0)", [&] () -> void {
         saturation = (float)stod(*(it++));
     });
-    options.flag("--subtitles", "Display SRT subtitles synced to the disc's own time code.  The "
+    options.flag("--subtitles", "Display SRT subtitles synced to the disc's own time code, or to "
+                                "the playback position when the capture carries no disc code "
+                                "(baseband captures usually do not).  The "
                                 "tracks are the .srt files next to the input file whose names "
                                 "start with the input's name minus its extension "
                                 "(capture.ja.srt for capture.raw); the first one alphabetically "
@@ -639,6 +649,12 @@ int main(int argc, char *argv[]) {
             cerr << "Subtitle file not found: " << *subtitles_file << endl;
             exit(EXIT_FAILURE);
         }
+    });
+    options.option("--subtitle-offset", "SECONDS", "Delay the subtitles by this much; negative "
+                                                   "shows them earlier.  Useful for tracks timed "
+                                                   "against a --write render rather than the "
+                                                   "disc's own time code", [&] () -> void {
+        subtitle_offset_seconds = stod(*(it++));
     });
     options.option("--subtitle-font", "FILE", "TrueType font for the subtitles (default: the "
                                               "bundled Noto Sans JP)", [&] () -> void {
@@ -774,6 +790,7 @@ int main(int argc, char *argv[]) {
 
                 SubtitleSetup subtitle_setup;
                 subtitle_setup.font_path = subtitle_font_path;
+                subtitle_setup.offset_seconds = subtitle_offset_seconds;
                 if (subtitles_enabled)
                     subtitle_setup.files = discoverSubtitleFiles(*it);
                 if (subtitles_file) {
@@ -820,7 +837,8 @@ int main(int argc, char *argv[]) {
                                                      efm_audio,
                                                      benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
-                                     export_frame_filename, export_frame_after_seconds, write_duration_seconds);
+                                     export_frame_filename, export_frame_after_seconds, write_duration_seconds,
+                                     initial_seek_seconds);
                         delete reader;
                         break;
                     }
@@ -831,7 +849,8 @@ int main(int argc, char *argv[]) {
                                      full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
                                      efm_audio, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
-                                     export_frame_filename, export_frame_after_seconds, write_duration_seconds);
+                                     export_frame_filename, export_frame_after_seconds, write_duration_seconds,
+                                     initial_seek_seconds);
                         delete reader;
                         break;
                     }
@@ -845,7 +864,8 @@ int main(int argc, char *argv[]) {
                                      full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
                                      efm_audio, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
-                                     export_frame_filename, export_frame_after_seconds, write_duration_seconds);
+                                     export_frame_filename, export_frame_after_seconds, write_duration_seconds,
+                                     initial_seek_seconds);
                         delete reader;
                         break;
                     }

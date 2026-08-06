@@ -11,6 +11,7 @@
 
 #include "SrtParser.h"
 #include "SubtitleFont.h"
+#include "logging/Logger.h"
 #include "musevk/CommandPool.h"
 #include "musevk/ComputeShader.h"
 #include "musevk/VulkanBuffer.h"
@@ -34,9 +35,13 @@ struct SubtitleTrack {
 // shows is passed to render() each frame, so the hotkeys can switch freely.
 class SubtitleOverlay {
 public:
-    SubtitleOverlay(std::shared_ptr<const std::vector<SubtitleTrack>> tracks,
+    // offset_seconds delays the subtitles relative to the playback clock
+    // (negative shows them earlier).
+    SubtitleOverlay(Logger &log,
+                    std::shared_ptr<const std::vector<SubtitleTrack>> tracks,
                     std::shared_ptr<SubtitleFont> font,
                     bool anchor_top,
+                    double offset_seconds,
                     const std::string &executable_dir,
                     musevk::VulkanManager &vulkan_manager,
                     musevk::CommandPool &command_pool);
@@ -58,7 +63,11 @@ private:
 
     std::shared_ptr<const std::vector<SubtitleTrack>> m_tracks;
     std::shared_ptr<SubtitleFont> m_font;
+    Logger &m_log;
     bool m_anchor_top;
+    double m_offset_seconds;
+    bool m_disc_time_seen = false;
+    bool m_fallback_logged = false;
     int m_last_track_index = -1;
     int m_last_entry_index = -1;
     LaidSubtitle m_last_laid;
