@@ -1,6 +1,7 @@
 // Copyright 2025-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <algorithm>
 #include <cstdint>
 #include <unistd.h>
 #include <cassert>
@@ -57,6 +58,8 @@ void LdfInputReader::seek(off_t no_samples) {
         return;
     std::scoped_lock<std::mutex> lock(m_fd_mutex);
     throwIfFailed();
+    // Clamp at the start of the stream (see InputReaderImpl::seek)
+    no_samples = std::max(no_samples, -(off_t)m_sample_position);
     const bool ok = seek_absolute(m_sample_position + no_samples);
     throwIfFailed();
     if (!ok)

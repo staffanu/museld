@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <cassert>
@@ -49,12 +50,15 @@ void PhaseCorrect16MHzFrameReader::seek(double seconds) {
     if (!m_input_is_realtime) {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        off_t frames_to_seek = (off_t)(seconds * 30);
+        // Whole frames only, clamped at the sync origin -- seeking to the file
+        // start would lose the frame alignment found by compute_initial_skip()
+        off_t frames_to_seek = std::max((off_t)(seconds * 30), -m_frame_position);
         off_t samples_to_seek = frames_to_seek * c_samples_per_frame;
         double actual_seek_time = (double)frames_to_seek / 30.0;
         m_log.info(eInput, std::format("Seeking relative time {} s, {} samples.",
                                        actual_seek_time, samples_to_seek));
         m_input_reader->seek(samples_to_seek);
+        m_frame_position += frames_to_seek;
 
         // discard content in existing input buffers
         move(m_filled_input_buffers.begin(), m_filled_input_buffers.end(), back_inserter(m_vacant_input_buffers));
@@ -84,6 +88,7 @@ void PhaseCorrect16MHzFrameReader::threadFunc() {
         memset(buffer->dropout_data->data<uint8_t>(), 0, sizeof(buffer->dropout_data->size()));
 
         std::unique_lock<std::mutex> lock(m_mutex);
+        m_frame_position++;
         m_cv_filled.notify_one();
         m_filled_input_buffers.push_back(std::move(buffer));
     }

@@ -1,6 +1,7 @@
 // Copyright 2025-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <algorithm>
 #include <cstdint>
 #include <cassert>
 #include <chrono>
@@ -27,7 +28,9 @@ void LdsInputReader::seek(off_t no_samples) {
         return;
     std::scoped_lock<std::mutex> lock(m_fd_mutex);
     off_t bytes_to_seek = no_samples / 4 * 5;
-    lseek(m_fd, bytes_to_seek, SEEK_CUR);
+    // Clamp at the start of the file (see InputReaderImpl::seek)
+    off_t current = lseek(m_fd, 0, SEEK_CUR);
+    lseek(m_fd, std::max<off_t>(0, current + bytes_to_seek), SEEK_SET);
 }
 
 int LdsInputReader::readFloats(float *f) {
