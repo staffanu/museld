@@ -34,6 +34,10 @@
 #include "subtitles/SubtitleOverlay.h"
 #include "input/InputReader.h"
 #include "input/InputReaderFactory.h"
+#ifdef HAVE_OCR
+# include "ocr/OcrBandCapture.h"
+# include "ocr/OcrWorker.h"
+#endif
 #include "muse/ResamplingFrameReader.h"
 #include "muse/PhaseCorrect16MHzFrameReader.h"
 #include "muse/MuseDecoder.h"
@@ -65,7 +69,68 @@ struct SubtitleSetup {
     int primary_index = -1; // initial primary track
     std::optional<std::string> font_path;
     double offset_seconds = 0.0; // delays the subtitles (negative shows them earlier)
+    // Directory holding the PP-OCR detection and recognition .onnx models;
+    // set iff live subtitle OCR is enabled (--ocr)
+    std::optional<std::string> ocr_models_dir;
 };
+
+#ifdef HAVE_OCR
+// The bottom fraction of the frame the OCR watches for burned-in subtitles
+static constexpr double c_ocr_band_fraction = 0.28;
+
+// Locates the detection and recognition models in the --ocr directory: the
+// .onnx files whose names contain "det" and "rec".
+static std::pair<std::string, std::string> findOcrModels(const std::string &dir) {
+    std::string det, rec;
+    std::error_code ec;
+    for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".onnx") continue;
+        const std::string name = entry.path().filename().string();
+        if (name.find("det") != std::string::npos) det = entry.path().string();
+        else if (name.find("rec") != std::string::npos) rec = entry.path().string();
+    }
+    return {det, rec};
+}
+
+// Applies OCR text updates to the live "OCR" subtitle track (render thread
+// only).  An update opens a cue at its stream time and the next one closes it;
+// near-identical cues split by a momentary detection dropout are bridged by
+// reopening the previous entry, mirroring tools/subocr/subocr.py.
+struct LiveSubtitleFeed {
+    static constexpr double c_merge_gap_seconds = 0.7;
+    static constexpr double c_open_end = 1e9; // end of a cue still on screen
+
+    int open_entry = -1;
+    std::vector<std::string> last_lines;
+    double last_end = -1e9;
+
+    void apply(const OcrWorker::Update &update, SubtitleTrack &track, SubtitleFont &font) {
+        // After a backward seek, drop cues from the abandoned timeline; the
+        // rewatched span is re-OCRed and re-appended, keeping entries sorted
+        while (!track.entries.empty() && track.entries.back().start_seconds > update.seconds) {
+            track.entries.pop_back();
+            open_entry = -1;
+        }
+        if (open_entry >= 0) {
+            track.entries[open_entry].end_seconds = update.seconds;
+            last_lines = track.entries[open_entry].lines;
+            last_end = update.seconds;
+            open_entry = -1;
+        }
+        if (update.lines.empty()) return;
+        if (!track.entries.empty() && update.lines == last_lines
+            && update.seconds - last_end <= c_merge_gap_seconds) {
+            open_entry = (int)track.entries.size() - 1; // flicker: reopen the previous cue
+            track.entries[open_entry].end_seconds = c_open_end;
+            return;
+        }
+        for (const auto &line : update.lines)
+            font.warmUpLine(utf8ToCodepoints(line));
+        track.entries.push_back({update.seconds, c_open_end, update.lines});
+        open_entry = (int)track.entries.size() - 1;
+    }
+};
+#endif
 
 // Find the .srt files next to the input whose names start with the input's own
 // name minus its extension: capture.raw matches capture.srt, capture.ja.srt,
@@ -143,10 +208,16 @@ static void runPlayer(Logger &log,
         FrameExporter frame_exporter(log, manager, command_pool);
 
         // All tracks are parsed and warmed into the shared glyph atlas up front,
-        // so the [ and ] keys can switch tracks without any loading hitch.
+        // so the [ and ] keys can switch tracks without any loading hitch.  The
+        // OCR feature adds a live track to the same list; its entries (and
+        // glyphs) arrive during playback, so the display path is shared between
+        // file and live subtitles.
         std::unique_ptr<SubtitleOverlay> subtitle_primary_overlay;
         std::unique_ptr<SubtitleOverlay> subtitle_secondary_overlay;
-        if (!subtitle_setup.files.empty()) {
+        std::shared_ptr<std::vector<SubtitleTrack>> subtitle_tracks;
+        std::shared_ptr<SubtitleFont> subtitle_font;
+        int ocr_track_index = -1;
+        if (!subtitle_setup.files.empty() || subtitle_setup.ocr_models_dir) {
             try {
                 auto tracks = std::make_shared<std::vector<SubtitleTrack>>();
                 for (const auto &[label, path] : subtitle_setup.files) {
@@ -155,12 +226,16 @@ static void runPlayer(Logger &log,
                                                        entries.size(), path, label));
                     tracks->push_back({label, std::move(entries)});
                 }
+                if (subtitle_setup.ocr_models_dir) {
+                    ocr_track_index = (int)tracks->size();
+                    tracks->push_back({"OCR", {}});
+                }
                 std::filesystem::path font_path = subtitle_setup.font_path
                     ? std::filesystem::path(*subtitle_setup.font_path)
                     : std::filesystem::path(executable_dir) / "fonts" / "NotoSansJP-Regular.ttf";
                 const int frame_h = (int)decoder.getResultImages().out_image->getHeight();
                 const int pixel_height = std::max(20, frame_h / 18);
-                auto font = std::make_shared<SubtitleFont>(font_path, pixel_height, manager, command_pool);
+                auto font = std::make_shared<SubtitleFont>(log, font_path, pixel_height, manager, command_pool);
                 for (const auto &track : *tracks)
                     for (const auto &e : track.entries)
                         for (const auto &line : e.lines)
@@ -170,17 +245,46 @@ static void runPlayer(Logger &log,
                     log, tracks, font, false, subtitle_setup.offset_seconds, executable_dir, manager, command_pool);
                 subtitle_secondary_overlay = std::make_unique<SubtitleOverlay>(
                     log, tracks, font, true, subtitle_setup.offset_seconds, executable_dir, manager, command_pool);
-                for (const auto &[label, path] : subtitle_setup.files)
-                    state.subtitle_track_names.push_back(label);
-                state.subtitle_primary = subtitle_setup.primary_index;
+                for (const auto &track : *tracks)
+                    state.subtitle_track_names.push_back(track.label);
+                state.subtitle_primary = subtitle_setup.primary_index >= 0
+                    ? subtitle_setup.primary_index : ocr_track_index;
+                subtitle_tracks = std::move(tracks);
+                subtitle_font = std::move(font);
             } catch (const std::exception &x) {
                 log.error(eApplication, std::format("Subtitles disabled: {}", x.what()));
                 subtitle_primary_overlay.reset();
                 subtitle_secondary_overlay.reset();
+                subtitle_tracks.reset();
+                subtitle_font.reset();
+                ocr_track_index = -1;
                 state.subtitle_track_names.clear();
                 state.subtitle_primary = state.subtitle_secondary = -1;
             }
         }
+
+#ifdef HAVE_OCR
+        // The OCR worker is owned here, directly by the render thread; band
+        // samples go out and text updates come back between frames, so all
+        // track and glyph-atlas mutation happens on this thread.
+        std::unique_ptr<OcrWorker> ocr_worker;
+        std::unique_ptr<OcrBandCapture> ocr_band_capture;
+        LiveSubtitleFeed ocr_feed;
+        int ocr_sample_countdown = 0;
+        const int ocr_sample_every = std::max(1, (int)std::round(1.0 / (3.0 * seconds_per_iteration)));
+        if (ocr_track_index >= 0) {
+            auto [det_model, rec_model] = findOcrModels(*subtitle_setup.ocr_models_dir);
+            if (det_model.empty() || rec_model.empty()) {
+                log.error(eApplication, std::format("OCR disabled: no det/rec .onnx models in {}",
+                                                    *subtitle_setup.ocr_models_dir));
+                ocr_track_index = -1;
+            } else {
+                ocr_worker = std::make_unique<OcrWorker>(log, det_model, rec_model);
+                ocr_band_capture = std::make_unique<OcrBandCapture>(manager, command_pool,
+                                                                    c_ocr_band_fraction);
+            }
+        }
+#endif
 
         auto t0 = chrono::high_resolution_clock::now();
         int disc_code_logged_minute = 0; // minute 0 is not logged: the decoder is still locking
@@ -245,6 +349,39 @@ static void runPlayer(Logger &log,
                 state.osd_text = path ? std::format("SAVED {}", std::filesystem::path(*path).filename().string())
                                       : "EXPORT FAILED";
             }
+
+#ifdef HAVE_OCR
+            if (ocr_worker) {
+                if (!state.paused && state.last_decoded.decoded
+                    && ++ocr_sample_countdown >= ocr_sample_every) {
+                    ocr_sample_countdown = 0;
+                    int band_width, band_height;
+                    auto rgb = ocr_band_capture->capture(*images.out_image, band_width, band_height);
+                    ocr_worker->submitBand(std::move(rgb), band_width, band_height,
+                                           state.stream_seconds);
+                }
+                for (const auto &update : ocr_worker->drainUpdates()) {
+                    // Log with the subtitle's absolute position in the capture
+                    // (independent of --seek) so a specific cue is easy to
+                    // refer to
+                    if (!update.lines.empty()) {
+                        std::string text;
+                        for (const auto &line : update.lines) {
+                            if (!text.empty()) text += " | ";
+                            text += line;
+                        }
+                        const double file_seconds = state.stream_start_seconds + update.seconds;
+                        const long msec = std::lround(std::abs(file_seconds) * 1000);
+                        log.info(eApplication,
+                                 std::format("OCR [{}{:02}:{:02}.{}] {}",
+                                             file_seconds < 0 ? "-" : "", msec / 60000,
+                                             msec / 1000 % 60, msec % 1000 / 100, text));
+                    }
+                    ocr_feed.apply(update, (*subtitle_tracks)[ocr_track_index], *subtitle_font);
+                }
+                subtitle_font->refreshAtlasIfDirty(command_pool);
+            }
+#endif
 
 #ifdef HAVE_LIBAV
             if (vfw) {
@@ -527,6 +664,7 @@ int main(int argc, char *argv[]) {
     optional<string> subtitles_file;
     optional<string> subtitle_font_path;
     double subtitle_offset_seconds = 0.0;
+    optional<string> ocr_models_dir;
 
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -655,6 +793,21 @@ int main(int argc, char *argv[]) {
                                                    "against a --write render rather than the "
                                                    "disc's own time code", [&] () -> void {
         subtitle_offset_seconds = stod(*(it++));
+    });
+    options.option("--ocr", "DIR", "OCR burned-in Japanese subtitles during playback into a "
+                                   "live \"OCR\" subtitle track, selectable like any other with "
+                                   "the [ and ] keys.  DIR holds the PP-OCR text detection and "
+                                   "recognition models (the .onnx files with \"det\" and \"rec\" "
+                                   "in their names)", [&] () -> void {
+        ocr_models_dir = *(it++);
+#ifndef HAVE_OCR
+        cerr << "--ocr requires a build with -DUSE_OCR=ON" << endl;
+        exit(EXIT_FAILURE);
+#endif
+        if (!filesystem::is_directory(*ocr_models_dir)) {
+            cerr << "OCR model directory not found: " << *ocr_models_dir << endl;
+            exit(EXIT_FAILURE);
+        }
     });
     options.option("--subtitle-font", "FILE", "TrueType font for the subtitles (default: the "
                                               "bundled Noto Sans JP)", [&] () -> void {
@@ -791,6 +944,7 @@ int main(int argc, char *argv[]) {
                 SubtitleSetup subtitle_setup;
                 subtitle_setup.font_path = subtitle_font_path;
                 subtitle_setup.offset_seconds = subtitle_offset_seconds;
+                subtitle_setup.ocr_models_dir = ocr_models_dir;
                 if (subtitles_enabled)
                     subtitle_setup.files = discoverSubtitleFiles(*it);
                 if (subtitles_file) {

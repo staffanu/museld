@@ -311,12 +311,20 @@ if(USE_OCR)
         message(FATAL_ERROR "USE_OCR is on but ONNX Runtime was not found")
     endif()
 
-    add_library(museld-ocr STATIC ocr/OcrEngine.cpp ocr/OcrEngine.h)
+    add_library(museld-ocr STATIC
+        ocr/OcrEngine.cpp ocr/OcrEngine.h
+        ocr/OcrWorker.cpp ocr/OcrWorker.h)
     target_compile_features(museld-ocr PUBLIC cxx_std_20)
     target_include_directories(museld-ocr
         PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
         PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
     target_link_libraries(museld-ocr PUBLIC ${ONNXRUNTIME_LIBRARY} Threads::Threads)
+
+    if(BUILD_MUSE)
+        target_sources(museld PRIVATE ocr/OcrBandCapture.cpp ocr/OcrBandCapture.h)
+        target_compile_definitions(museld PRIVATE HAVE_OCR)
+        target_link_libraries(museld PRIVATE museld-ocr)
+    endif()
 
     add_executable(subocr-test ocr/subocr-test.cpp)
     target_include_directories(subocr-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/stb)

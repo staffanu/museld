@@ -166,8 +166,10 @@ void SubtitleOverlay::render(musevk::CommandBuffer &command_buffer,
                                  vk::AccessFlags(),
                                  vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
 
+    // The atlas buffer is replaced whenever live OCR text adds glyphs
+    // (SubtitleFont::refreshAtlasIfDirty), so it is part of the staleness check
     auto current = m_shader->getBuffersForDescriptorSet(0);
-    if (current.size() != 3 || current[2] != img) {
+    if (current.size() != 3 || current[1] != m_font->atlasBuffer() || current[2] != img) {
         m_shader->updateBufferDescriptorsInSet(0,
             {m_quad_buffer, m_font->atlasBuffer(), img});
     }
