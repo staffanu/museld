@@ -44,7 +44,10 @@ picostream/        — Standalone: Picoscope oscilloscope capture tool (analog +
 ldconv/            — Standalone: converter between capture formats (.lds/.ldf/.s16/...)
 octave/            — Octave/Matlab scripts for filter design and algorithm exploration
 tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parseQ.awk,
-                     srt-furigana.py for beginner-friendly Japanese subtitle variants)
+                     srt-furigana.py for beginner-friendly Japanese subtitle variants,
+                     subocr/ prototype: OCR burned-in Japanese subtitles from rendered
+                     frames to .srt and translate them via the Claude API or a local
+                     OpenAI-compatible model server)
 packaging/         — Scripts and per-package READMEs for the Windows/macOS downloads
 docs/              — Reference documentation (player, CLI, AC3-RF decoding, packaging)
 ```
