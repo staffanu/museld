@@ -35,8 +35,10 @@
 #include "input/InputReader.h"
 #include "input/InputReaderFactory.h"
 #ifdef HAVE_OCR
+# include <map>
 # include "ocr/OcrBandCapture.h"
 # include "ocr/OcrWorker.h"
+# include "ocr/TranslationWorker.h"
 #endif
 #include "muse/ResamplingFrameReader.h"
 #include "muse/PhaseCorrect16MHzFrameReader.h"
@@ -72,6 +74,14 @@ struct SubtitleSetup {
     // Directory holding the PP-OCR detection and recognition .onnx models;
     // set iff live subtitle OCR is enabled (--ocr)
     std::optional<std::string> ocr_models_dir;
+    // OpenAI-compatible server translating the OCR track into a live "OCR-EN"
+    // track; set iff --ocr-translate is given
+    std::optional<std::string> ocr_translate_url;
+    std::string ocr_translate_model; // empty: first model from /v1/models
+    std::string ocr_translate_key;   // empty: no Authorization header
+    // Non-empty: save the OCR (and OCR-EN) cues at exit as <stem>.OCR.srt /
+    // <stem>.OCR-EN.srt with their original imprint timing (--ocr-write)
+    std::string ocr_write_stem;
 };
 
 #ifdef HAVE_OCR
@@ -98,23 +108,38 @@ static std::pair<std::string, std::string> findOcrModels(const std::string &dir)
 // reopening the previous entry, mirroring tools/subocr/subocr.py.
 struct LiveSubtitleFeed {
     static constexpr double c_merge_gap_seconds = 0.7;
-    static constexpr double c_open_end = 1e9; // end of a cue still on screen
+    static constexpr double c_open_end = 1e9;          // end of a cue still on screen
+    static constexpr double c_max_end_extension = 2.5; // cap on the late-display compensation
 
     int open_entry = -1;
+    double open_display_delay = 0.0; // how late the open cue appeared on screen
     std::vector<std::string> last_lines;
     double last_end = -1e9;
+    // Cues with their original imprint timing, unaffected by the display-side
+    // lateness compensation below; this is what --ocr-write saves
+    std::vector<SubtitleEntry> file_entries;
 
-    void apply(const OcrWorker::Update &update, SubtitleTrack &track, SubtitleFont &font) {
+    void apply(const OcrWorker::Update &update, double now, SubtitleTrack &track,
+               SubtitleFont &font) {
         // After a backward seek, drop cues from the abandoned timeline; the
         // rewatched span is re-OCRed and re-appended, keeping entries sorted
         while (!track.entries.empty() && track.entries.back().start_seconds > update.seconds) {
             track.entries.pop_back();
             open_entry = -1;
         }
+        while (!file_entries.empty() && file_entries.back().start_seconds > update.seconds)
+            file_entries.pop_back();
         if (open_entry >= 0) {
-            track.entries[open_entry].end_seconds = update.seconds;
+            // OCR latency made the cue appear open_display_delay late on
+            // screen; keep it up correspondingly longer so its display time is
+            // not shortened.  A later cue takes over the screen the moment it
+            // is appended, so the overlap is harmless.
+            track.entries[open_entry].end_seconds =
+                    update.seconds + std::min(open_display_delay, c_max_end_extension);
             last_lines = track.entries[open_entry].lines;
             last_end = update.seconds;
+            file_entries.push_back({track.entries[open_entry].start_seconds, update.seconds,
+                                    last_lines});
             open_entry = -1;
         }
         if (update.lines.empty()) return;
@@ -122,12 +147,133 @@ struct LiveSubtitleFeed {
             && update.seconds - last_end <= c_merge_gap_seconds) {
             open_entry = (int)track.entries.size() - 1; // flicker: reopen the previous cue
             track.entries[open_entry].end_seconds = c_open_end;
+            if (!file_entries.empty()) file_entries.pop_back(); // re-closed with the full span
             return;
         }
         for (const auto &line : update.lines)
             font.warmUpLine(utf8ToCodepoints(line));
         track.entries.push_back({update.seconds, c_open_end, update.lines});
         open_entry = (int)track.entries.size() - 1;
+        open_display_delay = std::max(0.0, now - update.seconds);
+    }
+
+    // Close the still-open cue into the file record at end of playback.
+    void finish(double now, SubtitleTrack &track) {
+        if (open_entry < 0) return;
+        file_entries.push_back({track.entries[open_entry].start_seconds, now,
+                                track.entries[open_entry].lines});
+        open_entry = -1;
+    }
+};
+
+// Correlates translated cues with their Japanese originals and applies them to
+// the live "OCR-EN" track.  An English cue inherits its Japanese cue's span:
+// the translation typically arrives well before the cue leaves the screen, and
+// the entry's start lying slightly in the past makes it display immediately.
+struct TranslatedSubtitleFeed {
+    struct Span { double start; double end; }; // end < 0: cue still on screen
+
+    struct OpenEn {
+        int index;            // index of the open-ended EN entry
+        double display_delay; // how late its translation appeared on screen
+    };
+
+    long next_id = 1;
+    long open_id = 0;           // ja cue currently on screen
+    std::map<long, Span> spans; // cues whose translation is pending or open
+    std::map<long, OpenEn> open_en_entries;
+    std::vector<SubtitleEntry> file_entries; // original imprint timing, for --ocr-write
+
+    // Track the ja-side update; returns the id to submit for translation
+    // (0 = nothing new to translate).
+    long onOcrUpdate(const OcrWorker::Update &update, SubtitleTrack &en_track) {
+        // Backward seek: mirror LiveSubtitleFeed's truncation, and forget
+        // pending cues from the abandoned timeline so late translations of
+        // them are not applied
+        if (!en_track.entries.empty() && en_track.entries.back().start_seconds > update.seconds) {
+            while (!en_track.entries.empty()
+                   && en_track.entries.back().start_seconds > update.seconds)
+                en_track.entries.pop_back();
+            std::erase_if(open_en_entries, [&](const auto &kv) {
+                return kv.second.index >= (int)en_track.entries.size();
+            });
+            std::erase_if(spans, [&](const auto &kv) {
+                return kv.second.start > update.seconds;
+            });
+            while (!file_entries.empty() && file_entries.back().start_seconds > update.seconds)
+                file_entries.pop_back();
+            if (open_id && !spans.count(open_id)) open_id = 0;
+        }
+        if (open_id) {
+            if (auto it = open_en_entries.find(open_id); it != open_en_entries.end()) {
+                // Same lateness compensation as the ja track: the translation
+                // appeared display_delay late, so let it linger as long
+                auto &entry = en_track.entries[it->second.index];
+                entry.end_seconds = update.seconds
+                        + std::min(it->second.display_delay, LiveSubtitleFeed::c_max_end_extension);
+                file_entries.push_back({entry.start_seconds, update.seconds, entry.lines});
+                open_en_entries.erase(it);
+                spans.erase(open_id); // translated and closed: done
+            } else {
+                spans[open_id].end = update.seconds; // translation still pending
+            }
+            open_id = 0;
+        }
+        if (update.lines.empty()) return 0;
+        const long id = next_id++;
+        spans[id] = {update.seconds, -1.0};
+        open_id = id;
+        return id;
+    }
+
+    struct Applied {
+        double start;        // the cue's start time
+        double late_seconds; // > 0: cue had left the screen this long before
+                             // its translation arrived (shown for a grace
+                             // period from now instead)
+    };
+
+    // Applies one finished translation.  `now` is the current stream time: a
+    // translation can arrive after its cue already left the screen (OCR +
+    // translation latency exceeding the cue duration), and is then shown from
+    // now for a bounded grace period instead of being appended entirely in the
+    // past and never displaying.
+    std::optional<Applied> onTranslation(const TranslationWorker::Result &result, double now,
+                                         SubtitleTrack &en_track, SubtitleFont &font) {
+        auto it = spans.find(result.id);
+        if (it == spans.end() || result.lines.empty()) return std::nullopt;
+        const Span span = it->second;
+        // A backward seek may have replayed earlier cues since: keep sorted
+        if (!en_track.entries.empty()
+            && span.start < en_track.entries.back().start_seconds) {
+            spans.erase(it);
+            return std::nullopt;
+        }
+        double end = span.end < 0 ? LiveSubtitleFeed::c_open_end : span.end;
+        double late_seconds = 0.0;
+        if (span.end >= 0 && now >= span.end) {
+            late_seconds = now - span.end;
+            end = now + std::min(2.5, span.end - span.start);
+        }
+        for (const auto &line : result.lines)
+            font.warmUpLine(utf8ToCodepoints(line));
+        en_track.entries.push_back({span.start, end, result.lines});
+        if (span.end < 0) {
+            open_en_entries[result.id] = {(int)en_track.entries.size() - 1,
+                                          std::max(0.0, now - span.start)};
+        } else {
+            file_entries.push_back({span.start, span.end, result.lines});
+            spans.erase(it);
+        }
+        return Applied{span.start, late_seconds};
+    }
+
+    // Close still-open cues into the file record at end of playback.
+    void finish(double now, SubtitleTrack &en_track) {
+        for (const auto &[id, open] : open_en_entries)
+            file_entries.push_back({en_track.entries[open.index].start_seconds, now,
+                                    en_track.entries[open.index].lines});
+        open_en_entries.clear();
     }
 };
 #endif
@@ -217,6 +363,7 @@ static void runPlayer(Logger &log,
         std::shared_ptr<std::vector<SubtitleTrack>> subtitle_tracks;
         std::shared_ptr<SubtitleFont> subtitle_font;
         int ocr_track_index = -1;
+        int ocr_en_track_index = -1;
         if (!subtitle_setup.files.empty() || subtitle_setup.ocr_models_dir) {
             try {
                 auto tracks = std::make_shared<std::vector<SubtitleTrack>>();
@@ -229,6 +376,10 @@ static void runPlayer(Logger &log,
                 if (subtitle_setup.ocr_models_dir) {
                     ocr_track_index = (int)tracks->size();
                     tracks->push_back({"OCR", {}});
+                    if (subtitle_setup.ocr_translate_url) {
+                        ocr_en_track_index = (int)tracks->size();
+                        tracks->push_back({"OCR-EN", {}});
+                    }
                 }
                 std::filesystem::path font_path = subtitle_setup.font_path
                     ? std::filesystem::path(*subtitle_setup.font_path)
@@ -247,8 +398,11 @@ static void runPlayer(Logger &log,
                     log, tracks, font, true, subtitle_setup.offset_seconds, executable_dir, manager, command_pool);
                 for (const auto &track : *tracks)
                     state.subtitle_track_names.push_back(track.label);
+                // With no file track chosen, the translated OCR track (when
+                // enabled) beats the raw Japanese one as the default
                 state.subtitle_primary = subtitle_setup.primary_index >= 0
-                    ? subtitle_setup.primary_index : ocr_track_index;
+                    ? subtitle_setup.primary_index
+                    : (ocr_en_track_index >= 0 ? ocr_en_track_index : ocr_track_index);
                 subtitle_tracks = std::move(tracks);
                 subtitle_font = std::move(font);
             } catch (const std::exception &x) {
@@ -258,6 +412,7 @@ static void runPlayer(Logger &log,
                 subtitle_tracks.reset();
                 subtitle_font.reset();
                 ocr_track_index = -1;
+                ocr_en_track_index = -1;
                 state.subtitle_track_names.clear();
                 state.subtitle_primary = state.subtitle_secondary = -1;
             }
@@ -269,7 +424,9 @@ static void runPlayer(Logger &log,
         // track and glyph-atlas mutation happens on this thread.
         std::unique_ptr<OcrWorker> ocr_worker;
         std::unique_ptr<OcrBandCapture> ocr_band_capture;
+        std::unique_ptr<TranslationWorker> ocr_translator;
         LiveSubtitleFeed ocr_feed;
+        TranslatedSubtitleFeed ocr_translated_feed;
         int ocr_sample_countdown = 0;
         const int ocr_sample_every = std::max(1, (int)std::round(1.0 / (3.0 * seconds_per_iteration)));
         if (ocr_track_index >= 0) {
@@ -282,6 +439,10 @@ static void runPlayer(Logger &log,
                 ocr_worker = std::make_unique<OcrWorker>(log, det_model, rec_model);
                 ocr_band_capture = std::make_unique<OcrBandCapture>(manager, command_pool,
                                                                     c_ocr_band_fraction);
+                if (ocr_en_track_index >= 0)
+                    ocr_translator = std::make_unique<TranslationWorker>(
+                            log, *subtitle_setup.ocr_translate_url,
+                            subtitle_setup.ocr_translate_model, subtitle_setup.ocr_translate_key);
             }
         }
 #endif
@@ -377,7 +538,37 @@ static void runPlayer(Logger &log,
                                              file_seconds < 0 ? "-" : "", msec / 60000,
                                              msec / 1000 % 60, msec % 1000 / 100, text));
                     }
-                    ocr_feed.apply(update, (*subtitle_tracks)[ocr_track_index], *subtitle_font);
+                    ocr_feed.apply(update, state.stream_seconds,
+                                   (*subtitle_tracks)[ocr_track_index], *subtitle_font);
+                    if (ocr_translator) {
+                        const long id = ocr_translated_feed.onOcrUpdate(
+                                update, (*subtitle_tracks)[ocr_en_track_index]);
+                        if (id) ocr_translator->submit(id, update.lines);
+                    }
+                }
+                if (ocr_translator) {
+                    for (const auto &result : ocr_translator->drainResults()) {
+                        auto applied = ocr_translated_feed.onTranslation(
+                                result, state.stream_seconds,
+                                (*subtitle_tracks)[ocr_en_track_index], *subtitle_font);
+                        if (applied && !result.lines.empty()) {
+                            std::string text;
+                            for (const auto &line : result.lines) {
+                                if (!text.empty()) text += " | ";
+                                text += line;
+                            }
+                            const double file_seconds = state.stream_start_seconds + applied->start;
+                            const long msec = std::lround(std::abs(file_seconds) * 1000);
+                            const std::string late = applied->late_seconds > 0
+                                ? std::format(" (cue ended {:.1f} s before the translation "
+                                              "arrived; showing it briefly)", applied->late_seconds)
+                                : "";
+                            log.info(eApplication,
+                                     std::format("OCR-EN [{}{:02}:{:02}.{}] {}{}",
+                                                 file_seconds < 0 ? "-" : "", msec / 60000,
+                                                 msec / 1000 % 60, msec % 1000 / 100, text, late));
+                        }
+                    }
                 }
                 subtitle_font->refreshAtlasIfDirty(command_pool);
             }
@@ -428,6 +619,43 @@ static void runPlayer(Logger &log,
                             full_screen, src_dims.width, src_dims.height))
                 break;
         }
+
+#ifdef HAVE_OCR
+        // Save the collected cues with their original imprint timing, as
+        // absolute positions in the input so the files line up when played
+        // from the start (--subtitles auto-discovers them by these names)
+        if (ocr_worker && !subtitle_setup.ocr_write_stem.empty() && subtitle_tracks) {
+            auto absoluteEntries = [&](std::vector<SubtitleEntry> entries) {
+                for (auto &e : entries) {
+                    e.start_seconds += initial_seek_seconds;
+                    e.end_seconds += initial_seek_seconds;
+                }
+                std::sort(entries.begin(), entries.end(),
+                          [](const auto &a, const auto &b) {
+                              return a.start_seconds < b.start_seconds;
+                          });
+                return entries;
+            };
+            try {
+                ocr_feed.finish(state.stream_seconds, (*subtitle_tracks)[ocr_track_index]);
+                const std::string ja_path = subtitle_setup.ocr_write_stem + ".OCR.srt";
+                writeSrt(ja_path, absoluteEntries(ocr_feed.file_entries));
+                log.info(eApplication, std::format("Wrote {} OCR cues to {}",
+                                                   ocr_feed.file_entries.size(), ja_path));
+                if (ocr_translator) {
+                    ocr_translated_feed.finish(state.stream_seconds,
+                                               (*subtitle_tracks)[ocr_en_track_index]);
+                    const std::string en_path = subtitle_setup.ocr_write_stem + ".OCR-EN.srt";
+                    writeSrt(en_path, absoluteEntries(ocr_translated_feed.file_entries));
+                    log.info(eApplication, std::format("Wrote {} translated cues to {}",
+                                                       ocr_translated_feed.file_entries.size(),
+                                                       en_path));
+                }
+            } catch (const std::exception &x) {
+                log.error(eApplication, std::format("Saving OCR subtitles failed: {}", x.what()));
+            }
+        }
+#endif
 
         auto t1 = chrono::high_resolution_clock::now();
         auto time_us = (double) chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
@@ -665,6 +893,9 @@ int main(int argc, char *argv[]) {
     optional<string> subtitle_font_path;
     double subtitle_offset_seconds = 0.0;
     optional<string> ocr_models_dir;
+    optional<string> ocr_translate_url;
+    string ocr_translate_model;
+    bool ocr_write = false;
 
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -809,6 +1040,24 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
     });
+    options.option("--ocr-translate", "URL", "Translate the OCR track into a live \"OCR-EN\" "
+                                             "track via the OpenAI-compatible server at URL "
+                                             "(llama.cpp, Ollama, vLLM, ...; e.g. "
+                                             "http://localhost:11434).  $OPENAI_API_KEY is sent "
+                                             "as a bearer token if set.  Requires --ocr",
+                   [&] () -> void {
+        ocr_translate_url = *(it++);
+    });
+    options.option("--ocr-translate-model", "NAME", "Model for --ocr-translate (default: the "
+                                                    "first one the server reports)", [&] () -> void {
+        ocr_translate_model = *(it++);
+    });
+    options.flag("--ocr-write", "Save the cues collected by --ocr at exit, with their original "
+                                "imprint timing, as <input>.OCR.srt (and <input>.OCR-EN.srt with "
+                                "--ocr-translate) next to the input file, where --subtitles "
+                                "finds them on the next playback", [&] () -> void {
+        ocr_write = true;
+    });
     options.option("--subtitle-font", "FILE", "TrueType font for the subtitles (default: the "
                                               "bundled Noto Sans JP)", [&] () -> void {
         subtitle_font_path = *(it++);
@@ -945,6 +1194,23 @@ int main(int argc, char *argv[]) {
                 subtitle_setup.font_path = subtitle_font_path;
                 subtitle_setup.offset_seconds = subtitle_offset_seconds;
                 subtitle_setup.ocr_models_dir = ocr_models_dir;
+                if (ocr_translate_url && !ocr_models_dir) {
+                    cerr << "--ocr-translate requires --ocr" << endl;
+                    exit(EXIT_FAILURE);
+                }
+                subtitle_setup.ocr_translate_url = ocr_translate_url;
+                subtitle_setup.ocr_translate_model = ocr_translate_model;
+                if (const char *key = getenv("OPENAI_API_KEY"))
+                    subtitle_setup.ocr_translate_key = key;
+                if (ocr_write) {
+                    if (!ocr_models_dir) {
+                        cerr << "--ocr-write requires --ocr" << endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    const filesystem::path input_path(*it);
+                    subtitle_setup.ocr_write_stem =
+                            (input_path.parent_path() / input_path.stem()).string();
+                }
                 if (subtitles_enabled)
                     subtitle_setup.files = discoverSubtitleFiles(*it);
                 if (subtitles_file) {

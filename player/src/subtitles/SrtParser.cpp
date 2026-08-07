@@ -4,6 +4,8 @@
 #include "SrtParser.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <regex>
 #include <sstream>
@@ -185,4 +187,24 @@ std::vector<SubtitleEntry> parseSrt(const std::filesystem::path &file) {
     std::ostringstream buf;
     buf << in.rdbuf();
     return parseSrtText(buf.str());
+}
+
+void writeSrt(const std::filesystem::path &file, const std::vector<SubtitleEntry> &entries) {
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    if (!out) throw std::runtime_error("Could not open for writing: " + file.string());
+    int index = 1;
+    for (const auto &entry : entries) {
+        auto timestamp = [](double seconds) {
+            const long ms = std::lround(std::max(0.0, seconds) * 1000);
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%02ld:%02ld:%02ld,%03ld",
+                     ms / 3600000, ms / 60000 % 60, ms / 1000 % 60, ms % 1000);
+            return std::string(buf);
+        };
+        out << index++ << "\n" << timestamp(entry.start_seconds) << " --> "
+            << timestamp(entry.end_seconds) << "\n";
+        for (const auto &line : entry.lines) out << line << "\n";
+        out << "\n";
+    }
+    if (!out) throw std::runtime_error("Write failed: " + file.string());
 }
