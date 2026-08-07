@@ -27,8 +27,11 @@ public:
         std::vector<std::string> lines;
     };
 
+    // source_language / target_language are plain English language names
+    // ("Japanese", "French", ...) interpolated into the prompt.
     TranslationWorker(Logger &log, const std::string &base_url,
-                      const std::string &model, const std::string &api_key);
+                      const std::string &model, const std::string &api_key,
+                      const std::string &source_language, const std::string &target_language);
     ~TranslationWorker(); // joins the thread
 
     TranslationWorker(const TranslationWorker &) = delete;
@@ -48,6 +51,9 @@ private:
     std::string m_base_url; // normalized to end with /v1
     std::string m_model;
     std::string m_api_key;
+    std::string m_source_language;
+    std::string m_target_language;
+    std::string m_system_prompt;
 
     std::mutex m_mutex;
     std::condition_variable m_cv;

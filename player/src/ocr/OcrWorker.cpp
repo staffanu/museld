@@ -104,8 +104,9 @@ bool maskChanged(const std::vector<uint8_t> &prev, const std::vector<uint8_t> &c
 } // namespace
 
 OcrWorker::OcrWorker(Logger &log, const std::string &det_model_path,
-                     const std::string &rec_model_path)
+                     const std::string &rec_model_path, OcrScriptFilter script_filter)
         : m_log(log),
+          m_script_filter(script_filter),
           m_thread(&OcrWorker::threadFunc, this, det_model_path, rec_model_path) {
 }
 
@@ -176,7 +177,8 @@ void OcrWorker::threadFunc(std::string det_model_path, std::string rec_model_pat
         std::vector<std::string> lines;
         if (mask_pixels >= c_mask_min_pixels) {
             const auto t0 = std::chrono::steady_clock::now();
-            lines = OcrEngine::assembleLines(engine->recognize(rgb.data(), width, height), true);
+            lines = OcrEngine::assembleLines(engine->recognize(rgb.data(), width, height),
+                                             m_script_filter);
             const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - t0).count();
             long dropped;

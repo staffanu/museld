@@ -91,9 +91,34 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
 | `--saturation <factor>` | NTSC: scale the chroma gain (default 1.0, applied on top of the burst-referenced AGC) |
-| `--subtitles` | Display SRT subtitles synced to the disc's own time code. The available tracks are the `.srt` files next to the input file whose names start with the input's name minus its extension (`capture.srt`, `capture.ja.srt`, … for `capture.raw`). The first one alphabetically starts as the primary (bottom) track; the `[` and `]` keys cycle the primary and secondary (top) track through all of them |
+| `--subtitles` | Display SRT subtitles synced to the disc's own time code — or to the playback position when the capture carries no disc code (baseband captures usually do not). The available tracks are the `.srt` files next to the input file whose names start with the input's name minus its extension (`capture.srt`, `capture.ja.srt`, … for `capture.raw`). The first one alphabetically starts as the primary (bottom) track; the `[` and `]` keys cycle the primary and secondary (top) track through all of them |
 | `--subtitles-file <file.srt>` | Start with this file as the primary subtitle track (implies `--subtitles`; the file need not match the naming pattern) |
+| `--subtitle-offset <seconds>` | Delay the subtitles by this much; negative shows them earlier. Useful for tracks timed against a `--write` render rather than the disc's own time code |
 | `--subtitle-font <file.ttf>` | Override the default subtitle font (bundled Noto Sans JP) |
+
+### Live subtitle OCR and translation (experimental)
+
+Discs with burned-in subtitles can be read and translated during playback. This
+needs a build with `-DUSE_OCR=ON` (requires ONNX Runtime) and the PP-OCR text
+detection and recognition models as `.onnx` files (with "det" and "rec" in
+their names) in a directory of your choice.
+
+| Option | Description |
+|---|---|
+| `--ocr <dir>` | OCR the burned-in subtitles into a live "OCR" subtitle track, selectable like any file track with the `[` and `]` keys. `<dir>` holds the detection and recognition models; the recognition model decides the alphabet (PaddleOCR publishes per-script models: the default Chinese/Japanese one, `latin`, `korean`, `cyrillic`, …) |
+| `--ocr-script <script>` | Script a text row must contain to count as a subtitle, dropping film credits and stray detections: `cjk` (default; Japanese and Chinese), `latin`, or `any` (keep everything) |
+| `--ocr-translate <url>` | Translate the OCR track into a live translated track via the OpenAI-compatible server at `<url>` (llama.cpp, Ollama, vLLM, …; e.g. `http://localhost:11434`). `$OPENAI_API_KEY` is sent as a bearer token if set. Each cue is translated with a rolling window of the recent dialogue as context |
+| `--ocr-translate-model <name>` | Model to use (default: the first one the server reports) |
+| `--ocr-language <name>` | Language of the burned-in subtitles, for the translation prompt (default Japanese) |
+| `--ocr-translate-to <name>` | Language to translate into (default English). The live track and the saved file are named after its first two letters ("OCR-EN", "OCR-SV", …) |
+| `--ocr-write` | Save the collected cues at exit as `<input>.OCR.srt` (and `<input>.OCR-XX.srt` with `--ocr-translate`) next to the input, with the cues' original on-screen timing — `--subtitles` finds them on the next playback, so one watched pass extracts a finished subtitle pair |
+
+The OCR watches the bottom of the frame and runs only when the subtitle area
+changes, so the model cost is per cue, not per frame. Text appears on the live
+tracks with a small lag (OCR plus translation, typically around a second); a
+cue that appeared late is kept up correspondingly longer. Translating into a
+language whose script the bundled font does not cover may need
+`--subtitle-font`.
 
 **Dropouts** (RF input): the default is to conceal detected dropouts by averaging the surrounding
 picture lines. `--no-dropout` leaves them untouched; `--highlight-dropout` paints them red

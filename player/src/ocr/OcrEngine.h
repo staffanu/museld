@@ -19,6 +19,10 @@ struct OcrDetection {
     int x, y, w, h;
 };
 
+// Which script a text row must contain to count as a subtitle; rows without it
+// (film credits, detector garbage) are dropped.  eAny keeps everything.
+enum class OcrScriptFilter { eCjk, eLatin, eAny };
+
 // PP-OCR text detection + recognition on ONNX Runtime, self-contained (no
 // OpenCV): DBNet postprocessing is a threshold + connected components + box
 // expansion, which is all subtitle-shaped text needs.  The recognizer's
@@ -37,10 +41,10 @@ public:
 
     // Groups detections into text rows top-to-bottom (concatenating
     // side-by-side boxes left to right), dropping furigana ruby glosses
-    // (boxes much shorter than the tallest) and, if japanese_only, rows
-    // without any Japanese script.  Mirrors tools/subocr/subocr.py.
+    // (boxes much shorter than the tallest) and rows failing the script
+    // filter.  Mirrors tools/subocr/subocr.py.
     static std::vector<std::string> assembleLines(std::vector<OcrDetection> detections,
-                                                  bool japanese_only);
+                                                  OcrScriptFilter filter);
 
 private:
     struct Impl;
