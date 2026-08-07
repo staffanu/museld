@@ -313,11 +313,14 @@ if(USE_OCR)
 
     add_library(museld-ocr STATIC
         ocr/OcrEngine.cpp ocr/OcrEngine.h
-        ocr/OcrWorker.cpp ocr/OcrWorker.h)
+        ocr/OcrWorker.cpp ocr/OcrWorker.h
+        ocr/TranslationWorker.cpp ocr/TranslationWorker.h)
     target_compile_features(museld-ocr PUBLIC cxx_std_20)
     target_include_directories(museld-ocr
         PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-        PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+        PRIVATE ${ONNXRUNTIME_INCLUDE_DIR}
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/httplib
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../third_party)
     target_link_libraries(museld-ocr PUBLIC ${ONNXRUNTIME_LIBRARY} Threads::Threads)
 
     if(BUILD_MUSE)

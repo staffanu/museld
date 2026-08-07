@@ -23,4 +23,7 @@ std::vector<SubtitleEntry> parseSrt(const std::filesystem::path &file);
 // Parse from an in-memory string (useful for tests).
 std::vector<SubtitleEntry> parseSrtText(const std::string &text);
 
+// Write entries as an SRT file. Throws std::runtime_error on I/O errors.
+void writeSrt(const std::filesystem::path &file, const std::vector<SubtitleEntry> &entries);
+
 #endif // MUSELD_SRT_PARSER_H

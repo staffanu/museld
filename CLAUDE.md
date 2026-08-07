@@ -32,9 +32,12 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
     ntsc/          — NTSC frame buffers, sync detection, field decoder
     musevk/        — Vulkan abstraction layer (buffers, images, command pools, compute)
     subtitles/     — SRT parser, stb_truetype-based glyph atlas, GPU subtitle overlay
-    ocr/           — Live subtitle OCR (PP-OCR on ONNX Runtime, no OpenCV): OcrEngine,
-                     OcrWorker thread, Vulkan band readback; built with -DUSE_OCR=ON
-                     (museld --ocr <models-dir>); subocr-test is the regression harness
+    ocr/           — Live subtitle OCR + translation (PP-OCR on ONNX Runtime, no OpenCV):
+                     OcrEngine, OcrWorker thread, Vulkan band readback, TranslationWorker
+                     (OpenAI-compatible HTTP, cpp-httplib + nlohmann/json).  Built with
+                     -DUSE_OCR=ON; museld --ocr <models-dir> adds a live "OCR" track,
+                     --ocr-translate <url> adds "OCR-EN", --ocr-write saves both as .srt
+                     with original imprint timing.  subocr-test is the regression harness
                      against the tools/subocr Python reference
     util/          — PercentileFilter, LinearRegression, ConstExprHelpers, FmtAddons
     shaders/       — GLSL compute shaders (compiled to SPIR-V at build time)

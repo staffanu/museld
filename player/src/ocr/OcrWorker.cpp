@@ -50,6 +50,45 @@ std::vector<uint8_t> textMask(const uint8_t *rgb, int width, int height) {
     return mask;
 }
 
+// OCR of the same subtitle jitters between samples: an extra space, a split
+// line, or one confused character (一 vs ー is the classic).  Treat such
+// readings as the same text so the cue is not closed, reopened and
+// retranslated.  Whitespace and line breaks are ignored entirely (like norm()
+// in tools/subocr/subocr.py); beyond that at most one codepoint may differ.
+bool similarLines(const std::vector<std::string> &a, const std::vector<std::string> &b) {
+    auto flattened = [](const std::vector<std::string> &lines) {
+        std::vector<uint32_t> out;
+        for (const auto &line : lines) {
+            for (size_t j = 0; j < line.size();) {
+                uint8_t c = line[j];
+                int len = c < 0x80 ? 1 : (c & 0xe0) == 0xc0 ? 2 : (c & 0xf0) == 0xe0 ? 3 : 4;
+                uint32_t cp = 0;
+                for (int k = 0; k < len && j + k < line.size(); k++)
+                    cp = (cp << 8) | (uint8_t)line[j + k];
+                j += len;
+                if (cp != ' ' && cp != 0xe38080) // ASCII and ideographic space
+                    out.push_back(cp);
+            }
+        }
+        return out;
+    };
+    auto ca = flattened(a), cb = flattened(b);
+    // Edit distance <= 1: one substitution, or one inserted/dropped codepoint
+    // (a flickering quotation mark at the start of a cue is the common case)
+    if (ca.size() == cb.size()) {
+        int differing = 0;
+        for (size_t j = 0; j < ca.size(); j++) differing += ca[j] != cb[j];
+        return differing <= 1;
+    }
+    if (ca.size() < cb.size()) std::swap(ca, cb);
+    if (ca.size() != cb.size() + 1) return false;
+    size_t i = 0;
+    while (i < cb.size() && ca[i] == cb[i]) i++;
+    for (size_t j = i; j < cb.size(); j++)
+        if (ca[j + 1] != cb[j]) return false;
+    return true;
+}
+
 bool maskChanged(const std::vector<uint8_t> &prev, const std::vector<uint8_t> &cur) {
     if (prev.size() != cur.size()) return true;
     size_t a = 0, b = 0, differ = 0;
@@ -152,7 +191,7 @@ void OcrWorker::threadFunc(std::string det_model_path, std::string rec_model_pat
                                   elapsed_ms, dropped));
         }
 
-        if (lines != last_lines) {
+        if (lines != last_lines && !similarLines(lines, last_lines)) {
             last_lines = lines;
             confirm_next = true;
             std::scoped_lock lock(m_mutex);
