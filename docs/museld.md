@@ -264,6 +264,21 @@ RF → TimingRecovery (Mueller-Müller PLL) → EfmDecoder → CIRC C1/C2 Reed-S
 - **Picture filters**: Most filters were computed early in the project; picture quality could probably be improved by spending more time on them.
 - **Motion detection**: The algorithm is quite simplistic and could probably be improved.
 - **LD MUSE vs BS MUSE**: Available documentation describes the satellite broadcasting standard. MUSE decoders have separate inputs for the two signals, so presumably there is some difference, but it is unknown what it is.
+- **Subtitle OCR** (experimental; see the option section above):
+  - Not in the release packages yet: `USE_OCR` is off by default, and how to distribute
+    ONNX Runtime and the PP-OCR models with the downloads is undecided (see docs/packaging.md
+    before changing this).
+  - `--ocr-translate` speaks plain HTTP only — hosted TLS endpoints would need an
+    OpenSSL-enabled cpp-httplib build.
+  - The live tracks lag the burned-in text by OCR + translation latency (about a second).
+    A deliberate presentation-delay buffer (delaying video/audio output a second or two
+    behind decode) would make the translated subtitles appear exactly in sync, and would
+    also enable temporal inpainting to hide the burned-in text itself.
+  - A translation still in flight when playback ends is dropped instead of being flushed
+    into the `--ocr-write` file.
+  - On Latin-script discs the `--ocr-script latin` filter cannot distinguish subtitles
+    from film credits (same script); only the recognition-confidence threshold filters
+    noise there.
 
 ## References
 
