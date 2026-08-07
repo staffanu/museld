@@ -40,7 +40,7 @@ int main(int argc, char **argv) {
     for (const auto &d : detections)
         fprintf(stderr, "box (%d,%d %dx%d) score %.2f: %s\n", d.x, d.y, d.w, d.h, d.score,
                 d.text.c_str());
-    for (const auto &line : OcrEngine::assembleLines(detections, true))
+    for (const auto &line : OcrEngine::assembleLines(detections, OcrScriptFilter::eCjk))
         printf("%s\n", line.c_str());
 
     stbi_image_free(pixels);

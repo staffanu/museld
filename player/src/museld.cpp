@@ -79,6 +79,9 @@ struct SubtitleSetup {
     std::optional<std::string> ocr_translate_url;
     std::string ocr_translate_model; // empty: first model from /v1/models
     std::string ocr_translate_key;   // empty: no Authorization header
+    std::string ocr_script = "cjk"; // cjk | latin | any: rows without it are dropped
+    std::string ocr_source_language = "Japanese";
+    std::string ocr_target_language = "English";
     // Non-empty: save the OCR (and OCR-EN) cues at exit as <stem>.OCR.srt /
     // <stem>.OCR-EN.srt with their original imprint timing (--ocr-write)
     std::string ocr_write_stem;
@@ -278,6 +281,17 @@ struct TranslatedSubtitleFeed {
 };
 #endif
 
+// "English" -> "EN": the short code naming the translated OCR track and its
+// saved file ("OCR-EN", <input>.OCR-EN.srt).
+static std::string languageCode(const std::string &language) {
+    std::string code;
+    for (char c : language) {
+        if (code.size() == 2) break;
+        if (isalpha((unsigned char)c)) code += (char)toupper((unsigned char)c);
+    }
+    return code.empty() ? "XX" : code;
+}
+
 // Find the .srt files next to the input whose names start with the input's own
 // name minus its extension: capture.raw matches capture.srt, capture.ja.srt,
 // capture.ja-hira.srt, ...  The label is what follows the shared stem ("ja"
@@ -378,7 +392,7 @@ static void runPlayer(Logger &log,
                     tracks->push_back({"OCR", {}});
                     if (subtitle_setup.ocr_translate_url) {
                         ocr_en_track_index = (int)tracks->size();
-                        tracks->push_back({"OCR-EN", {}});
+                        tracks->push_back({"OCR-" + languageCode(subtitle_setup.ocr_target_language), {}});
                     }
                 }
                 std::filesystem::path font_path = subtitle_setup.font_path
@@ -436,13 +450,19 @@ static void runPlayer(Logger &log,
                                                     *subtitle_setup.ocr_models_dir));
                 ocr_track_index = -1;
             } else {
-                ocr_worker = std::make_unique<OcrWorker>(log, det_model, rec_model);
+                const OcrScriptFilter script_filter =
+                        subtitle_setup.ocr_script == "latin" ? OcrScriptFilter::eLatin
+                        : subtitle_setup.ocr_script == "any" ? OcrScriptFilter::eAny
+                                                             : OcrScriptFilter::eCjk;
+                ocr_worker = std::make_unique<OcrWorker>(log, det_model, rec_model, script_filter);
                 ocr_band_capture = std::make_unique<OcrBandCapture>(manager, command_pool,
                                                                     c_ocr_band_fraction);
                 if (ocr_en_track_index >= 0)
                     ocr_translator = std::make_unique<TranslationWorker>(
                             log, *subtitle_setup.ocr_translate_url,
-                            subtitle_setup.ocr_translate_model, subtitle_setup.ocr_translate_key);
+                            subtitle_setup.ocr_translate_model, subtitle_setup.ocr_translate_key,
+                            subtitle_setup.ocr_source_language,
+                            subtitle_setup.ocr_target_language);
             }
         }
 #endif
@@ -564,7 +584,8 @@ static void runPlayer(Logger &log,
                                               "arrived; showing it briefly)", applied->late_seconds)
                                 : "";
                             log.info(eApplication,
-                                     std::format("OCR-EN [{}{:02}:{:02}.{}] {}{}",
+                                     std::format("{} [{}{:02}:{:02}.{}] {}{}",
+                                                 (*subtitle_tracks)[ocr_en_track_index].label,
                                                  file_seconds < 0 ? "-" : "", msec / 60000,
                                                  msec / 1000 % 60, msec % 1000 / 100, text, late));
                         }
@@ -645,7 +666,8 @@ static void runPlayer(Logger &log,
                 if (ocr_translator) {
                     ocr_translated_feed.finish(state.stream_seconds,
                                                (*subtitle_tracks)[ocr_en_track_index]);
-                    const std::string en_path = subtitle_setup.ocr_write_stem + ".OCR-EN.srt";
+                    const std::string en_path = subtitle_setup.ocr_write_stem + ".OCR-"
+                            + languageCode(subtitle_setup.ocr_target_language) + ".srt";
                     writeSrt(en_path, absoluteEntries(ocr_translated_feed.file_entries));
                     log.info(eApplication, std::format("Wrote {} translated cues to {}",
                                                        ocr_translated_feed.file_entries.size(),
@@ -895,6 +917,9 @@ int main(int argc, char *argv[]) {
     optional<string> ocr_models_dir;
     optional<string> ocr_translate_url;
     string ocr_translate_model;
+    string ocr_script = "cjk";
+    string ocr_source_language = "Japanese";
+    string ocr_target_language = "English";
     bool ocr_write = false;
 
     const vector<string> args(argv + 1, argv + argc);
@@ -1052,6 +1077,28 @@ int main(int argc, char *argv[]) {
                                                     "first one the server reports)", [&] () -> void {
         ocr_translate_model = *(it++);
     });
+    options.option("--ocr-script", "SCRIPT", "Script a text row must contain to count as a "
+                                             "subtitle: cjk (default; Japanese and Chinese), "
+                                             "latin, or any (keep everything, e.g. credits)",
+                   [&] () -> void {
+        ocr_script = *(it++);
+        if (ocr_script != "cjk" && ocr_script != "latin" && ocr_script != "any") {
+            cerr << "--ocr-script must be cjk, latin or any" << endl;
+            exit(EXIT_FAILURE);
+        }
+    });
+    options.option("--ocr-language", "NAME", "Language of the burned-in subtitles, for the "
+                                             "translation prompt (default Japanese).  Pick a "
+                                             "matching recognition model for --ocr and "
+                                             "--ocr-script accordingly", [&] () -> void {
+        ocr_source_language = *(it++);
+    });
+    options.option("--ocr-translate-to", "NAME", "Language to translate the subtitles into "
+                                                 "(default English).  The live track and saved "
+                                                 "file are named after its first two letters",
+                   [&] () -> void {
+        ocr_target_language = *(it++);
+    });
     options.flag("--ocr-write", "Save the cues collected by --ocr at exit, with their original "
                                 "imprint timing, as <input>.OCR.srt (and <input>.OCR-EN.srt with "
                                 "--ocr-translate) next to the input file, where --subtitles "
@@ -1202,6 +1249,9 @@ int main(int argc, char *argv[]) {
                 subtitle_setup.ocr_translate_model = ocr_translate_model;
                 if (const char *key = getenv("OPENAI_API_KEY"))
                     subtitle_setup.ocr_translate_key = key;
+                subtitle_setup.ocr_script = ocr_script;
+                subtitle_setup.ocr_source_language = ocr_source_language;
+                subtitle_setup.ocr_target_language = ocr_target_language;
                 if (ocr_write) {
                     if (!ocr_models_dir) {
                         cerr << "--ocr-write requires --ocr" << endl;

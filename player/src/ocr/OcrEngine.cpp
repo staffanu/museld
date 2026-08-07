@@ -28,15 +28,22 @@ constexpr int c_rec_max_width = 1280;
 constexpr float c_rec_score_thresh = 0.6f;
 constexpr float c_rec_single_char_score_thresh = 0.85f;
 
-// Same ranges as JAPANESE_RE in tools/subocr/subocr.py: kana, kana marks, CJK
-bool isJapaneseCodepoint(uint32_t cp) {
+// Kana, kana marks, and CJK ideographs -- covers Japanese and Chinese subs
+// (same ranges as JAPANESE_RE in tools/subocr/subocr.py)
+bool isCjkCodepoint(uint32_t cp) {
     return (cp >= 0x3041 && cp <= 0x3096)    // hiragana
         || (cp >= 0x30a1 && cp <= 0x30fa)    // katakana
         || cp == 0x30fc || cp == 0x3005 || cp == 0x3006
         || (cp >= 0x4e00 && cp <= 0x9fff);   // CJK unified ideographs
 }
 
-bool containsJapanese(const std::string &utf8) {
+bool isLatinLetterCodepoint(uint32_t cp) {
+    return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z')
+        || (cp >= 0xc0 && cp <= 0x24f && cp != 0xd7 && cp != 0xf7); // Latin-1..Extended-B
+}
+
+template<typename Predicate>
+bool containsCodepoint(const std::string &utf8, Predicate predicate) {
     for (size_t i = 0; i < utf8.size();) {
         uint8_t b = utf8[i];
         uint32_t cp = 0;
@@ -47,10 +54,23 @@ bool containsJapanese(const std::string &utf8) {
         else if ((b & 0xf8) == 0xf0) { len = 4; cp = b & 0x07; }
         if (i + len > utf8.size()) break;
         for (int k = 1; k < len; k++) cp = (cp << 6) | (utf8[i + k] & 0x3f);
-        if (isJapaneseCodepoint(cp)) return true;
+        if (predicate(cp)) return true;
         i += len;
     }
     return false;
+}
+
+bool containsCjk(const std::string &utf8) {
+    return containsCodepoint(utf8, isCjkCodepoint);
+}
+
+bool passesFilter(const std::string &utf8, OcrScriptFilter filter) {
+    switch (filter) {
+        case OcrScriptFilter::eCjk: return containsCjk(utf8);
+        case OcrScriptFilter::eLatin: return containsCodepoint(utf8, isLatinLetterCodepoint);
+        case OcrScriptFilter::eAny: return true;
+    }
+    return true;
 }
 
 // Bilinear resize of packed RGB into a caller-provided planar float buffer,
@@ -257,13 +277,13 @@ std::vector<OcrDetection> OcrEngine::recognize(const uint8_t *rgb, int width, in
 }
 
 std::vector<std::string> OcrEngine::assembleLines(std::vector<OcrDetection> detections,
-                                                  bool japanese_only) {
+                                                  OcrScriptFilter filter) {
     if (detections.empty()) return {};
     int max_h = 0;
     for (const auto &d : detections) max_h = std::max(max_h, d.h);
     std::erase_if(detections, [&](const OcrDetection &d) {
         if (d.h < 0.62f * (float)max_h) return true; // furigana ruby gloss
-        return japanese_only && !containsJapanese(d.text);
+        return !passesFilter(d.text, filter);
     });
     std::sort(detections.begin(), detections.end(), [](const auto &a, const auto &b) {
         return a.y + a.h / 2 < b.y + b.h / 2;
@@ -283,12 +303,14 @@ std::vector<std::string> OcrEngine::assembleLines(std::vector<OcrDetection> dete
     std::vector<std::string> lines;
     for (auto &row : rows) {
         std::sort(row.begin(), row.end(), [](const auto &a, const auto &b) { return a.x < b.x; });
-        const bool all_japanese = std::all_of(row.begin(), row.end(), [](const auto &d) {
-            return containsJapanese(d.text);
+        // CJK text concatenates without separators; everything else gets
+        // spaces between the detector's side-by-side fragments
+        const bool all_cjk = std::all_of(row.begin(), row.end(), [](const auto &d) {
+            return containsCjk(d.text);
         });
         std::string line;
         for (const auto &d : row) {
-            if (!line.empty() && !all_japanese) line += ' ';
+            if (!line.empty() && !all_cjk) line += ' ';
             line += d.text;
         }
         lines.push_back(std::move(line));

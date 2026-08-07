@@ -16,15 +16,18 @@ namespace {
 
 constexpr int c_context_pairs = 8; // recent dialogue pairs sent as context
 
-// Same instructions as tools/subocr/translate_srt.py
-constexpr const char *c_system_prompt =
-    "You translate Japanese film subtitles to English, one cue at a time.\n"
-    "You are given the recent dialogue (Japanese with your English translations) "
-    "as context, then one new Japanese cue.\n"
-    "Reply with ONLY the English subtitle text for the new cue - no quotes, no "
-    "notes, no Japanese. Keep it concise and natural, as a subtitle: idiomatic "
-    "English, consistent names and pronouns with the context, preserve line "
-    "breaks if the cue has two lines.";
+// Same instructions as tools/subocr/translate_srt.py, parameterized on the
+// language pair
+std::string makeSystemPrompt(const std::string &source, const std::string &target) {
+    return std::format(
+        "You translate {0} film subtitles to {1}, one cue at a time.\n"
+        "You are given the recent dialogue ({0} with your {1} translations) "
+        "as context, then one new {0} cue.\n"
+        "Reply with ONLY the {1} subtitle text for the new cue - no quotes, no "
+        "notes, no {0}. Keep it concise and natural, as a subtitle: idiomatic "
+        "{1}, consistent names and pronouns with the context, preserve line "
+        "breaks if the cue has two lines.", source, target);
+}
 
 std::vector<std::string> splitLines(const std::string &text) {
     std::vector<std::string> lines;
@@ -38,10 +41,15 @@ std::vector<std::string> splitLines(const std::string &text) {
 } // namespace
 
 TranslationWorker::TranslationWorker(Logger &log, const std::string &base_url,
-                                     const std::string &model, const std::string &api_key)
+                                     const std::string &model, const std::string &api_key,
+                                     const std::string &source_language,
+                                     const std::string &target_language)
         : m_log(log),
           m_model(model),
-          m_api_key(api_key) {
+          m_api_key(api_key),
+          m_source_language(source_language),
+          m_target_language(target_language),
+          m_system_prompt(makeSystemPrompt(source_language, target_language)) {
     m_base_url = base_url;
     while (!m_base_url.empty() && m_base_url.back() == '/') m_base_url.pop_back();
     if (!m_base_url.ends_with("/v1")) m_base_url += "/v1";
@@ -102,8 +110,8 @@ std::string TranslationWorker::translate(const std::string &ja_text) {
         prompt += "Recent dialogue:\n";
         const size_t from = m_history.size() > c_context_pairs ? m_history.size() - c_context_pairs : 0;
         for (size_t i = from; i < m_history.size(); i++) {
-            prompt += "JA: " + m_history[i].first + "\n";
-            prompt += "EN: " + m_history[i].second + "\n";
+            prompt += m_source_language + ": " + m_history[i].first + "\n";
+            prompt += m_target_language + ": " + m_history[i].second + "\n";
         }
         prompt += "\n";
     }
@@ -116,7 +124,7 @@ std::string TranslationWorker::translate(const std::string &ja_text) {
         // thinking before the one-line answer
         {"chat_template_kwargs", {{"enable_thinking", false}}},
         {"messages", {
-            {{"role", "system"}, {"content", c_system_prompt}},
+            {{"role", "system"}, {"content", m_system_prompt}},
             {{"role", "user"}, {"content", prompt}},
         }},
     };

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "logging/Logger.h"
+#include "OcrEngine.h"
 
 // Background OCR of the subtitle band ("museld-ocr" thread).  The render
 // thread submits sampled band images (latest wins -- OCR slower than the
@@ -29,7 +30,8 @@ public:
         std::vector<std::string> lines;
     };
 
-    OcrWorker(Logger &log, const std::string &det_model_path, const std::string &rec_model_path);
+    OcrWorker(Logger &log, const std::string &det_model_path, const std::string &rec_model_path,
+              OcrScriptFilter script_filter);
     ~OcrWorker(); // joins the thread
 
     OcrWorker(const OcrWorker &) = delete;
@@ -45,6 +47,7 @@ private:
     void threadFunc(std::string det_model_path, std::string rec_model_path);
 
     Logger &m_log;
+    const OcrScriptFilter m_script_filter;
 
     std::mutex m_mutex;
     std::condition_variable m_cv;
