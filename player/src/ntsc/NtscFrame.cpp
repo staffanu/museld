@@ -139,7 +139,7 @@ int NtscFrame::AccumulateNoisePsd(float const *data, double *psd, float max_sigm
     return windows;
 }
 
-void NtscFrame::set_frame_no(int frame_no, long input_offset, double input_samples_per_sample) {
+void NtscFrame::set_frame_no(int frame_no, int64_t input_offset, double input_samples_per_sample) {
     m_frame_no = frame_no;
     m_input_offset = input_offset;
     m_input_samples_per_sample = input_samples_per_sample;
@@ -147,7 +147,7 @@ void NtscFrame::set_frame_no(int frame_no, long input_offset, double input_sampl
     m_fields[1].set_frame_no(frame_no);
 }
 
-long NtscFrame::getInputOffset() const {
+int64_t NtscFrame::getInputOffset() const {
     return m_input_offset;
 }
 

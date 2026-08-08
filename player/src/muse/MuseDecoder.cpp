@@ -354,14 +354,14 @@ Decoder::SourceDimensions MuseDecoder::getSourceDimensions() const {
 
 std::optional<Decoder::PixelFileOffsets> MuseDecoder::computePixelFileOffsets(
         int field_x, int field_y, int field_parity,
-        long buffer_file_offset, double input_samples_per_muse_sample) const {
-    long field_start = buffer_file_offset // start of sound data
-            + (long)((field_parity ? 565 : 2) * MUSE_TOTAL_WIDTH * input_samples_per_muse_sample);
+        int64_t buffer_file_offset, double input_samples_per_muse_sample) const {
+    int64_t field_start = buffer_file_offset // start of sound data
+            + (int64_t)((field_parity ? 565 : 2) * MUSE_TOTAL_WIDTH * input_samples_per_muse_sample);
     PixelFileOffsets r;
     r.field_start = field_start;
-    r.y  = field_start + (long)(input_samples_per_muse_sample * ((field_y + 44) * MUSE_TOTAL_WIDTH + (field_x + 106)));
-    r.cr = field_start + (long)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2) * MUSE_TOTAL_WIDTH + field_x / 4 + 11);
-    r.cb = field_start + (long)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2 + 1) * MUSE_TOTAL_WIDTH + field_x / 4 + 11);
+    r.y  = field_start + (int64_t)(input_samples_per_muse_sample * ((field_y + 44) * MUSE_TOTAL_WIDTH + (field_x + 106)));
+    r.cr = field_start + (int64_t)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2) * MUSE_TOTAL_WIDTH + field_x / 4 + 11);
+    r.cb = field_start + (int64_t)(input_samples_per_muse_sample * ((field_y + 40) / 2 * 2 + 1) * MUSE_TOTAL_WIDTH + field_x / 4 + 11);
     return r;
 }
 

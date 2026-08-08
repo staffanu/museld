@@ -170,6 +170,11 @@ The `src/` directory is the include root for both binaries. The `ac3rf` CMake ta
 
 **Input format abstraction**: `InputReader` specializations with auto-detection by file extension.
 
+**No bare `long` for sample offsets or bit patterns**: Windows is LLP64, so `long` is 32
+bits there (this once broke NTSC vertical sync lock on Windows only). Sample/file offsets
+use `int64_t`, bit-pattern accumulators `uint64_t`, with `ULL` suffixes on wide literals.
+Known remaining exception: the `lseek`/`off_t` seek paths, still 32-bit on MinGW.
+
 **SIMD-aware FIR filtering**: `FirFilterStage.h` has AVX, NEON, and scalar paths. On x86 the AVX path is compiled in regardless of `-march` (function-level target attribute) and chosen at runtime via CPUID, so `MUSELD_ARCH` sets which CPUs can run the binary without deciding whether AVX is used. `--simd`/`--no-simd` override the automatic choice; forcing `--simd` on a CPU without support is an error.
 
 **Video file output presets**: `museld --write <file> --write-preset standard|archival` (`VideoFileWriter`, `VideoWriterOptions.h`). `standard` = H.264 (libx264, CRF) + AAC in MP4; `archival` = lossless FFV1 16-bit + PCM in Matroska. Container/codecs come from the preset, not the filename extension. Color metadata (BT.709 for MUSE, SMPTE 170M for NTSC, full range) is tagged per input type. Audio is kept in sync with the video clock: small deficits (25–100 ms) are concealed by stretching/interpolation, larger gaps by silence with a fade-out, excess audio by dropping samples. For batch rendering add `--no-sync`, otherwise the display loop caps decoding at 1.0x realtime. Raw captures without a recognized extension need `--input-format` (e.g. `s16`).

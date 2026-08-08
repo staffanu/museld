@@ -4,6 +4,7 @@
 #ifndef MUSECPP_DECODER_H
 #define MUSECPP_DECODER_H
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include "AudioDefs.h"
@@ -25,12 +26,12 @@ public:
     };
 
     struct PixelFileOffsets {
-        long field_start;
-        long y;
+        int64_t field_start;
+        int64_t y;
         // Chroma sample offsets. Unset for composite formats (NTSC), whose file
         // carries no separate Cr/Cb samples — there Y is the only real offset.
-        std::optional<long> cr;
-        std::optional<long> cb;
+        std::optional<int64_t> cr;
+        std::optional<int64_t> cb;
     };
 
     struct DecodeControls {
@@ -54,7 +55,7 @@ public:
         int audio_sample_count;
         AudioFrame audio_samples[MAX_AUDIO_OUTPUT_SAMPLES];
         int field_parity;
-        long last_frame_buffer_input_offset;
+        int64_t last_frame_buffer_input_offset;
         double input_samples_per_muse_sample;
         std::shared_ptr<DiscInfo> disc_info;
         // Film mode status for the disc info overlay; empty for decoders
@@ -83,7 +84,7 @@ public:
     // offset; NTSC returns std::nullopt and the overlay omits that line.
     virtual std::optional<PixelFileOffsets> computePixelFileOffsets(
             int field_x, int field_y, int field_parity,
-            long buffer_file_offset, double input_samples_per_muse_sample) const = 0;
+            int64_t buffer_file_offset, double input_samples_per_muse_sample) const = 0;
 
 protected:
     Decoder() = default;

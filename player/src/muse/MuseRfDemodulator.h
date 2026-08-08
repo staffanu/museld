@@ -47,7 +47,7 @@ struct MuseDemodulatedBlock {
                 vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, musevk::HostAccess::eHostRead);
     }
 
-    long input_offset; // the number of samples in the input before this block
+    int64_t input_offset; // the number of samples in the input before this block
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropouts; // 1-to-1 with the video_data array. 0 or 1 for now, but could indicate how certain we are in the future
     std::vector<float> efm_input; // raw input samples staged for the EFM worker thread; empty when EFM is disabled

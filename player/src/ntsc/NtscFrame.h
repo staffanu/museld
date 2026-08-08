@@ -39,8 +39,8 @@ public:
     // signal.  Returns the number of windows added.
     static int AccumulateNoisePsd(float const *data, double *psd, float max_sigma);
 
-    void set_frame_no(int frame_no, long input_offset, double input_samples_per_sample);
-    [[nodiscard]] long getInputOffset() const;
+    void set_frame_no(int frame_no, int64_t input_offset, double input_samples_per_sample);
+    [[nodiscard]] int64_t getInputOffset() const;
     [[nodiscard]] double getInputSamplesPerNtscSample() const;
     std::shared_ptr<musevk::VulkanBuffer> &data();
     std::shared_ptr<musevk::VulkanBuffer> &burst_phase_data();
@@ -54,7 +54,7 @@ private:
 
     Logger &m_log;
     int m_frame_no;
-    long m_input_offset;
+    int64_t m_input_offset;
     double m_input_samples_per_sample;
     std::shared_ptr<musevk::VulkanBuffer> m_data;
     std::shared_ptr<musevk::VulkanBuffer> m_burst_phase_data;

@@ -71,7 +71,7 @@ private:
 
     uint8_t *m_input_buffer;
     uint8_t *m_input_dropout_buffer;
-    long m_input_sub_buffer_input_offsets[c_number_of_input_sub_buffers];
+    int64_t m_input_sub_buffer_input_offsets[c_number_of_input_sub_buffers];
 
     int m_last_input_sub_buffer_ix_read;
     double m_t;
@@ -110,7 +110,8 @@ private:
     float m_half_line_sync_pattern_eq_error_sum; // used when scanning for horiz sync
     float m_half_line_sync_pattern_br_error_sum; // used when scanning for horiz sync
     // two bits per half line: 01: EQ, 11: BR, 00 -- other. Last half line shifted in at LSB
-    long m_vert_sync_half_line_pattern; // using 36 bits
+    // (uses 36 bits, so a fixed 64-bit type: long is 32-bit on Windows)
+    uint64_t m_vert_sync_half_line_pattern;
 
     int m_sample_ix;
     int m_line;
@@ -121,7 +122,7 @@ private:
     // Set when the lock landed on field 2's vertical interval, so the frame
     // being filled has no field 1 and must not be handed on
     bool m_first_field_incomplete;
-    long m_frame_start_offset;
+    int64_t m_frame_start_offset;
 
     static constexpr int c_sample_history_size = 16;
     float m_sample_history[c_sample_history_size];

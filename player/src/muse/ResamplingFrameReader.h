@@ -69,7 +69,7 @@ private:
 
     float *m_input_buffer;
     uint8_t *m_input_dropout_buffer;
-    long m_input_sub_buffer_input_offsets[c_number_of_input_sub_buffers];
+    int64_t m_input_sub_buffer_input_offsets[c_number_of_input_sub_buffers];
 
     int m_last_input_sub_buffer_ix_read;
     double m_t;
@@ -107,7 +107,7 @@ private:
     float m_max_frame_pulse_sum_difference;
     int m_consecutive_good_syncs;
     int m_missed_line_pulses;
-    long m_frame_start_offset;
+    int64_t m_frame_start_offset;
 
     double m_error_sum;
 };
