@@ -6,6 +6,7 @@
 
 #include <thread>
 #include <condition_variable>
+#include <exception>
 #include <optional>
 #include <vector>
 #include <deque>
@@ -29,7 +30,11 @@ class FrameReader {
 public:
     void operator=(const FrameReader&) = delete;
     FrameReader(const FrameReader&) = delete;
-    virtual ~FrameReader() = default;
+    // Derived classes call cleanup() from their own destructors, so the reader
+    // thread is joined while the threadFunc() override it is running still
+    // exists.  The call here is the idempotent backstop (and resolves to the
+    // base cleanup(), which is why it cannot replace the derived calls).
+    virtual ~FrameReader();
 
     [[nodiscard]] virtual bool initialize(std::vector<std::unique_ptr<InputBlock>> &buffers);
     virtual void cleanup();
@@ -64,8 +69,9 @@ protected:
     int m_get_input_buffers_count;
 
 private:
-    std::thread *m_reader_thread;
     void *m_file_write_buffer;
+    std::exception_ptr m_thread_exception; // set by the reader thread; guarded by m_mutex
+    std::thread m_reader_thread; // last member: joined before the state above goes away
 };
 
 #include "FrameReader.impl.h"

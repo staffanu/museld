@@ -62,6 +62,12 @@ public:
     MuseRfDemodulator(const MuseRfDemodulator&) = delete;
     void operator=(const MuseRfDemodulator&) = delete;
 
+    // Join the demodulator thread while demodulate() and m_efm_demodulator
+    // still exist; the base destructor's cleanup() would be too late.
+    ~MuseRfDemodulator() {
+        cleanup();
+    }
+
     void setEfmEnabled(bool enabled) { m_efm_enabled = enabled; }
 
 protected:

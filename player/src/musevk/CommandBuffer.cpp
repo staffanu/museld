@@ -25,6 +25,12 @@ namespace musevk {
     }
 
     CommandBuffer::~CommandBuffer() {
+        // Never destroy under in-flight work: an unwind between submit() and
+        // wait() would otherwise free the fence and buffer mid-execution.  The
+        // pointer-style waitForFences overload reports errors as result codes
+        // rather than exceptions, and there is nothing to do about them here.
+        if (m_is_running)
+            (void)m_device.waitForFences(1, &m_fence, VK_TRUE, UINT64_MAX);
         m_device.destroy(m_fence);
         m_device.freeCommandBuffers(m_command_pool, m_command_buffer);
     }

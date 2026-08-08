@@ -202,6 +202,22 @@ RF (40 MHz) → NtscRfDemodulator → NtscInputReader DPLL →
 NTSC frame buffer → Vulkan GPU color decode → video output
 ```
 
+### Object Lifetimes and Teardown (museld)
+
+Every class that owns a thread or an armed callback stops and joins it in its
+destructor (`FrameReader` and subclasses, `RfDemodulator` and subclasses, the
+EFM worker inside `demodulate()`, `AudioPlayback`, `OcrWorker`,
+`TranslationWorker`). The `cleanup()` methods still exist for the explicit
+happy-path teardown order but are idempotent, so destructor-driven unwinding
+after an exception is always safe. Conventions to preserve when touching this
+code: thread members are declared last in their class (joined before the state
+they use is destroyed); worker-thread exceptions are marshalled via
+`exception_ptr` and rethrown on the consumer's thread (`getNextInputBuffer`
+ultimately rethrows on the main thread — never `std::exit` from a worker);
+frame readers call `RfDemodulator::requestStop()` before joining their reader
+thread (deadlock otherwise); destructors never throw. `process_file` tears
+down via a RAII guard: reader → Vulkan → GLFW window, in that order.
+
 ### museld Threading
 
 - Main thread: Vulkan command recording + GLFW event loop

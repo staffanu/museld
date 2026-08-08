@@ -15,11 +15,11 @@ struct ma_device;
 class AudioPlayback {
 public:
     explicit AudioPlayback(Logger &log);
+    ~AudioPlayback();
     void add_samples(
             AudioMode const &audio_mode,
             int const &sample_count,
             AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES]);
-    void cleanup();
 
 private:
     static constexpr int c_audio_buffer_size = 16384;

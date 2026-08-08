@@ -22,6 +22,11 @@ public:
                                    const std::optional<std::string> &output_filename);
     ResamplingFrameReader(const ResamplingFrameReader&) = delete;
     void operator=(const ResamplingFrameReader&) = delete;
+    // Join the reader thread while threadFunc() and the demodulator still
+    // exist; the base destructor's cleanup() would be too late.
+    ~ResamplingFrameReader() override {
+        ResamplingFrameReader::cleanup();
+    }
 
     bool initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) override;
     void cleanup() override;
