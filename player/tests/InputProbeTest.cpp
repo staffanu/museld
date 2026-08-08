@@ -133,6 +133,32 @@ TEST_CASE("Probe detects u8 and lds sample formats by content", "[InputProbe]") 
     CHECK(lds_result.type == InputProbeResult::Type::eNtscRf);
 }
 
+TEST_CASE("Probe detects muse-16 baseband by its folded line profile", "[InputProbe]") {
+    // MUSE baseband is hostile to autocorrelation: the dot-interleaved video
+    // decorrelates adjacent lines, leaving only a small per-line sync.  Model
+    // that as content smooth within each 480-sample line but independent from
+    // line to line, and expect the fold-480 test to find the sync anyway.
+    vector<float> samples(c_samples);
+    mt19937 rng(3);
+    uniform_real_distribution<float> cycles(3.0f, 40.0f);
+    uniform_real_distribution<float> phase01(0.0f, 1.0f);
+    for (size_t line = 0; line * 480 < samples.size(); line++) {
+        float f = cycles(rng), ph = phase01(rng);
+        for (int i = 0; i < 480 && line * 480 + i < samples.size(); i++)
+            samples[line * 480 + i] = i < 12
+                    ? (i < 6 ? -0.5f : 0.5f)
+                    : 0.3f * sinf(2 * (float)M_PI * (f * i / 480.0f + ph));
+    }
+
+    auto path = tempFile("museld-probe-m16.bin");
+    writeS16(path, samples);
+    auto r = probe(path);
+    filesystem::remove(path);
+
+    CHECK(r.type == InputProbeResult::Type::eMuse16Baseband);
+    CHECK(r.sample_frequency == 16.2e6);
+}
+
 TEST_CASE("Probe reports white noise as unclassifiable", "[InputProbe]") {
     vector<float> noise(c_samples);
     mt19937 rng(7);
