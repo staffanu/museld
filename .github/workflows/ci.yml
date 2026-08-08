@@ -225,11 +225,22 @@ jobs:
           path: "*.zip"
           if-no-files-found: error
 
+      # The release page text is the tag's annotation (subject and body),
+      # so write it with git tag -a.  checkout may have dereferenced the tag,
+      # so fetch the real tag object before reading the annotation.
+      - name: Extract release notes from the tag annotation
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          git fetch --force origin "+refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+
       - name: Attach packages to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: "*.zip"
+          body_path: RELEASE_NOTES.md
 
   windows:
     name: Windows MSYS2 (ac3rf-efm-decode + tests)
@@ -358,8 +369,19 @@ jobs:
           path: "*.zip"
           if-no-files-found: error
 
+      # The release page text is the tag's annotation (subject and body),
+      # so write it with git tag -a.  checkout may have dereferenced the tag,
+      # so fetch the real tag object before reading the annotation.
+      - name: Extract release notes from the tag annotation
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          git fetch --force origin "+refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+
       - name: Attach packages to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: "*.zip"
+          body_path: RELEASE_NOTES.md

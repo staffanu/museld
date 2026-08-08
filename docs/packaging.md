@@ -62,10 +62,11 @@ packaging/*/README-*.txt               the README that goes inside each package
 
 ## Making a release
 
-Push a tag beginning with `v`:
+Push an annotated tag beginning with `v`; the annotation's subject and body become the
+text on the release page:
 
 ```bash
-git tag v0.1.0
+git tag -a v0.1.0    # write the release notes as the tag message
 git push origin v0.1.0
 ```
 
