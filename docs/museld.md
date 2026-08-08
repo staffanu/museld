@@ -38,6 +38,13 @@ single CPU thread.
 | `--sample-freq <Hz>` | Sets the input sample rate. Measured from the file contents when omitted. |
 | `--probe` | Print what content-based detection finds for each following input file (sample format, RF type, sample rate, and a ready-to-paste option line) instead of decoding it. |
 
+The input types:
+
+- `muse-rf` — RF from the disc surface (or a player's RF tap) of a MUSE Hi-Vision laserdisc, typically captured at 62.5 MHz.
+- `ntsc-rf` — RF of a standard NTSC laserdisc, typically a DomesDay Duplicator capture at 40 MHz.
+- `muse-16` — MUSE baseband resampled to exactly one sample per pixel at 16.2 MHz, phase locked to the line structure (480 samples per line). This is museld's own intermediate format, produced with `--write-muse16` (see below); `--sample-freq` does not apply.
+- `muse-os` — MUSE baseband (a player's output, before any resampling) captured at an arbitrary rate, e.g. an oscilloscope capture at 50 MHz. The resampling DPLL locks to it like to RF, but skips the FM demodulation.
+
 By default museld detects everything the options leave open and plays the file with whatever it
 finds: the input type, the sample rate (unless `--sample-freq` was given -- and with an explicit
 `--input-type` the rate is measured under that type, which works even for captures the classifier
@@ -290,30 +297,13 @@ RF → TimingRecovery (Mueller-Müller PLL) → EfmDecoder → CIRC C1/C2 Reed-S
 - **Picture filters**: Most filters were computed early in the project; picture quality could probably be improved by spending more time on them.
 - **Motion detection**: The algorithm is quite simplistic and could probably be improved.
 - **LD MUSE vs BS MUSE**: Available documentation describes the satellite broadcasting standard. MUSE decoders have separate inputs for the two signals, so presumably there is some difference, but it is unknown what it is.
-- **Input detection on fifos, and live MUSE/NTSC switching**: Content detection needs seeks,
-  so fifo input requires explicit `--input-type` and `--sample-freq`. For the decoder-box use
-  case — museld sitting between a physical player and the TV, fed over a fifo — detection
-  should ideally run on the live stream (buffering and discarding some input while deciding),
-  and the player should switch between MUSE and NTSC mid-playback when the disc changes.
-  The detection itself is the easy part; the hard part is that the reader, demodulator,
-  decoder and display pipeline for the input type are built once at startup, so switching
-  needs a refactoring of the player setup code into something that can be torn down and
-  rebuilt (or kept warm in both flavors) without dropping the output window and audio device.
+- **Input detection on fifos, live MUSE/NTSC switching**: For the decoder-box use case (fifo from a capture device to the TV), detection should run on the live stream and the player should switch type when the disc changes. Needs the per-type reader/demodulator/decoder pipeline setup refactored so it can be swapped mid-playback; the detection itself is the easy part.
 - **Subtitle OCR** (experimental; see the option section above):
-  - Not in the release packages yet: `USE_OCR` is off by default, and how to distribute
-    ONNX Runtime and the PP-OCR models with the downloads is undecided (see docs/packaging.md
-    before changing this).
-  - `--ocr-translate` speaks plain HTTP only — hosted TLS endpoints would need an
-    OpenSSL-enabled cpp-httplib build.
-  - The live tracks lag the burned-in text by OCR + translation latency (about a second).
-    A deliberate presentation-delay buffer (delaying video/audio output a second or two
-    behind decode) would make the translated subtitles appear exactly in sync, and would
-    also enable temporal inpainting to hide the burned-in text itself.
-  - A translation still in flight when playback ends is dropped instead of being flushed
-    into the `--ocr-write` file.
-  - On Latin-script discs the `--ocr-script latin` filter cannot distinguish subtitles
-    from film credits (same script); only the recognition-confidence threshold filters
-    noise there.
+  - Not in the release packages: `USE_OCR` is off by default, and distributing ONNX Runtime and the PP-OCR models is undecided (see docs/packaging.md).
+  - `--ocr-translate` speaks plain HTTP only; hosted TLS endpoints would need an OpenSSL-enabled cpp-httplib build.
+  - The live tracks lag the burned-in text by about a second. A presentation-delay buffer would fix the sync, and would also enable inpainting the burned-in text away.
+  - A translation still in flight when playback ends is dropped instead of flushed into the `--ocr-write` file.
+  - On Latin-script discs the `--ocr-script latin` filter cannot tell subtitles from film credits; only the confidence threshold filters noise.
 
 ## References
 
