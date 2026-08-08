@@ -135,15 +135,25 @@ bool ResamplingFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBloc
     return FrameReader::initialize(buffers);
 }
 
+// Idempotent: runs both from the explicit teardown path and from the destructor.
 void ResamplingFrameReader::cleanup() {
+    // Stop the demodulator before FrameReader::cleanup() joins the reader
+    // thread: that thread may be waiting inside getNextDemodulatedBlock(),
+    // whose predicate tests the demodulator's stop flag, not ours.
+    if (m_demodulator != nullptr)
+        m_demodulator->requestStop();
+
     FrameReader::cleanup();
 
     free(m_input_buffer);
+    m_input_buffer = nullptr;
     free(m_input_dropout_buffer);
+    m_input_dropout_buffer = nullptr;
 
     if (m_demodulator != nullptr) {
         m_demodulator->cleanup();
         delete m_demodulator;
+        m_demodulator = nullptr;
     }
 
     m_input_reader.reset();

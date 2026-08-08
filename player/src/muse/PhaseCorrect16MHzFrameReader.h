@@ -14,6 +14,11 @@ public:
     explicit PhaseCorrect16MHzFrameReader(Logger &log, const std::string &filename, InputFormat input_format,
                                           double initial_seek_seconds,
                                           const std::optional<std::string> &output_filename);
+    // Join the reader thread while threadFunc() and m_input_reader still
+    // exist; the base destructor's cleanup() would be too late.
+    ~PhaseCorrect16MHzFrameReader() override {
+        PhaseCorrect16MHzFrameReader::cleanup();
+    }
 
     bool initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) override;
     void cleanup() override;

@@ -52,12 +52,18 @@ void musevk::VulkanMemoryObject::synchronizeHostWrites(CommandBuffer &command_bu
 }
 
 musevk::VulkanMemoryObject::~VulkanMemoryObject() {
-    if (m_host_visible_buffer)
-        m_vulkan_manager.getDevice().destroy(m_host_visible_buffer.value());
+    // Implicitly noexcept, so an allocator error escaping here would be an
+    // immediate terminate -- during unwinding, before anything gets reported.
+    try {
+        if (m_host_visible_buffer)
+            m_vulkan_manager.getDevice().destroy(m_host_visible_buffer.value());
 
-    m_vulkan_manager.getMemoryAllocator().free(m_allocated_device_memory);
-    if (m_allocated_host_visible_memory)
-        m_vulkan_manager.getMemoryAllocator().free(m_allocated_host_visible_memory.value());
+        m_vulkan_manager.getMemoryAllocator().free(m_allocated_device_memory);
+        if (m_allocated_host_visible_memory)
+            m_vulkan_manager.getMemoryAllocator().free(m_allocated_host_visible_memory.value());
+    } catch (const std::exception &x) {
+        m_vulkan_manager.getLogger().error(eVideo, std::format("~VulkanMemoryObject: {}", x.what()));
+    }
 };
 
 std::vector<std::pair<vk::MemoryPropertyFlags, std::optional<vk::MemoryPropertyFlags>>>

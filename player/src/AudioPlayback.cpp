@@ -65,16 +65,22 @@ AudioPlayback::AudioPlayback(Logger &log)
     m_log.debug(eAudio, std::format("Audio backend: {}", ma_get_backend_name(m_context->backend)));
 }
 
-void AudioPlayback::cleanup() {
-    if (m_device != nullptr)
-        closeStream();
+// Must not throw, and must run even during stack unwinding: the miniaudio
+// device owns a callback thread that reaches back into this object through
+// pUserData, so the device has to be gone before the members are.
+AudioPlayback::~AudioPlayback() {
+    if (m_device != nullptr) {
+        ma_device_uninit(m_device); // stops the device and joins the callback
+        delete m_device;
+        m_device = nullptr;
+    }
 
     if (m_context != nullptr) {
         auto audio_status = ma_context_uninit(m_context);
         delete m_context;
         m_context = nullptr;
         if (audio_status != MA_SUCCESS)
-            throw runtime_error(string("miniaudio: ") + ma_result_description(audio_status));
+            m_log.error(eAudio, string("miniaudio: ") + ma_result_description(audio_status));
     }
 }
 
@@ -220,8 +226,14 @@ void AudioPlayback::openStream() {
                                    m_device->playback.internalChannels, m_device->playback.internalSampleRate));
 
     audio_status = ma_device_start(m_device);
-    if (audio_status != MA_SUCCESS)
+    if (audio_status != MA_SUCCESS) {
+        // Uninit before throwing: an initialized device has the callback armed,
+        // and the destructor must not find a device it believes is running.
+        ma_device_uninit(m_device);
+        delete m_device;
+        m_device = nullptr;
         throw runtime_error(string("miniaudio: ") + ma_result_description(audio_status));
+    }
 }
 
 void AudioPlayback::closeStream() {

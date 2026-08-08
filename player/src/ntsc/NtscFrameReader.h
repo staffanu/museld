@@ -21,6 +21,11 @@ public:
                              const std::optional<std::string> &output_filename);
     NtscFrameReader(const NtscFrameReader&) = delete;
     void operator=(const NtscFrameReader&) = delete;
+    // Join the reader thread while threadFunc() and the demodulator still
+    // exist; the base destructor's cleanup() would be too late.
+    ~NtscFrameReader() override {
+        NtscFrameReader::cleanup();
+    }
 
     bool initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) override;
     void cleanup() override;

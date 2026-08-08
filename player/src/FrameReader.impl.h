@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <format>
+#include <utility>
 #include "musevk/VulkanBuffer.h"
 #include "FrameReader.h"
 #include "logging/Logger.h"
@@ -26,13 +27,17 @@ FrameReader<InputBlock>::FrameReader(Logger &log, const std::string &filename, b
           m_file_write_buffer(nullptr),
           m_vacant_input_buffers{},
           m_filled_input_buffers{},
-          m_reader_thread(nullptr),
           m_reader_thread_finished(false),
           m_stop_request(false),
           m_mutex(),
           m_cv_filled(),
           m_cv_vacant(),
           m_get_input_buffers_count(0) {
+}
+
+template<class InputBlock>
+FrameReader<InputBlock>::~FrameReader() {
+    cleanup();
 }
 
 template<class InputBlock>
@@ -48,13 +53,23 @@ bool FrameReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>
 
     m_log.debug(eInput, std::format("Using {} input buffers", m_vacant_input_buffers.size()));
 
-    m_reader_thread = new std::thread([this]() {
+    m_reader_thread = std::thread([this]() {
 #ifdef __APPLE__
         pthread_setname_np("museld-reader");
 #elif defined(linux) || defined(__FreeBSD__)
         pthread_setname_np(pthread_self(), "museld-reader");
 #endif
-        threadFunc();
+        // An exception escaping a thread is std::terminate, so store it and
+        // finish the stream instead; getNextInputBuffer() rethrows it on the
+        // consumer's thread once the filled buffers are drained.
+        try {
+            threadFunc();
+        } catch (...) {
+            std::unique_lock<std::mutex> lock(m_mutex);
+            m_thread_exception = std::current_exception();
+            m_reader_thread_finished = true;
+            m_cv_filled.notify_all();
+        }
     });
 
     if (m_output_filename) {
@@ -73,6 +88,7 @@ bool FrameReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>
     return true;
 }
 
+// Idempotent: runs both from the explicit teardown path and from the destructors.
 template<class InputBlock>
 void FrameReader<InputBlock>::cleanup() {
     {
@@ -80,14 +96,16 @@ void FrameReader<InputBlock>::cleanup() {
         m_stop_request = true;
         m_cv_vacant.notify_all();
     }
-    m_reader_thread->join();
-    delete m_reader_thread;
+    if (m_reader_thread.joinable())
+        m_reader_thread.join();
     m_vacant_input_buffers.clear();
     m_filled_input_buffers.clear();
 
     if (m_output_file_fd != -1) {
         close(m_output_file_fd);
+        m_output_file_fd = -1;
         free(m_file_write_buffer);
+        m_file_write_buffer = nullptr;
     }
 }
 
@@ -105,8 +123,11 @@ FrameReader<InputBlock>::getNextInputBuffer() {
                 std::chrono::milliseconds(100),
                 [this] { return m_reader_thread_finished || !m_filled_input_buffers.empty(); });
 
-        if (m_filled_input_buffers.empty())
+        if (m_filled_input_buffers.empty()) {
+            if (m_reader_thread_finished && m_thread_exception)
+                std::rethrow_exception(std::exchange(m_thread_exception, nullptr));
             return {nullptr, m_reader_thread_finished ? InputStatus::eEof : InputStatus::eTimeout};
+        }
 
         buffer = std::move(m_filled_input_buffers.front());
         m_filled_input_buffers.pop_front();

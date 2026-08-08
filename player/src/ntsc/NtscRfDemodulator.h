@@ -61,6 +61,12 @@ public:
     NtscRfDemodulator(const NtscRfDemodulator&) = delete;
     void operator=(const NtscRfDemodulator&) = delete;
 
+    // Join the demodulator thread while demodulate() and m_efm_demodulator
+    // still exist; the base destructor's cleanup() would be too late.
+    ~NtscRfDemodulator() {
+        cleanup();
+    }
+
     void setEfmEnabled(bool enabled) { m_efm_enabled = enabled; }
 
     // enough buffers for two frames

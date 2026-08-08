@@ -101,19 +101,31 @@ bool NtscFrameReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &b
     return FrameReader::initialize(buffers);
 }
 
+// Idempotent: runs both from the explicit teardown path and from the destructor.
 void NtscFrameReader::cleanup() {
+    // Stop the demodulator before FrameReader::cleanup() joins the reader
+    // thread: that thread may be waiting inside getNextDemodulatedBlock(),
+    // whose predicate tests the demodulator's stop flag, not ours.
+    if (m_demodulator != nullptr)
+        m_demodulator->requestStop();
+
     FrameReader::cleanup();
 
     free(m_input_buffer);
+    m_input_buffer = nullptr;
     free(m_input_dropout_buffer);
+    m_input_dropout_buffer = nullptr;
 
     if (m_demodulator != nullptr) {
         m_demodulator->cleanup();
         delete m_demodulator;
+        m_demodulator = nullptr;
     }
 
-    if (m_file_fd != -1)
+    if (m_file_fd != -1) {
         close(m_file_fd);
+        m_file_fd = -1;
+    }
 }
 
 void NtscFrameReader::seek(double seconds) {

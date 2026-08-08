@@ -732,6 +732,30 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
 
+    // Teardown must run in this order on every exit path, including stack
+    // unwinding: first stop the reader, which joins the reader/demodulator/EFM
+    // threads while the Vulkan device they use is still alive; then tear down
+    // Vulkan, which destroys the surface; then the window the surface was
+    // created from.  Both cleanup()s are idempotent, and their destructors
+    // would otherwise run too late -- reader and manager belong to main().
+    // Declared before initVulkan so a failure anywhere below is covered.
+    struct Teardown {
+        Logger &log;
+        FrameReader<InputBlock> &reader;
+        musevk::VulkanManager &manager;
+        GLFWwindow *window;
+        ~Teardown() {
+            try {
+                reader.cleanup();
+                manager.cleanup();
+            } catch (const std::exception &x) {
+                log.error(eApplication, x.what());
+            }
+            glfwDestroyWindow(window);
+            glfwTerminate();
+        }
+    } teardown{log, reader, manager, window};
+
     manager.initVulkan(window, no_sync);
 
     {
@@ -829,13 +853,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         vfw = nullptr;
     }
 #endif
-    if (audio_playback != nullptr)
-        audio_playback->cleanup();
-    reader.cleanup();
-    manager.cleanup();
-
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    // audio_playback, the decoder scope above and the Teardown guard handle the
+    // rest, in reverse declaration order.
 }
 
 enum InputType {
@@ -1298,7 +1317,7 @@ int main(int argc, char *argv[]) {
 
                 switch (input_type) {
                     case eNtscRf: {
-                        auto *reader = new NtscFrameReader(
+                        auto reader = make_unique<NtscFrameReader>(
                                         log, executable_dir, manager, *it, input_format,
                                         input_sample_frequency, initial_seek_seconds, benchmark_shaders, efm_audio,
                                         muse_output_filename);
@@ -1309,11 +1328,10 @@ int main(int argc, char *argv[]) {
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                      initial_seek_seconds);
-                        delete reader;
                         break;
                     }
                     case eMuse16MHz: {
-                        auto *reader = new PhaseCorrect16MHzFrameReader(
+                        auto reader = make_unique<PhaseCorrect16MHzFrameReader>(
                                 log, *it, input_format, initial_seek_seconds, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
@@ -1321,12 +1339,11 @@ int main(int argc, char *argv[]) {
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                      initial_seek_seconds);
-                        delete reader;
                         break;
                     }
                     case eMuseOversampled:
                     case eMuseRf: {
-                        auto *reader = new ResamplingFrameReader(
+                        auto reader = make_unique<ResamplingFrameReader>(
                                 log, executable_dir, manager, *it, input_format,
                                 input_sample_frequency, initial_seek_seconds, input_type == eMuseRf, benchmark_shaders,
                                 efm_audio, muse_output_filename);
@@ -1336,7 +1353,6 @@ int main(int argc, char *argv[]) {
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                      initial_seek_seconds);
-                        delete reader;
                         break;
                     }
                     default:

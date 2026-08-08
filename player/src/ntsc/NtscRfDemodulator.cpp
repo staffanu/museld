@@ -40,10 +40,11 @@ void NtscRfDemodulator::demodulate() {
     assert(c_sample_block_size % c_video_decimation_rate == 0);
 
     CommandPool command_pool(m_vulkan_manager);
-    musevk::TimestampQueryPool *timestamp_query_pool =
-            m_benchmark_shaders ? new musevk::TimestampQueryPool(m_vulkan_manager.getPhysicalDevice(), m_vulkan_manager.getDevice(), 40) : nullptr;
+    std::unique_ptr<musevk::TimestampQueryPool> timestamp_query_pool = m_benchmark_shaders
+            ? std::make_unique<musevk::TimestampQueryPool>(m_vulkan_manager.getPhysicalDevice(), m_vulkan_manager.getDevice(), 40)
+            : nullptr;
     musevk::TimestampStatistics timestamp_statistics;
-    auto command_buffer = command_pool.createCommandBuffer(timestamp_query_pool);
+    auto command_buffer = command_pool.createCommandBuffer(timestamp_query_pool.get());
 
     vk::BufferUsageFlags buffer_usage_flags =
             vk::BufferUsageFlagBits::eStorageBuffer
@@ -183,11 +184,28 @@ void NtscRfDemodulator::demodulate() {
     // with it; the worker fills in efm_data and forwards the block to m_filled_blocks.  A single
     // worker with a FIFO queue keeps the blocks in order, and the queue is bounded by the block
     // pool: when all blocks are queued for EFM the loop waits on m_cv_vacant as before.
-    std::mutex efm_mutex;
-    std::condition_variable efm_cv;
-    std::deque<unique_ptr<NtscDemodulatedBlock>> efm_queue;
-    bool efm_stop = false;
-    std::thread efm_thread([&]() {
+    // The worker's shared state and the thread live in one struct so a single
+    // destructor stops and joins on every exit path: an exception below would
+    // otherwise unwind past a joinable std::thread (std::terminate) while
+    // destroying the queue the worker is still using.
+    struct EfmWorker {
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::deque<unique_ptr<NtscDemodulatedBlock>> queue;
+        bool stop = false;
+        std::thread thread; // last member: joined before the state above goes away
+
+        ~EfmWorker() {
+            {
+                std::unique_lock<std::mutex> lock(mutex);
+                stop = true;
+                cv.notify_one();
+            }
+            if (thread.joinable())
+                thread.join();
+        }
+    } efm;
+    efm.thread = std::thread([&]() {
 #ifdef __APPLE__
         pthread_setname_np("museld-efm");
 #elif defined(linux) || defined(__FreeBSD__)
@@ -196,12 +214,12 @@ void NtscRfDemodulator::demodulate() {
         while (true) {
             unique_ptr<NtscDemodulatedBlock> block;
             {
-                std::unique_lock<std::mutex> lock(efm_mutex);
-                efm_cv.wait(lock, [&] { return efm_stop || !efm_queue.empty(); });
-                if (efm_queue.empty())
+                std::unique_lock<std::mutex> lock(efm.mutex);
+                efm.cv.wait(lock, [&] { return efm.stop || !efm.queue.empty(); });
+                if (efm.queue.empty())
                     break; // stop requested and the queue is drained
-                block = std::move(efm_queue.front());
-                efm_queue.pop_front();
+                block = std::move(efm.queue.front());
+                efm.queue.pop_front();
             }
             if (!block->efm_input.empty())
                 m_efm_demodulator.demodulate(block->efm_input.data(), block->efm_data);
@@ -350,22 +368,21 @@ void NtscRfDemodulator::demodulate() {
         // Hand the block to the EFM worker, which forwards it to m_filled_blocks.  This must not
         // happen before command_buffer->wait() above, since the consumer reads video_data as soon
         // as the block appears in m_filled_blocks.
-        std::unique_lock<std::mutex> lock(efm_mutex);
-        efm_cv.notify_one();
-        efm_queue.push_back(std::move(block));
+        std::unique_lock<std::mutex> lock(efm.mutex);
+        efm.cv.notify_one();
+        efm.queue.push_back(std::move(block));
     }
 
     // Let the EFM worker drain its queue before signalling end of stream
     {
-        std::unique_lock<std::mutex> lock(efm_mutex);
-        efm_stop = true;
-        efm_cv.notify_one();
+        std::unique_lock<std::mutex> lock(efm.mutex);
+        efm.stop = true;
+        efm.cv.notify_one();
     }
-    efm_thread.join();
+    efm.thread.join();
 
     m_reader_thread_finished = true;
     m_cv_filled.notify_one();
 
-    delete timestamp_query_pool;
     timestamp_statistics.print_stats(0);
 }

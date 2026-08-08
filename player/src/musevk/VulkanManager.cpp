@@ -17,7 +17,19 @@ using namespace std;
 namespace musevk {
     VulkanManager::VulkanManager(Logger &log)
     : m_log(log),
-      m_graphics_and_compute_queue(nullptr) {}
+      m_window(nullptr),
+      m_no_sync(false),
+      m_graphics_and_compute_queue(nullptr),
+      m_present_queue(nullptr) {}
+
+    VulkanManager::~VulkanManager() {
+        // Backstop for the exception path; must not throw while unwinding.
+        try {
+            cleanup();
+        } catch (const std::exception &x) {
+            m_log.error(eVideo, x.what());
+        }
+    }
 
     void VulkanManager::initVulkan(GLFWwindow *window, bool no_sync) {
         m_window = window;
@@ -31,18 +43,27 @@ namespace musevk {
     }
 
     void VulkanManager::cleanup() {
-        m_logical_device.waitIdle();
-        cleanupSwapChain();
-        delete m_graphics_and_compute_queue;
-        if (m_present_queue != m_graphics_and_compute_queue)
-            delete m_present_queue;
-        m_logical_device.destroy();
+        if (!m_instance)
+            return; // never initialized, or already cleaned up
+        if (m_logical_device) {
+            m_logical_device.waitIdle();
+            cleanupSwapChain();
+            delete m_graphics_and_compute_queue;
+            if (m_present_queue != m_graphics_and_compute_queue)
+                delete m_present_queue;
+            m_graphics_and_compute_queue = nullptr;
+            m_present_queue = nullptr;
+            m_logical_device.destroy();
+            m_logical_device = nullptr;
+        }
         m_instance.destroy(m_surface);
+        m_surface = nullptr;
         if (enableValidationLayers) {
             vk::detail::DispatchLoaderDynamic dynamic_loader(m_instance, vkGetInstanceProcAddr);
             m_instance.destroyDebugUtilsMessengerEXT(m_debug_messenger, nullptr, dynamic_loader);
         }
         m_instance.destroy();
+        m_instance = nullptr;
     }
 
     void VulkanManager::cleanupSwapChain() {

@@ -21,10 +21,14 @@ namespace musevk {
     class VulkanManager {
     public:
         explicit VulkanManager(Logger &log);
+        ~VulkanManager();
         VulkanManager(VulkanManager &other) = delete;
         void operator=(const musevk::VulkanManager &) = delete;
 
         void initVulkan(GLFWwindow *window, bool no_sync);
+        // Idempotent, and safe after a partial initVulkan().  Everything created
+        // on this manager's device must already be gone: the explicit teardown
+        // path calls this once that holds, and the destructor is the backstop.
         void cleanup();
 
         Logger &getLogger() { return m_log; }
