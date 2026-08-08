@@ -23,14 +23,14 @@ LdsInputReader::~LdsInputReader() {
 void LdsInputReader::initialize() {
 }
 
-void LdsInputReader::seek(off_t no_samples) {
+void LdsInputReader::seek(int64_t no_samples) {
     if (m_is_fifo)
         return;
     std::scoped_lock<std::mutex> lock(m_fd_mutex);
-    off_t bytes_to_seek = no_samples / 4 * 5;
+    int64_t bytes_to_seek = no_samples / 4 * 5;
     // Clamp at the start of the file (see InputReaderImpl::seek)
-    off_t current = lseek(m_fd, 0, SEEK_CUR);
-    lseek(m_fd, std::max<off_t>(0, current + bytes_to_seek), SEEK_SET);
+    int64_t current = seekFile(m_fd, 0, SEEK_CUR);
+    seekFile(m_fd, std::max<int64_t>(0, current + bytes_to_seek), SEEK_SET);
 }
 
 int LdsInputReader::readFloats(float *f) {

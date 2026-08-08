@@ -51,7 +51,7 @@ void processFile(Logger &logger, Operation input_type,
 
     reader->initialize();
     if (initial_seek_seconds != 0)
-        reader->seek((off_t)(input_sample_frequency * initial_seek_seconds));
+        reader->seek((int64_t)(input_sample_frequency * initial_seek_seconds));
     auto *input_buffer = new float[block_size];
 
     switch (input_type) {

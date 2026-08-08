@@ -15,7 +15,7 @@
 
 using namespace std;
 
-static constexpr off_t c_samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
+static constexpr int64_t c_samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WIDTH;
 
 PhaseCorrect16MHzFrameReader::PhaseCorrect16MHzFrameReader(
         Logger &log,
@@ -52,8 +52,8 @@ void PhaseCorrect16MHzFrameReader::seek(double seconds) {
 
         // Whole frames only, clamped at the sync origin -- seeking to the file
         // start would lose the frame alignment found by compute_initial_skip()
-        off_t frames_to_seek = std::max((off_t)(seconds * 30), -m_frame_position);
-        off_t samples_to_seek = frames_to_seek * c_samples_per_frame;
+        int64_t frames_to_seek = std::max((int64_t)(seconds * 30), -m_frame_position);
+        int64_t samples_to_seek = frames_to_seek * c_samples_per_frame;
         double actual_seek_time = (double)frames_to_seek / 30.0;
         m_log.info(eInput, std::format("Seeking relative time {} s, {} samples.",
                                        actual_seek_time, samples_to_seek));
@@ -83,7 +83,7 @@ void PhaseCorrect16MHzFrameReader::threadFunc() {
         auto data = buffer->video_data->data<float>();
         if (m_input_reader->readFloats(data) != (int)c_samples_per_frame)
             break;
-        for (off_t i = 0; i < c_samples_per_frame; i++)
+        for (int64_t i = 0; i < c_samples_per_frame; i++)
             data[i] = data[i] * m_input_scale.first + m_input_scale.second;
         memset(buffer->dropout_data->data<uint8_t>(), 0, sizeof(buffer->dropout_data->size()));
 
@@ -98,7 +98,7 @@ void PhaseCorrect16MHzFrameReader::threadFunc() {
 }
 
 pair<int, pair<float, float>> PhaseCorrect16MHzFrameReader::compute_initial_skip(Logger &log) {
-    constexpr off_t two_frame_size = 480 * 1125 * 2;
+    constexpr int64_t two_frame_size = 480 * 1125 * 2;
     auto reader = makeInputReader(m_filename, m_input_format, two_frame_size);
     reader->initialize();
 

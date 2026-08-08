@@ -37,7 +37,7 @@ public:
     ~PrefetchingInputReader() override;
 
     void initialize() override;
-    void seek(off_t no_samples) override;
+    void seek(int64_t no_samples) override;
     int readFloats(float *f) override;
     int bitsPerSample() const override { return m_inner->bitsPerSample(); }
 
@@ -57,7 +57,7 @@ private:
     std::condition_variable m_cv;
     std::deque<std::vector<float>> m_filled;  // decoded blocks in stream order
     std::vector<std::vector<float>> m_vacant; // recycled block buffers
-    off_t m_inner_position = 0; // samples the inner reader has produced, adjusted by seeks
+    int64_t m_inner_position = 0; // samples the inner reader has produced, adjusted by seeks
     bool m_eof = false;         // the inner reader reported end of stream; a seek clears it
     bool m_seek_pending = false;
     bool m_producer_parked = false;

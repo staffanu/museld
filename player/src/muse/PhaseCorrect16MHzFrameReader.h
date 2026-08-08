@@ -37,7 +37,7 @@ private:
     // Input-reader position in frames past the sync origin found by
     // compute_initial_skip().  Seeks are clamped here: position 0 is the first
     // start-of-frame in the capture, which need not be the start of the file.
-    off_t m_frame_position = 0;
+    int64_t m_frame_position = 0;
 };
 
 #endif //MUSECPP_PHASECORRECT16MHZFRAMEREADER_H
