@@ -33,7 +33,15 @@ public:
     InputReader(int fd, uint32_t block_size, bool is_fifo)
     : m_fd(fd), m_block_size(block_size), m_is_fifo(is_fifo) {}
 
-    virtual ~InputReader() = default;
+    // The factory transfers fd ownership to the reader.  Without this close,
+    // probing (which opens a short-lived reader per candidate format and
+    // chunk) leaks handles -- and on Windows an open handle blocks deleting
+    // the file.  -1 (PrefetchingInputReader) and the standard fds (stdin
+    // reader) are not ours to close.
+    virtual ~InputReader() {
+        if (m_fd > STDERR_FILENO)
+            close(m_fd);
+    }
 
     virtual void initialize() = 0;
     virtual void seek(int64_t no_samples) = 0;
