@@ -52,6 +52,10 @@ A real-time [MUSE](https://en.wikipedia.org/wiki/Multiple_sub-Nyquist_sampling_e
 and NTSC laserdisc decoder. Video filtering runs on the GPU via Vulkan
 and GLSL compute shaders. Audio is output via the bundled [miniaudio](https://miniaud.io/) library.
 
+Playback is controlled entirely with keyboard shortcuts, so it can be driven from the sofa with
+any Bluetooth keyboard, or [BridgedIrRemote](https://bitbucket.org/staffanulfberg/bridgedirremote/src/master/), an Android
+remote control app that pairs with the computer.
+
 See **[docs/museld.md](docs/museld.md)** for the full player reference.
 
 ### ac3rf-efm-decode
