@@ -34,6 +34,7 @@
 #include "subtitles/SubtitleOverlay.h"
 #include "input/InputReader.h"
 #include "input/InputReaderFactory.h"
+#include "InputProbe.h"
 #ifdef HAVE_OCR
 # include <map>
 # include "ocr/OcrBandCapture.h"
@@ -898,15 +899,48 @@ static string get_executable_dir(const char *argv0) {
     return std::filesystem::path(argv0).parent_path().string();
 }
 
+static void printProbeResult(const std::string &filename, const InputProbeResult &r) {
+    cout << filename << ":" << endl;
+    if (!r.format) {
+        cout << "  sample format: not recognized" << endl;
+        return;
+    }
+    cout << std::format("  sample format: {}", inputFormatName(*r.format)) << endl;
+    if (r.line_period == 0) {
+        cout << "  no video line structure found -- not an RF capture, or too noisy" << endl;
+        return;
+    }
+    cout << std::format("  line period {:.1f} samples (correlation {:.2f}), "
+                        "carrier {:.0f} cycles/line, audio carrier {:.0f}x background",
+                        r.line_period, r.line_strength, r.cycles_per_line,
+                        r.audio_carrier_ratio) << endl;
+    if (r.type == InputProbeResult::Type::eUnknown) {
+        cout << "  RF type: ambiguous -- give --input-type explicitly" << endl;
+        return;
+    }
+    if (r.type == InputProbeResult::Type::eMuse16Baseband) {
+        cout << "  detected: phase-correct 16.2 MHz MUSE baseband" << endl;
+        cout << std::format("  suggested: --input-format {} --input-type muse-16",
+                            inputFormatName(*r.format)) << endl;
+        return;
+    }
+    const char *type = r.type == InputProbeResult::Type::eNtscRf ? "ntsc-rf" : "muse-rf";
+    cout << std::format("  detected: {} at {:.4g} MHz{}", type, r.sample_frequency / 1e6,
+                        r.sample_frequency_snapped ? "" : " (no common capture rate matched)") << endl;
+    cout << std::format("  suggested: --input-format {} --input-type {} --sample-freq {:.4g}e6",
+                        inputFormatName(*r.format), type, r.sample_frequency / 1e6) << endl;
+}
+
 int main(int argc, char *argv[]) {
     auto log_selection = StreamLogger::c_log_warn;
     std::string executable_dir = get_executable_dir(argv[0]);
     bool decode_all_fields = true;
     bool full_screen = false;
     bool no_sync = false;
-    InputType input_type = eMuseRf;
+    std::optional<InputType> input_type_option;         // unset (the default) means auto-detect
+    bool probe_only = false;      // --probe: print what probing finds and skip decoding
     std::optional<InputFormat> input_format_option = std::nullopt;
-    double input_sample_frequency = 62.5e6;
+    std::optional<double> sample_frequency_option;      // unset means measure it from the file
     double initial_seek_seconds = 0;
     bool start_paused = false;
     auto field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
@@ -963,19 +997,26 @@ int main(int argc, char *argv[]) {
         input_format_option = inputFormatFromString(*(it++));
     });
     options.option("--input-type", "TYPE",
-                   "muse-rf (default) or ntsc-rf for RF captures, muse-16 for phase correct "
-                   "16.2 MHz MUSE baseband, muse-os for oversampled MUSE baseband", [&] () -> void {
+                   "muse-rf or ntsc-rf for RF captures, muse-16 for phase correct 16.2 MHz "
+                   "MUSE baseband, muse-os for oversampled MUSE baseband, or auto (the "
+                   "default): detect RF type, sample rate and format from the file contents", [&] () -> void {
         const auto &name = *(it++);
-        if      (name == "muse-rf")  input_type = eMuseRf;
-        else if (name == "ntsc-rf")  input_type = eNtscRf;
-        else if (name == "muse-16")  input_type = eMuse16MHz;
-        else if (name == "muse-os")  input_type = eMuseOversampled;
+        if      (name == "auto")     input_type_option = nullopt;
+        else if (name == "muse-rf")  input_type_option = eMuseRf;
+        else if (name == "ntsc-rf")  input_type_option = eNtscRf;
+        else if (name == "muse-16")  input_type_option = eMuse16MHz;
+        else if (name == "muse-os")  input_type_option = eMuseOversampled;
         else throw std::runtime_error(std::format("Unknown input type {}", name));
     });
     options.option("--sample-freq", "HZ",
-                   "Input sample rate, written as 62.5e6 rather than 62.5 (default 62.5e6, "
-                   "the MUSE RF rate; NTSC RF captures are usually 40e6)", [&] () -> void {
-        input_sample_frequency = stod(*(it++));
+                   "Input sample rate, written as 62.5e6 rather than 62.5 (measured from "
+                   "the file when omitted; NTSC RF captures are usually 40e6, MUSE RF "
+                   "62.5e6)", [&] () -> void {
+        sample_frequency_option = stod(*(it++));
+    });
+    options.flag("--probe", "Detect each input file's sample format, RF type and sample rate "
+                            "from its contents, print the result, and exit without decoding", [&] () -> void {
+        probe_only = true;
     });
     options.option("--seek", "SECONDS", "Seek to this position before playing", [&] () -> void {
         initial_seek_seconds = stod(*(it++));
@@ -1246,15 +1287,83 @@ int main(int argc, char *argv[]) {
                     exit(EXIT_FAILURE);
                 }
 
-                InputFormat input_format;
-                if (input_format_option.has_value())
-                    input_format = input_format_option.value();
-                else if (auto detected = inputFormatFromFilename(*it); detected.has_value())
-                    input_format = detected.value();
-                else {
+                std::optional<InputFormat> resolved_format = input_format_option;
+                if (!resolved_format)
+                    resolved_format = inputFormatFromFilename(*it);
+
+                // The type and rate used for this file; probing fills in
+                // whatever the options left open
+                InputType file_input_type = input_type_option.value_or(eMuseRf);
+                double file_sample_frequency = sample_frequency_option.value_or(0);
+
+                const bool needs_probe = probe_only || !input_type_option ||
+                        (!sample_frequency_option && *input_type_option != eMuse16MHz);
+                if (needs_probe) {
+                    if (filesystem::is_fifo(*it)) {
+                        cerr << "Reading from a pipe cannot use content detection -- give both "
+                                "--input-type and --sample-freq explicitly" << endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    StreamLogger probe_log(log_selection, std::cerr, true);
+                    const InputProbeResult probe = probeInputFile(probe_log, *it, resolved_format);
+                    if (probe_only) {
+                        printProbeResult(*it, probe);
+                        it++;
+                        continue;
+                    }
+                    if (!resolved_format)
+                        resolved_format = probe.format;
+
+                    InputType detected_type = eMuseRf;
+                    bool type_detected = true;
+                    switch (probe.type) {
+                        case InputProbeResult::Type::eNtscRf:         detected_type = eNtscRf; break;
+                        case InputProbeResult::Type::eMuseRf:         detected_type = eMuseRf; break;
+                        case InputProbeResult::Type::eMuse16Baseband: detected_type = eMuse16MHz; break;
+                        case InputProbeResult::Type::eUnknown:        type_detected = false; break;
+                    }
+                    if (!input_type_option) {
+                        if (!type_detected) {
+                            cerr << std::format(
+                                    "Could not determine the input type of {} -- give --input-type "
+                                    "explicitly (--probe prints what the detection measured)", *it) << endl;
+                            exit(EXIT_FAILURE);
+                        }
+                        file_input_type = detected_type;
+                    } else if (type_detected && detected_type != file_input_type) {
+                        cerr << std::format("Warning: {} looks like --input-type {}",
+                                            *it, detected_type == eNtscRf ? "ntsc-rf" :
+                                                 detected_type == eMuseRf ? "muse-rf" : "muse-16") << endl;
+                    }
+
+                    if (!sample_frequency_option) {
+                        // The rate follows from the line period under whichever
+                        // type is in effect, so an explicit --input-type gets a
+                        // rate even when the classification was ambiguous
+                        auto hypothesis =
+                                file_input_type == eNtscRf    ? InputProbeResult::Type::eNtscRf :
+                                file_input_type == eMuse16MHz ? InputProbeResult::Type::eMuse16Baseband :
+                                                                InputProbeResult::Type::eMuseRf;
+                        file_sample_frequency = estimateSampleFrequency(probe, hypothesis);
+                        if (file_sample_frequency == 0) {
+                            cerr << std::format("Could not measure the sample rate of {} -- "
+                                                "give --sample-freq explicitly", *it) << endl;
+                            exit(EXIT_FAILURE);
+                        }
+                    }
+                    cout << std::format("{}: {} {} at {:.4g}e6 Hz",
+                                        *it, inputFormatName(resolved_format.value_or(eSint16)),
+                                        file_input_type == eNtscRf ? "NTSC RF" :
+                                        file_input_type == eMuseRf ? "MUSE RF" :
+                                        file_input_type == eMuse16MHz ? "MUSE baseband" : "oversampled MUSE baseband",
+                                        file_sample_frequency / 1e6) << endl;
+                }
+
+                if (!resolved_format) {
                     cerr << "No input format specified and unknown input file extension" << endl;
                     exit(EXIT_FAILURE);
                 }
+                InputFormat input_format = *resolved_format;
 
                 SubtitleSetup subtitle_setup;
                 subtitle_setup.font_path = subtitle_font_path;
@@ -1315,11 +1424,11 @@ int main(int argc, char *argv[]) {
                             "the seek position ({} s) to give the decoder a warm-up run.",
                             initial_seek_seconds) << endl;
 
-                switch (input_type) {
+                switch (file_input_type) {
                     case eNtscRf: {
                         auto reader = make_unique<NtscFrameReader>(
                                         log, executable_dir, manager, *it, input_format,
-                                        input_sample_frequency, initial_seek_seconds, benchmark_shaders, efm_audio,
+                                        file_sample_frequency, initial_seek_seconds, benchmark_shaders, efm_audio,
                                         muse_output_filename);
                         process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                                      full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
@@ -1345,7 +1454,7 @@ int main(int argc, char *argv[]) {
                     case eMuseRf: {
                         auto reader = make_unique<ResamplingFrameReader>(
                                 log, executable_dir, manager, *it, input_format,
-                                input_sample_frequency, initial_seek_seconds, input_type == eMuseRf, benchmark_shaders,
+                                file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
                                 efm_audio, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
