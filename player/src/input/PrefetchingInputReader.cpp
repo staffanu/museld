@@ -102,7 +102,7 @@ int PrefetchingInputReader::readFloats(float *f) {
     return (int)m_block_size;
 }
 
-void PrefetchingInputReader::seek(off_t no_samples) {
+void PrefetchingInputReader::seek(int64_t no_samples) {
     if (m_is_fifo)
         return;
     std::unique_lock<std::mutex> lock(m_mutex);
@@ -117,7 +117,7 @@ void PrefetchingInputReader::seek(off_t no_samples) {
     // After a producer failure the queued exception is the story; readFloats reports it.
     if (!m_producer_exception) {
         try {
-            off_t adjusted = no_samples - (off_t)m_filled.size() * (off_t)m_block_size;
+            int64_t adjusted = no_samples - (int64_t)m_filled.size() * (int64_t)m_block_size;
             if (m_inner_position + adjusted < 0)
                 adjusted = -m_inner_position; // clamp to the start of the stream
             m_inner->seek(adjusted);

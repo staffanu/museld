@@ -14,6 +14,7 @@
 #include <string>
 #include <thread>
 #include <format>
+#include "FileSeek.h"
 
 enum InputFormat {
     eUint8,
@@ -35,7 +36,7 @@ public:
     virtual ~InputReader() = default;
 
     virtual void initialize() = 0;
-    virtual void seek(off_t no_samples) = 0;
+    virtual void seek(int64_t no_samples) = 0;
     virtual int readFloats(float *f) = 0;
     virtual int bitsPerSample() const = 0;
 
@@ -110,15 +111,15 @@ public:
     void initialize() override {}
     int bitsPerSample() const override { return sizeof(T) * 8; }
 
-    void seek(off_t no_samples) override {
+    void seek(int64_t no_samples) override {
         if (m_is_fifo)
             return;
         std::scoped_lock<std::mutex> lock(m_fd_mutex);
-        off_t bytes_to_seek = no_samples * sizeof(*m_buffer);
+        int64_t bytes_to_seek = no_samples * (int64_t)sizeof(*m_buffer);
         // Clamp at the start of the file: without it a backward seek that would
         // land before the start fails outright and the position doesn't move
-        off_t current = lseek(m_fd, 0, SEEK_CUR);
-        lseek(m_fd, std::max<off_t>(0, current + bytes_to_seek), SEEK_SET);
+        int64_t current = seekFile(m_fd, 0, SEEK_CUR);
+        seekFile(m_fd, std::max<int64_t>(0, current + bytes_to_seek), SEEK_SET);
     }
 
     int readFloats(float *f) override {

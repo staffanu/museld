@@ -173,7 +173,8 @@ The `src/` directory is the include root for both binaries. The `ac3rf` CMake ta
 **No bare `long` for sample offsets or bit patterns**: Windows is LLP64, so `long` is 32
 bits there (this once broke NTSC vertical sync lock on Windows only). Sample/file offsets
 use `int64_t`, bit-pattern accumulators `uint64_t`, with `ULL` suffixes on wide literals.
-Known remaining exception: the `lseek`/`off_t` seek paths, still 32-bit on MinGW.
+File seeking goes through `seekFile()` (`input/FileSeek.h`), never bare `lseek`/`off_t`,
+which are 32-bit on MinGW.
 
 **SIMD-aware FIR filtering**: `FirFilterStage.h` has AVX, NEON, and scalar paths. On x86 the AVX path is compiled in regardless of `-march` (function-level target attribute) and chosen at runtime via CPUID, so `MUSELD_ARCH` sets which CPUs can run the binary without deciding whether AVX is used. `--simd`/`--no-simd` override the automatic choice; forcing `--simd` on a CPU without support is an error.
 

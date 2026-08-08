@@ -166,7 +166,7 @@ void ResamplingFrameReader::seek(double seconds) {
         } else {
             std::unique_lock<std::mutex> lock(m_mutex);
 
-            off_t samples_to_seek = (off_t) (seconds * 16.2e6 * m_input_samples_per_sample);
+            int64_t samples_to_seek = (int64_t) (seconds * 16.2e6 * m_input_samples_per_sample);
             m_log.info(eInput, std::format("Seeking relative time {} s, {} samples.",
                                            seconds, samples_to_seek));
             m_input_reader->seek(samples_to_seek);

@@ -53,13 +53,13 @@ void LdfInputReader::initialize() {
         processSingleChecked();
 }
 
-void LdfInputReader::seek(off_t no_samples) {
+void LdfInputReader::seek(int64_t no_samples) {
     if (m_is_fifo)
         return;
     std::scoped_lock<std::mutex> lock(m_fd_mutex);
     throwIfFailed();
     // Clamp at the start of the stream (see InputReaderImpl::seek)
-    no_samples = std::max(no_samples, -(off_t)m_sample_position);
+    no_samples = std::max(no_samples, -(int64_t)m_sample_position);
     const bool ok = seek_absolute(m_sample_position + no_samples);
     throwIfFailed();
     if (!ok)
@@ -140,7 +140,7 @@ void LdfInputReader::error_callback(::FLAC__StreamDecoderErrorStatus status) {
 }
 
 FLAC__StreamDecoderTellStatus LdfInputReader::tell_callback(FLAC__uint64 *absolute_byte_offset) {
-    *absolute_byte_offset = lseek(m_fd, 0, SEEK_CUR);;
+    *absolute_byte_offset = seekFile(m_fd, 0, SEEK_CUR);
     if (*absolute_byte_offset == -1) {
         if (errno == ESPIPE)
             return FLAC__STREAM_DECODER_TELL_STATUS_UNSUPPORTED;
@@ -150,7 +150,7 @@ FLAC__StreamDecoderTellStatus LdfInputReader::tell_callback(FLAC__uint64 *absolu
 }
 
 FLAC__StreamDecoderSeekStatus LdfInputReader::seek_callback(FLAC__uint64 absolute_byte_offset) {
-    int r = lseek(m_fd, (off_t)absolute_byte_offset, SEEK_SET);
+    int64_t r = seekFile(m_fd, (int64_t)absolute_byte_offset, SEEK_SET);
     if (r == -1) {
         if (errno == ESPIPE)
             return FLAC__STREAM_DECODER_SEEK_STATUS_UNSUPPORTED;

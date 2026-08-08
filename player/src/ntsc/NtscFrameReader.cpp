@@ -135,11 +135,11 @@ void NtscFrameReader::seek(double seconds) {
         } else {
             std::unique_lock<std::mutex> lock(m_mutex);
 
-            off_t samples_to_seek = (off_t) (seconds * NtscInputBlock::c_video_sampling_frequency * m_input_samples_per_sample);
-            off_t bytes_to_seek = m_bytes_per_sample * samples_to_seek;
+            int64_t samples_to_seek = (int64_t) (seconds * NtscInputBlock::c_video_sampling_frequency * m_input_samples_per_sample);
+            int64_t bytes_to_seek = m_bytes_per_sample * samples_to_seek;
             m_log.info(eInput, std::format("Seeking relative time {} s, {} samples, {} bytes.",
                                            seconds, samples_to_seek, bytes_to_seek));
-            lseek(m_file_fd, bytes_to_seek, SEEK_CUR);
+            seekFile(m_file_fd, bytes_to_seek, SEEK_CUR);
 
             // discard content in existing input buffers
             move(m_filled_input_buffers.begin(), m_filled_input_buffers.end(),
