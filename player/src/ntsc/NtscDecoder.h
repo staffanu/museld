@@ -48,7 +48,7 @@ public:
     SourceDimensions getSourceDimensions() const override;
     std::optional<PixelFileOffsets> computePixelFileOffsets(
             int field_x, int field_y, int field_parity,
-            long buffer_file_offset, double input_samples_per_muse_sample) const override;
+            int64_t buffer_file_offset, double input_samples_per_muse_sample) const override;
 
 private:
     Logger &m_log;

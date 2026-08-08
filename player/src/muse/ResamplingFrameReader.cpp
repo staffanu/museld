@@ -48,7 +48,7 @@ ResamplingFrameReader::ResamplingFrameReader(
           m_max_frame_pulse_sum_difference(0),
           m_consecutive_good_syncs(0),
           m_missed_line_pulses(0),
-          m_frame_start_offset(0L),
+          m_frame_start_offset(0),
           m_error_sum(0) {
     if (m_demodulate) {
         m_demodulator = new MuseRfDemodulator(log, executable_dir, m_filename, (float)sample_rate, vulkan_manager,

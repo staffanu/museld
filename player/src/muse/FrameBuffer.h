@@ -62,8 +62,8 @@ public:
     static constexpr int c_vits_pulse_offset = 263 - c_vits_first_sample; // = 49
     static void ExtractVits(float const *data, float *out_line0, float *out_line1);
 
-    void set_frame_no(int frame_no, long input_offset, double input_samples_per_sample);
-    [[nodiscard]] long getInputOffset() const;
+    void set_frame_no(int frame_no, int64_t input_offset, double input_samples_per_sample);
+    [[nodiscard]] int64_t getInputOffset() const;
     [[nodiscard]] double getInputSamplesPerMuseSample() const;
     std::shared_ptr<musevk::VulkanBuffer> &data();
     FieldBufferView &get_field(int parity);
@@ -73,7 +73,7 @@ public:
 
 private:
     int m_frame_no;
-    long m_input_offset;
+    int64_t m_input_offset;
     double m_input_samples_per_sample;
     std::shared_ptr<musevk::VulkanBuffer> m_data;
     std::vector<FieldBufferView> m_fields;

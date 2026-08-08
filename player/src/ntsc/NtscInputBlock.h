@@ -28,7 +28,7 @@ public:
     static constexpr int c_total_video_lines = 525;
 
 
-    long input_offset;
+    int64_t input_offset;
     double input_samples_per_video_sample;
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropout_data;

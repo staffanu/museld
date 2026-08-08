@@ -43,7 +43,7 @@ NtscFrameReader::NtscFrameReader(
           m_half_line_sync_pattern_error_sum(0.0),
           m_half_line_sync_pattern_eq_error_sum(0.0),
           m_half_line_sync_pattern_br_error_sum(0.0),
-          m_vert_sync_half_line_pattern(0L),
+          m_vert_sync_half_line_pattern(0),
           m_sample_ix(1),
           m_line(1),
           m_state(eSearching),
@@ -51,7 +51,7 @@ NtscFrameReader::NtscFrameReader(
           m_consecutive_good_syncs(0),
           m_missed_half_line_vert_sync_patterns(0),
           m_first_field_incomplete(false),
-          m_frame_start_offset(0L),
+          m_frame_start_offset(0),
           m_sample_history{},
           m_sample_history_ix(0),
           m_error_sum(0) {
@@ -333,7 +333,7 @@ bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
                 else
                     m_vert_sync_half_line_pattern = (m_vert_sync_half_line_pattern << 2) | 0b00;
 
-                if ((m_vert_sync_half_line_pattern & 0xfffffffff) == 0b010101010101111111111111010101010101L) {
+                if ((m_vert_sync_half_line_pattern & 0xfffffffffULL) == 0b010101010101111111111111010101010101ULL) {
                     // Both fields carry the same six-EQ / six-broad / six-EQ
                     // sequence, so the pattern alone does not say which field
                     // this is — but its phase does.  Field 1's vertical interval
@@ -448,7 +448,7 @@ bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
 void NtscFrameReader::updateFrameStartOffset() {
     size_t pos = (size_t)m_t & c_input_buffer_size_mask;
     m_frame_start_offset = m_input_sub_buffer_input_offsets[pos >> c_input_sub_buffer_size_bits]
-            + (long)((pos & (c_input_sub_buffer_size - 1)) * m_input_samples_decimation_rate);
+            + (int64_t)((pos & (c_input_sub_buffer_size - 1)) * m_input_samples_decimation_rate);
 }
 
 void NtscFrameReader::setUnlocked() {

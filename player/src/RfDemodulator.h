@@ -127,11 +127,11 @@ public:
     void seek(double seconds) {
         if (m_input_is_fifo)
             return;
-        long samples_to_seek = (long)(seconds * m_sample_frequency);
+        int64_t samples_to_seek = (int64_t)(seconds * m_sample_frequency);
         m_log.info(eInput, std::format("Seeking relative time {} s, {} samples.",
                                        seconds, samples_to_seek));
         m_input_reader->seek(samples_to_seek);
-        m_total_samples_read = std::max(0L, m_total_samples_read + samples_to_seek);
+        m_total_samples_read = std::max<int64_t>(0, m_total_samples_read + samples_to_seek);
 
         // Discard any filled buffers
         std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
@@ -220,7 +220,7 @@ protected:
     Logger &m_log;
     std::unique_ptr<InputReader> m_input_reader;
     bool m_input_is_fifo;
-    long m_total_samples_read;
+    int64_t m_total_samples_read;
     std::deque<std::unique_ptr<B>> m_vacant_blocks;
     std::deque<std::unique_ptr<B>> m_filled_blocks;
     std::mutex m_demodulated_block_mutex; // used to synchronize access to the vacant / filled blocks

@@ -36,7 +36,7 @@ public:
 
     static constexpr size_t c_requiredFileWriteBufferSize = sizeof(uint16_t) * MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT;
 
-    long input_offset;
+    int64_t input_offset;
     double input_samples_per_muse_sample;
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropout_data;
