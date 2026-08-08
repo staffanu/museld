@@ -10,7 +10,7 @@ jobs:
     name: Linux (museld + ac3rf-efm-decode + tests)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Ubuntu's own Vulkan packages are too old for the vulkan-hpp API museld
       # uses (vk::detail, typed debug callback); use the LunarG SDK instead.
@@ -56,7 +56,7 @@ jobs:
     name: FreeBSD (museld + ac3rf-efm-decode + tests)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build and test in a FreeBSD VM
         uses: vmactions/freebsd-vm@v1
@@ -82,7 +82,7 @@ jobs:
     name: macOS (museld + ac3rf-efm-decode + tests)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: >
@@ -127,7 +127,7 @@ jobs:
             runner: macos-15-intel
             march: "x86-64-v3"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: >-
@@ -183,7 +183,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/download-artifact@v4
         with:
@@ -249,7 +249,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -315,7 +315,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: msys2/setup-msys2@v2
         with:
