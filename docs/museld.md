@@ -260,6 +260,20 @@ but usually close enough to find the dropout.  For NTSC the offsets are line-acc
 start is tracked to the input sample), and Y, Cr, and Cb are the same offset since the composite
 carries no separate chroma samples.
 
+### Remote control
+
+Every playback function is a single key press, so museld can be driven by anything that can send
+key presses, like a Bluetooth keyboard.
+[BridgedIrRemote](https://bitbucket.org/staffanulfberg/bridgedirremote/src/master/) is a universal
+remote control app for Android that includes a museld remote: while that remote is selected, the
+phone registers itself as a Bluetooth HID keyboard (Android 9 or later) with the computer it is
+paired with, and its buttons send the shortcuts in the table above instead of infrared commands.
+
+The same app also controls other equipment commonly used with museld — Pioneer CLD-95, Pioneer HLD-X9,
+Sony MSC-4000 MUSE decoder, and the Victor HR-W5 W-VHS player — either from the phone's own IR
+transmitter or through a Bluetooth-to-infrared bridge built from an Arduino Nano 33 BLE and a handful
+of components.
+
 ## Architecture
 
 ### Data flow — MUSE
