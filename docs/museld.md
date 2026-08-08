@@ -33,9 +33,35 @@ single CPU thread.
 
 | Option | Description |
 |---|---|
-| `--input-format <fmt>` | Input sample type: `u8`, `s8`, `u16`, `s16`, `u16be`, `s16be`, `lds`, `flac`, `ldf`. Auto-detected from filename extension when omitted. |
-| `--input-type <type>` | Input type: `muse-rf`, `ntsc-rf`, `muse-16`, `muse-os`. RF input MUSE/NTSC, phase correct 16.2 MHz MUSE baseband, oversampled MUSE baseband. Default is `muse-rf`. |
-| `--sample-freq <Hz>` | Sets the input sample rate. Default 62.5 MHz. |
+| `--input-format <fmt>` | Input sample type: `u8`, `s8`, `u16`, `s16`, `u16be`, `s16be`, `lds`, `flac`, `ldf`. Auto-detected from the filename extension, or failing that from the file contents. |
+| `--input-type <type>` | Input type: `muse-rf`, `ntsc-rf`, `muse-16`, `muse-os`, or `auto` (the default): detect the type from the file contents. |
+| `--sample-freq <Hz>` | Sets the input sample rate. Measured from the file contents when omitted. |
+| `--probe` | Print what content-based detection finds for each following input file (sample format, RF type, sample rate, and a ready-to-paste option line) instead of decoding it. |
+
+By default museld detects everything the options leave open and plays the file with whatever it
+finds: the input type, the sample rate (unless `--sample-freq` was given -- and with an explicit
+`--input-type` the rate is measured under that type, which works even for captures the classifier
+finds ambiguous), and the sample format (when the extension is not recognized). Files whose
+measurements are ambiguous are refused rather than guessed at; `--probe` shows the numbers behind
+the verdict. Reading from a pipe cannot use detection, so fifo input needs explicit
+`--input-type` and `--sample-freq`.
+
+Detection reads a few short stretches spread across the file
+and takes well under a second: the sample format is whichever interpretation of the bytes looks
+like a band-limited signal, the line period in samples comes from the periodicity of the FM
+carrier's instantaneous frequency, and NTSC against MUSE is decided by the carrier's mean
+cycles-per-line and the 2.3 MHz NTSC analog audio carrier. The line period then fixes the sample
+rate (NTSC lines at 15.734 kHz, MUSE at 33.75 kHz), snapped to a common capture rate when one is
+within about a percent.
+
+```console
+$ museld --probe capture.lds
+capture.lds:
+  sample format: lds
+  line period 2542.4 samples (correlation 0.88), carrier 518 cycles/line, audio carrier 6239x background
+  detected: ntsc-rf at 40 MHz
+  suggested: --input-format lds --input-type ntsc-rf --sample-freq 40e6
+```
 
 Any argument not starting with `-` is an input filename. Several files can be given, with other
 options in between; each file is played with the most recent options in effect, so files with
@@ -264,6 +290,15 @@ RF → TimingRecovery (Mueller-Müller PLL) → EfmDecoder → CIRC C1/C2 Reed-S
 - **Picture filters**: Most filters were computed early in the project; picture quality could probably be improved by spending more time on them.
 - **Motion detection**: The algorithm is quite simplistic and could probably be improved.
 - **LD MUSE vs BS MUSE**: Available documentation describes the satellite broadcasting standard. MUSE decoders have separate inputs for the two signals, so presumably there is some difference, but it is unknown what it is.
+- **Input detection on fifos, and live MUSE/NTSC switching**: Content detection needs seeks,
+  so fifo input requires explicit `--input-type` and `--sample-freq`. For the decoder-box use
+  case — museld sitting between a physical player and the TV, fed over a fifo — detection
+  should ideally run on the live stream (buffering and discarding some input while deciding),
+  and the player should switch between MUSE and NTSC mid-playback when the disc changes.
+  The detection itself is the easy part; the hard part is that the reader, demodulator,
+  decoder and display pipeline for the input type are built once at startup, so switching
+  needs a refactoring of the player setup code into something that can be torn down and
+  rebuilt (or kept warm in both flavors) without dropping the output window and audio device.
 - **Subtitle OCR** (experimental; see the option section above):
   - Not in the release packages yet: `USE_OCR` is off by default, and how to distribute
     ONNX Runtime and the PP-OCR models with the downloads is undecided (see docs/packaging.md

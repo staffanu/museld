@@ -174,6 +174,7 @@ if(BUILD_MUSE)
         input/LdsInputReader.cpp input/LdsInputReader.h
         input/LdfInputReader.cpp input/LdfInputReader.h
         input/PrefetchingInputReader.cpp input/PrefetchingInputReader.h
+        InputProbe.cpp InputProbe.h
         AudioPlayback.cpp AudioPlayback.h
         FrameReader.h FrameReader.impl.h
         InputBlockBase.h

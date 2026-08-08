@@ -89,3 +89,18 @@ InputFormat inputFormatFromString(const std::string &name) {
     else if (name == "ldf")   return eFlacOgg;
     else throw std::runtime_error(std::format("Unknown input format: {}", name));
 }
+
+const char *inputFormatName(InputFormat format) {
+    switch (format) {
+        case eUint8:    return "u8";
+        case eSint8:    return "s8";
+        case eUint16:   return "u16";
+        case eSint16:   return "s16";
+        case eUint16BE: return "u16be";
+        case eSint16BE: return "s16be";
+        case eLds:      return "lds";
+        case eFlac:     return "flac";
+        case eFlacOgg:  return "ldf";
+    }
+    return "?";
+}

@@ -134,7 +134,10 @@ cd player/build-debug && ctest -V
 ```
 
 Tests are only built when `-DBUILD_TESTING=ON` is passed. They are in `player/tests/`
-(`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`, `FilterSimdParityTest.cpp`, `SrtParserTest.cpp`).
+(`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`, `FilterSimdParityTest.cpp`, `InputProbeTest.cpp`,
+`NtscCadenceTrackerTest.cpp`, `PrefetchingInputReaderTest.cpp`, `SrtParserTest.cpp`). On macOS
+the Homebrew Catch2 is not ASan-instrumented, so run them with
+`ASAN_OPTIONS=detect_container_overflow=0` to avoid a false container-overflow abort at startup.
 
 ## CI and Packaging
 
@@ -169,6 +172,11 @@ The `src/` directory is the include root for both binaries. The `ac3rf` CMake ta
 **Pluggable erasure concealment**: Abstract `ErasureConcealer` interface with four implementations (`RepeatingSample`, `LinearInterpolation`, `Ar`, `SlowAr`), selected via CLI.
 
 **Input format abstraction**: `InputReader` specializations with auto-detection by file extension.
+
+**Content-based input detection**: `src/InputProbe.{h,cpp}` (museld only, CPU-only, no GPU)
+detects sample format, MUSE/NTSC RF type and sample rate from short chunks of the file.
+This is museld's default: `--input-type` and `--sample-freq` are probed when not given
+(so fifo input needs both), and `--probe` prints the measurements instead of decoding.
 
 **No bare `long` for sample offsets or bit patterns**: Windows is LLP64, so `long` is 32
 bits there (this once broke NTSC vertical sync lock on Windows only). Sample/file offsets

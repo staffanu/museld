@@ -25,4 +25,7 @@ std::optional<InputFormat> inputFormatFromFilename(const std::string &filename);
 // Throws std::runtime_error for unknown names.
 InputFormat inputFormatFromString(const std::string &name);
 
+// The inverse: the name inputFormatFromString accepts for this format.
+const char *inputFormatName(InputFormat format);
+
 #endif //AC3RF_DECODE_INPUTREADERFACTORY_H
