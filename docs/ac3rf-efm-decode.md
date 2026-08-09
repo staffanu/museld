@@ -1,6 +1,7 @@
 # ac3rf-efm-decode — CLI Reference
 
-`ac3rf-efm-decode` decodes EFM CD audio and AC3-RF surround audio from laserdisc RF captures.
+`ac3rf-efm-decode` decodes EFM CD audio, AC3-RF surround audio, and the analog FM stereo audio
+from laserdisc RF captures.
 It is also a reusable C++ library; see `player/src/` for the library source.
 
 For a detailed explanation of how AC3-RF decoding works, see [ac3rf-decoding.md](ac3rf-decoding.md).
@@ -24,6 +25,7 @@ time); `--help` lists all options.
 | Option | Description                                                                       |
 |---|-----------------------------------------------------------------------------------|
 | `--ac3` | Decode AC3-RF surround audio (the default when no mode option is given)           |
+| `--analog` | Decode the analog FM stereo audio from an NTSC RF capture (carriers at 2.3011 and 2.8125 MHz) |
 | `--efm` | Decode EFM baseband audio (as captured from the EFM output of some players)       |
 | `--efm-rf` | Decode EFM from RF input (runs bandpass + envelope detection before EFM decoding) |
 | `--efm-t-values` | Decode EFM T-values from ld-decode (raw run-length encoded EFM symbols; implies u8 input) |
@@ -59,6 +61,7 @@ added with the `flac` tool (e.g. `--seekpoint=100x` for 100 evenly spaced seek p
 | `--adaptive-filter-size <n>` | Adaptive FIR filter size for the EFM signal. Default 3; 0 disables adaptive filtering. Values over 15 are probably overkill, but try 9 or 11 if a distorted input signal causes many errors. |
 | `--error-concealment <mode>` | Erasure concealment strategy: `none`, `repeat` (repeat previous sample), `li` (linear interpolation), `ar` (autoregressive), `sar` (slower, more advanced autoregressive). Default: `ar`. |
 | `--simd` / `--no-simd` | Enable or disable SIMD (AVX/NEON) FIR filtering. Enabled by default on supported hardware. |
+| `--cx` | Apply CX noise reduction expansion to the analog audio. There is no video decode here to read the CX flag from the VBI, so choose based on the disc (most discs from the mid-80s on use CX). |
 
 When decoding DTS audio, turn concealment off (`--error-concealment none`): the computed
 concealment values are likely worse than the values at erasure positions, which are sometimes
@@ -70,8 +73,17 @@ correct.
 |---|-----------------------------------------------------------------------------------------------------------------|
 | `--output-filename <file>` | Write decoded audio to this file instead of stdout. Use `-` to select stdout explicitly. |
 
-Output is raw signed 16-bit little-endian stereo PCM at 44.1 kHz (EFM) or 
-a 48 kHz AC3 bitstream (after AC3-RF decoding).
+Output is raw signed 16-bit little-endian stereo PCM at 44.1 kHz (EFM), stereo PCM at
+48 kHz (analog), or a 48 kHz AC3 bitstream (after AC3-RF decoding).
+
+The analog decoder squelches a channel whose FM carrier is missing or unreadable — on discs
+with AC3-RF the analog right channel is replaced by the AC3 carrier, so only the left
+(usually mono or a commentary track) plays.
+
+The analog output level is calibrated 10 dB below the deviation clamp
+(`AnalogAudioDemodulator::c_output_level`), which puts the same program at the same
+loudness as the disc's EFM track; full ±100 kHz deviation would clip mildly, but real
+discs stay well below it.
 
 Output is never written to a terminal: if stdout is a tty, the program refuses to run unless
 stdout is forced with `--output-filename -`. When several input files are processed with the same
@@ -172,6 +184,14 @@ Write EFM timing recovery debug data for analysis in Octave/Python:
 
 ```bash
 ac3rf-efm-decode --efm-rf --reclock-debug-filename reclock.bin capture.u8 > /dev/null
+```
+
+### Analog audio
+
+Decode the analog stereo audio from an NTSC RF capture and play it (macOS):
+
+```bash
+ac3rf-efm-decode --analog --cx capture.ldf | ffplay -f s16le -ar 48000 -ch_layout stereo -i pipe:
 ```
 
 ### Resampling

@@ -24,6 +24,7 @@
 #include "input/InputReaderFactory.h"
 #include "ac3/Ac3Decoder.h"
 #include "ac3/Ac3RfDemodulator.h"
+#include "analog/AnalogAudioDemodulator.h"
 #include "efm/EfmDemodulator.h"
 #include "efm/EfmDecoder.h"
 #include "efm/TwoChannelSample.h"
@@ -33,6 +34,7 @@
 
 enum Operation {
     Ac3,
+    Analog,
     Efm,
     EfmRf,
     EfmTValues,
@@ -47,7 +49,7 @@ void processFile(Logger &logger, Operation input_type,
     int efm_adaptive_filter_size, std::optional<std::string> efm_retiming_debug_filename,
     std::optional<std::string> efm_t_values_output_filename, std::optional<std::string> efm_circ_debug_filename,
     ErasureConcealer::ConcealmentImplementation concealment_impl,
-    double target_sample_frequency) {
+    double target_sample_frequency, bool analog_cx, double analog_output_frequency) {
 
     reader->initialize();
     if (initial_seek_seconds != 0)
@@ -149,6 +151,38 @@ void processFile(Logger &logger, Operation input_type,
             break;
         }
 
+        case Analog: {
+            logger.info(eApplication, std::format(
+                "Processing analog audio using input sample frequency {} MHz, output rate {} Hz, CX {}",
+                input_sample_frequency / 1e6, analog_output_frequency, analog_cx ? "on" : "off"));
+
+            AnalogAudioDemodulator analog_demodulator(logger, input_sample_frequency, (int)reader->block_size(),
+                analog_output_frequency, use_simd);
+
+            std::vector<TwoChannelSample> output;
+            double processed_time = 0.0;
+            bool squelch_logged[2] = {false, false};
+            while (reader->readFloats(input_buffer) == reader->block_size() &&
+                (!duration_seconds.has_value() || processed_time < duration_seconds.value())) {
+
+                output.clear();
+                analog_demodulator.demodulate(input_buffer, analog_cx, output);
+                processed_time += block_size / input_sample_frequency;
+
+                for (int c = 0; c < 2; c++) {
+                    if (analog_demodulator.squelched(c) != squelch_logged[c]) {
+                        squelch_logged[c] = analog_demodulator.squelched(c);
+                        logger.info(eAudio, std::format("{} channel {} at {:.2f} s",
+                            c == 0 ? "Left" : "Right", squelch_logged[c] ? "squelched" : "active", processed_time));
+                    }
+                }
+
+                if (write(out_fd, output.data(), output.size() * sizeof(TwoChannelSample)) == -1)
+                    throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
+            }
+            break;
+        }
+
         case Resample: {
             logger.info(eApplication,
                 std::format("Resampling input at {} MHz to {} MHz", input_sample_frequency / 1e6, target_sample_frequency / 1e6));
@@ -190,6 +224,8 @@ int main(int argc, char *argv[]) {
     std::optional<std::string> efm_t_values_output_filename = std::nullopt;
     std::optional<std::string> efm_circ_debug_filename = std::nullopt;
     ErasureConcealer::ConcealmentImplementation concealment_impl = ErasureConcealer::AutoregressiveModel;
+    bool analog_cx = false;
+    constexpr double analog_output_frequency = 48000;
     bool did_show_help_or_version = false;
 
     const std::vector<std::string> args(argv + 1, argv + argc);
@@ -210,6 +246,10 @@ int main(int argc, char *argv[]) {
     options.section("Modes:");
     options.flag("--ac3", "Decode AC3-RF surround audio (the default)", [&] () -> void {
         operation = Ac3;
+    });
+    options.flag("--analog", "Decode the analog FM stereo audio from an NTSC RF capture; the output "
+                             "is 16-bit stereo PCM at 48 kHz", [&] () -> void {
+        operation = Analog;
     });
     options.flag("--efm", "Decode EFM audio from a baseband capture, as taken from the EFM output "
                           "of some players", [&] () -> void {
@@ -286,6 +326,10 @@ int main(int argc, char *argv[]) {
             concealment_impl = ErasureConcealer::RepeatingSample;
         else
             throw std::runtime_error("Invalid error concealment model");
+    });
+    options.flag("--cx", "Apply CX noise reduction expansion to the analog audio (an RF capture "
+                         "carries no VBI decode here, so choose based on the disc)", [&] () -> void {
+        analog_cx = true;
     });
     options.section("Output options:");
     options.option("--output-filename", "FILE",
@@ -399,7 +443,8 @@ int main(int argc, char *argv[]) {
                           r->setDcBlocking(true); // RF carries no legitimate DC
                           return r; }(), block_size, out_fd, use_simd,
                     efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,
-                    efm_t_values_output_filename, efm_circ_debug_filename, concealment_impl, target_sample_frequency);
+                    efm_t_values_output_filename, efm_circ_debug_filename, concealment_impl, target_sample_frequency,
+                    analog_cx, analog_output_frequency);
 
                 it++;
             }
@@ -414,7 +459,8 @@ int main(int argc, char *argv[]) {
             processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
                 std::move(stdin_reader), block_size, out_fd, use_simd,
                 efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,
-                efm_t_values_output_filename, efm_circ_debug_filename, concealment_impl, target_sample_frequency);
+                efm_t_values_output_filename, efm_circ_debug_filename, concealment_impl, target_sample_frequency,
+                analog_cx, analog_output_frequency);
         }
         if (out_fd != 1)
             close(out_fd);

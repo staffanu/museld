@@ -14,6 +14,7 @@ Supported formats:
 - **NTSC**: Standard definition laserdisc video + audio
 - **EFM**: CD audio (CIRC Reed-Solomon, stereo PCM)
 - **AC3RF**: QPSK-demodulated AC3 surround audio
+- **Analog**: NTSC analog FM stereo audio (2.3011/2.8125 MHz carriers, CX expansion, squelch)
 
 ## Repository Structure
 
@@ -22,6 +23,7 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
   CMakeLists.txt
   src/             — All C++ source (shared between both binaries)
     ac3/           — AC3-RF QPSK demodulation, DPLL, frame sync, decoder
+    analog/        — Analog FM audio demodulator (NTSC carriers) and CX expander
     efm/           — EFM demodulation, timing recovery, CIRC decoding, concealment
     filter/        — FIR/IIR primitives, Parks-McClellan, FFT, SIMD (AVX/NEON)
     rs/            — Header-only Reed-Solomon codec over GF(2^8) with erasure support
@@ -161,7 +163,7 @@ split, what museld loads at runtime, and how Vulkan is wired up on macOS.
 
 ### src/ Internal Structure
 
-The `src/` directory is the include root for both binaries. The `ac3rf` CMake target covers the reusable library (`ac3/`, `efm/`, `filter/`, `rs/`, `logging/`). The `museld` target adds everything else (`muse/`, `ntsc/`, `musevk/`, `bch/`, `util/`, `shaders/`).
+The `src/` directory is the include root for both binaries. The `ac3rf` CMake target covers the reusable library (`ac3/`, `analog/`, `efm/`, `filter/`, `rs/`, `logging/`). The `museld` target adds everything else (`muse/`, `ntsc/`, `musevk/`, `bch/`, `util/`, `shaders/`).
 
 ### Key Design Patterns
 
