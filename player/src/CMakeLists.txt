@@ -7,6 +7,7 @@ add_library(ac3rf STATIC
     filter/FirFilterStage.cpp filter/FirFilterStage.h
     filter/ComplexFirFilterStage.cpp filter/ComplexFirFilterStage.h
     filter/HalfBand.h
+    filter/KaiserLowPass.h
     filter/FFT.h
     filter/Window.h
     filter/RaisedCosine.h
@@ -31,6 +32,8 @@ add_library(ac3rf STATIC
     efm/concealment/RepeatingSampleErasureConcealer.cpp efm/concealment/RepeatingSampleErasureConcealer.h
     efm/concealment/ArErasureConcealer.cpp efm/concealment/ArErasureConcealer.h
     efm/PopDetector.cpp efm/PopDetector.h
+    analog/AnalogAudioDemodulator.cpp analog/AnalogAudioDemodulator.h
+    analog/CxExpander.cpp analog/CxExpander.h
     efm/EfmPcmProcessor.cpp efm/EfmPcmProcessor.h
 )
 
@@ -69,7 +72,7 @@ install(TARGETS ac3rf
 )
 
 install(FILES logging/Logger.h logging/StreamLogger.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ac3rf/logging)
-install(DIRECTORY ac3 efm filter rs
+install(DIRECTORY ac3 analog efm filter rs
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ac3rf
     FILES_MATCHING PATTERN "*.h"
 )
