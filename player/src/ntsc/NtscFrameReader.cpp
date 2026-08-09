@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <chrono>
 #include <cstdint>
 #include <fcntl.h>
 #include <unistd.h>
@@ -54,7 +55,10 @@ NtscFrameReader::NtscFrameReader(
           m_frame_start_offset(0),
           m_sample_history{},
           m_sample_history_ix(0),
-          m_error_sum(0) {
+          m_error_sum(0),
+          m_process_elapsed_ms(0),
+          m_read_input_elapsed_ms(0),
+          m_timed_frames(0) {
 
     m_demodulator = new NtscRfDemodulator(log, executable_dir, m_filename, sample_rate, vulkan_manager, input_format, benchmark_shaders, efm_enabled);
     // m_sample_rate = 31.25e6;
@@ -172,6 +176,7 @@ void NtscFrameReader::threadFunc() {
         readInput(nullptr);
     }
     m_last_input_sub_buffer_ix_read = c_number_of_input_sub_buffers - 1;
+    m_read_input_elapsed_ms = 0; // the priming reads above happen outside process()'s timing
 
     for (;;) {
         if (output_block == nullptr) {
@@ -219,6 +224,7 @@ bool NtscFrameReader::readInput(std::unique_ptr<NtscInputBlock> const &output_bl
     if (m_stop_request)
         return false;
 
+    auto t_start = std::chrono::steady_clock::now();
     uint8_t *read_ptr = m_input_buffer + m_bytes_per_sample * c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
     uint8_t *dropout_read_ptr = m_input_dropout_buffer + c_input_sub_buffer_size * m_last_input_sub_buffer_ix_read;
 
@@ -243,6 +249,9 @@ bool NtscFrameReader::readInput(std::unique_ptr<NtscInputBlock> const &output_bl
     }
 
     m_demodulator->returnBlock(block);
+
+    m_read_input_elapsed_ms +=
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count();
 
     // int fd = open("videodata.floats",
     //               O_WRONLY | O_TRUNC | O_CREAT,
@@ -287,6 +296,8 @@ bool NtscFrameReader::resample(float *sample_out, uint8_t *dropout_out,
 bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_block) {
     auto *output = output_block->video_data->data<float>();
     auto *dropout_output = output_block->dropout_data->data<uint8_t>();
+
+    auto t_start = std::chrono::steady_clock::now();
 
     updateFrameStartOffset();
 
@@ -442,8 +453,27 @@ bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
             else {
                 m_line = 1;
                 if (m_state == eLocked) {
-                    if (!m_first_field_incomplete)
+                    if (!m_first_field_incomplete) {
+                        // Per-frame timing: readInput accumulates its own time
+                        // (mostly waiting on the demodulator), the rest is the
+                        // DPLL/sync loop above
+                        m_process_elapsed_ms += std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - t_start).count();
+                        if (++m_timed_frames == c_timing_report_frames) {
+                            const double frame_budget_ms = NtscInputBlock::c_samples_per_video_line
+                                    * NtscInputBlock::c_total_video_lines
+                                    / NtscInputBlock::c_video_sampling_frequency * 1e3;
+                            m_log.info(ePerformance, std::format(
+                                    "reader avg/frame (budget {:.2f} ms): dpll {:.2f} ms, input {:.2f} ms, total {:.2f} ms",
+                                    frame_budget_ms,
+                                    (m_process_elapsed_ms - m_read_input_elapsed_ms) / m_timed_frames,
+                                    m_read_input_elapsed_ms / m_timed_frames,
+                                    m_process_elapsed_ms / m_timed_frames));
+                            m_process_elapsed_ms = m_read_input_elapsed_ms = 0;
+                            m_timed_frames = 0;
+                        }
                         return true;
+                    }
                     // Locked part-way into field 2: this frame has no field 1.
                     // Keep filling and hand over the next, complete one.
                     m_first_field_incomplete = false;

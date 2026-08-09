@@ -238,8 +238,8 @@ down via a RAII guard: reader → Vulkan → GLFW window, in that order.
 
 - Main thread: Vulkan command recording + GLFW event loop
 - Worker thread: Resampling DPLL (CPU bottleneck)
-- Demodulator thread (`museld-demod`): input read + RF demod GPU pipeline; logs per-section timing at info level (`ePerformance`)
-- EFM worker thread (`museld-efm`): EFM demodulation off the demodulator thread; blocks flow vacant → demod → EFM queue → filled, order preserved by the single FIFO worker
+- Demodulator thread (`museld-demod`): input read + RF demod GPU pipeline; logs per-section timing at info level (`ePerformance`), for both MUSE and NTSC
+- EFM worker thread (`museld-efm`): EFM demodulation off the demodulator thread; blocks flow vacant → demod → EFM queue → filled, order preserved by the single FIFO worker. The NTSC worker (EFM or analog demod always runs) and the NTSC reader thread (DPLL vs input wait per frame) also log `ePerformance` timing
 - GPU: Async compute via SPIR-V shaders (`player/src/shaders/*.comp`)
 
 ### Compiler Flags
