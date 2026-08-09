@@ -130,6 +130,15 @@ private:
     int m_sample_history_ix;
 
     double m_error_sum;
+
+    // Per-frame CPU timing of the reader thread, reported every
+    // c_timing_report_frames frames: the DPLL/sync loop's own time versus the
+    // time spent in readInput (fetching demodulated blocks, which blocks on
+    // the demodulator when it is the slower stage)
+    static constexpr int c_timing_report_frames = 128;
+    double m_process_elapsed_ms;
+    double m_read_input_elapsed_ms;
+    int m_timed_frames;
 };
 
 #endif //MUSECPP_NTSCFRAMEREADER_H

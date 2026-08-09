@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <pthread.h>
@@ -119,6 +120,14 @@ void NtscRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> input_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(input_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostWrite);
 
+    // The CPU only writes to this mapping (the audio path stages its input separately), but log the
+    // memory properties since a non-host-cached (write-combined) mapping would make any future
+    // CPU read of it very slow.
+    m_log.info(ePerformance, std::format("input_buffer host mapping memory properties: {}{}",
+                                         vk::to_string(input_buffer->hostMappedMemoryProperties()),
+                                         (input_buffer->hostMappedMemoryProperties() & vk::MemoryPropertyFlagBits::eHostCached)
+                                                 ? "" : " -- NOT host-cached: do not read from this mapping on the CPU"));
+
     shared_ptr<VulkanBuffer> analytic_buffer_re = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
@@ -216,6 +225,18 @@ void NtscRfDemodulator::demodulate() {
 #elif defined(linux) || defined(__FreeBSD__)
         pthread_setname_np(pthread_self(), "museld-efm");
 #endif
+        // Per-block CPU timing of the audio demodulation, reported every
+        // c_timing_report_blocks blocks together with the real-time budget per
+        // block.  Unlike MUSE, the NTSC path always runs one of the two
+        // demodulators, so this stage can be the pipeline bottleneck.
+        using timing_clock = std::chrono::steady_clock;
+        constexpr int c_timing_report_blocks = 256;
+        const double block_budget_ms = c_sample_block_size / (double)m_sample_frequency * 1e3;
+        double efm_ms = 0, analog_ms = 0;
+        int timed_blocks = 0;
+        auto ms_between = [](timing_clock::time_point a, timing_clock::time_point b) {
+            return std::chrono::duration<double, std::milli>(b - a).count();
+        };
         while (true) {
             unique_ptr<NtscDemodulatedBlock> block;
             {
@@ -226,19 +247,45 @@ void NtscRfDemodulator::demodulate() {
                 block = std::move(efm.queue.front());
                 efm.queue.pop_front();
             }
+            auto t_block_start = timing_clock::now();
             if (block->efm_wanted)
                 m_efm_demodulator.demodulate(block->raw_input.data(), block->efm_data);
             else
                 block->efm_data.clear();
+            auto t_after_efm = timing_clock::now();
             block->analog_data.clear();
             if (block->analog_wanted)
                 m_analog_demodulator.demodulate(block->raw_input.data(), m_analog_cx, block->analog_data);
+            auto t_after_analog = timing_clock::now();
+
+            efm_ms += ms_between(t_block_start, t_after_efm);
+            analog_ms += ms_between(t_after_efm, t_after_analog);
+            if (++timed_blocks == c_timing_report_blocks) {
+                m_log.info(ePerformance, std::format(
+                        "audio demod avg/block (budget {:.2f} ms): efm {:.2f} ms, analog {:.2f} ms",
+                        block_budget_ms, efm_ms / timed_blocks, analog_ms / timed_blocks));
+                efm_ms = analog_ms = 0;
+                timed_blocks = 0;
+            }
 
             std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
             m_cv_filled.notify_one();
             m_filled_blocks.push_back(std::move(block));
         }
     });
+
+    // Per-section CPU timing of the demodulation loop, reported every c_timing_report_blocks
+    // blocks together with the real-time budget per block.  On a fifo the read time includes
+    // waiting for the capture device, so a large read share is expected there.  A large acquire
+    // share means the downstream stages (audio demod worker or the reader's DPLL) cannot keep up.
+    using timing_clock = std::chrono::steady_clock;
+    constexpr int c_timing_report_blocks = 256;
+    const double block_budget_ms = c_sample_block_size / (double)m_sample_frequency * 1e3;
+    double read_ms = 0, acquire_ms = 0, record_ms = 0, submit_ms = 0, audio_ms = 0, gpu_wait_ms = 0;
+    int timed_blocks = 0;
+    auto ms_between = [](timing_clock::time_point a, timing_clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
 
     // The samples are always read into this heap buffer and copied into the mapping in one go,
     // never written to the mapping directly.  The mapping is not host-cached, and writing it is
@@ -249,6 +296,7 @@ void NtscRfDemodulator::demodulate() {
     std::vector<float> input_staging;
 
     while (!m_stop_request) {
+        auto t_loop_start = timing_clock::now();
         const bool efm_enabled = m_efm_enabled;
         const bool analog_enabled = m_analog_enabled;
         float *input_samples = input_buffer->data<float>() + bandpass_filter_def.size() - 1;
@@ -256,6 +304,7 @@ void NtscRfDemodulator::demodulate() {
         if (!readFloats(input_staging.data(), c_sample_block_size))
             break;
         memcpy(input_samples, input_staging.data(), c_sample_block_size * sizeof(float));
+        auto t_after_read = timing_clock::now();
 
         // First get a free output block to write to
         unique_ptr<NtscDemodulatedBlock> block = nullptr;
@@ -276,6 +325,7 @@ void NtscRfDemodulator::demodulate() {
             block = std::move(m_vacant_blocks.front());
             m_vacant_blocks.pop_front();
         }
+        auto t_after_acquire = timing_clock::now();
         // The first byte of the output lags the actual input due to three filters being applied
         block->input_offset = m_total_samples_read - (bandpass_filter_def.size() + lowpass_filter_def.size()) / 2;
         m_total_samples_read += c_sample_block_size;
@@ -359,7 +409,9 @@ void NtscRfDemodulator::demodulate() {
         enqueue_float_copy(*lowpass_in_buffer, lowpass_in_buffer_size, lowpass_filter_def.size() - 1);
         command_buffer->enqueueCopyBuffer(*dropout_buffer, *dropout_buffer, (dropout_buffer_size - dropout_delay) * sizeof(uint8_t), 0, dropout_delay * sizeof(uint8_t));
 
+        auto t_after_record = timing_clock::now();
         command_buffer->submit({}, {}, {});
+        auto t_after_submit = timing_clock::now();
 
         // Hand the staged input samples to the block for the audio worker.  The swap gives the
         // block this iteration's samples and reclaims the block's old buffer for the next read, so
@@ -370,8 +422,28 @@ void NtscRfDemodulator::demodulate() {
             std::swap(block->raw_input, input_staging);
         else
             block->raw_input.clear();
+        auto t_after_audio = timing_clock::now();
 
         command_buffer->wait();
+        auto t_after_gpu_wait = timing_clock::now();
+
+        read_ms += ms_between(t_loop_start, t_after_read);
+        acquire_ms += ms_between(t_after_read, t_after_acquire);
+        record_ms += ms_between(t_after_acquire, t_after_record);
+        submit_ms += ms_between(t_after_record, t_after_submit);
+        audio_ms += ms_between(t_after_submit, t_after_audio);
+        gpu_wait_ms += ms_between(t_after_audio, t_after_gpu_wait);
+        if (++timed_blocks == c_timing_report_blocks) {
+            m_log.info(ePerformance, std::format(
+                    "demodulate avg/block (budget {:.2f} ms): read {:.2f} ms, acquire {:.2f} ms, "
+                    "record {:.2f} ms, submit {:.2f} ms, audio copy {:.2f} ms, gpu wait {:.2f} ms, total {:.2f} ms",
+                    block_budget_ms, read_ms / timed_blocks, acquire_ms / timed_blocks,
+                    record_ms / timed_blocks, submit_ms / timed_blocks, audio_ms / timed_blocks,
+                    gpu_wait_ms / timed_blocks,
+                    (read_ms + acquire_ms + record_ms + submit_ms + audio_ms + gpu_wait_ms) / timed_blocks));
+            read_ms = acquire_ms = record_ms = submit_ms = audio_ms = gpu_wait_ms = 0;
+            timed_blocks = 0;
+        }
 
         if (timestamp_query_pool != nullptr)
             timestamp_statistics.add_timestamps(timestamp_query_pool->getTimestamps());
