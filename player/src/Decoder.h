@@ -18,6 +18,12 @@ public:
         eNormal, eForceIntraField, eForceInterFrame
     };
 
+    // CX noise reduction for the NTSC analog audio: follow the VBI flag, or
+    // force it off/on (for discs without a readable flag, or for A/B listening)
+    enum class CxMode {
+        eAuto, eOff, eOn
+    };
+
     struct SourceDimensions {
         int width;          // full image, both fields, all chroma planes laid out as in out_image
         int height;
@@ -36,6 +42,7 @@ public:
 
     struct DecodeControls {
         bool efm_audio;
+        CxMode analog_cx;
         FieldInterpolationMode field_interpolation_mode;
         bool redo_last_field;
         bool enable_non_linear;

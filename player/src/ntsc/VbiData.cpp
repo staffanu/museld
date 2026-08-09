@@ -24,6 +24,13 @@ VbiData::VbiData(bool is_lead_in, bool is_lead_out, bool is_clv, bool is_stop_co
 
 std::vector<std::string> VbiData::asStrings() const {
   std::string string1 = m_is_clv ? "CLV " : "CAV ";
+  if (m_cx_override.has_value()) {
+    string1 += std::format("CX {} forced ", m_cx_override.value() ? "on" : "off");
+    if (m_cx_enabled.has_value() && m_cx_enabled != m_cx_override)
+      string1 += std::format("(disc {}) ", m_cx_enabled.value() ? "on" : "off");
+  } else if (m_cx_enabled.has_value()) {
+    string1 += m_cx_enabled.value() ? "CX on " : "CX off ";
+  }
   if (m_is_lead_in)
     string1 += "Lead in ";
   if (m_is_lead_out)

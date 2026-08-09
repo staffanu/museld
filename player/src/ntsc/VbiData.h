@@ -19,6 +19,11 @@ public:
 
     std::vector<std::string> asStrings() const override;
     std::optional<double> playbackTimeSeconds() const override;
+    [[nodiscard]] std::optional<bool> cxEnabled() const { return m_cx_enabled; }
+
+    // The CX state the player applies when the user forces it (nullopt in
+    // auto mode); set by the decoder so asStrings() can show detected vs used
+    void setCxOverride(std::optional<bool> used) { m_cx_override = used; }
 
 private:
     bool m_is_lead_in;
@@ -30,6 +35,7 @@ private:
     std::optional<int> m_clv_picture_number;
     std::optional<int> m_cav_picture_number;
     std::optional<bool> m_cx_enabled;
+    std::optional<bool> m_cx_override;
 };
 
 #endif //MUSECPP_VBIDATA_H

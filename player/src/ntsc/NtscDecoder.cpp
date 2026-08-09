@@ -363,6 +363,23 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     if (input_block != nullptr) {
         m_frames[0]->processVbi();
 
+        // Drive the analog audio's CX expansion from the VBI status, unless
+        // the user forces it.  The demodulator runs a few frames ahead of the
+        // VBI decode, but the flag changes on program boundaries, so the
+        // latency does not matter.
+        switch (controls.analog_cx) {
+            case CxMode::eOff:
+                m_reader.setAnalogCx(false);
+                break;
+            case CxMode::eOn:
+                m_reader.setAnalogCx(true);
+                break;
+            case CxMode::eAuto:
+                if (auto cx = m_frames[0]->getVbiData()->cxEnabled(); cx.has_value())
+                    m_reader.setAnalogCx(cx.value());
+                break;
+        }
+
         // Film cadence evidence: the per-field differences between the frame
         // just read and its predecessor (both synchronized for host reads, as
         // the VBI processing needs).  The decision this feeds is always about
@@ -397,7 +414,15 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                 m_pending_audio.push_back(f);
             }
             m_pending_audio_mode = MODE_EFM;
-        } else { // Analog audio
+        } else if (input_block != nullptr && !input_block->analog_data.empty()) {
+            for (const auto &s : input_block->analog_data) {
+                AudioFrame f{};
+                f.samples[0] = s.samples[0];
+                f.samples[1] = s.samples[1];
+                m_pending_audio.push_back(f);
+            }
+            m_pending_audio_mode = MODE_ANALOG;
+        } else {
             m_pending_audio_mode = MODE_UNKNOWN;
         }
     }
@@ -424,6 +449,12 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         m_field_index = (m_field_index + 1) % 2;
 
     out.disc_info = m_frames[1]->getVbiData();
+    // Let the disc info overlay show what the CX expander actually does when
+    // the user forces it away from the VBI flag
+    if (auto vbi = m_frames[1]->getVbiData())
+        vbi->setCxOverride(controls.analog_cx == CxMode::eAuto
+            ? std::nullopt
+            : std::make_optional(controls.analog_cx == CxMode::eOn));
 
     return true;
 }

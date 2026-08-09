@@ -17,6 +17,12 @@ class Logger;
 struct ReaderControls {
     std::function<void(double)> seek;
     std::function<void(bool)> setEfmEnabled;
+    // OSD label for the audio the disc plays when EFM is off: the MUSE audio
+    // on MUSE discs, the analog FM audio on NTSC discs
+    std::string non_efm_audio_label;
+    // True when the non-EFM audio is the NTSC analog track, so the CX toggle
+    // has an audible effect (unless EFM is selected)
+    bool has_analog_audio = false;
     // Adaptive equalizer controls (MUSE only).  cycleEqMode returns a short label
     // for the new mode ("OFF"/"ADAPT"/"FROZEN") for OSD display.  Empty when the
     // decoder doesn't support adaptive equalization (NTSC).

@@ -474,6 +474,7 @@ static void runPlayer(Logger &log,
         auto make_controls = [&](bool redo) {
             return Decoder::DecodeControls{
                     efm_audio,
+                    state.analog_cx_mode,
                     state.field_interpolation_mode,
                     redo,
                     state.enable_non_linear,
@@ -610,6 +611,20 @@ static void runPlayer(Logger &log,
 
             if (audio_playback && state.last_decoded.audio_sample_count != 0
                 && state.last_decoded.audio_mode != MODE_UNKNOWN && !state.paused) {
+                // Channel selection for the listener (bilingual discs, or the
+                // left-only analog audio on AC3 discs).  Mutating the decoded
+                // samples is safe here: the file writer above has already
+                // consumed them, so it always gets the full stereo track.
+                // MODE_A is the 4-channel MUSE format, where a stereo
+                // channel choice has no meaning.
+                if (state.audio_channel_mode != AudioChannelMode::eStereo
+                    && state.last_decoded.audio_mode != MODE_A) {
+                    const int source = state.audio_channel_mode == AudioChannelMode::eLeft ? 0 : 1;
+                    for (int i = 0; i < state.last_decoded.audio_sample_count; i++) {
+                        auto &f = state.last_decoded.audio_samples[i];
+                        f.samples[0] = f.samples[1] = f.samples[source];
+                    }
+                }
                 audio_playback->add_samples(state.last_decoded.audio_mode,
                                             state.last_decoded.audio_sample_count,
                                             state.last_decoded.audio_samples);
@@ -804,6 +819,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         ReaderControls reader_controls{
                 [&reader](double seconds) { reader.seek(seconds); },
                 [&reader](bool enabled) { reader.setEfmEnabled(enabled); },
+                std::is_same<InputBlock, MuseInputBlock>::value ? "MUSE AUDIO" : "ANALOG AUDIO",
+                !std::is_same<InputBlock, MuseInputBlock>::value, // has_analog_audio
         };
 
         std::unique_ptr<Decoder> decoder;
@@ -1035,8 +1052,8 @@ int main(int argc, char *argv[]) {
     options.flag("--no-audio", "Do not decode audio", [&] () -> void {
         decode_audio = false;
     });
-    options.flag("--efm", "Take the audio from the EFM (CD) track instead of the MUSE audio "
-                          "(RF input only)", [&] () -> void {
+    options.flag("--efm", "Take the audio from the EFM (CD) track instead of the MUSE audio, "
+                          "or of the analog audio for NTSC (RF input only)", [&] () -> void {
         efm_audio = true;
     });
     options.flag("--all-fields", "Update the display once per field, at 60 Hz (default)", [&] () -> void {

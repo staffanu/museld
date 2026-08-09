@@ -128,7 +128,43 @@ bool InputController::poll(GLFWwindow *window,
     if (checkKey(window, GLFW_KEY_A)) {
         efm_audio = !efm_audio;
         reader.setEfmEnabled(efm_audio);
-        state.osd_text = efm_audio ? "EFM AUDIO" : "MUSE AUDIO";
+        state.osd_text = efm_audio ? "EFM AUDIO" : reader.non_efm_audio_label;
+    }
+    if (checkKey(window, GLFW_KEY_B)) {
+        switch (state.audio_channel_mode) {
+            case AudioChannelMode::eStereo:
+                state.audio_channel_mode = AudioChannelMode::eLeft;
+                state.osd_text = "LEFT CHANNEL";
+                break;
+            case AudioChannelMode::eLeft:
+                state.audio_channel_mode = AudioChannelMode::eRight;
+                state.osd_text = "RIGHT CHANNEL";
+                break;
+            case AudioChannelMode::eRight:
+                state.audio_channel_mode = AudioChannelMode::eStereo;
+                state.osd_text = "STEREO";
+                break;
+        }
+    }
+    if (checkKey(window, GLFW_KEY_X)) {
+        switch (state.analog_cx_mode) {
+            case Decoder::CxMode::eAuto:
+                state.analog_cx_mode = Decoder::CxMode::eOff;
+                state.osd_text = "CX OFF";
+                break;
+            case Decoder::CxMode::eOff:
+                state.analog_cx_mode = Decoder::CxMode::eOn;
+                state.osd_text = "CX ON";
+                break;
+            case Decoder::CxMode::eOn:
+                state.analog_cx_mode = Decoder::CxMode::eAuto;
+                state.osd_text = "CX AUTO";
+                break;
+        }
+        // Parenthesized when the audio playing is not the NTSC analog track,
+        // where the setting is remembered but has no audible effect
+        if (!reader.has_analog_audio || efm_audio)
+            state.osd_text = "(" + state.osd_text + ")";
     }
     if (checkKey(window, GLFW_KEY_D)) {
         switch (dropout_mode) {

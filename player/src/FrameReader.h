@@ -43,6 +43,8 @@ public:
     void returnBuffer(std::unique_ptr<InputBlock> &buffer);
     virtual void seek(double seconds) = 0;
     virtual void setEfmEnabled(bool) {}
+    // CX noise reduction for the NTSC analog audio; a no-op elsewhere
+    virtual void setAnalogCx(bool) {}
 
 protected:
     // input_is_realtime is separate from input_is_fifo since we could have non-real-time input from a pipe

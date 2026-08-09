@@ -9,6 +9,11 @@
 #include <vector>
 #include "Decoder.h"
 
+// What the listener hears from a stereo audio track: both channels, or one of
+// them on both ears (bilingual discs, or the left-only analog audio on AC3
+// discs).  Applies to playback only; --write always keeps the full track.
+enum class AudioChannelMode { eStereo, eLeft, eRight };
+
 struct PlayerState {
     bool paused = false;
     int paused_countdown = 0;
@@ -19,6 +24,8 @@ struct PlayerState {
     bool use_3d_comb = true; // NTSC: temporal Y/C separation on still parts
     bool film_mode = true;   // NTSC: reverse-telecine weave on a 3:2 cadence lock
     bool enable_cursor = false;
+    AudioChannelMode audio_channel_mode = AudioChannelMode::eStereo;
+    Decoder::CxMode analog_cx_mode = Decoder::CxMode::eAuto;
     bool show_disc_code = false;
     int zoom_factor = 1;
     std::pair<double, double> zoom_center{0.5, 0.5};

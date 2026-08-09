@@ -101,7 +101,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 
 | Option | Description |
 |---|---|
-| `--efm` | Use EFM data for audio instead of MUSE audio (RF input only) |
+| `--efm` | Use EFM data for audio instead of the MUSE audio, or of the NTSC analog audio (RF input only) |
 | `--no-video` / `--no-audio` | Disable video or audio output |
 | `--no-sync` | Display frames as fast as possible (benchmark mode) |
 | `--full-frames-only` | Skip every other field update (reduces CPU/GPU load) |
@@ -240,7 +240,9 @@ also given, which is the mode to use for batch rendering.
 | 4 | NTSC: toggle the 3D comb (temporal Y/C separation on still parts) |
 | 5 | NTSC: film mode auto / off (reverse-telecine weave on a 3:2 cadence lock) |
 | D | Cycle dropout handling: conceal → ignore → highlight (red = luminance dropout, green = color dropout) |
-| A | Toggle audio between MUSE and EFM (RF input only) |
+| A | Toggle audio between MUSE (or NTSC analog) and EFM (RF input only) |
+| B | Cycle the audio channels heard: stereo → left only → right only (bilingual discs, or the left-only analog track on AC3 discs; `--write` output always keeps stereo) |
+| X | Cycle CX noise reduction for the NTSC analog audio: auto (follow the VBI flag, the default) → off → on. Shown in parentheses when the audio playing is not the analog track (the setting is remembered but inaudible). The V info line shows the CX status: the disc's flag in auto mode, or e.g. "CX off forced (disc on)" when overridden. |
 | V | Toggle disc code / chapter / frame display, plus the NTSC film mode status (TOC reading is not implemented) |
 | C | Show cursor coordinates and input-file offsets (see below) |
 | L | Toggle non-linear de-emphasis processing |
@@ -301,6 +303,21 @@ RF capture (40 MHz) → NtscRfDemodulator → NtscInputReader (DPLL)
 RF → TimingRecovery (Mueller-Müller PLL) → EfmDecoder → CIRC C1/C2 Reed-Solomon
   → erasure concealment → pop detection → stereo PCM
 ```
+
+### Data flow — NTSC analog audio (inside museld)
+
+The default NTSC audio; both it and EFM run on the demodulator's audio worker thread
+(`museld-efm`), fed with the same staged raw RF blocks.
+
+```
+RF → shared half-band decimation → per channel (2.3011 / 2.8125 MHz): NCO mix
+  → complex decimation + channel filter → atan2 FM discriminator → audio decimation
+  → resample to 48 kHz → 75 µs de-emphasis → CX expansion (VBI-controlled) → stereo PCM
+```
+
+A channel whose carrier is missing (the right channel on AC3 discs) is squelched. The CX
+expander follows the CX flag decoded from the VBI, a few frames behind the audio, which is
+harmless since the flag changes on program boundaries.
 
 ## Known limitations and future work
 

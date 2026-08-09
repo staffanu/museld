@@ -5,10 +5,12 @@
 #define MUSECPP_INPUTBLOCKBASE_H
 
 #include <vector>
+#include "efm/TwoChannelSample.h"
 
 class InputBlockBase {
 public:
     std::vector<float> efm_data;
+    std::vector<TwoChannelSample> analog_data; // NTSC analog FM audio; empty elsewhere
 
     virtual void writeToFile(int fd, void *buffer) = 0;
 
