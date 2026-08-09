@@ -8,7 +8,7 @@
 
 #define MAX_AUDIO_OUTPUT_SAMPLES 2048
 
-enum AudioMode { MODE_A, MODE_B, MODE_EFM, MODE_UNKNOWN };
+enum AudioMode { MODE_A, MODE_B, MODE_EFM, MODE_ANALOG, MODE_UNKNOWN };
 
 struct AudioFrame
 {

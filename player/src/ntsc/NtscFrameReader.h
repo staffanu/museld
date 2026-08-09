@@ -31,6 +31,7 @@ public:
     void cleanup() override;
     void seek(double seconds) override;
     void setEfmEnabled(bool enabled) override;
+    void setAnalogCx(bool enabled) override;
 
 protected:
     void threadFunc() override;

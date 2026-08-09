@@ -33,7 +33,11 @@ NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string executable_dir, st
   m_efm_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
                     FirFilterStage::simdSupported(), true,
                     EfmDemodulator::defaultLog2Decimation(sample_frequency), 3, std::nullopt),
-  m_efm_enabled(efm_enabled) {
+  m_analog_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
+                       48000.0, FirFilterStage::simdSupported()),
+  m_efm_enabled(efm_enabled),
+  m_analog_enabled(!efm_enabled),
+  m_analog_cx(false) {
 }
 
 void NtscRfDemodulator::demodulate() {
@@ -178,10 +182,11 @@ void NtscRfDemodulator::demodulate() {
     command_buffer->submit({}, {}, {});
     command_buffer->wait();
 
-    // The EFM demodulation is CPU work independent of the Vulkan pipeline, so it runs on its own
-    // worker thread and overlaps the next block's read/record/submit.  The demodulation loop stages
-    // the raw input samples in block->efm_input and hands the block over after the GPU has finished
-    // with it; the worker fills in efm_data and forwards the block to m_filled_blocks.  A single
+    // The EFM and analog audio demodulation is CPU work independent of the Vulkan pipeline, so it
+    // runs on its own worker thread and overlaps the next block's read/record/submit.  The
+    // demodulation loop stages the raw input samples in block->raw_input and hands the block over
+    // after the GPU has finished with it; the worker fills in efm_data/analog_data and forwards
+    // the block to m_filled_blocks.  A single
     // worker with a FIFO queue keeps the blocks in order, and the queue is bounded by the block
     // pool: when all blocks are queued for EFM the loop waits on m_cv_vacant as before.
     // The worker's shared state and the thread live in one struct so a single
@@ -221,10 +226,13 @@ void NtscRfDemodulator::demodulate() {
                 block = std::move(efm.queue.front());
                 efm.queue.pop_front();
             }
-            if (!block->efm_input.empty())
-                m_efm_demodulator.demodulate(block->efm_input.data(), block->efm_data);
+            if (block->efm_wanted)
+                m_efm_demodulator.demodulate(block->raw_input.data(), block->efm_data);
             else
                 block->efm_data.clear();
+            block->analog_data.clear();
+            if (block->analog_wanted)
+                m_analog_demodulator.demodulate(block->raw_input.data(), m_analog_cx, block->analog_data);
 
             std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
             m_cv_filled.notify_one();
@@ -242,6 +250,7 @@ void NtscRfDemodulator::demodulate() {
 
     while (!m_stop_request) {
         const bool efm_enabled = m_efm_enabled;
+        const bool analog_enabled = m_analog_enabled;
         float *input_samples = input_buffer->data<float>() + bandpass_filter_def.size() - 1;
         input_staging.resize(c_sample_block_size);
         if (!readFloats(input_staging.data(), c_sample_block_size))
@@ -352,13 +361,15 @@ void NtscRfDemodulator::demodulate() {
 
         command_buffer->submit({}, {}, {});
 
-        // Hand the staged input samples to the block for the EFM worker.  The swap gives the block
-        // this iteration's samples and reclaims the block's old buffer for the next read, so no
-        // data is copied and nothing is read back from the mapped input buffer.
-        if (efm_enabled)
-            std::swap(block->efm_input, input_staging);
+        // Hand the staged input samples to the block for the audio worker.  The swap gives the
+        // block this iteration's samples and reclaims the block's old buffer for the next read, so
+        // no data is copied and nothing is read back from the mapped input buffer.
+        block->efm_wanted = efm_enabled;
+        block->analog_wanted = analog_enabled;
+        if (efm_enabled || analog_enabled)
+            std::swap(block->raw_input, input_staging);
         else
-            block->efm_input.clear();
+            block->raw_input.clear();
 
         command_buffer->wait();
 

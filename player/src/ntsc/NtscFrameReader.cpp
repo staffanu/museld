@@ -152,8 +152,17 @@ void NtscFrameReader::seek(double seconds) {
 }
 
 void NtscFrameReader::setEfmEnabled(bool enabled) {
-    if (m_demodulator != nullptr)
+    // The two audio tracks are alternatives: selecting EFM turns the analog
+    // demodulation off and vice versa
+    if (m_demodulator != nullptr) {
         m_demodulator->setEfmEnabled(enabled);
+        m_demodulator->setAnalogEnabled(!enabled);
+    }
+}
+
+void NtscFrameReader::setAnalogCx(bool enabled) {
+    if (m_demodulator != nullptr)
+        m_demodulator->setAnalogCx(enabled);
 }
 
 void NtscFrameReader::threadFunc() {
@@ -182,6 +191,7 @@ void NtscFrameReader::threadFunc() {
             output_block = std::move(m_vacant_input_buffers.front());
             m_vacant_input_buffers.pop_front();
             output_block->efm_data.clear();
+            output_block->analog_data.clear();
         }
 
         if (!process(output_block)) {
@@ -223,10 +233,13 @@ bool NtscFrameReader::readInput(std::unique_ptr<NtscInputBlock> const &output_bl
     m_input_sub_buffer_input_offsets[m_last_input_sub_buffer_ix_read] = block->input_offset;
 
     if (output_block != nullptr) {
-        if (m_state == eLocked)
+        if (m_state == eLocked) {
             output_block->efm_data.insert(output_block->efm_data.end(), block->efm_data.begin(), block->efm_data.end());
-        else
+            output_block->analog_data.insert(output_block->analog_data.end(), block->analog_data.begin(), block->analog_data.end());
+        } else {
             output_block->efm_data.clear();
+            output_block->analog_data.clear();
+        }
     }
 
     m_demodulator->returnBlock(block);
