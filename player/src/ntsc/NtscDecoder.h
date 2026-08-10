@@ -82,6 +82,15 @@ private:
     int m_frame_no;
     int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field
     long m_total_elapsed_time_us;
+    // Per-section CPU timing of next(), accumulated over both fields and
+    // reported every c_timing_report_frames frames (ePerformance).  The two
+    // Vulkan fence waits and the host-side reads of mapped buffers (noise
+    // estimate, VBI, cadence diffs) get their own buckets, since their cost
+    // varies wildly between GPUs and drivers.
+    static constexpr int c_timing_report_frames = 128;
+    double m_sec_input_ms = 0, m_sec_noise_ms = 0, m_sec_record_ms = 0, m_sec_gpu1_wait_ms = 0,
+           m_sec_vbi_ms = 0, m_sec_cadence_ms = 0, m_sec_audio_ms = 0, m_sec_gpu2_wait_ms = 0;
+    int m_timed_frames = 0;
     NtscCadenceTracker m_cadence;
     // Which displayed frame each per-parity field buffer set in NtscShaders
     // currently holds: input starvation can skip a field decode, and a

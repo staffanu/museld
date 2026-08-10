@@ -108,6 +108,16 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     auto t0 = chrono::high_resolution_clock::now();
 
+    // Closes the current timing section: adds the time since the previous mark
+    // to the given bucket.  Skipped code between two marks just leaves the
+    // earlier bucket at zero.
+    auto t_prev = t0;
+    auto section_ms = [&t_prev](double &acc) {
+        auto now = chrono::high_resolution_clock::now();
+        acc += chrono::duration<double, std::milli>(now - t_prev).count();
+        t_prev = now;
+    };
+
     std::unique_ptr<NtscInputBlock> input_block = nullptr;
     InputStatus input_status = InputStatus::eNormal;
     if (m_field_index == 0 && !redo_last_field) {
@@ -123,6 +133,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                 break;
         }
     }
+    section_ms(m_sec_input_ms);
     out.decoded = true;
 
     m_first_stage_command_buffer->begin();
@@ -234,6 +245,8 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                         sqrt(total) * ire));
             }
         }
+
+        section_ms(m_sec_noise_ms); // the noise/level estimation reads the mapped input block on the CPU
 
         // The input block data was written by the host, so make sure it is visible on the GPU
         input_block->video_data->synchronizeHostWrites(*m_first_stage_command_buffer);
@@ -357,8 +370,10 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     }
 
     m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});
+    section_ms(m_sec_record_ms);
 
     m_first_stage_command_buffer->wait();
+    section_ms(m_sec_gpu1_wait_ms);
 
     if (input_block != nullptr) {
         m_frames[0]->processVbi();
@@ -379,6 +394,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                     m_reader.setAnalogCx(cx.value());
                 break;
         }
+        section_ms(m_sec_vbi_ms); // processVbi reads the mapped frame buffer on the CPU
 
         // Film cadence evidence: the per-field differences between the frame
         // just read and its predecessor (both synchronized for host reads, as
@@ -394,6 +410,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
             float sigma = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.55f : -1.0f;
             m_cadence.update(m_frame_no, diffs.d0, diffs.d1, sigma);
         }
+        section_ms(m_sec_cadence_ms); // MeasureFieldDiffs reads two mapped frame buffers on the CPU
     }
 
     if (m_decode_audio && m_field_index == 0) {
@@ -426,12 +443,14 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
             m_pending_audio_mode = MODE_UNKNOWN;
         }
     }
+    section_ms(m_sec_audio_ms);
 
     if (input_block != nullptr)
         m_reader.returnBuffer(input_block); // EFM audio uses the buffer, so we cannot return it until now
 
     if (m_second_stage_command_buffer->isSubmitted())
         m_second_stage_command_buffer->wait();
+    section_ms(m_sec_gpu2_wait_ms);
 
     if (m_timestamp_query_pool != nullptr)
         m_timestamp_statistics.add_timestamps(m_timestamp_query_pool->getTimestamps());
@@ -442,6 +461,24 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     m_log.info(ePerformance, std::format("Field {} elapsed time {} ms; {} ms/frame",
                                          m_field_index, time_us / 1000,
                                          m_frame_no != 0 ? m_total_elapsed_time_us / 1000 / m_frame_no : -1));
+
+    if (m_field_index == 0 && ++m_timed_frames == c_timing_report_frames) {
+        const double frame_budget_ms = NtscInputBlock::c_samples_per_video_line
+                * NtscInputBlock::c_total_video_lines / NtscInputBlock::c_video_sampling_frequency * 1e3;
+        const int n = c_timing_report_frames;
+        m_log.info(ePerformance, std::format(
+                "decoder avg/frame (budget {:.2f} ms): input {:.2f} ms, noise {:.2f} ms, record {:.2f} ms, "
+                "gpu1 wait {:.2f} ms, vbi {:.2f} ms, cadence {:.2f} ms, audio {:.2f} ms, gpu2 wait {:.2f} ms, "
+                "total {:.2f} ms",
+                frame_budget_ms, m_sec_input_ms / n, m_sec_noise_ms / n, m_sec_record_ms / n,
+                m_sec_gpu1_wait_ms / n, m_sec_vbi_ms / n, m_sec_cadence_ms / n, m_sec_audio_ms / n,
+                m_sec_gpu2_wait_ms / n,
+                (m_sec_input_ms + m_sec_noise_ms + m_sec_record_ms + m_sec_gpu1_wait_ms + m_sec_vbi_ms
+                 + m_sec_cadence_ms + m_sec_audio_ms + m_sec_gpu2_wait_ms) / n));
+        m_sec_input_ms = m_sec_noise_ms = m_sec_record_ms = m_sec_gpu1_wait_ms = 0;
+        m_sec_vbi_ms = m_sec_cadence_ms = m_sec_audio_ms = m_sec_gpu2_wait_ms = 0;
+        m_timed_frames = 0;
+    }
 
     if (input_status == InputStatus::eBuffersFilled)
         m_field_index = 0; // skip second field -- next field will be from the next frame
