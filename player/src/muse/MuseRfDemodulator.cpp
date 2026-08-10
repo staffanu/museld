@@ -401,6 +401,15 @@ void MuseRfDemodulator::demodulate() {
         enqueue_float_copy(*analytic_buffer_im, analytic_buffer_size, 1);
         enqueue_float_copy(*lowpass_in_buffer, lowpass_in_buffer_size, lowpass_filter_size - 1);
         enqueue_float_copy(*rrc_in_buffer, rrc_in_buffer_size, rrc_filter_size - 1);
+        // The tail recycle below writes the start of dropout_buffer, which the
+        // copy into block->dropouts above reads; transfers on the same queue
+        // have no implicit ordering, so the write needs an execution dependency
+        // on the read.  (The float recycles are ordered against the shader
+        // reads by the compute-to-transfer barrier already.)
+        command_buffer->enqueueBarrier(vk::AccessFlagBits::eTransferRead,
+                                       vk::AccessFlagBits::eTransferWrite,
+                                       vk::PipelineStageFlagBits::eTransfer,
+                                       vk::PipelineStageFlagBits::eTransfer);
         command_buffer->enqueueCopyBuffer(*dropout_buffer, *dropout_buffer, (c_dropout_buffer_size - c_dropout_delay) * sizeof(uint8_t), 0, c_dropout_delay * sizeof(uint8_t));
 
         auto t_after_record = timing_clock::now();
