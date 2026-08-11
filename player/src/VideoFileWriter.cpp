@@ -237,9 +237,9 @@ void VideoFileWriter::cleanup() {
     av_write_trailer(m_format_context);
 
     if (m_have_video)
-        close_stream(m_format_context, &m_video_stream);
+        close_stream(&m_video_stream);
     if (m_have_audio)
-        close_stream(m_format_context, &m_audio_stream);
+        close_stream(&m_audio_stream);
 
     swr_free(&m_swr_ctx);
 
@@ -463,7 +463,7 @@ void VideoFileWriter::initResampler(AudioMode mode) {
     m_audio_input_mode = mode;
 }
 
-void VideoFileWriter::close_stream(AVFormatContext *oc, OutputStream *ost) {
+void VideoFileWriter::close_stream(OutputStream *ost) {
     avcodec_free_context(&ost->codec_context);
     av_frame_free(&ost->frame);
     av_packet_free(&ost->tmp_pkt);
@@ -485,23 +485,23 @@ AVFrame *VideoFileWriter::makeVideoFrame(OutputStream *ost, std::shared_ptr<muse
 
     // Plane order: data[0] = Y, data[1] = Cb (out_U carries B-Y), data[2] = Cr (out_V carries R-Y)
     if (ost->codec_context->pix_fmt == AV_PIX_FMT_YUV420P16LE) {
-        for (int y = 0; y < sizeY.y_size; y++)
+        for (uint32_t y = 0; y < sizeY.y_size; y++)
             memcpy(ost->frame->data[0] + y * ost->frame->linesize[0],
                    image_Y->data<uint16_t>() + y * sizeY.x_size, sizeY.x_size * sizeof(uint16_t));
 
-        for (int y = 0; y < sizeU.y_size; y++) {
+        for (uint32_t y = 0; y < sizeU.y_size; y++) {
             memcpy(ost->frame->data[1] + y * ost->frame->linesize[1],
                    image_U->data<uint16_t>() + y * sizeU.x_size, sizeU.x_size * sizeof(uint16_t));
             memcpy(ost->frame->data[2] + y * ost->frame->linesize[2],
                    image_V->data<uint16_t>() + y * sizeU.x_size, sizeU.x_size * sizeof(uint16_t));
         }
     } else {
-        for (int y = 0; y < sizeY.y_size; y++)
-            for (int x = 0; x < sizeY.x_size; x++)
+        for (uint32_t y = 0; y < sizeY.y_size; y++)
+            for (uint32_t x = 0; x < sizeY.x_size; x++)
                 ost->frame->data[0][y * ost->frame->linesize[0] + x] = image_Y->data<uint16_t>()[y * sizeY.x_size + x] >> 8;
 
-        for (int y = 0; y < sizeU.y_size; y++)
-            for (int x = 0; x < sizeU.x_size; x++) {
+        for (uint32_t y = 0; y < sizeU.y_size; y++)
+            for (uint32_t x = 0; x < sizeU.x_size; x++) {
                 ost->frame->data[1][y * ost->frame->linesize[1] + x] = image_U->data<uint16_t>()[y * sizeU.x_size + x] >> 8;
                 ost->frame->data[2][y * ost->frame->linesize[2] + x] = image_V->data<uint16_t>()[y * sizeU.x_size + x] >> 8;
             }

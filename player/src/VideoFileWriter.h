@@ -94,7 +94,7 @@ private:
     AVFrame *makeVideoFrame(OutputStream *ost, std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
                             std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V);
     bool writeFrame(AVCodecContext *c, AVStream *st, AVFrame *frame, AVPacket *pkt);
-    static void close_stream(AVFormatContext *oc, OutputStream *ost);
+    static void close_stream(OutputStream *ost);
 
     static std::string av_err2string(int errnum) {
         char str[AV_ERROR_MAX_STRING_SIZE];
