@@ -42,9 +42,17 @@ template<>
 class InputBlockFactory<NtscInputBlock> {
 public:
     static std::unique_ptr<NtscInputBlock> makeBlock(musevk::VulkanManager &manager) {
+        // video_data is written by the reader thread but also READ back by the
+        // decoder's noise/level estimation, so it must not end up in uncached
+        // (write-combined) memory: on discrete GPUs eHostWrite's first choice
+        // is the PCIe BAR, where those reads run at a few MB/s and dominated a
+        // whole frame's decode time.  eHostReadWrite picks a host-cached
+        // mapping, or falls back to a cached staging buffer plus the device
+        // copy that synchronizeHostWrites already maintains.  dropout_data is
+        // only ever read by the GPU, so plain eHostWrite stays right for it.
         return std::make_unique<NtscInputBlock>(
                 std::make_unique<musevk::VulkanBuffer>(manager, NtscInputBlock::c_samples_per_video_line * NtscInputBlock::c_total_video_lines,
-                                                       sizeof(float), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite),
+                                                       sizeof(float), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostReadWrite),
                 std::make_unique<musevk::VulkanBuffer>(manager, NtscInputBlock::c_samples_per_video_line * NtscInputBlock::c_total_video_lines,
                                                        sizeof(uint8_t), vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostWrite)
         );
