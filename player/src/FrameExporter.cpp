@@ -17,8 +17,17 @@
 #include "musevk/VulkanBuffer.h"
 #include "musevk/VulkanImage.h"
 
+// The vendored stb_image_write uses sprintf() in its HDR writer (which we never
+// call); macOS deprecates it, so keep that warning out of our build.
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include "stb_image_write.h"
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 using namespace musevk;
 
