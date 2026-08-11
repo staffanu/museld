@@ -68,6 +68,30 @@ vector<float> readChunk(const string &filename, InputFormat format,
     return samples;
 }
 
+// Read a chunk at the requested offset, falling back toward the start when the
+// reader cannot get there.  Long FLAC captures need this: STREAMINFO stores the
+// sample count in 36 bits, so anything past 2^36 samples (18 minutes at 62.5
+// MHz) records a wrapped total, and libFLAC then refuses every seek beyond that
+// wrapped value even though the frames decode fine.  Backing off keeps the
+// probe reading real data instead of reporting an unreadable file.
+vector<float> readChunkNear(Logger &log, const string &filename, InputFormat format,
+                            int64_t &sample_offset, uint32_t chunk_samples) {
+    constexpr int c_max_backoffs = 12;
+    const int64_t requested = sample_offset;
+    for (int attempt = 0; ; attempt++) {
+        auto samples = readChunk(filename, format, sample_offset, chunk_samples);
+        if (!samples.empty()) {
+            if (sample_offset != requested)
+                log.debug(eInput, std::format("Probe: sample {} unreadable, used sample {} instead",
+                                              requested, sample_offset));
+            return samples;
+        }
+        if (sample_offset == 0)
+            return {};
+        sample_offset = attempt < c_max_backoffs ? sample_offset / 2 : 0;
+    }
+}
+
 double lag1Autocorrelation(const vector<float> &x) {
     double mean = 0;
     for (float v : x) mean += v;
@@ -375,7 +399,7 @@ FileAnalysis analyzeFile(Logger &log, const string &filename, InputFormat format
     vector<ChunkStats> chunks;
     vector<double> fold_significances, fold_ratios;
     for (int64_t offset : chunkOffsets(filename, format)) {
-        auto samples = readChunk(filename, format, offset, c_chunk_samples);
+        auto samples = readChunkNear(log, filename, format, offset, c_chunk_samples);
         if (samples.empty())
             continue;
         ChunkStats stats = analyzeChunk(log, samples, offset);
@@ -508,11 +532,7 @@ InputProbeResult probeInputFile(Logger &log, const string &filename,
     result.audio_carrier_ratio = best.audio_carrier_ratio;
 
     // Phase-correct 16.2 MHz MUSE baseband is exactly 480 samples per line and
-    // has no FM carrier for the mean frequency to sit on.  Otherwise the audio
-    // carrier is decisive when present -- the measured ratio is ~10^4 on real
-    // NTSC RF and ~1.5 elsewhere -- and beyond that, classify on the carrier
-    // frequency: ~520 cycles/line for NTSC, ~340 for MUSE, with the gap left
-    // unclassified rather than guessed (content brightness moves the mean).
+    // has no FM carrier for the mean frequency to sit on.
     using Type = InputProbeResult::Type;
     if (abs(result.line_period - 480.0) / 480.0 < 0.005 && result.cycles_per_line < 250) {
         result.type = Type::eMuse16Baseband;
@@ -520,11 +540,40 @@ InputProbeResult probeInputFile(Logger &log, const string &filename,
         result.sample_frequency_snapped = true;
         return result;
     }
-    if (result.audio_carrier_ratio > 50 || result.cycles_per_line >= 470)
-        result.type = Type::eNtscRf;
-    else if (result.cycles_per_line >= 260 && result.cycles_per_line <= 430)
-        result.type = Type::eMuseRf;
-    else
+
+    // Otherwise classify on the carrier frequency: NTSC deviates between 7.6
+    // and 9.3 MHz, so 483..591 cycles per line, and MUSE sits near 340.  Both
+    // bands are bounded and the space between and outside them is left
+    // unclassified rather than guessed, since content brightness moves the
+    // mean.  A count above every band means the autocorrelation locked two or
+    // three lines apart -- which happens on MUSE, where neighbouring lines can
+    // be too unlike each other to correlate -- and that scales the period and
+    // the carrier count by the same factor, so divide both back down until the
+    // carrier lands in a band.  The bands are the only way to tell: the
+    // single-line peak of such a lock is no stronger than the half-line peak
+    // of a perfectly good NTSC lock.
+    auto classifyByCarrier = [](double cycles_per_line) {
+        if (cycles_per_line >= 470 && cycles_per_line <= 640)
+            return Type::eNtscRf;
+        if (cycles_per_line >= 260 && cycles_per_line <= 430)
+            return Type::eMuseRf;
+        return Type::eUnknown;
+    };
+    for (int harmonic = 1; harmonic <= 3; harmonic++) {
+        // The audio carrier is decisive where it is measurable -- the ratio is
+        // ~10^4 on real NTSC RF and ~1.5 elsewhere -- but it was measured at
+        // the undivided period, so it only speaks for the unscaled hypothesis
+        Type type = classifyByCarrier(result.cycles_per_line / harmonic);
+        if (harmonic == 1 && result.audio_carrier_ratio > 50)
+            type = Type::eNtscRf;
+        if (type == Type::eUnknown)
+            continue;
+        result.type = type;
+        result.line_period /= harmonic;
+        result.cycles_per_line /= harmonic;
+        break;
+    }
+    if (result.type == Type::eUnknown)
         return result;
 
     result.sample_frequency = estimateSampleFrequency(result, result.type);
