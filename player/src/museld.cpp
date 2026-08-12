@@ -21,6 +21,7 @@
 #include "musevk/CommandPool.h"
 #include "logging/StreamLogger.h"
 #include "AudioPlayback.h"
+#include "CompressedAudioDecoder.h"
 #include "FrameReader.h"
 #include "TextRenderer.h"
 #include "Decoder.h"
@@ -330,7 +331,7 @@ static void runPlayer(Logger &log,
                       bool initial_use_3d_comb,
                       bool initial_film_mode,
                       DropoutMode dropout_mode,
-                      bool efm_audio,
+                      AudioTrack audio_track,
                       bool benchmark_shaders,
                       bool output_yuv,
                       const std::unique_ptr<VideoFileWriter> &vfw,
@@ -473,7 +474,7 @@ static void runPlayer(Logger &log,
 
         auto make_controls = [&](bool redo) {
             return Decoder::DecodeControls{
-                    efm_audio,
+                    audio_track,
                     state.analog_cx_mode,
                     state.field_interpolation_mode,
                     redo,
@@ -652,7 +653,7 @@ static void runPlayer(Logger &log,
             }
             if (glfwWindowShouldClose(window))
                 break;
-            if (!input.poll(window, state, reader_controls, dropout_mode, efm_audio,
+            if (!input.poll(window, state, reader_controls, dropout_mode, audio_track,
                             full_screen, src_dims.width, src_dims.height))
                 break;
         }
@@ -717,7 +718,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   bool decode_all_fields, bool full_screen, bool no_sync,
                   bool start_paused, Decoder::FieldInterpolationMode field_interpolation_mode,
                   bool use_3d_comb, bool film_mode, bool decode_video, DropoutMode dropout_mode,
-                  bool decode_audio, bool efm_audio, bool benchmark_shaders,
+                  bool decode_audio, AudioTrack audio_track, bool benchmark_shaders,
                   MuseAdaptiveEqualizer::Mode eq_mode, float eq_alpha,
                   float tint_degrees, float saturation,
                   optional<string> const &output_filename,
@@ -816,11 +817,14 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 ? std::make_unique<musevk::TimestampQueryPool>(manager.getPhysicalDevice(), manager.getDevice(), 40)
                 : nullptr;
 
+        constexpr bool is_muse = std::is_same<InputBlock, MuseInputBlock>::value;
         ReaderControls reader_controls{
                 [&reader](double seconds) { reader.seek(seconds); },
-                [&reader](bool enabled) { reader.setEfmEnabled(enabled); },
-                std::is_same<InputBlock, MuseInputBlock>::value ? "MUSE AUDIO" : "ANALOG AUDIO",
-                !std::is_same<InputBlock, MuseInputBlock>::value, // has_analog_audio
+                [&reader](AudioTrack track) { reader.setAudioTrack(track); },
+                is_muse ? "MUSE AUDIO" : "ANALOG AUDIO",
+                CompressedAudioDecoder::available() ? "AC3 AUDIO" : "AC3 AUDIO (NO FFMPEG)",
+                !is_muse, // has_analog_audio
+                !is_muse, // has_ac3_audio
         };
 
         std::unique_ptr<Decoder> decoder;
@@ -857,7 +861,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         const double seconds_per_iteration = (decode_all_fields ? 1 : 2) / fields_per_second;
 
         runPlayer(log, manager, *decoder, reader_controls, window, full_screen, start_paused,
-                  field_interpolation_mode, use_3d_comb, film_mode, dropout_mode, efm_audio, benchmark_shaders,
+                  field_interpolation_mode, use_3d_comb, film_mode, dropout_mode, audio_track, benchmark_shaders,
                   output_filename.has_value(),
                   vfw, audio_playback.get(), executable_dir,
                   subtitle_setup,
@@ -974,7 +978,7 @@ int main(int argc, char *argv[]) {
     bool decode_video = true;
     DropoutMode dropout_mode = DropoutMode::eNormal;
     bool decode_audio = true;
-    bool efm_audio = false;
+    AudioTrack audio_track = AudioTrack::eDefault;
     bool benchmark_shaders = false;
     MuseAdaptiveEqualizer::Mode eq_mode = MuseAdaptiveEqualizer::Mode::eAdapt;
     constexpr float eq_alpha = 0.005f;
@@ -1053,8 +1057,13 @@ int main(int argc, char *argv[]) {
         decode_audio = false;
     });
     options.flag("--efm", "Take the audio from the EFM (CD) track instead of the MUSE audio, "
-                          "or of the analog audio for NTSC (RF input only)", [&] () -> void {
-        efm_audio = true;
+                          "or of the analog audio for NTSC (RF input only).  A DTS bitstream "
+                          "on the track is detected and decoded automatically", [&] () -> void {
+        audio_track = AudioTrack::eEfm;
+    });
+    options.flag("--ac3", "NTSC: take the audio from the AC3-RF surround track, downmixed to "
+                          "stereo (RF input only; decoding needs an FFmpeg build)", [&] () -> void {
+        audio_track = AudioTrack::eAc3;
     });
     options.flag("--all-fields", "Update the display once per field, at 60 Hz (default)", [&] () -> void {
         decode_all_fields = true;
@@ -1445,11 +1454,11 @@ int main(int argc, char *argv[]) {
                     case eNtscRf: {
                         auto reader = make_unique<NtscFrameReader>(
                                         log, executable_dir, manager, *it, input_format,
-                                        file_sample_frequency, initial_seek_seconds, benchmark_shaders, efm_audio,
+                                        file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
                                         muse_output_filename);
                         process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                                      full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
-                                                     efm_audio,
+                                                     audio_track,
                                                      benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
@@ -1461,7 +1470,7 @@ int main(int argc, char *argv[]) {
                                 log, *it, input_format, initial_seek_seconds, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
-                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
+                                     audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                      initial_seek_seconds);
@@ -1472,10 +1481,10 @@ int main(int argc, char *argv[]) {
                         auto reader = make_unique<ResamplingFrameReader>(
                                 log, executable_dir, manager, *it, input_format,
                                 file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
-                                efm_audio, muse_output_filename);
+                                audio_track == AudioTrack::eEfm, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
-                                     efm_audio, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
+                                     audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                      initial_seek_seconds);

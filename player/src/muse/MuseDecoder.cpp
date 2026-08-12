@@ -85,7 +85,7 @@ bool MuseDecoder::initialize() {
 }
 
 bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
-    const bool efm_audio = controls.efm_audio;
+    const bool efm_audio = controls.audio_track == AudioTrack::eEfm;
     const FieldInterpolationMode field_interpolation_mode = controls.field_interpolation_mode;
     const bool redo_last_field = controls.redo_last_field;
     const bool enable_non_linear = controls.enable_non_linear;

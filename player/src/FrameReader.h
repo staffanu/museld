@@ -11,6 +11,7 @@
 #include <vector>
 #include <deque>
 #include <atomic>
+#include "AudioDefs.h"
 
 namespace musevk {
     class VulkanBuffer;
@@ -43,6 +44,10 @@ public:
     void returnBuffer(std::unique_ptr<InputBlock> &buffer);
     virtual void seek(double seconds) = 0;
     virtual void setEfmEnabled(bool) {}
+    // Which audio source to demodulate.  MUSE readers know two sources, so the
+    // default maps the track onto the EFM on/off switch; the NTSC reader
+    // overrides this with its three-way selection (analog/EFM/AC3-RF).
+    virtual void setAudioTrack(AudioTrack track) { setEfmEnabled(track == AudioTrack::eEfm); }
     // CX noise reduction for the NTSC analog audio; a no-op elsewhere
     virtual void setAnalogCx(bool) {}
 

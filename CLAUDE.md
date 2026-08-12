@@ -16,6 +16,11 @@ Supported formats:
 - **AC3RF**: QPSK-demodulated AC3 surround audio
 - **Analog**: NTSC analog FM stereo audio (2.3011/2.8125 MHz carriers, CX expansion, squelch)
 
+NTSC playback in museld selects between the analog, EFM and AC3-RF tracks (`AudioTrack`,
+A key / `--efm` / `--ac3`); a DTS bitstream on the EFM track is auto-detected. AC3 and DTS
+are decoded to stereo by `CompressedAudioDecoder` (libavcodec + libswresample), which is
+gated on `HAVE_LIBAV` — in builds without FFmpeg those tracks are selectable but silent.
+
 ## Repository Structure
 
 ```

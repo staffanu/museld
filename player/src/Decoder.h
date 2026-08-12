@@ -41,7 +41,7 @@ public:
     };
 
     struct DecodeControls {
-        bool efm_audio;
+        AudioTrack audio_track;
         CxMode analog_cx;
         FieldInterpolationMode field_interpolation_mode;
         bool redo_last_field;

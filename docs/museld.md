@@ -101,7 +101,8 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 
 | Option | Description |
 |---|---|
-| `--efm` | Use EFM data for audio instead of the MUSE audio, or of the NTSC analog audio (RF input only) |
+| `--efm` | Use EFM data for audio instead of the MUSE audio, or of the NTSC analog audio (RF input only). A DTS bitstream on the track (DTS laserdiscs) is detected and decoded automatically. |
+| `--ac3` | NTSC: use the AC3-RF surround track, downmixed to stereo (RF input only; decoding requires an FFmpeg build — without it the track is silent) |
 | `--no-video` / `--no-audio` | Disable video or audio output |
 | `--no-sync` | Display frames as fast as possible (benchmark mode) |
 | `--full-frames-only` | Skip every other field update (reduces CPU/GPU load) |
@@ -240,7 +241,7 @@ also given, which is the mode to use for batch rendering.
 | 4 | NTSC: toggle the 3D comb (temporal Y/C separation on still parts) |
 | 5 | NTSC: film mode auto / off (reverse-telecine weave on a 3:2 cadence lock) |
 | D | Cycle dropout handling: conceal → ignore → highlight (red = luminance dropout, green = color dropout) |
-| A | Toggle audio between MUSE (or NTSC analog) and EFM (RF input only) |
+| A | Cycle the audio track: MUSE (or NTSC analog) → EFM → AC3 (NTSC only) (RF input only) |
 | B | Cycle the audio channels heard: stereo → left only → right only (bilingual discs, or the left-only analog track on AC3 discs; `--write` output always keeps stereo) |
 | X | Cycle CX noise reduction for the NTSC analog audio: auto (follow the VBI flag, the default) → off → on. Shown in parentheses when the audio playing is not the analog track (the setting is remembered but inaudible). The V info line shows the CX status: the disc's flag in auto mode, or e.g. "CX off forced (disc on)" when overridden. |
 | V | Toggle disc code / chapter / frame display, plus the NTSC film mode status (TOC reading is not implemented) |
@@ -318,6 +319,24 @@ RF → shared half-band decimation → per channel (2.3011 / 2.8125 MHz): NCO mi
 A channel whose carrier is missing (the right channel on AC3 discs) is squelched. The CX
 expander follows the CX flag decoded from the VBI, a few frames behind the audio, which is
 harmless since the flag changes on program boundaries.
+
+### Data flow — AC3 and DTS (inside museld)
+
+The `--ac3` track (or the A key) runs the AC3-RF QPSK demodulator on the same audio worker
+thread; the recovered AC3 sync frames are decoded to PCM with libavcodec, using the
+decoder's own stereo downmix. On DTS laserdiscs the EFM track carries a DTS bitstream
+instead of PCM: museld watches the decoded EFM samples for DTS sync words and, once seen,
+bypasses the PCM processing (concealment, de-emphasis and pop detection would corrupt the
+bitstream — and playing it as PCM is loud noise) and feeds the bytes to libavcodec's DTS
+decoder, downmixed to stereo the same way. Both need an FFmpeg build (`--write` capable);
+without it the tracks are selectable but silent. Compressed frames that fail to decode
+(dropouts) become silence of the same duration, keeping A/V sync.
+
+```
+AC3: RF → bandpass/decimation → IQ mix (DPLL) → QPSK demod → framing/de-interleave
+  → Reed-Solomon C1/C2 → AC3 sync frames → libavcodec ac3 → stereo PCM (48 kHz)
+DTS: EFM stereo samples → DTS sync detection → byte stream → libavcodec dca → stereo PCM (44.1 kHz)
+```
 
 ## Known limitations and future work
 

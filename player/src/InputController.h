@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 
+#include "AudioDefs.h"
 #include "DropoutMode.h"
 
 struct GLFWwindow;
@@ -16,13 +17,18 @@ class Logger;
 
 struct ReaderControls {
     std::function<void(double)> seek;
-    std::function<void(bool)> setEfmEnabled;
-    // OSD label for the audio the disc plays when EFM is off: the MUSE audio
-    // on MUSE discs, the analog FM audio on NTSC discs
-    std::string non_efm_audio_label;
-    // True when the non-EFM audio is the NTSC analog track, so the CX toggle
-    // has an audible effect (unless EFM is selected)
+    std::function<void(AudioTrack)> setAudioTrack;
+    // OSD label for the disc's default audio: the MUSE audio on MUSE discs,
+    // the analog FM audio on NTSC discs
+    std::string default_audio_label;
+    // OSD label for the AC3-RF track; annotated in builds that cannot decode it
+    std::string ac3_audio_label;
+    // True when the default audio is the NTSC analog track, so the CX toggle
+    // has an audible effect (unless another track is selected)
     bool has_analog_audio = false;
+    // True when the disc format can carry an AC3-RF track (NTSC), which adds
+    // it to the A key's cycle
+    bool has_ac3_audio = false;
     // Adaptive equalizer controls (MUSE only).  cycleEqMode returns a short label
     // for the new mode ("OFF"/"ADAPT"/"FROZEN") for OSD display.  Empty when the
     // decoder doesn't support adaptive equalization (NTSC).
@@ -39,7 +45,7 @@ public:
               PlayerState &state,
               ReaderControls &reader,
               DropoutMode &dropout_mode,
-              bool &efm_audio,
+              AudioTrack &audio_track,
               bool &full_screen,
               int window_width,
               int window_height);

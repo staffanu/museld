@@ -26,7 +26,7 @@ using namespace NtscRfDemodulatorConstants;
 
 NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string executable_dir, std::string filename,  float sample_frequency,
                                      musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
-                                     bool efm_enabled)
+                                     AudioTrack audio_track)
 : RfDemodulator<NtscDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency,
                                       vulkan_manager, input_format,
                                       NtscRfDemodulatorConstants::c_sample_block_size,
@@ -36,9 +36,15 @@ NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string executable_dir, st
                     EfmDemodulator::defaultLog2Decimation(sample_frequency), 3, std::nullopt),
   m_analog_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
                        48000.0, FirFilterStage::simdSupported()),
-  m_efm_enabled(efm_enabled),
-  m_analog_enabled(!efm_enabled),
+  m_ac3_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
+                    FirFilterStage::simdSupported()),
+  m_ac3_decoder(log),
+  m_efm_enabled(audio_track == AudioTrack::eEfm),
+  m_analog_enabled(audio_track == AudioTrack::eDefault),
+  m_ac3_enabled(audio_track == AudioTrack::eAc3),
   m_analog_cx(false) {
+    // demodulateToSymbols requires block sizes aligned to its internal decimation
+    assert(c_sample_block_size % m_ac3_demodulator.inputSampleAlignment() == 0);
 }
 
 void NtscRfDemodulator::demodulate() {
@@ -232,7 +238,7 @@ void NtscRfDemodulator::demodulate() {
         using timing_clock = std::chrono::steady_clock;
         constexpr int c_timing_report_blocks = 256;
         const double block_budget_ms = c_sample_block_size / (double)m_sample_frequency * 1e3;
-        double efm_ms = 0, analog_ms = 0;
+        double efm_ms = 0, analog_ms = 0, ac3_ms = 0;
         int timed_blocks = 0;
         auto ms_between = [](timing_clock::time_point a, timing_clock::time_point b) {
             return std::chrono::duration<double, std::milli>(b - a).count();
@@ -257,14 +263,21 @@ void NtscRfDemodulator::demodulate() {
             if (block->analog_wanted)
                 m_analog_demodulator.demodulate(block->raw_input.data(), m_analog_cx, block->analog_data);
             auto t_after_analog = timing_clock::now();
+            if (block->ac3_wanted)
+                block->ac3_frames = m_ac3_decoder.decodeSymbols(
+                        m_ac3_demodulator.demodulateToSymbols(block->raw_input.data(), c_sample_block_size));
+            else
+                block->ac3_frames.clear();
+            auto t_after_ac3 = timing_clock::now();
 
             efm_ms += ms_between(t_block_start, t_after_efm);
             analog_ms += ms_between(t_after_efm, t_after_analog);
+            ac3_ms += ms_between(t_after_analog, t_after_ac3);
             if (++timed_blocks == c_timing_report_blocks) {
                 m_log.info(ePerformance, std::format(
-                        "audio demod avg/block (budget {:.2f} ms): efm {:.2f} ms, analog {:.2f} ms",
-                        block_budget_ms, efm_ms / timed_blocks, analog_ms / timed_blocks));
-                efm_ms = analog_ms = 0;
+                        "audio demod avg/block (budget {:.2f} ms): efm {:.2f} ms, analog {:.2f} ms, ac3 {:.2f} ms",
+                        block_budget_ms, efm_ms / timed_blocks, analog_ms / timed_blocks, ac3_ms / timed_blocks));
+                efm_ms = analog_ms = ac3_ms = 0;
                 timed_blocks = 0;
             }
 
@@ -299,6 +312,7 @@ void NtscRfDemodulator::demodulate() {
         auto t_loop_start = timing_clock::now();
         const bool efm_enabled = m_efm_enabled;
         const bool analog_enabled = m_analog_enabled;
+        const bool ac3_enabled = m_ac3_enabled;
         float *input_samples = input_buffer->data<float>() + bandpass_filter_def.size() - 1;
         input_staging.resize(c_sample_block_size);
         if (!readFloats(input_staging.data(), c_sample_block_size))
@@ -427,7 +441,8 @@ void NtscRfDemodulator::demodulate() {
         // no data is copied and nothing is read back from the mapped input buffer.
         block->efm_wanted = efm_enabled;
         block->analog_wanted = analog_enabled;
-        if (efm_enabled || analog_enabled)
+        block->ac3_wanted = ac3_enabled;
+        if (efm_enabled || analog_enabled || ac3_enabled)
             std::swap(block->raw_input, input_staging);
         else
             block->raw_input.clear();

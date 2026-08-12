@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <algorithm>
 #include <string>
 #include <map>
 #include <chrono>
@@ -56,6 +57,10 @@ NtscDecoder::NtscDecoder(
   m_field_buffer_frame_no{-100, -100},
   m_efm_decoder(log, std::nullopt, std::nullopt),
   m_efm_pcm_processor(log),
+  m_ac3_pcm_decoder(log, CompressedAudioDecoder::Codec::eAc3),
+  m_dts_pcm_decoder(log, CompressedAudioDecoder::Codec::eDts),
+  m_dts_sync_count(0),
+  m_dts_sync_age_frames(0),
   m_pending_audio(),
   m_pending_audio_mode(MODE_UNKNOWN),
   m_frames() {
@@ -91,9 +96,40 @@ bool NtscDecoder::initialize() {
     return true;
 }
 
+// DTS laserdiscs put a DTS bitstream where the EFM track normally carries PCM.
+// Look for the DTS sync word in consecutive 16-bit words of the sample stream
+// (L and R flattened, as on the disc): 0x7FFE 0x8001 for a 16-bit stream,
+// 0x1FFF 0xE800 for the 14-bit-in-16 packing DTS discs use, plus their
+// byte-swapped forms.  A hit is essentially unambiguous (a 32-bit match), but
+// two are required before latching so a chance pattern in PCM cannot flip a
+// frame into bitstream mode; once latched, it takes ~4 s without any sync word
+// (a video frame holds at most a few DTS frames) to fall back to PCM.
+bool NtscDecoder::detectDtsBitstream(const std::vector<TwoChannelSampleWithErasureFlags> &raw_samples) {
+    int syncs = 0;
+    uint16_t prev = 0;
+    for (const auto &s : raw_samples)
+        for (int ch = 0; ch < 2; ch++) {
+            const auto w = (uint16_t)s.samples[ch];
+            if ((prev == 0x7ffe && w == 0x8001) || (prev == 0x1fff && w == 0xe800) ||
+                (prev == 0xfe7f && w == 0x0180) || (prev == 0xff1f && w == 0x00e8))
+                syncs++;
+            prev = w;
+        }
+    if (syncs > 0) {
+        if (m_dts_sync_count < 2 && m_dts_sync_count + syncs >= 2)
+            m_log.info(eAudio, "DTS bitstream detected on the EFM track");
+        m_dts_sync_count = std::min(m_dts_sync_count + syncs, 1000);
+        m_dts_sync_age_frames = 0;
+    } else if (m_dts_sync_count > 0 && ++m_dts_sync_age_frames > 120) {
+        m_log.info(eAudio, "DTS sync words gone; treating the EFM track as PCM again");
+        m_dts_sync_count = 0;
+    }
+    return m_dts_sync_count >= 2;
+}
+
 // For NTSC, enable_non_linear is not implemented
 bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
-    const bool efm_audio = controls.efm_audio;
+    const AudioTrack audio_track = controls.audio_track;
     const bool use_3d_comb = controls.use_3d_comb;
     const FieldInterpolationMode field_interpolation_mode = controls.field_interpolation_mode;
     const bool redo_last_field = controls.redo_last_field;
@@ -415,32 +451,68 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     if (m_decode_audio && m_field_index == 0) {
         // Deliver the audio held from the previous read (it belongs to the
-        // frame being displayed), then decode and hold this block's audio
+        // frame being displayed), then decode and hold this block's audio.
+        // AC3/DTS decode in whole compressed frames, so a delivery can exceed
+        // the per-field cap now and then; the remainder carries over.
         out.audio_mode = m_pending_audio_mode;
-        for (const auto &s : m_pending_audio) {
-            if (out.audio_sample_count >= MAX_AUDIO_OUTPUT_SAMPLES) break;
-            out.audio_samples[out.audio_sample_count++] = s;
-        }
-        m_pending_audio.clear();
-        if (efm_audio && input_block != nullptr) {
+        // AC3/DTS decode in whole compressed frames (32 ms for AC3), so
+        // uncapped delivery would jitter by a full frame against the video
+        // clock -- past the file writer's sync dead band.  Capping just above
+        // the nominal per-video-frame rate keeps about one compressed frame
+        // queued as a jitter buffer, and the small surplus drains any larger
+        // backlog instead of letting it become permanent latency.
+        const int cap = m_pending_audio_mode == MODE_AC3 ? 48000 * 1001 / 30000 + 16
+                      : m_pending_audio_mode == MODE_DTS ? 44100 * 1001 / 30000 + 16
+                      : MAX_AUDIO_OUTPUT_SAMPLES;
+        const int delivered = std::min((int)m_pending_audio.size(), cap);
+        for (int i = 0; i < delivered; i++)
+            out.audio_samples[out.audio_sample_count++] = m_pending_audio[i];
+        m_pending_audio.erase(m_pending_audio.begin(), m_pending_audio.begin() + delivered);
+
+        // Any leftovers belong to m_pending_audio_mode; a mode change (track
+        // switch, DTS detection flipping) must not deliver them under the new
+        // mode's label and sample rate
+        auto beginMode = [this](AudioMode mode) {
+            if (mode != m_pending_audio_mode)
+                m_pending_audio.clear();
+            m_pending_audio_mode = mode;
+        };
+        auto pendStereo = [this](const auto &samples) {
+            for (const auto &s : samples) {
+                AudioFrame f{};
+                f.samples[0] = s.samples[0];
+                f.samples[1] = s.samples[1];
+                m_pending_audio.push_back(f);
+            }
+        };
+        if (audio_track == AudioTrack::eEfm && input_block != nullptr) {
             auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
-            for (const auto &s : m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis())) {
-                AudioFrame f{};
-                f.samples[0] = s.samples[0];
-                f.samples[1] = s.samples[1];
-                m_pending_audio.push_back(f);
+            if (detectDtsBitstream(raw)) {
+                // A DTS disc's EFM track is a bitstream, not PCM: concealment,
+                // de-emphasis and pop detection would corrupt it (and playing
+                // it as PCM is loud noise), so hand the raw bytes to the DTS
+                // decoder instead
+                beginMode(MODE_DTS);
+                m_dts_bitstream.clear();
+                for (const auto &s : raw)
+                    for (int ch = 0; ch < 2; ch++) { // L then R, little endian: the disc's frame order
+                        m_dts_bitstream.push_back((uint8_t)(s.samples[ch] & 0xff));
+                        m_dts_bitstream.push_back((uint8_t)((uint16_t)s.samples[ch] >> 8));
+                    }
+                pendStereo(m_dts_pcm_decoder.decode(m_dts_bitstream.data(), m_dts_bitstream.size()));
+            } else {
+                beginMode(MODE_EFM);
+                pendStereo(m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis()));
             }
-            m_pending_audio_mode = MODE_EFM;
+        } else if (audio_track == AudioTrack::eAc3 && input_block != nullptr) {
+            beginMode(MODE_AC3);
+            for (const auto &frame : input_block->ac3_frames)
+                pendStereo(m_ac3_pcm_decoder.decode(frame.data(), frame.size()));
         } else if (input_block != nullptr && !input_block->analog_data.empty()) {
-            for (const auto &s : input_block->analog_data) {
-                AudioFrame f{};
-                f.samples[0] = s.samples[0];
-                f.samples[1] = s.samples[1];
-                m_pending_audio.push_back(f);
-            }
-            m_pending_audio_mode = MODE_ANALOG;
+            beginMode(MODE_ANALOG);
+            pendStereo(input_block->analog_data);
         } else {
-            m_pending_audio_mode = MODE_UNKNOWN;
+            beginMode(MODE_UNKNOWN);
         }
     }
     section_ms(m_sec_audio_ms);
