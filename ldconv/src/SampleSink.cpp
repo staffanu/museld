@@ -156,7 +156,11 @@ public:
         // RF captures are not music: nothing downstream needs a subset stream,
         // and insisting on one only rules out the larger block sizes.
         set_streamable_subset(false);
-        if (options.total_samples != 0)
+        // STREAMINFO stores the total in 36 bits.  A longer capture must
+        // declare "unknown" (0): libFLAC masks the estimate to the field
+        // width, and decoders trust the wrapped result -- libFLAC refuses
+        // every seek past it, which broke museld's --probe on long captures.
+        if (options.total_samples != 0 && options.total_samples < (1ULL << 36))
             set_total_samples_estimate(options.total_samples);
 
 #if FLAC_API_VERSION_CURRENT >= 14
