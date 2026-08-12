@@ -18,8 +18,11 @@
 #include <deque>
 #include <condition_variable>
 #include "logging/Logger.h"
+#include "AudioDefs.h"
 #include "RfDemodulator.h"
 #include "musevk/VulkanManager.h"
+#include "ac3/Ac3Decoder.h"
+#include "ac3/Ac3RfDemodulator.h"
 #include "efm/EfmDemodulator.h"
 #include "analog/AnalogAudioDemodulator.h"
 
@@ -49,11 +52,13 @@ struct NtscDemodulatedBlock {
     int64_t input_offset; // the number of samples in the input before this block
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropouts; // 1-to-1 with the video_data array. 0 or 1 for now, but could indicate how certain we are in the future
-    std::vector<float> raw_input; // raw input samples staged for the audio worker thread; empty when EFM and analog are both disabled
+    std::vector<float> raw_input; // raw input samples staged for the audio worker thread; empty when no audio demodulator is enabled
     bool efm_wanted = false;      // which decoders the worker runs on raw_input
     bool analog_wanted = false;
+    bool ac3_wanted = false;
     std::vector<float> efm_data;
     std::vector<TwoChannelSample> analog_data; // 48 kHz stereo from the analog FM carriers
+    std::vector<std::array<uint8_t, 1536>> ac3_frames; // raw AC3 sync frames from the AC3-RF carrier
     std::shared_ptr<musevk::VulkanBuffer> audio_data;
 };
 
@@ -61,7 +66,7 @@ class NtscRfDemodulator : public RfDemodulator<NtscDemodulatedBlock> {
 public:
     NtscRfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
                       musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
-                      bool efm_enabled);
+                      AudioTrack audio_track);
     NtscRfDemodulator(const NtscRfDemodulator&) = delete;
     void operator=(const NtscRfDemodulator&) = delete;
 
@@ -71,8 +76,12 @@ public:
         cleanup();
     }
 
-    void setEfmEnabled(bool enabled) { m_efm_enabled = enabled; }
-    void setAnalogEnabled(bool enabled) { m_analog_enabled = enabled; }
+    // The three audio sources are alternatives; enable the selected one only
+    void setAudioTrack(AudioTrack track) {
+        m_efm_enabled = track == AudioTrack::eEfm;
+        m_analog_enabled = track == AudioTrack::eDefault;
+        m_ac3_enabled = track == AudioTrack::eAc3;
+    }
     // CX expansion for the analog audio, driven by the VBI status decoded downstream
     void setAnalogCx(bool enabled) { m_analog_cx = enabled; }
 
@@ -89,8 +98,11 @@ private:
     static constexpr float c_frequency_deviation = 0.85e6f;
     EfmDemodulator m_efm_demodulator;
     AnalogAudioDemodulator m_analog_demodulator;
+    Ac3RfDemodulator m_ac3_demodulator;
+    Ac3Decoder m_ac3_decoder;
     std::atomic<bool> m_efm_enabled;
     std::atomic<bool> m_analog_enabled;
+    std::atomic<bool> m_ac3_enabled;
     std::atomic<bool> m_analog_cx;
 };
 

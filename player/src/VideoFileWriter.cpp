@@ -32,6 +32,8 @@ static int audioModeSampleRate(AudioMode mode) {
         case MODE_B:   return 48000;
         case MODE_EFM: return 44100;
         case MODE_ANALOG: return 48000;
+        case MODE_AC3: return 48000;
+        case MODE_DTS: return 44100;
         default:       return 0;
     }
 }

@@ -27,7 +27,7 @@ using namespace std;
 NtscFrameReader::NtscFrameReader(
         Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
         const std::string &filename, InputFormat input_format, double sample_rate,
-        double initial_seek_seconds, bool benchmark_shaders, bool efm_enabled,
+        double initial_seek_seconds, bool benchmark_shaders, AudioTrack audio_track,
         const std::optional<std::string> &output_filename)
         : FrameReader(log, filename,
                       filesystem::is_fifo(filename),
@@ -60,7 +60,7 @@ NtscFrameReader::NtscFrameReader(
           m_read_input_elapsed_ms(0),
           m_timed_frames(0) {
 
-    m_demodulator = new NtscRfDemodulator(log, executable_dir, m_filename, sample_rate, vulkan_manager, input_format, benchmark_shaders, efm_enabled);
+    m_demodulator = new NtscRfDemodulator(log, executable_dir, m_filename, sample_rate, vulkan_manager, input_format, benchmark_shaders, audio_track);
     // m_sample_rate = 31.25e6;
 
     m_bytes_per_sample = 4;
@@ -155,13 +155,10 @@ void NtscFrameReader::seek(double seconds) {
     }
 }
 
-void NtscFrameReader::setEfmEnabled(bool enabled) {
-    // The two audio tracks are alternatives: selecting EFM turns the analog
-    // demodulation off and vice versa
-    if (m_demodulator != nullptr) {
-        m_demodulator->setEfmEnabled(enabled);
-        m_demodulator->setAnalogEnabled(!enabled);
-    }
+void NtscFrameReader::setAudioTrack(AudioTrack track) {
+    // The audio tracks are alternatives: only the selected one is demodulated
+    if (m_demodulator != nullptr)
+        m_demodulator->setAudioTrack(track);
 }
 
 void NtscFrameReader::setAnalogCx(bool enabled) {
@@ -197,6 +194,7 @@ void NtscFrameReader::threadFunc() {
             m_vacant_input_buffers.pop_front();
             output_block->efm_data.clear();
             output_block->analog_data.clear();
+            output_block->ac3_frames.clear();
         }
 
         if (!process(output_block)) {
@@ -242,9 +240,11 @@ bool NtscFrameReader::readInput(std::unique_ptr<NtscInputBlock> const &output_bl
         if (m_state == eLocked) {
             output_block->efm_data.insert(output_block->efm_data.end(), block->efm_data.begin(), block->efm_data.end());
             output_block->analog_data.insert(output_block->analog_data.end(), block->analog_data.begin(), block->analog_data.end());
+            output_block->ac3_frames.insert(output_block->ac3_frames.end(), block->ac3_frames.begin(), block->ac3_frames.end());
         } else {
             output_block->efm_data.clear();
             output_block->analog_data.clear();
+            output_block->ac3_frames.clear();
         }
     }
 

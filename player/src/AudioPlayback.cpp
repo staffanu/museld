@@ -208,7 +208,8 @@ void AudioPlayback::openStream() {
     config.playback.channels = m_channels_used;
     config.playback.pChannelMap = const_cast<ma_channel *>(c_channel_map);
     config.sampleRate = m_current_mode == MODE_A ? 32000
-        : m_current_mode == MODE_B || m_current_mode == MODE_ANALOG ? 48000 : 44100;
+        : m_current_mode == MODE_B || m_current_mode == MODE_ANALOG || m_current_mode == MODE_AC3
+            ? 48000 : 44100; // MODE_EFM and MODE_DTS are the CD rate
     config.resampling.linear.lpfOrder = MA_MAX_FILTER_ORDER; // best quality for the conversion to the device rate
     config.periodSizeInFrames = 256;
     config.dataCallback = audio_callback;

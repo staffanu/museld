@@ -27,7 +27,7 @@ bool InputController::poll(GLFWwindow *window,
                            PlayerState &state,
                            ReaderControls &reader,
                            DropoutMode &dropout_mode,
-                           bool &efm_audio,
+                           AudioTrack &audio_track,
                            bool &full_screen,
                            int window_width,
                            int window_height) {
@@ -126,9 +126,15 @@ bool InputController::poll(GLFWwindow *window,
         state.osd_text = state.film_mode ? "FILM MODE AUTO" : "FILM MODE OFF";
     }
     if (checkKey(window, GLFW_KEY_A)) {
-        efm_audio = !efm_audio;
-        reader.setEfmEnabled(efm_audio);
-        state.osd_text = efm_audio ? "EFM AUDIO" : reader.non_efm_audio_label;
+        // Cycle through the disc's audio tracks: default -> EFM -> (AC3 on
+        // NTSC) -> default
+        audio_track = audio_track == AudioTrack::eDefault ? AudioTrack::eEfm
+                    : audio_track == AudioTrack::eEfm && reader.has_ac3_audio ? AudioTrack::eAc3
+                    : AudioTrack::eDefault;
+        reader.setAudioTrack(audio_track);
+        state.osd_text = audio_track == AudioTrack::eEfm ? "EFM AUDIO"
+                       : audio_track == AudioTrack::eAc3 ? reader.ac3_audio_label
+                       : reader.default_audio_label;
     }
     if (checkKey(window, GLFW_KEY_B)) {
         switch (state.audio_channel_mode) {
@@ -163,7 +169,7 @@ bool InputController::poll(GLFWwindow *window,
         }
         // Parenthesized when the audio playing is not the NTSC analog track,
         // where the setting is remembered but has no audible effect
-        if (!reader.has_analog_audio || efm_audio)
+        if (!reader.has_analog_audio || audio_track != AudioTrack::eDefault)
             state.osd_text = "(" + state.osd_text + ")";
     }
     if (checkKey(window, GLFW_KEY_D)) {

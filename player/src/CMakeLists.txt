@@ -179,6 +179,7 @@ if(BUILD_MUSE)
         input/PrefetchingInputReader.cpp input/PrefetchingInputReader.h
         InputProbe.cpp InputProbe.h
         AudioPlayback.cpp AudioPlayback.h
+        CompressedAudioDecoder.cpp CompressedAudioDecoder.h
         FrameReader.h FrameReader.impl.h
         InputBlockBase.h
         Decoder.h

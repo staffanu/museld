@@ -17,7 +17,7 @@ public:
     explicit NtscFrameReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
                              const std::string &filename, InputFormat input_format,
                              double sample_rate, double initial_seek_seconds,
-                             bool benchmark_shaders, bool efm_enabled,
+                             bool benchmark_shaders, AudioTrack audio_track,
                              const std::optional<std::string> &output_filename);
     NtscFrameReader(const NtscFrameReader&) = delete;
     void operator=(const NtscFrameReader&) = delete;
@@ -30,7 +30,7 @@ public:
     bool initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) override;
     void cleanup() override;
     void seek(double seconds) override;
-    void setEfmEnabled(bool enabled) override;
+    void setAudioTrack(AudioTrack track) override;
     void setAnalogCx(bool enabled) override;
 
 protected:

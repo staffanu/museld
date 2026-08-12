@@ -7,6 +7,7 @@
 #include <array>
 #include <deque>
 #include "musevk/TimestampStatistics.h"
+#include "CompressedAudioDecoder.h"
 #include "efm/EfmDecoder.h"
 #include "efm/EfmPcmProcessor.h"
 #include "musevk/CommandPool.h"
@@ -51,6 +52,10 @@ public:
             int64_t buffer_file_offset, double input_samples_per_muse_sample) const override;
 
 private:
+    // Watches the decoded EFM samples for DTS sync words and latches while
+    // they keep arriving; returns true when the track carries a DTS bitstream
+    bool detectDtsBitstream(const std::vector<TwoChannelSampleWithErasureFlags> &raw_samples);
+
     Logger &m_log;
     FrameReader<NtscInputBlock> &m_reader;
     musevk::VulkanManager &m_manager;
@@ -99,9 +104,19 @@ private:
     std::array<int, 2> m_field_buffer_frame_no;
     EfmDecoder m_efm_decoder;
     EfmPcmProcessor m_efm_pcm_processor;
+    // AC3 (from the AC3-RF track) and DTS (a bitstream in place of the EFM
+    // track's PCM) decoded to stereo; silent stubs in builds without FFmpeg
+    CompressedAudioDecoder m_ac3_pcm_decoder;
+    CompressedAudioDecoder m_dts_pcm_decoder;
+    std::vector<uint8_t> m_dts_bitstream; // per-frame staging of the EFM bytes for the DTS decoder
+    // DTS detection on the EFM track: sync words seen recently, and frames
+    // since the last one.  The count decides MODE_EFM (PCM) vs MODE_DTS.
+    int m_dts_sync_count;
+    int m_dts_sync_age_frames;
     // Audio decoded from the newest read block, held back one frame so it
     // stays in sync with the picture (which displays one frame behind the
-    // read for the 3D comb lookahead)
+    // read for the 3D comb lookahead).  A FIFO: AC3 and DTS produce PCM in
+    // whole-frame quanta, so a delivery can leave a remainder for the next.
     std::vector<AudioFrame> m_pending_audio;
     AudioMode m_pending_audio_mode;
     // The front (index 0) is the newest received frame N+1 (the lookahead);
