@@ -10,7 +10,7 @@ The text below is written as a Mesa issue report.
 ## Title
 
 radv: loads from a push constant array with a divergent index return the first lane's
-element for all lanes (GCN/Renoir)
+element for all lanes (Renoir)
 
 ## Environment
 
@@ -22,6 +22,8 @@ element for all lanes (GCN/Renoir)
 Control: the same binary and SPIR-V pass on lavapipe from the *same* Mesa build
 (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json ./repro repro.spv` → PASS), so the
 shader, the host program and the common NIR path are all fine and this is RADV-specific.
+The same SPIR-V also passes on MoltenVK (Apple M2, portability flags added to the host
+program for that run). The repro is clean under VK_LAYER_KHRONOS_validation 1.4.350.
 
 ## Description
 
