@@ -53,7 +53,8 @@ and NTSC laserdisc decoder. Video filtering runs on the GPU via Vulkan
 and GLSL compute shaders. Audio is output via the bundled [miniaudio](https://miniaud.io/) library.
 NTSC playback can take its audio from the analog FM, EFM (CD), or AC3-RF surround track;
 AC3 — and the DTS bitstream that DTS discs carry on the EFM track, detected automatically —
-are decoded to stereo with FFmpeg (in the builds that include it).
+are decoded with FFmpeg (in the builds that include it), with all 5.1 channels sent to the
+audio device; `--write` keeps the AC3 track as the original bitstream.
 
 Playback is controlled entirely with keyboard shortcuts, so it can be driven from the sofa with
 any Bluetooth keyboard, or [BridgedIrRemote](https://bitbucket.org/staffanulfberg/bridgedirremote/src/master/), an Android

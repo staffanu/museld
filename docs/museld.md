@@ -102,7 +102,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | Option | Description |
 |---|---|
 | `--efm` | Use EFM data for audio instead of the MUSE audio, or of the NTSC analog audio (RF input only). A DTS bitstream on the track (DTS laserdiscs) is detected and decoded automatically. |
-| `--ac3` | NTSC: use the AC3-RF surround track, downmixed to stereo (RF input only; decoding requires an FFmpeg build — without it the track is silent) |
+| `--ac3` | NTSC: use the AC3-RF surround track (RF input only; decoding requires an FFmpeg build — without it the track is silent). All 5.1 channels go to the audio device, and `--write` files carry the original AC3 bitstream (stream copy, no transcode). |
 | `--no-video` / `--no-audio` | Disable video or audio output |
 | `--no-sync` | Display frames as fast as possible (benchmark mode) |
 | `--full-frames-only` | Skip every other field update (reduces CPU/GPU load) |
@@ -323,22 +323,37 @@ harmless since the flag changes on program boundaries.
 ### Data flow — AC3 and DTS (inside museld)
 
 The `--ac3` track (or the A key) runs the AC3-RF QPSK demodulator on the same audio worker
-thread; the recovered AC3 sync frames are decoded to PCM with libavcodec, using the
-decoder's own stereo downmix. On DTS laserdiscs the EFM track carries a DTS bitstream
-instead of PCM: museld watches the decoded EFM samples for DTS sync words and, once seen,
-bypasses the PCM processing (concealment, de-emphasis and pop detection would corrupt the
-bitstream — and playing it as PCM is loud noise) and feeds the bytes to libavcodec's DTS
-decoder, downmixed to stereo the same way. Both need an FFmpeg build (`--write` capable);
-without it the tracks are selectable but silent. Compressed frames that fail to decode
-(dropouts) become silence of the same duration, keeping A/V sync.
+thread; the recovered AC3 sync frames are decoded to PCM with libavcodec. On DTS laserdiscs
+the EFM track carries a DTS bitstream instead of PCM: museld watches the decoded EFM
+samples for DTS sync words and, once seen, bypasses the PCM processing (concealment,
+de-emphasis and pop detection would corrupt the bitstream — and playing it as PCM is loud
+noise) and feeds the bytes to libavcodec's DTS decoder. Both need an FFmpeg build
+(`--write` capable); without it the tracks are selectable but silent. Compressed frames
+that fail to decode (dropouts) become silence of the same duration, keeping A/V sync.
+
+All 5.1 channels are kept and sent to the audio device with a 5.1 channel map; miniaudio
+(and the OS) deliver them as multichannel LPCM on surround-capable outputs such as HDMI,
+or downmix to the device's actual speaker layout.
+
+For `--write` with the AC3 track selected, the file's audio stream is the original AC3
+bitstream, muxed as-is (both presets; AC3 is standard in MP4 and Matroska — note that
+QuickTime Player cannot decode AC3, though VLC, ffmpeg and most TVs can). A compressed
+stream cannot be stretched for A/V sync, so demodulation gaps become pts jumps against the
+video clock. With any other track selected the file keeps the preset's PCM/AAC audio;
+DTS is still written as decoded PCM (stereo downmix), since the container header must be
+written before the DTS detection has seen the stream.
 
 ```
 AC3: RF → bandpass/decimation → IQ mix (DPLL) → QPSK demod → framing/de-interleave
-  → Reed-Solomon C1/C2 → AC3 sync frames → libavcodec ac3 → stereo PCM (48 kHz)
-DTS: EFM stereo samples → DTS sync detection → byte stream → libavcodec dca → stereo PCM (44.1 kHz)
+  → Reed-Solomon C1/C2 → AC3 sync frames → libavcodec ac3 → 5.1 PCM (48 kHz)
+DTS: EFM stereo samples → DTS sync detection → byte stream → libavcodec dca → 5.1 PCM (44.1 kHz)
 ```
 
 ## Known limitations and future work
+
+- **Multi-track `--write` audio**: written video files could include all the disc's audio
+  tracks (analog, EFM, AC3/DTS) as separate streams instead of only the selected one; needs
+  the demodulator worker to run several sources at once.
 
 - **Motion vectors**: MUSE specifies motion compensation in control data (3+4 bits), but these bits are
   always zero on every disc tested. It is unclear whether this feature was ever used on MUSE laserdiscs.

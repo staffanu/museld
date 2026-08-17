@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #define MAX_AUDIO_OUTPUT_SAMPLES 2048
+#define MAX_AUDIO_CHANNELS 6
 
 enum AudioMode { MODE_A, MODE_B, MODE_EFM, MODE_ANALOG, MODE_AC3, MODE_DTS, MODE_UNKNOWN };
 
@@ -16,9 +17,14 @@ enum AudioMode { MODE_A, MODE_B, MODE_EFM, MODE_ANALOG, MODE_AC3, MODE_DTS, MODE
 // track of its own: it arrives on the EFM track and is detected there.
 enum class AudioTrack { eDefault, eEfm, eAc3 };
 
+// One output sample across the channels of the playing mode.  The slot
+// meaning depends on the mode (AudioPlayback carries the channel map):
+//   MODE_A (MUSE 4-channel):  FL FR BL BR
+//   MODE_AC3 / MODE_DTS 5.1:  FL FR FC LFE SL SR
+//   everything else (stereo): FL FR
 struct AudioFrame
 {
-    int16_t samples[4];
+    int16_t samples[MAX_AUDIO_CHANNELS];
 };
 
 #endif //MUSECPP_AUDIODEFS_H

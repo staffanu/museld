@@ -27,6 +27,8 @@ struct CompressedAudioDecoder::Impl {
     AVChannelLayout swr_in_layout = {};
     AVSampleFormat swr_in_format = AV_SAMPLE_FMT_NONE;
     int swr_in_rate = 0;
+    int swr_out_channels = 0;
+    std::vector<int16_t> stereo_buffer; // staging when the output is narrower than an AudioFrame
 
     // Silence inserted per undecodable frame; refined to the stream's real
     // frame length after the first successful decode
@@ -55,9 +57,6 @@ CompressedAudioDecoder::CompressedAudioDecoder(Logger &log, Codec codec)
                                         codec == Codec::eAc3 ? "AC3" : "DTS"));
         return;
     }
-    // Let the decoder itself downmix to stereo (proper center/surround/LFE
-    // coefficients); both the ac3 and dca decoders support this option.
-    av_opt_set(impl->ctx, "downmix", "stereo", AV_OPT_SEARCH_CHILDREN);
     if (avcodec_open2(impl->ctx, impl->codec, nullptr) < 0) {
         m_log.error(eAudio, "libavcodec decoder failed to open; this audio track will be silent");
         return;
@@ -71,8 +70,8 @@ CompressedAudioDecoder::~CompressedAudioDecoder() = default;
 
 bool CompressedAudioDecoder::available() { return true; }
 
-std::vector<TwoChannelSample> CompressedAudioDecoder::decode(const uint8_t *data, size_t size) {
-    std::vector<TwoChannelSample> output;
+std::vector<AudioFrame> CompressedAudioDecoder::decode(const uint8_t *data, size_t size) {
+    std::vector<AudioFrame> output;
     if (m_impl == nullptr)
         return output;
     Impl &impl = *m_impl;
@@ -82,12 +81,18 @@ std::vector<TwoChannelSample> CompressedAudioDecoder::decode(const uint8_t *data
             || impl.swr_in_format != (AVSampleFormat)impl.frame->format
             || impl.swr_in_rate != impl.frame->sample_rate) {
             swr_free(&impl.swr);
+            // Mono/stereo passes through; anything wider is remapped to the
+            // AudioFrame 5.1 order (extra channels of exotic layouts fold in,
+            // and 5.1(back) lands on the side slots)
             const AVChannelLayout stereo = AV_CHANNEL_LAYOUT_STEREO;
-            if (swr_alloc_set_opts2(&impl.swr, &stereo, AV_SAMPLE_FMT_S16, impl.frame->sample_rate,
+            const AVChannelLayout surround = AV_CHANNEL_LAYOUT_5POINT1;
+            const bool to_surround = impl.frame->ch_layout.nb_channels > 2;
+            const AVChannelLayout &out_layout = to_surround ? surround : stereo;
+            if (swr_alloc_set_opts2(&impl.swr, &out_layout, AV_SAMPLE_FMT_S16, impl.frame->sample_rate,
                                     &impl.frame->ch_layout, (AVSampleFormat)impl.frame->format,
                                     impl.frame->sample_rate, 0, nullptr) < 0)
                 return false;
-            // Normalize the downmix matrix so a full-scale input cannot clip
+            // Normalize any mixing matrix so a full-scale input cannot clip
             av_opt_set_double(impl.swr, "rematrix_maxval", 1.0, 0);
             if (swr_init(impl.swr) < 0) {
                 swr_free(&impl.swr);
@@ -96,14 +101,30 @@ std::vector<TwoChannelSample> CompressedAudioDecoder::decode(const uint8_t *data
             av_channel_layout_copy(&impl.swr_in_layout, &impl.frame->ch_layout);
             impl.swr_in_format = (AVSampleFormat)impl.frame->format;
             impl.swr_in_rate = impl.frame->sample_rate;
+            impl.swr_out_channels = out_layout.nb_channels;
         }
         // Equal in and out rates: the conversion is 1:1 and buffers nothing
         const size_t base = output.size();
-        output.resize(base + impl.frame->nb_samples);
-        uint8_t *out[1] = {(uint8_t *)&output[base]};
-        int converted = swr_convert(impl.swr, out, impl.frame->nb_samples,
+        int converted;
+        if (impl.swr_out_channels == MAX_AUDIO_CHANNELS) {
+            // An AudioFrame is exactly the interleaved 5.1 sample, so convert in place
+            output.resize(base + impl.frame->nb_samples);
+            uint8_t *out[1] = {(uint8_t *)&output[base]};
+            converted = swr_convert(impl.swr, out, impl.frame->nb_samples,
                                     (const uint8_t **)impl.frame->extended_data, impl.frame->nb_samples);
-        output.resize(base + std::max(converted, 0));
+            output.resize(base + std::max(converted, 0));
+        } else {
+            impl.stereo_buffer.resize((size_t)impl.frame->nb_samples * impl.swr_out_channels);
+            uint8_t *out[1] = {(uint8_t *)impl.stereo_buffer.data()};
+            converted = swr_convert(impl.swr, out, impl.frame->nb_samples,
+                                    (const uint8_t **)impl.frame->extended_data, impl.frame->nb_samples);
+            for (int i = 0; i < converted; i++) {
+                AudioFrame f{};
+                for (int ch = 0; ch < impl.swr_out_channels; ch++)
+                    f.samples[ch] = impl.stereo_buffer[i * impl.swr_out_channels + ch];
+                output.push_back(f);
+            }
+        }
         return converted > 0;
     };
 
@@ -131,7 +152,7 @@ std::vector<TwoChannelSample> CompressedAudioDecoder::decode(const uint8_t *data
         if (avcodec_send_packet(impl.ctx, impl.packet) == 0)
             receiveFrames();
         if (output.size() == before) // the frame was damaged: hold the timeline with silence
-            output.resize(before + impl.error_silence_samples, TwoChannelSample{});
+            output.resize(before + impl.error_silence_samples, AudioFrame{});
     }
     return output;
 }
@@ -148,7 +169,7 @@ CompressedAudioDecoder::~CompressedAudioDecoder() = default;
 
 bool CompressedAudioDecoder::available() { return false; }
 
-std::vector<TwoChannelSample> CompressedAudioDecoder::decode(const uint8_t *, size_t) {
+std::vector<AudioFrame> CompressedAudioDecoder::decode(const uint8_t *, size_t) {
     if (!m_unavailable_warned) {
         m_unavailable_warned = true;
         m_log.warn(eAudio, std::format("This build has no FFmpeg, so the {} audio cannot be decoded "

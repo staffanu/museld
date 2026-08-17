@@ -38,6 +38,12 @@ static int audioModeSampleRate(AudioMode mode) {
     }
 }
 
+// AudioFrame slots the mode fills.  The 5.1 modes are downmixed to the file's
+// stereo track by the resampler; MODE_A's back channels are still dropped.
+static int audioModeChannels(AudioMode mode) {
+    return mode == MODE_AC3 || mode == MODE_DTS ? MAX_AUDIO_CHANNELS : 2;
+}
+
 bool VideoFileWriter::init() {
     const PresetSpec spec = presetSpec(m_preset);
 
@@ -52,7 +58,10 @@ bool VideoFileWriter::init() {
     m_have_video = true;
     m_encode_video = true;
 
-    initAudio(spec);
+    if (m_ac3_passthrough)
+        initAudioPassthrough();
+    else
+        initAudio(spec);
     m_have_audio = true;
     m_encode_audio = true;
 
@@ -76,7 +85,8 @@ bool VideoFileWriter::init() {
 void VideoFileWriter::addVideoFrameWithAudio(
         std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
         std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V,
-        AudioMode audio_mode, int number_of_samples, AudioFrame *audio_samples) {
+        AudioMode audio_mode, int number_of_samples, AudioFrame *audio_samples,
+        const std::vector<std::array<uint8_t, 1536>> &ac3_frames) {
 
     //av_compare_ts(m_video_stream.next_pts, m_video_stream.codec_context->time_base,
     //              m_audio_stream.next_pts, m_audio_stream.codec_context->time_base)
@@ -86,6 +96,18 @@ void VideoFileWriter::addVideoFrameWithAudio(
         assert(image_Y->size().y_size == m_video_stream.codec_context->height);
         auto frame = makeVideoFrame(&m_video_stream, image_Y, image_U, image_V);
         m_encode_video = !writeFrame(m_video_stream.codec_context, m_video_stream.stream, frame, m_video_stream.tmp_pkt);
+    }
+
+    if (m_ac3_passthrough) {
+        if (m_encode_audio)
+            writeAc3Frames(ac3_frames);
+        // The stream is the AC3 bitstream: PCM from another track selected
+        // mid-write has nowhere to go
+        if (ac3_frames.empty() && number_of_samples != 0 && audio_mode != MODE_AC3 && !m_ac3_pause_logged) {
+            m_ac3_pause_logged = true;
+            m_log.warn(eOutput, "Audio track switched away from AC3; the file's AC3 stream pauses until it is back");
+        }
+        return;
     }
 
     if (number_of_samples != 0 && audio_mode != MODE_UNKNOWN && m_encode_audio) {
@@ -111,14 +133,14 @@ void VideoFileWriter::addVideoFrameWithAudio(
 
         auto *q = (int16_t *) m_audio_tmp_buffer;
         for (int i = skip; i < number_of_samples; i++)
-            for (int j = 0; j < m_audio_stream.codec_context->ch_layout.nb_channels; j++)
+            for (int j = 0; j < m_audio_in_channels; j++)
                 *q++ = audio_samples[i].samples[j];
 
         const uint8_t *in[8] = {m_audio_tmp_buffer};
         convertAndWriteAudio(in, number_of_samples - skip);
         m_audio_in_samples += number_of_samples - skip;
-        m_last_sample[0] = audio_samples[number_of_samples - 1].samples[0];
-        m_last_sample[1] = audio_samples[number_of_samples - 1].samples[1];
+        for (int j = 0; j < m_audio_in_channels; j++)
+            m_last_sample[j] = audio_samples[number_of_samples - 1].samples[j];
     }
 }
 
@@ -172,7 +194,7 @@ void VideoFileWriter::convertAndWriteAudio(const uint8_t **in, int in_samples) {
 void VideoFileWriter::insertSilence(int64_t count, int in_rate) {
     m_log.warn(eOutput, std::format("Audio {} ms behind the video clock; inserting silence", count * 1000 / in_rate));
 
-    const int channels = m_audio_stream.codec_context->ch_layout.nb_channels;
+    const int channels = m_audio_in_channels;
     const int capacity = (int) (sizeof(m_audio_tmp_buffer) / (channels * sizeof(int16_t)));
     const int64_t fade = std::min<int64_t>(64, count);
 
@@ -186,7 +208,8 @@ void VideoFileWriter::insertSilence(int64_t count, int in_rate) {
         const uint8_t *in[8] = {m_audio_tmp_buffer};
         convertAndWriteAudio(in, n);
     }
-    m_last_sample[0] = m_last_sample[1] = 0;
+    for (int j = 0; j < channels; j++)
+        m_last_sample[j] = 0;
     m_audio_in_samples += count;
 }
 
@@ -196,7 +219,7 @@ void VideoFileWriter::insertInterpolated(int64_t count, int in_rate, const Audio
     m_log.info(eOutput, std::format("Audio {} ms behind the video clock; inserting {} interpolated samples",
                                     count * 1000 / in_rate, count));
 
-    const int channels = m_audio_stream.codec_context->ch_layout.nb_channels;
+    const int channels = m_audio_in_channels;
     count = std::min<int64_t>(count, (int64_t) (sizeof(m_audio_tmp_buffer) / (channels * sizeof(int16_t))));
 
     auto *q = (int16_t *) m_audio_tmp_buffer;
@@ -233,7 +256,7 @@ void VideoFileWriter::cleanup() {
     // encoder (e.g. x264 lookahead and B frames) are lost
     if (m_encode_video)
         writeFrame(m_video_stream.codec_context, m_video_stream.stream, nullptr, m_video_stream.tmp_pkt);
-    if (m_encode_audio)
+    if (m_encode_audio && !m_ac3_passthrough) // the passthrough stream has no encoder to drain
         writeFrame(m_audio_stream.codec_context, m_audio_stream.stream, nullptr, m_audio_stream.tmp_pkt);
 
     av_write_trailer(m_format_context);
@@ -423,6 +446,69 @@ void VideoFileWriter::initAudio(const PresetSpec &spec) {
     // arrives, since the input sample rate depends on the audio mode
 }
 
+// A stream-copy audio track for the AC3-RF bitstream: no encoder, the sync
+// frames from the demodulator are muxed as they are.  The layout/bit rate
+// here are the laserdisc AC3 parameters; players read the authoritative
+// values from the bitstream itself.
+void VideoFileWriter::initAudioPassthrough() {
+    if (avformat_query_codec(m_format_context->oformat, AV_CODEC_ID_AC3, FF_COMPLIANCE_NORMAL) != 1)
+        throw std::runtime_error(std::format("AC3 cannot be stored in format {}", m_format_context->oformat->name));
+
+    m_audio_stream.tmp_pkt = av_packet_alloc();
+    if (!m_audio_stream.tmp_pkt)
+        throw std::runtime_error("Could not allocate AVPacket");
+    m_audio_stream.stream = avformat_new_stream(m_format_context, nullptr);
+    if (!m_audio_stream.stream)
+        throw std::runtime_error("Could not allocate stream");
+    m_audio_stream.stream->id = (int)m_format_context->nb_streams - 1;
+
+    AVCodecParameters *par = m_audio_stream.stream->codecpar;
+    par->codec_type = AVMEDIA_TYPE_AUDIO;
+    par->codec_id = AV_CODEC_ID_AC3;
+    par->sample_rate = 48000;
+    par->frame_size = 1536;
+    par->bit_rate = 384000;
+    const AVChannelLayout layout = AV_CHANNEL_LAYOUT_5POINT1;
+    av_channel_layout_copy(&par->ch_layout, &layout);
+    m_audio_stream.stream->time_base = (AVRational){1, par->sample_rate};
+}
+
+void VideoFileWriter::writeAc3Frames(const std::vector<std::array<uint8_t, 1536>> &ac3_frames) {
+    if (ac3_frames.empty())
+        return;
+
+    // Align to the video clock like the PCM path, but a compressed stream
+    // cannot be stretched: a real gap (demodulator dropout, initial lock time,
+    // or the track switched away and back) becomes a jump in pts instead.
+    const int64_t scheduled =
+            m_video_stream.next_pts * 48000 * m_video_fps_den / m_video_fps_num;
+    if (m_ac3_next_pts < scheduled - 48000 * SYNC_MAX_STRETCH_MS / 1000) {
+        m_log.warn(eOutput, std::format("AC3 stream {} ms behind the video clock; leaving a gap",
+                                        (scheduled - m_ac3_next_pts) * 1000 / 48000));
+        m_ac3_next_pts = scheduled;
+    }
+    m_ac3_pause_logged = false;
+
+    for (const auto &frame : ac3_frames) {
+        AVPacket *pkt = m_audio_stream.tmp_pkt;
+        if (av_new_packet(pkt, (int)frame.size()) < 0)
+            throw std::runtime_error("Could not allocate AC3 packet");
+        memcpy(pkt->data, frame.data(), frame.size());
+        pkt->pts = pkt->dts = m_ac3_next_pts;
+        pkt->duration = 1536;
+        pkt->flags |= AV_PKT_FLAG_KEY;
+        pkt->stream_index = m_audio_stream.stream->index;
+        av_packet_rescale_ts(pkt, (AVRational){1, 48000}, m_audio_stream.stream->time_base);
+        m_ac3_next_pts += 1536;
+        int ret = av_interleaved_write_frame(m_format_context, pkt);
+        if (ret < 0) {
+            m_log.error(eOutput, std::format("Error while writing AC3 packet: {}", av_err2string(ret)));
+            m_encode_audio = false;
+            return;
+        }
+    }
+}
+
 void VideoFileWriter::initResampler(AudioMode mode) {
     if (mode == m_audio_input_mode)
         return;
@@ -440,13 +526,21 @@ void VideoFileWriter::initResampler(AudioMode mode) {
     if (!m_swr_ctx)
         throw std::runtime_error("Could not allocate resampler context");
 
+    // The 5.1 modes deliver 6 slots in the AudioFrame 5.1 order; the resampler
+    // downmixes them to the file's stereo track
+    m_audio_in_channels = audioModeChannels(mode);
+    const AVChannelLayout in_layout = m_audio_in_channels == MAX_AUDIO_CHANNELS
+            ? (AVChannelLayout)AV_CHANNEL_LAYOUT_5POINT1 : (AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO;
+
     // No asserts here: side effects in assert() disappear in NDEBUG builds
-    int ret = av_opt_set_chlayout(m_swr_ctx, "in_chlayout", &c->ch_layout, 0);
+    int ret = av_opt_set_chlayout(m_swr_ctx, "in_chlayout", &in_layout, 0);
     ret |= av_opt_set_int(m_swr_ctx, "in_sample_rate", in_sample_rate, 0);
     ret |= av_opt_set_sample_fmt(m_swr_ctx, "in_sample_fmt", AV_SAMPLE_FMT_S16, 0);
     ret |= av_opt_set_chlayout(m_swr_ctx, "out_chlayout", &c->ch_layout, 0);
     ret |= av_opt_set_int(m_swr_ctx, "out_sample_rate", c->sample_rate, 0);
     ret |= av_opt_set_sample_fmt(m_swr_ctx, "out_sample_fmt", c->sample_fmt, 0);
+    // Normalize the downmix matrix so a full-scale 5.1 input cannot clip
+    ret |= av_opt_set_double(m_swr_ctx, "rematrix_maxval", 1.0, 0);
     if (ret != 0)
         throw std::runtime_error("Failed to configure the resampling context");
 

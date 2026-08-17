@@ -18,8 +18,12 @@ Supported formats:
 
 NTSC playback in museld selects between the analog, EFM and AC3-RF tracks (`AudioTrack`,
 A key / `--efm` / `--ac3`); a DTS bitstream on the EFM track is auto-detected. AC3 and DTS
-are decoded to stereo by `CompressedAudioDecoder` (libavcodec + libswresample), which is
-gated on `HAVE_LIBAV` — in builds without FFmpeg those tracks are selectable but silent.
+are decoded by `CompressedAudioDecoder` (libavcodec + libswresample), which is gated on
+`HAVE_LIBAV` — in builds without FFmpeg those tracks are selectable but silent. `AudioFrame`
+carries up to 6 channels (5.1 slot order FL FR FC LFE SL SR); playback opens a 6-channel
+device for the 5.1 modes. `--write` with the AC3 track muxes the original AC3 bitstream
+(stream copy via `DecodedField::ac3_frames`); DTS and the other tracks are written as PCM,
+with 5.1 downmixed to the file's stereo track.
 
 ## Repository Structure
 

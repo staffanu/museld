@@ -603,7 +603,8 @@ static void runPlayer(Logger &log,
                 vfw->addVideoFrameWithAudio(images.out_Y, images.out_U, images.out_V,
                                             state.last_decoded.audio_mode,
                                             state.last_decoded.audio_sample_count,
-                                            state.last_decoded.audio_samples);
+                                            state.last_decoded.audio_samples,
+                                            state.last_decoded.ac3_frames);
                 // Breaking out finalizes the file in the writer's destructor
                 if (state.field_count * seconds_per_iteration >= write_duration_seconds)
                     break;
@@ -616,10 +617,13 @@ static void runPlayer(Logger &log,
                 // left-only analog audio on AC3 discs).  Mutating the decoded
                 // samples is safe here: the file writer above has already
                 // consumed them, so it always gets the full stereo track.
-                // MODE_A is the 4-channel MUSE format, where a stereo
-                // channel choice has no meaning.
+                // The multichannel modes (4-channel MUSE, 5.1 AC3/DTS) carry
+                // no bilingual pairing, so a stereo channel choice has no
+                // meaning there.
                 if (state.audio_channel_mode != AudioChannelMode::eStereo
-                    && state.last_decoded.audio_mode != MODE_A) {
+                    && state.last_decoded.audio_mode != MODE_A
+                    && state.last_decoded.audio_mode != MODE_AC3
+                    && state.last_decoded.audio_mode != MODE_DTS) {
                     const int source = state.audio_channel_mode == AudioChannelMode::eLeft ? 0 : 1;
                     for (int i = 0; i < state.last_decoded.audio_sample_count; i++) {
                         auto &f = state.last_decoded.audio_samples[i];
@@ -798,9 +802,14 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             dar_num = 4; dar_den = 3;
             fps_num = decode_all_fields ? 60000 : 30000; fps_den = 1001;
         }
+        // With the AC3 track selected, the file gets the original AC3
+        // bitstream (all 5.1 channels, no transcode) instead of PCM
+        const bool ac3_passthrough = !std::is_same<InputBlock, MuseInputBlock>::value
+                && audio_track == AudioTrack::eAc3 && decode_audio;
         vfw = make_unique<VideoFileWriter>(output_filename.value(), log,
                                            initial_w, initial_h, fps_num, fps_den,
-                                           write_preset, color_standard, dar_num, dar_den);
+                                           write_preset, color_standard, dar_num, dar_den,
+                                           ac3_passthrough);
         if (!vfw->init())
             throw runtime_error("Cannot initialize output encoder");
     }
