@@ -93,6 +93,7 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
     const bool output_yuv = controls.output_yuv;
 
     out.audio_sample_count = 0;
+    out.ac3_frames.clear();
     out.decoded = false;
 
     if (redo_last_field) // undo the field advance from the previous call
@@ -311,10 +312,7 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
             auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
             for (const auto &s : m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis())) {
                 if (out.audio_sample_count >= MAX_AUDIO_OUTPUT_SAMPLES) break;
-                out.audio_samples[out.audio_sample_count].samples[0] = s.samples[0];
-                out.audio_samples[out.audio_sample_count].samples[1] = s.samples[1];
-                out.audio_samples[out.audio_sample_count].samples[2] = 0;
-                out.audio_samples[out.audio_sample_count].samples[3] = 0;
+                out.audio_samples[out.audio_sample_count] = AudioFrame{{s.samples[0], s.samples[1]}};
                 out.audio_sample_count++;
             }
             out.audio_mode = MODE_EFM;

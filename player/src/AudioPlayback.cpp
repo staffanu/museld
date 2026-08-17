@@ -23,13 +23,22 @@ using namespace std;
 
 namespace {
 
-// Semantic meaning of AudioFrame::samples[k]; miniaudio routes/mixes these to
-// whatever channel layout the output device actually has.
-constexpr ma_channel c_channel_map[4] = {
-    MA_CHANNEL_FRONT_LEFT,  // channel 1
-    MA_CHANNEL_FRONT_RIGHT, // channel 2
-    MA_CHANNEL_BACK_LEFT,   // channel 3
-    MA_CHANNEL_BACK_RIGHT,  // channel 4
+// Semantic meaning of AudioFrame::samples[k] per mode; miniaudio routes/mixes
+// these to whatever channel layout the output device actually has (a stereo
+// device gets a downmix, a surround receiver over HDMI gets the channels).
+constexpr ma_channel c_channel_map_quad[4] = { // MODE_A, and the stereo modes use the first two
+    MA_CHANNEL_FRONT_LEFT,
+    MA_CHANNEL_FRONT_RIGHT,
+    MA_CHANNEL_BACK_LEFT,
+    MA_CHANNEL_BACK_RIGHT,
+};
+constexpr ma_channel c_channel_map_51[MAX_AUDIO_CHANNELS] = { // MODE_AC3 / MODE_DTS
+    MA_CHANNEL_FRONT_LEFT,
+    MA_CHANNEL_FRONT_RIGHT,
+    MA_CHANNEL_FRONT_CENTER,
+    MA_CHANNEL_LFE,
+    MA_CHANNEL_SIDE_LEFT,
+    MA_CHANNEL_SIDE_RIGHT,
 };
 
 } // namespace
@@ -201,12 +210,13 @@ void AudioPlayback::openStream() {
             m_log.debug(eAudio, std::format("Device {}: {}{}", i, device_infos[i].name,
                                             device_infos[i].isDefault ? " (default)" : ""));
 
-    m_channels_used = m_current_mode == MODE_A ? 4 : 2;
+    const bool surround = m_current_mode == MODE_AC3 || m_current_mode == MODE_DTS;
+    m_channels_used = m_current_mode == MODE_A ? 4 : surround ? MAX_AUDIO_CHANNELS : 2;
 
     ma_device_config config = ma_device_config_init(ma_device_type_playback);
     config.playback.format = ma_format_s16;
     config.playback.channels = m_channels_used;
-    config.playback.pChannelMap = const_cast<ma_channel *>(c_channel_map);
+    config.playback.pChannelMap = const_cast<ma_channel *>(surround ? c_channel_map_51 : c_channel_map_quad);
     config.sampleRate = m_current_mode == MODE_A ? 32000
         : m_current_mode == MODE_B || m_current_mode == MODE_ANALOG || m_current_mode == MODE_AC3
             ? 48000 : 44100; // MODE_EFM and MODE_DTS are the CD rate

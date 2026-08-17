@@ -4,9 +4,11 @@
 #ifndef MUSECPP_DECODER_H
 #define MUSECPP_DECODER_H
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 #include "AudioDefs.h"
 #include "DropoutMode.h"
 #include "DiscInfo.h"
@@ -61,6 +63,10 @@ public:
         AudioMode audio_mode;
         int audio_sample_count;
         AudioFrame audio_samples[MAX_AUDIO_OUTPUT_SAMPLES];
+        // The raw AC3-RF sync frames behind this frame's MODE_AC3 audio, so
+        // the file writer can mux the original bitstream instead of PCM;
+        // empty for every other mode
+        std::vector<std::array<uint8_t, 1536>> ac3_frames;
         int field_parity;
         int64_t last_frame_buffer_input_offset;
         double input_samples_per_muse_sample;

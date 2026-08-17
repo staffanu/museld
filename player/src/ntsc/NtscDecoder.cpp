@@ -137,6 +137,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     const bool output_yuv = controls.output_yuv;
 
     out.audio_sample_count = 0;
+    out.ac3_frames.clear();
     out.decoded = false;
 
     if (redo_last_field) // undo the field advance from the previous call
@@ -468,6 +469,8 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         for (int i = 0; i < delivered; i++)
             out.audio_samples[out.audio_sample_count++] = m_pending_audio[i];
         m_pending_audio.erase(m_pending_audio.begin(), m_pending_audio.begin() + delivered);
+        out.ac3_frames = std::move(m_pending_ac3_frames);
+        m_pending_ac3_frames.clear();
 
         // Any leftovers belong to m_pending_audio_mode; a mode change (track
         // switch, DTS detection flipping) must not deliver them under the new
@@ -499,15 +502,19 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                         m_dts_bitstream.push_back((uint8_t)(s.samples[ch] & 0xff));
                         m_dts_bitstream.push_back((uint8_t)((uint16_t)s.samples[ch] >> 8));
                     }
-                pendStereo(m_dts_pcm_decoder.decode(m_dts_bitstream.data(), m_dts_bitstream.size()));
+                const auto pcm = m_dts_pcm_decoder.decode(m_dts_bitstream.data(), m_dts_bitstream.size());
+                m_pending_audio.insert(m_pending_audio.end(), pcm.begin(), pcm.end());
             } else {
                 beginMode(MODE_EFM);
                 pendStereo(m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis()));
             }
         } else if (audio_track == AudioTrack::eAc3 && input_block != nullptr) {
             beginMode(MODE_AC3);
-            for (const auto &frame : input_block->ac3_frames)
-                pendStereo(m_ac3_pcm_decoder.decode(frame.data(), frame.size()));
+            for (const auto &frame : input_block->ac3_frames) {
+                const auto pcm = m_ac3_pcm_decoder.decode(frame.data(), frame.size());
+                m_pending_audio.insert(m_pending_audio.end(), pcm.begin(), pcm.end());
+            }
+            m_pending_ac3_frames = input_block->ac3_frames; // originals for the file writer
         } else if (input_block != nullptr && !input_block->analog_data.empty()) {
             beginMode(MODE_ANALOG);
             pendStereo(input_block->analog_data);

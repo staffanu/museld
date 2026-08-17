@@ -7,15 +7,19 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
-#include "efm/TwoChannelSample.h"
+#include "AudioDefs.h"
 
 class Logger;
 
-// Decodes an AC3 or DTS bitstream to stereo PCM using libavcodec, with the
-// decoder's own downmix of the surround channels.  The input is a byte stream:
-// whole AC3 sync frames from the AC3-RF path, or the raw sample bytes of a
-// DTS laserdisc's EFM track; libavcodec's parser finds the frame boundaries
-// either way, so partial or damaged frames only cost their own output.
+// Decodes an AC3 or DTS bitstream to multichannel PCM using libavcodec.  The
+// input is a byte stream: whole AC3 sync frames from the AC3-RF path, or the
+// raw sample bytes of a DTS laserdisc's EFM track; libavcodec's parser finds
+// the frame boundaries either way, so partial or damaged frames only cost
+// their own output.
+//
+// Surround streams come out in the AudioFrame 5.1 slot order (FL FR FC LFE
+// SL SR, back channels mapped to the side slots); mono/stereo streams fill
+// the first two slots and leave the rest silent.
 //
 // Without HAVE_LIBAV the class exists but decode() returns nothing (after
 // warning once), which leaves the AC3/DTS tracks silent in builds without
@@ -35,7 +39,7 @@ public:
     // Feed bitstream bytes; returns whatever PCM became decodable.  A frame
     // that fails to decode is replaced by silence of the same duration, so
     // dropouts pause the sound instead of shifting the A/V sync.
-    std::vector<TwoChannelSample> decode(const uint8_t *data, size_t size);
+    std::vector<AudioFrame> decode(const uint8_t *data, size_t size);
 
 private:
     struct Impl;

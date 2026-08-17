@@ -119,6 +119,9 @@ private:
     // whole-frame quanta, so a delivery can leave a remainder for the next.
     std::vector<AudioFrame> m_pending_audio;
     AudioMode m_pending_audio_mode;
+    // The raw sync frames behind the pending MODE_AC3 audio, held back the
+    // same one frame, so the file writer can mux the original bitstream
+    std::vector<std::array<uint8_t, 1536>> m_pending_ac3_frames;
     // The front (index 0) is the newest received frame N+1 (the lookahead);
     // index 1 is the frame being decoded, 2 and 3 its history.
     std::deque<NtscFrame *> m_frames;

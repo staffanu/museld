@@ -4,9 +4,11 @@
 #ifndef MUSECPP_VIDEOFILEWRITER_H
 #define MUSECPP_VIDEOFILEWRITER_H
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <format>
+#include <vector>
 #include "musevk/VulkanImage.h"
 #include "logging/Logger.h"
 #include "AudioDefs.h"
@@ -24,10 +26,15 @@ extern "C" {
 
 class VideoFileWriter {
 public:
+    // With ac3_passthrough the audio stream is the original AC3 bitstream
+    // (stream copy of the sync frames passed to addVideoFrameWithAudio)
+    // instead of PCM encoded to the preset's audio codec.
     VideoFileWriter(std::string filename, Logger &log, int video_width, int video_height,
                     int video_fps_num, int video_fps_den,
                     VideoWriterPreset preset, VideoColorStandard color_standard,
-                    int display_aspect_num, int display_aspect_den) :
+                    int display_aspect_num, int display_aspect_den,
+                    bool ac3_passthrough) :
+            m_ac3_passthrough(ac3_passthrough),
             m_filename(std::move(filename)),
             m_log(log),
             m_video_width(video_width),
@@ -59,7 +66,8 @@ public:
     bool init();
     void addVideoFrameWithAudio(std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
                                 std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V,
-                                AudioMode audio_mode, int number_of_samples, AudioFrame *audio_samples);
+                                AudioMode audio_mode, int number_of_samples, AudioFrame *audio_samples,
+                                const std::vector<std::array<uint8_t, 1536>> &ac3_frames);
     void cleanup();
 
 private:
@@ -87,6 +95,8 @@ private:
     void initStream(OutputStream *ost, const char *codec_name);
     void initVideo(const PresetSpec &spec);
     void initAudio(const PresetSpec &spec);
+    void initAudioPassthrough();
+    void writeAc3Frames(const std::vector<std::array<uint8_t, 1536>> &ac3_frames);
     void initResampler(AudioMode mode);
     void convertAndWriteAudio(const uint8_t **in, int in_samples);
     void insertSilence(int64_t count, int in_rate);
@@ -111,6 +121,9 @@ private:
         return av_ts_make_time_string(str, ts, tb);
     }
 
+    const bool m_ac3_passthrough;
+    int64_t m_ac3_next_pts = 0;        // in samples at 48 kHz
+    bool m_ac3_pause_logged = false;   // the selected track left AC3 mid-write
     std::string m_filename;
     Logger &m_log;
     int m_video_width;
@@ -130,12 +143,13 @@ private:
 
     struct SwrContext *m_swr_ctx; // resampling; created lazily when the input sample rate is known
     AudioMode m_audio_input_mode; // audio mode the resampler was created for
+    int m_audio_in_channels = 2;  // AudioFrame slots the mode fills; the resampler downmixes to the file's stereo
 
     int64_t m_audio_anchor_frame; // video frame where the audio sync schedule starts
     int64_t m_audio_in_samples;   // input-rate samples fed to the resampler since the anchor
-    int16_t m_last_sample[2];     // last real sample written; start point for interpolation/fade-out
+    int16_t m_last_sample[MAX_AUDIO_CHANNELS]; // last real sample written; start point for interpolation/fade-out
 
-    uint8_t m_audio_tmp_buffer[20000];
+    uint8_t m_audio_tmp_buffer[MAX_AUDIO_OUTPUT_SAMPLES * MAX_AUDIO_CHANNELS * sizeof(int16_t)];
     int m_samples_in_frame;
 };
 
