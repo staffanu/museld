@@ -30,6 +30,7 @@
 #include "FrameBlitter.h"
 #include "FrameExporter.h"
 #include "InputController.h"
+#include "subtitles/Eia608Decoder.h"
 #include "subtitles/SrtParser.h"
 #include "subtitles/SubtitleFont.h"
 #include "subtitles/SubtitleOverlay.h"
@@ -87,6 +88,76 @@ struct SubtitleSetup {
     // Non-empty: save the OCR (and OCR-EN) cues at exit as <stem>.OCR.srt /
     // <stem>.OCR-EN.srt with their original imprint timing (--ocr-write)
     std::string ocr_write_stem;
+    // NTSC input: decode the line-21 EIA-608 closed captions into a live "CC"
+    // track (MUSE carries none, so the track is not offered there)
+    bool ntsc_cc = false;
+    // Non-empty: save the CC cues at exit as <stem>.CC.srt (--cc-write)
+    std::string cc_write_stem;
+};
+
+// Applies live text updates (from the OCR worker or the closed caption
+// decoder) to their subtitle track (render thread only).  An update opens a
+// cue at its stream time and the next one closes it; near-identical cues split
+// by a momentary detection dropout are bridged by reopening the previous
+// entry, mirroring tools/subocr/subocr.py.
+struct LiveSubtitleFeed {
+    static constexpr double c_merge_gap_seconds = 0.7;
+    static constexpr double c_open_end = 1e9;          // end of a cue still on screen
+    static constexpr double c_max_end_extension = 2.5; // cap on the late-display compensation
+
+    int open_entry = -1;
+    double open_display_delay = 0.0; // how late the open cue appeared on screen
+    std::vector<std::string> last_lines;
+    double last_end = -1e9;
+    // Cues with their original imprint timing, unaffected by the display-side
+    // lateness compensation below; this is what --ocr-write saves
+    std::vector<SubtitleEntry> file_entries;
+
+    void apply(const std::vector<std::string> &lines, double seconds, double now,
+               SubtitleTrack &track, SubtitleFont &font) {
+        // After a backward seek, drop cues from the abandoned timeline; the
+        // rewatched span is re-decoded and re-appended, keeping entries sorted
+        while (!track.entries.empty() && track.entries.back().start_seconds > seconds) {
+            track.entries.pop_back();
+            open_entry = -1;
+        }
+        while (!file_entries.empty() && file_entries.back().start_seconds > seconds)
+            file_entries.pop_back();
+        if (open_entry >= 0) {
+            // Recognition latency made the cue appear open_display_delay late
+            // on screen; keep it up correspondingly longer so its display time
+            // is not shortened.  A later cue takes over the screen the moment
+            // it is appended, so the overlap is harmless.
+            track.entries[open_entry].end_seconds =
+                    seconds + std::min(open_display_delay, c_max_end_extension);
+            last_lines = track.entries[open_entry].lines;
+            last_end = seconds;
+            file_entries.push_back({track.entries[open_entry].start_seconds, seconds,
+                                    last_lines});
+            open_entry = -1;
+        }
+        if (lines.empty()) return;
+        if (!track.entries.empty() && lines == last_lines
+            && seconds - last_end <= c_merge_gap_seconds) {
+            open_entry = (int)track.entries.size() - 1; // flicker: reopen the previous cue
+            track.entries[open_entry].end_seconds = c_open_end;
+            if (!file_entries.empty()) file_entries.pop_back(); // re-closed with the full span
+            return;
+        }
+        for (const auto &line : lines)
+            font.warmUpLine(utf8ToCodepoints(line));
+        track.entries.push_back({seconds, c_open_end, lines});
+        open_entry = (int)track.entries.size() - 1;
+        open_display_delay = std::max(0.0, now - seconds);
+    }
+
+    // Close the still-open cue into the file record at end of playback.
+    void finish(double now, SubtitleTrack &track) {
+        if (open_entry < 0) return;
+        file_entries.push_back({track.entries[open_entry].start_seconds, now,
+                                track.entries[open_entry].lines});
+        open_entry = -1;
+    }
 };
 
 #ifdef HAVE_OCR
@@ -106,70 +177,6 @@ static std::pair<std::string, std::string> findOcrModels(const std::string &dir)
     }
     return {det, rec};
 }
-
-// Applies OCR text updates to the live "OCR" subtitle track (render thread
-// only).  An update opens a cue at its stream time and the next one closes it;
-// near-identical cues split by a momentary detection dropout are bridged by
-// reopening the previous entry, mirroring tools/subocr/subocr.py.
-struct LiveSubtitleFeed {
-    static constexpr double c_merge_gap_seconds = 0.7;
-    static constexpr double c_open_end = 1e9;          // end of a cue still on screen
-    static constexpr double c_max_end_extension = 2.5; // cap on the late-display compensation
-
-    int open_entry = -1;
-    double open_display_delay = 0.0; // how late the open cue appeared on screen
-    std::vector<std::string> last_lines;
-    double last_end = -1e9;
-    // Cues with their original imprint timing, unaffected by the display-side
-    // lateness compensation below; this is what --ocr-write saves
-    std::vector<SubtitleEntry> file_entries;
-
-    void apply(const OcrWorker::Update &update, double now, SubtitleTrack &track,
-               SubtitleFont &font) {
-        // After a backward seek, drop cues from the abandoned timeline; the
-        // rewatched span is re-OCRed and re-appended, keeping entries sorted
-        while (!track.entries.empty() && track.entries.back().start_seconds > update.seconds) {
-            track.entries.pop_back();
-            open_entry = -1;
-        }
-        while (!file_entries.empty() && file_entries.back().start_seconds > update.seconds)
-            file_entries.pop_back();
-        if (open_entry >= 0) {
-            // OCR latency made the cue appear open_display_delay late on
-            // screen; keep it up correspondingly longer so its display time is
-            // not shortened.  A later cue takes over the screen the moment it
-            // is appended, so the overlap is harmless.
-            track.entries[open_entry].end_seconds =
-                    update.seconds + std::min(open_display_delay, c_max_end_extension);
-            last_lines = track.entries[open_entry].lines;
-            last_end = update.seconds;
-            file_entries.push_back({track.entries[open_entry].start_seconds, update.seconds,
-                                    last_lines});
-            open_entry = -1;
-        }
-        if (update.lines.empty()) return;
-        if (!track.entries.empty() && update.lines == last_lines
-            && update.seconds - last_end <= c_merge_gap_seconds) {
-            open_entry = (int)track.entries.size() - 1; // flicker: reopen the previous cue
-            track.entries[open_entry].end_seconds = c_open_end;
-            if (!file_entries.empty()) file_entries.pop_back(); // re-closed with the full span
-            return;
-        }
-        for (const auto &line : update.lines)
-            font.warmUpLine(utf8ToCodepoints(line));
-        track.entries.push_back({update.seconds, c_open_end, update.lines});
-        open_entry = (int)track.entries.size() - 1;
-        open_display_delay = std::max(0.0, now - update.seconds);
-    }
-
-    // Close the still-open cue into the file record at end of playback.
-    void finish(double now, SubtitleTrack &track) {
-        if (open_entry < 0) return;
-        file_entries.push_back({track.entries[open_entry].start_seconds, now,
-                                track.entries[open_entry].lines});
-        open_entry = -1;
-    }
-};
 
 // Correlates translated cues with their Japanese originals and applies them to
 // the live "OCR-EN" track.  An English cue inherits its Japanese cue's span:
@@ -380,7 +387,9 @@ static void runPlayer(Logger &log,
         std::shared_ptr<SubtitleFont> subtitle_font;
         int ocr_track_index = -1;
         int ocr_en_track_index = -1;
-        if (!subtitle_setup.files.empty() || subtitle_setup.ocr_models_dir) {
+        int cc_track_index = -1;
+        if (!subtitle_setup.files.empty() || subtitle_setup.ocr_models_dir
+            || subtitle_setup.ntsc_cc) {
             try {
                 auto tracks = std::make_shared<std::vector<SubtitleTrack>>();
                 for (const auto &[label, path] : subtitle_setup.files) {
@@ -388,6 +397,10 @@ static void runPlayer(Logger &log,
                     log.info(eApplication, std::format("Loaded {} subtitle entries from {} [{}]",
                                                        entries.size(), path, label));
                     tracks->push_back({label, std::move(entries)});
+                }
+                if (subtitle_setup.ntsc_cc) {
+                    cc_track_index = (int)tracks->size();
+                    tracks->push_back({"CC", {}});
                 }
                 if (subtitle_setup.ocr_models_dir) {
                     ocr_track_index = (int)tracks->size();
@@ -429,10 +442,18 @@ static void runPlayer(Logger &log,
                 subtitle_font.reset();
                 ocr_track_index = -1;
                 ocr_en_track_index = -1;
+                cc_track_index = -1;
                 state.subtitle_track_names.clear();
                 state.subtitle_primary = state.subtitle_secondary = -1;
             }
         }
+
+        // Line-21 closed captions: byte pairs arrive with the decoded fields
+        // and turn into cues on the live "CC" track, on this thread like the
+        // OCR updates.
+        Eia608Decoder cc_decoder(log);
+        LiveSubtitleFeed cc_feed;
+        double cc_last_seconds = -1e9;
 
 #ifdef HAVE_OCR
         // The OCR worker is owned here, directly by the render thread; band
@@ -534,6 +555,35 @@ static void runPlayer(Logger &log,
                                       : "EXPORT FAILED";
             }
 
+            if (cc_track_index >= 0 && state.last_decoded.cc_bytes && subtitle_tracks) {
+                // After a seek the caption memories describe the abandoned
+                // stream position; a forward jump also loses the pop-on load
+                // in progress, so start over in both directions
+                if (state.stream_seconds < cc_last_seconds
+                    || state.stream_seconds > cc_last_seconds + 5.0)
+                    cc_decoder.reset();
+                cc_last_seconds = state.stream_seconds;
+                const auto [cc1, cc2] = *state.last_decoded.cc_bytes;
+                if (auto lines = cc_decoder.process(cc1, cc2)) {
+                    if (!lines->empty()) {
+                        std::string text;
+                        for (const auto &line : *lines) {
+                            if (!text.empty()) text += " | ";
+                            text += line;
+                        }
+                        const double file_seconds = state.stream_start_seconds + state.stream_seconds;
+                        const long msec = std::lround(std::abs(file_seconds) * 1000);
+                        log.info(eApplication,
+                                 std::format("CC [{}{:02}:{:02}.{}] {}",
+                                             file_seconds < 0 ? "-" : "", msec / 60000,
+                                             msec / 1000 % 60, msec % 1000 / 100, text));
+                    }
+                    cc_feed.apply(*lines, state.stream_seconds, state.stream_seconds,
+                                  (*subtitle_tracks)[cc_track_index], *subtitle_font);
+                    subtitle_font->refreshAtlasIfDirty(command_pool);
+                }
+            }
+
 #ifdef HAVE_OCR
             if (ocr_worker) {
                 if (!state.paused && state.last_decoded.decoded
@@ -561,7 +611,7 @@ static void runPlayer(Logger &log,
                                              file_seconds < 0 ? "-" : "", msec / 60000,
                                              msec / 1000 % 60, msec % 1000 / 100, text));
                     }
-                    ocr_feed.apply(update, state.stream_seconds,
+                    ocr_feed.apply(update.lines, update.seconds, state.stream_seconds,
                                    (*subtitle_tracks)[ocr_track_index], *subtitle_font);
                     if (ocr_translator) {
                         const long id = ocr_translated_feed.onOcrUpdate(
@@ -662,22 +712,35 @@ static void runPlayer(Logger &log,
                 break;
         }
 
-#ifdef HAVE_OCR
         // Save the collected cues with their original imprint timing, as
         // absolute positions in the input so the files line up when played
         // from the start (--subtitles auto-discovers them by these names)
+        auto absoluteEntries = [&](std::vector<SubtitleEntry> entries) {
+            for (auto &e : entries) {
+                e.start_seconds += initial_seek_seconds;
+                e.end_seconds += initial_seek_seconds;
+            }
+            std::sort(entries.begin(), entries.end(),
+                      [](const auto &a, const auto &b) {
+                          return a.start_seconds < b.start_seconds;
+                      });
+            return entries;
+        };
+
+        if (cc_track_index >= 0 && !subtitle_setup.cc_write_stem.empty() && subtitle_tracks) {
+            try {
+                cc_feed.finish(state.stream_seconds, (*subtitle_tracks)[cc_track_index]);
+                const std::string cc_path = subtitle_setup.cc_write_stem + ".CC.srt";
+                writeSrt(cc_path, absoluteEntries(cc_feed.file_entries));
+                log.info(eApplication, std::format("Wrote {} CC cues to {}",
+                                                   cc_feed.file_entries.size(), cc_path));
+            } catch (const std::exception &x) {
+                log.error(eApplication, std::format("Saving CC subtitles failed: {}", x.what()));
+            }
+        }
+
+#ifdef HAVE_OCR
         if (ocr_worker && !subtitle_setup.ocr_write_stem.empty() && subtitle_tracks) {
-            auto absoluteEntries = [&](std::vector<SubtitleEntry> entries) {
-                for (auto &e : entries) {
-                    e.start_seconds += initial_seek_seconds;
-                    e.end_seconds += initial_seek_seconds;
-                }
-                std::sort(entries.begin(), entries.end(),
-                          [](const auto &a, const auto &b) {
-                              return a.start_seconds < b.start_seconds;
-                          });
-                return entries;
-            };
             try {
                 ocr_feed.finish(state.stream_seconds, (*subtitle_tracks)[ocr_track_index]);
                 const std::string ja_path = subtitle_setup.ocr_write_stem + ".OCR.srt";
@@ -1004,6 +1067,7 @@ int main(int argc, char *argv[]) {
     string ocr_source_language = "Japanese";
     string ocr_target_language = "English";
     bool ocr_write = false;
+    bool cc_write = false;
 
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -1199,6 +1263,11 @@ int main(int argc, char *argv[]) {
                                 "--ocr-translate) next to the input file, where --subtitles "
                                 "finds them on the next playback", [&] () -> void {
         ocr_write = true;
+    });
+    options.flag("--cc-write", "Save the line-21 closed captions decoded during NTSC playback "
+                               "at exit as <input>.CC.srt next to the input file, where "
+                               "--subtitles finds them on the next playback", [&] () -> void {
+        cc_write = true;
     });
     options.option("--subtitle-font", "FILE", "TrueType font for the subtitles (default: the "
                                               "bundled Noto Sans JP)", [&] () -> void {
@@ -1424,6 +1493,14 @@ int main(int argc, char *argv[]) {
                     subtitle_setup.ocr_write_stem =
                             (input_path.parent_path() / input_path.stem()).string();
                 }
+                if (cc_write) {
+                    if (file_input_type != eNtscRf)
+                        cerr << "Warning: --cc-write does nothing here: closed captions "
+                                "exist only on NTSC discs" << endl;
+                    const filesystem::path input_path(*it);
+                    subtitle_setup.cc_write_stem =
+                            (input_path.parent_path() / input_path.stem()).string();
+                }
                 if (subtitles_enabled)
                     subtitle_setup.files = discoverSubtitleFiles(*it);
                 if (subtitles_file) {
@@ -1461,6 +1538,7 @@ int main(int argc, char *argv[]) {
 
                 switch (file_input_type) {
                     case eNtscRf: {
+                        subtitle_setup.ntsc_cc = true;
                         auto reader = make_unique<NtscFrameReader>(
                                         log, executable_dir, manager, *it, input_format,
                                         file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,

@@ -7,9 +7,11 @@ add_executable(museld-tests
     BchDecoderTest.cpp
     FilterSimdParityTest.cpp
     InputProbeTest.cpp
+    Eia608DecoderTest.cpp
     NtscCadenceTrackerTest.cpp
     PrefetchingInputReaderTest.cpp
     SrtParserTest.cpp
+    ../src/subtitles/Eia608Decoder.cpp
     ../src/bch/BchDecoder.cpp
     ../src/InputProbe.cpp
     ../src/input/InputReaderFactory.cpp

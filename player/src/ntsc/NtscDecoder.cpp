@@ -139,6 +139,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     out.audio_sample_count = 0;
     out.ac3_frames.clear();
     out.decoded = false;
+    out.cc_bytes.reset();
 
     if (redo_last_field) // undo the field advance from the previous call
         m_field_index = (m_field_index + 1) % 2;
@@ -414,6 +415,10 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     if (input_block != nullptr) {
         m_frames[0]->processVbi();
+        // A new frame was read, so this pair has not been delivered before.
+        // It leads the displayed frame (m_frames[1]) by one frame time, which
+        // is well inside the caption timing tolerance.
+        out.cc_bytes = m_frames[0]->getClosedCaptionBytes();
 
         // Drive the analog audio's CX expansion from the VBI status, unless
         // the user forces it.  The demodulator runs a few frames ahead of the

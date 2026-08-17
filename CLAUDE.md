@@ -42,7 +42,9 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
     muse/          — MUSE frame buffers, audio/video decoders, GPU shaders interface
     ntsc/          — NTSC frame buffers, sync detection, field decoder
     musevk/        — Vulkan abstraction layer (buffers, images, command pools, compute)
-    subtitles/     — SRT parser, stb_truetype-based glyph atlas, GPU subtitle overlay
+    subtitles/     — SRT parser, stb_truetype-based glyph atlas, GPU subtitle overlay,
+                     EIA-608 closed caption decoder (live "CC" track on NTSC discs,
+                     line 21 sliced in ntsc/NtscFrame; --cc-write saves <input>.CC.srt)
     ocr/           — Live subtitle OCR + translation (PP-OCR on ONNX Runtime, no OpenCV):
                      OcrEngine, OcrWorker thread, Vulkan band readback, TranslationWorker
                      (OpenAI-compatible HTTP, cpp-httplib + nlohmann/json).  Built with
