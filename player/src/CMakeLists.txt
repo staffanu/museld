@@ -190,6 +190,7 @@ if(BUILD_MUSE)
         TextRenderer.cpp TextRenderer.h
         PlayerState.h
         OsdOverlay.cpp OsdOverlay.h
+        subtitles/Eia608Decoder.cpp subtitles/Eia608Decoder.h
         subtitles/SrtParser.cpp subtitles/SrtParser.h
         subtitles/SubtitleFont.cpp subtitles/SubtitleFont.h
         subtitles/SubtitleOverlay.cpp subtitles/SubtitleOverlay.h

@@ -130,6 +130,17 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--subtitle-offset <seconds>` | Delay the subtitles by this much; negative shows them earlier. Useful for tracks timed against a `--write` render rather than the disc's own time code |
 | `--subtitle-font <file.ttf>` | Override the default subtitle font (bundled Noto Sans JP) |
 
+### Closed captions (NTSC)
+
+NTSC discs mastered with EIA-608 closed captions (line 21) are decoded during
+playback into a live "CC" subtitle track — no option needed; select it with the
+`[` and `]` keys like any other track. Pop-on, roll-up and paint-on captions
+are supported; the channel-2 services and field 2 (CC3/CC4, XDS) are not.
+
+| Option | Description |
+|---|---|
+| `--cc-write` | Save the captions collected during playback at exit as `<input>.CC.srt` next to the input, with their original on-screen timing — `--subtitles` finds the file on the next playback |
+
 ### Live subtitle OCR and translation (experimental)
 
 Discs with burned-in subtitles can be read and translated during playback. This

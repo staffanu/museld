@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <algorithm>
+#include <cmath>
 #include <format>
 #include <vector>
 #include "NtscFrame.h"
@@ -176,8 +177,17 @@ std::shared_ptr<VbiData> NtscFrame::getVbiData() const {
     return m_vbi_data;
 }
 
+std::optional<std::pair<uint8_t, uint8_t>> NtscFrame::getClosedCaptionBytes() const {
+    return m_cc_bytes;
+}
+
 void NtscFrame::processVbi() {
     m_vbi_data = nullptr;
+
+    // EIA-608 closed captions ride on line 21 of field 1 (the caption
+    // services of field 2, line 284, carry CC3/CC4 and XDS and are not
+    // decoded).
+    m_cc_bytes = processCcLine(21);
 
     // The Philips VBI codes appear on lines 16/17/18 of each field, and this
     // frame's buffer holds the two fields back to back: field 1 from line 1 and
@@ -405,4 +415,73 @@ int NtscFrame::processVbiLine(int line) {
         }
     }
     return codeword;
+}
+
+// EIA-608 waveform (CEA-608-E §8.1): a clock run-in of 7 sine cycles at 32 x fH
+// (0.5035 MHz) starting 10.5 µs after 0H, two zero bits, a '1' start bit, then
+// 16 NRZ data bits, LSB first, at the same rate.  0 is the blanking level, 1 is
+// 50 IRE.  Returns the two bytes with their (odd) parity bits intact, or
+// nullopt when no caption waveform is found on the line.
+std::optional<std::pair<uint8_t, uint8_t>> NtscFrame::processCcLine(int line) {
+    constexpr int width = NtscInputBlock::c_samples_per_video_line;
+    constexpr double T = width / 32.0; // one 608 clock period in samples
+    const int16_t *row = m_data->data<int16_t>() + (line - 1) * width;
+    auto sample = [row](int i) { return HalfFloatUtil::half_to_float(row[i]); };
+
+    // Slicing level: halfway between blanking, measured on the back porch
+    // (after the colour burst, before the run-in), and the 50 IRE data level.
+    float zero = 0;
+    for (int i = 113; i < 129; i++)
+        zero += sample(i);
+    zero /= 16;
+    const float threshold = zero + 0.175f;
+
+    // The next upward crossing of the slicing level at or after `from`,
+    // linearly interpolated; -1 when none is found before `to`.
+    auto nextRise = [&](double from, double to) -> double {
+        for (int i = std::max((int)from, 1); i < std::min((int)to, width - 1); i++) {
+            float a = sample(i - 1), b = sample(i);
+            if (a <= threshold && b > threshold)
+                return i - 1 + (threshold - a) / (b - a);
+        }
+        return -1;
+    };
+
+    // The run-in's first upward crossing sits a quarter period past its
+    // nominal 10.5 µs start; search a window generously bracketing that.
+    const double t0 = nextRise(0.14 * width, 0.25 * width);
+    if (t0 < 0)
+        return std::nullopt; // blank line: no caption service
+
+    // Validate the run-in: one upward crossing per clock period for the
+    // remaining six cycles, each near its expected position.
+    double t = t0;
+    for (int k = 1; k <= 6; k++) {
+        t = nextRise(t + 0.5 * T, t0 + k * T + 0.5 * T);
+        if (t < 0 || std::abs(t - (t0 + k * T)) > 0.35 * T) {
+            m_log.debug(eDecoder, std::format("CC line {}: clock run-in cycle {} misplaced", line, k));
+            return std::nullopt;
+        }
+    }
+
+    // The '1' start bit rises two zero bits after the run-in's 7 cycles: at
+    // 9 periods past the run-in start, i.e. 8.75 T past the first crossing.
+    const double edge = nextRise(t0 + 7.4 * T, t0 + 9.6 * T);
+    if (edge < 0 || std::abs(edge - (t0 + 8.75 * T)) > 0.5 * T) {
+        m_log.debug(eDecoder, std::format("CC line {}: start bit not found", line));
+        return std::nullopt;
+    }
+
+    // Sample the 16 data bits at their centers, 1.5 periods past the start
+    // bit's leading edge onward
+    uint16_t bits = 0;
+    for (int k = 0; k < 16; k++) {
+        const int center = (int)std::lround(edge + (1.5 + k) * T);
+        float v = 0;
+        for (int i = center - 2; i <= center + 2; i++)
+            v += sample(std::min(i, width - 1));
+        if (v / 5 > threshold)
+            bits |= (uint16_t)(1 << k);
+    }
+    return std::make_pair((uint8_t)(bits & 0xff), (uint8_t)(bits >> 8));
 }

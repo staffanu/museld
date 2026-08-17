@@ -5,6 +5,9 @@
 #define MUSECPP_NTSCFRAME_H
 
 
+#include <optional>
+#include <utility>
+
 #include "logging/Logger.h"
 #include "musevk/VulkanManager.h"
 #include "NtscFieldView.h"
@@ -47,10 +50,15 @@ public:
     std::shared_ptr<musevk::VulkanBuffer> &dropout_data();
     NtscFieldView &get_field(int parity);
     [[nodiscard]] std::shared_ptr<VbiData> getVbiData() const;
+    // Field 1's EIA-608 closed caption byte pair (parity bits intact), sliced
+    // from line 21 by processVbi(); nullopt when the line carries no caption
+    // waveform.
+    [[nodiscard]] std::optional<std::pair<uint8_t, uint8_t>> getClosedCaptionBytes() const;
     void processVbi();
 
 private:
     int processVbiLine(int line);
+    std::optional<std::pair<uint8_t, uint8_t>> processCcLine(int line);
 
     Logger &m_log;
     int m_frame_no;
@@ -61,6 +69,7 @@ private:
     std::shared_ptr<musevk::VulkanBuffer> m_dropout_data; // extended flags, written by the copy shader
     std::vector<NtscFieldView> m_fields;
     std::shared_ptr<VbiData> m_vbi_data;
+    std::optional<std::pair<uint8_t, uint8_t>> m_cc_bytes;
 };
 
 

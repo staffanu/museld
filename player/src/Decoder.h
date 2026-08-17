@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 #include "AudioDefs.h"
 #include "DropoutMode.h"
@@ -71,6 +72,11 @@ public:
         int64_t last_frame_buffer_input_offset;
         double input_samples_per_muse_sample;
         std::shared_ptr<DiscInfo> disc_info;
+        // EIA-608 closed caption byte pair from NTSC line 21 (field 1, parity
+        // bits intact).  Set at most once per frame read, so the consumer sees
+        // each pair exactly once; always unset for decoders without captions
+        // (MUSE).
+        std::optional<std::pair<uint8_t, uint8_t>> cc_bytes;
         // Film mode status for the disc info overlay; empty for decoders
         // without film mode (MUSE).  The detail part changes per field, so
         // the overlay only appends it while paused, where it can be read.
