@@ -21,9 +21,10 @@ element for all lanes (Renoir)
 
 Control: the same binary and SPIR-V pass on lavapipe from the *same* Mesa build
 (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json ./repro repro.spv` → PASS), so the
-shader, the host program and the common NIR path are all fine and this is RADV-specific.
-The same SPIR-V also passes on MoltenVK (Apple M2, portability flags added to the host
-program for that run). The repro is clean under VK_LAYER_KHRONOS_validation 1.4.350.
+shader and the host program are fine and only RADV misrenders it (see the analysis below
+for why lavapipe passing does not clear the common NIR code). The same SPIR-V also passes
+on MoltenVK (Apple M2, portability flags added to the host program for that run). The
+repro is clean under VK_LAYER_KHRONOS_validation 1.4.350.
 
 ## Description
 
@@ -33,9 +34,27 @@ lane of the wavefront for *all* lanes, instead of each lane's own element. The i
 access pattern through an SSBO returns correct results.
 
 Observed on both compiler backends (default ACO and `RADV_DEBUG=llvm`, LLVM 20.1.8), while
-lavapipe from the same Mesa build is correct. That combination points at RADV's own NIR
-lowering of `nir_load_push_constant` — the part ACO and LLVM share but lavapipe does not —
-assuming the offset is uniform, rather than at either backend or at common NIR.
+lavapipe from the same Mesa build is correct.
+
+Two places in the code (as of current main, August 2026) look jointly responsible, so this
+is probably not purely a RADV bug:
+
+- `nir_divergence_analysis.c` lists `nir_intrinsic_load_push_constant` under "intrinsics
+  which are always uniform" — the result is treated as uniform no matter how divergent the
+  offset is. A comment on Intel's `push_data_intel` in `nir_intrinsics.py` says this is
+  intentional ("the semantic of load_push_constant which is always uniform regardless of
+  the offset source"); Intel added that intrinsic with an `ACCESS_NON_UNIFORM` flag to
+  express the divergent case. But `spirv_to_nir` emits `load_push_constant` with a
+  divergent offset for this (valid) SPIR-V, so producer and consumer disagree about the
+  contract.
+- RADV's lowering (`radv_nir_lower_descriptors.c`, `load_push_constant()`) turns every
+  non-constant-offset load into a scalar SMEM load (`ac_nir_load_smem`) with the offset
+  passed through unchecked, consistent with that always-uniform semantic.
+
+Either way both backends are *told* by the shared divergence analysis that the load is
+uniform and scalarize it legally by their own rules; lavapipe passes only because it never
+exploits uniformity, so its PASS does not exonerate the common code. The lowering is
+unchanged on main, so the bug should still be present in versions after 25.2.
 
 No extensions or optional features are involved: core Vulkan 1.1, plain `uint` array,
 fixed `local_size_x = 64`, one `vkCmdDispatch(1, 1, 1)`. The same wrong results are also
