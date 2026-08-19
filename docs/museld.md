@@ -148,6 +148,22 @@ needs a build with `-DUSE_OCR=ON` (requires ONNX Runtime) and the PP-OCR text
 detection and recognition models as `.onnx` files (with "det" and "rec" in
 their names) in a directory of your choice.
 
+Use the RapidOCR conversions of the PP-OCR models — museld reads the character
+dictionary embedded in their ONNX metadata, which raw PaddleOCR exports lack.
+The [RapidOCR model collection on Hugging Face](https://huggingface.co/SWHL/RapidOCR)
+hosts them; the default Chinese/Japanese pair is:
+
+```
+mkdir ocr-models && cd ocr-models
+curl -LO https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx
+curl -LO https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx
+```
+
+then play with `--ocr ocr-models`. Recognition models for other scripts
+(latin, korean, cyrillic, …) live in the same repository; the detection model
+is script-independent. On a successful start, `--log M3` logs
+`OCR models loaded, N character classes`.
+
 | Option | Description |
 |---|---|
 | `--ocr <dir>` | OCR the burned-in subtitles into a live "OCR" subtitle track, selectable like any file track with the `[` and `]` keys. `<dir>` holds the detection and recognition models; the recognition model decides the alphabet (PaddleOCR publishes per-script models: the default Chinese/Japanese one, `latin`, `korean`, `cyrillic`, …) |
