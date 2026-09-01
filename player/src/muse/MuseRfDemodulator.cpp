@@ -167,7 +167,7 @@ void MuseRfDemodulator::demodulate() {
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager,
                               "detect_dropouts_envelope",
-                              {analytic_buffer_re, analytic_buffer_im, dropout_buffer, lowpass_in_buffer}, 10 * sizeof(uint32_t),
+                              {analytic_buffer_re, analytic_buffer_im, dropout_buffer, lowpass_in_buffer}, 12 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts_envelope.comp"), Size(MuseDemodulatedBlock::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
@@ -363,7 +363,11 @@ void MuseRfDemodulator::demodulate() {
         // scales with the sample interval; MUSE carries roughly twice the video
         // bandwidth of NTSC, so it is allowed twice the step at the same rate.
         // The envelope conditions dominate: the flag count is unchanged between
-        // 2 and 8 half-ranges here.
+        // 2 and 8 half-ranges here.  The exceedance counts (1 for the line
+        // condition, 0 for the deep) keep the original single-spike /
+        // envelope-only semantics, which these ratios were measured against;
+        // the higher NTSC counts guard against white-on-black titles, which
+        // MUSE's much stricter ratios already separate from content.
         const float slew_threshold = 4.0f * 112.f * 40e6f / m_sample_frequency;
         // 32 taps spanning ~205 us, so a maximum-length dropout cannot drag the
         // carrier reference down with it (256 samples at the NTSC path's 40 MHz)
@@ -375,7 +379,7 @@ void MuseRfDemodulator::demodulate() {
                                          std::bit_cast<uint32_t>(c_line_ratio_squared),
                                          std::bit_cast<uint32_t>(c_deep_ratio_squared),
                                          (uint32_t)lowpass_filter_size - 1, std::bit_cast<uint32_t>(slew_threshold),
-                                         long_stride});
+                                         long_stride, /* line_min_exceedances */ 1u, /* deep_min_exceedances */ 0u});
 
         // Barrier: ensure all compute shader writes are visible to the subsequent transfer operations
         command_buffer->enqueueBarrier(vk::AccessFlagBits::eShaderWrite,

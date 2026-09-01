@@ -23,6 +23,8 @@ layout(push_constant) uniform PushConstants {
     uint demod_offset; // index of the first new sample in the demodulated buffer
     float slew_threshold; // noise condition: max sample-to-sample step nearby
     uint long_stride; // spacing of the 32 carrier-reference taps, in raw samples
+    uint line_min_exceedances; // slew exceedances required to corroborate the line condition
+    uint deep_min_exceedances; // ... and the deep condition (0: confident on its own)
 };
 
 layout(set = 0, binding = 0) buffer readonly analytic_re_buffer {
@@ -85,9 +87,6 @@ void main() {
         long_sum += envelope_squared(center + i * stride + stride / 2);
     float long_avg = long_sum / 32.0;
 
-    // A collapse below the deep ratio is confident on its own; the more
-    // sensitive line-referenced condition additionally requires the noise
-    // corroboration below.
     bool deep_low = local_avg < deep_ratio_squared * long_avg;
     bool envelope_low = local_avg < line_ratio_squared * line_ref;
 
@@ -103,17 +102,24 @@ void main() {
     // legal signal can produce.  Bright picture detail (text) lowers the
     // envelope too -- the disc MTF is lower at the bright end of the
     // deviation range -- but demodulates cleanly, and would otherwise be
-    // flagged whenever its line neighbours are dark.
-    bool noisy = false;
-    if (envelope_low && !deep_low) {
+    // flagged whenever its line neighbours are dark.  The corroboration is
+    // a count of exceedances, not a single one: a sharp glyph edge under a
+    // sagging envelope yields an isolated spike or two, while dropout noise
+    // slews illegally on a large fraction of the samples.  Each condition
+    // requires its own count (0 makes it confident on its own), so a caller
+    // whose ratios already separate content from dropouts can keep the
+    // envelope-only semantics.
+    int exceedances = 0;
+    if (envelope_low || deep_low) {
         int dc = int(demod_offset + ix * video_decimation_rate);
         int limit = int(demod_offset + dest_size * video_decimation_rate) - 1;
         for (int i = -16; i <= 16; i++) {
             int j = clamp(dc + i, 1, limit);
             if (abs(demodulated[j] - demodulated[j - 1]) > slew_threshold)
-                noisy = true;
+                exceedances++;
         }
     }
 
-    dest[dest_offset + ix] = uint8_t(deep_low || (envelope_low && noisy) ? 1 : 0);
+    dest[dest_offset + ix] = uint8_t((deep_low && exceedances >= int(deep_min_exceedances))
+                                     || (envelope_low && exceedances >= int(line_min_exceedances)) ? 1 : 0);
 }
