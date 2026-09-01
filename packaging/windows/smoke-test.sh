@@ -19,6 +19,22 @@ cd "$pkg"
 # grep and the rest still work.
 clean_path="/c/Windows/System32:/c/Windows"
 
+# An import that MSYS2 provides must travel with the package. Running with the
+# stripped PATH does not prove that: Windows ships some of the same DLL names
+# itself (onnxruntime.dll, from Windows ML, lives in System32), so a forgotten
+# DLL can silently resolve to the wrong library instead of failing to load.
+status=0
+for f in *.exe *.dll; do
+    [ -f "$f" ] || continue
+    for imp in $(ldd "$f" | awk '{print $1}'); do
+        if [ -f "/ucrt64/bin/$imp" ] && [ ! -f "./$imp" ]; then
+            echo "FAIL: $f imports $imp, which MSYS2 provides but the package does not carry"
+            status=1
+        fi
+    done
+done
+[ "$status" = 0 ] || exit 1
+
 if [ -f ac3rf-efm-decode.exe ]; then
     PATH="$clean_path" ./ac3rf-efm-decode.exe --version
 fi
