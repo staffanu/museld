@@ -328,6 +328,10 @@ if(USE_OCR)
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/httplib
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../third_party)
     target_link_libraries(museld-ocr PUBLIC ${ONNXRUNTIME_LIBRARY} Threads::Threads)
+    if(WIN32)
+        # cpp-httplib (TranslationWorker) uses Winsock
+        target_link_libraries(museld-ocr PUBLIC ws2_32)
+    endif()
 
     if(BUILD_MUSE)
         target_sources(museld PRIVATE ocr/OcrBandCapture.cpp ocr/OcrBandCapture.h)
