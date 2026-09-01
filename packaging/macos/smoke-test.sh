@@ -38,6 +38,13 @@ for f in $(macho_files); do
     fi
 
     if [ "$universal" = "--universal" ]; then
+        # Dylibs under lib/ may be thin: the two architectures' Homebrew
+        # dependency closures are not always identical, and merge-universal.sh
+        # carries a library only one of them references as it is.  The
+        # binaries themselves must have both slices.
+        case "$f" in
+            ./lib/*) continue ;;
+        esac
         archs=$(lipo -archs "$f")
         case "$archs" in
             *arm64*) ;;
