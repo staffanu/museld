@@ -40,21 +40,32 @@ else
     cp "$repo_root/packaging/windows/README-ac3rf-efm-decode.txt" "$pkg/README.txt"
 fi
 
-# Copy the UCRT64 DLLs the binaries need, transitively. Anything resolving
-# outside /ucrt64/bin is a Windows system DLL and is left to the target machine.
+# Copy the UCRT64 DLLs the binaries need, transitively. The test is whether
+# /ucrt64/bin provides the imported name, not where ldd resolved it: Windows
+# ships some of the same names itself (onnxruntime.dll, from Windows ML, lives
+# in System32), and System32 comes before PATH in the loader's search order, so
+# such an import resolves to the system copy while MSYS2's is the one the
+# binary was linked against and must travel with the package. Names /ucrt64/bin
+# does not provide are Windows system DLLs and are left to the target machine.
 changed=1
 while [ "$changed" = 1 ]; do
     changed=0
     for f in "$pkg"/*.exe "$pkg"/*.dll; do
         [ -f "$f" ] || continue
-        for dll in $(ldd "$f" | awk '/=> \/ucrt64\/bin\// {print $3}'); do
-            if [ ! -f "$pkg/$(basename "$dll")" ]; then
-                cp "$dll" "$pkg/"
+        for dll in $(ldd "$f" | awk '{print $1}'); do
+            if [ -f "/ucrt64/bin/$dll" ] && [ ! -f "$pkg/$dll" ]; then
+                cp "/ucrt64/bin/$dll" "$pkg/"
                 changed=1
             fi
         done
     done
 done
+
+# onnxruntime loads its provider bridge with LoadLibrary at runtime, which ldd
+# cannot see.
+if [ -f "$pkg/onnxruntime.dll" ] && [ -f /ucrt64/bin/onnxruntime_providers_shared.dll ]; then
+    cp /ucrt64/bin/onnxruntime_providers_shared.dll "$pkg/"
+fi
 
 # The Vulkan loader normally arrives with the graphics driver, so it is not among
 # the DLLs resolved above. Ship it too: it finds the driver through the registry
