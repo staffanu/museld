@@ -132,7 +132,8 @@ library:
 * On macOS there is no PATH to strip — a Mach-O file names the exact path of everything it
   loads — so the check reads those names back with `otool -L` and fails if any still
   points into Homebrew. Merged packages are also checked with `lipo -archs` for both
-  slices.
+  slices — except under `lib/`, where a dylib only one architecture's dependency
+  closure references is carried thin.
 * Both then run `ac3rf-efm-decode --version` and `museld --help`, which returns before any
   Vulkan device is needed and so works on a runner without a GPU.
 

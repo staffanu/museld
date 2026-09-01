@@ -4,6 +4,7 @@
 #ifndef MUSELD_OCR_ENGINE_H
 #define MUSELD_OCR_ENGINE_H
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>

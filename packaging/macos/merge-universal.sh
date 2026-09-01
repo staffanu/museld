@@ -9,6 +9,12 @@
 # joined here: every Mach-O file that exists in both trees becomes one file with
 # both slices, and everything else — shaders, font, manifest, launcher — is taken
 # as it is, being identical either way.
+#
+# A dylib may exist in only one tree: the two architectures' Homebrew builds do
+# not always have identical dependency closures (onnxruntime's abseil dylibs,
+# for instance).  Such a file is carried thin — the architecture that does not
+# reference it never asks the loader for it — and the smoke test accepts thin
+# files under lib/ while still insisting the binaries themselves are universal.
 
 set -euo pipefail
 
@@ -34,14 +40,15 @@ cp -R "$arm" "$out"
 
 merged=0
 skipped=0
+thin=0
 while IFS= read -r -d '' f; do
     rel="${f#"$out"/}"
     counterpart="$x86/$rel"
 
     if [ ! -f "$counterpart" ]; then
         if is_macho "$f"; then
-            echo "$0: $rel exists only for arm64" >&2
-            exit 1
+            echo "$0: $rel carried thin (arm64 only)" >&2
+            thin=$((thin + 1))
         fi
         continue
     fi
@@ -57,4 +64,18 @@ while IFS= read -r -d '' f; do
     fi
 done < <(find "$out" -type f -print0)
 
-echo "$out: $merged Mach-O files merged, $skipped other files passed through"
+# The reverse direction: files only the x86_64 tree has (the copy above
+# started from the arm64 tree, so these are missing from the output).
+while IFS= read -r -d '' f; do
+    rel="${f#"$x86"/}"
+    if [ ! -f "$out/$rel" ]; then
+        mkdir -p "$out/$(dirname "$rel")"
+        cp "$f" "$out/$rel"
+        if is_macho "$f"; then
+            echo "$0: $rel carried thin (x86_64 only)" >&2
+            thin=$((thin + 1))
+        fi
+    fi
+done < <(find "$x86" -type f -print0)
+
+echo "$out: $merged Mach-O files merged, $thin carried thin, $skipped other files passed through"

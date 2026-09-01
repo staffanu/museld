@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <format>
 #include <stdexcept>
 
@@ -118,7 +119,10 @@ struct OcrEngine::Impl {
 
     static std::unique_ptr<Ort::Session> open(Ort::Env &env, Ort::SessionOptions &options,
                                               const std::string &path) {
-        return std::make_unique<Ort::Session>(env, path.c_str(), options);
+        // ONNX Runtime takes wide paths on Windows (ORTCHAR_T is wchar_t
+        // there); std::filesystem converts with the same native narrow
+        // encoding the rest of museld's file handling uses.
+        return std::make_unique<Ort::Session>(env, std::filesystem::path(path).c_str(), options);
     }
 
     std::vector<Ort::Value> run(Ort::Session &session, const std::string &in_name,
