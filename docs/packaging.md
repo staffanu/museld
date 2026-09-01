@@ -11,13 +11,11 @@ Six packages, three per platform, all built from the same commit:
 | Package | Zipped | Contents |
 |---|---|---|
 | `museld-windows-x86_64.zip` | ~7 MB | `museld.exe`, `ac3rf-efm-decode.exe` |
-| `museld-windows-x86_64-full.zip` | ~70 MB | the same, plus FFmpeg for `--write` and ONNX Runtime for `--ocr` |
+| `museld-windows-x86_64-full.zip` | ~69 MB | the same, plus FFmpeg for `--write` and ONNX Runtime for `--ocr` |
 | `ac3rf-efm-decode-windows-x86_64.zip` | ~2 MB | `ac3rf-efm-decode.exe` alone |
 | `museld-macos-universal.zip` | ~10 MB | `museld`, `ac3rf-efm-decode` |
 | `museld-macos-universal-full.zip` | ~55 MB | the same, plus FFmpeg for `--write` and ONNX Runtime for `--ocr` |
 | `ac3rf-efm-decode-macos-universal.zip` | ~1 MB | `ac3rf-efm-decode` alone |
-
-(The full-package sizes are estimates until a CI run confirms them.)
 
 Each is self-contained: it carries the libraries the programs need, so nothing has to be
 installed first. Only the graphics driver comes from the system.
