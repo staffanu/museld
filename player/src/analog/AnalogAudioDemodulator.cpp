@@ -100,6 +100,7 @@ AnalogAudioDemodulator::AnalogAudioDemodulator(Logger &log, double input_sample_
 
 void AnalogAudioDemodulator::buildChannel(ChannelState &channel, const std::string &name, double carrier_frequency,
                                           double mix_frequency, bool use_simd) {
+    channel.name = name;
     channel.phase_step = (int)((1 << c_phase_accum_bits) * carrier_frequency / mix_frequency);
     channel.phase_accumulator = 0;
     channel.prev_iq = {0.0f, 0.0f};
@@ -235,8 +236,10 @@ void AnalogAudioDemodulator::processChannel(ChannelState &channel, std::vector<f
     }
 
     // FM discriminator: the angle between consecutive IQ samples, scaled to
-    // deviation units (1.0 = 100 kHz) and clamped like the hardware
-    // implementation.  Clamp hits feed the squelch.
+    // deviation units (1.0 = 100 kHz) and clamped.  Clamp hits feed the
+    // squelch; the clamp sits where only a missing carrier's noise reaches
+    // (see c_deviation_clamp), so program peaks pass untouched and never
+    // mute the channel.
     const size_t n_iq = channel.iq_re_buffer.size();
     const float discriminator_frequency =
         (float)(m_input_sample_frequency / m_pre_mix_decimation_factor / m_post_mix_decimation_factor);
@@ -284,13 +287,17 @@ void AnalogAudioDemodulator::processChannel(ChannelState &channel, std::vector<f
         }
     }
 
-    // Squelch with hysteresis on the fraction of clamped discriminator samples
-    // (the software analog of the hardware's angle-overflow counter)
+    // Squelch with hysteresis on the fraction of overflowed discriminator
+    // samples (the software analog of the hardware's angle-overflow counter)
     const double clamp_fraction = (double)channel.clamped_samples / (double)n_iq;
+    const bool was_squelched = channel.squelched;
     if (clamp_fraction > 1.0 / 16)
         channel.squelched = true;
     else if (clamp_fraction < 1.0 / 128)
         channel.squelched = false;
+    if (channel.squelched != was_squelched)
+        m_log.info(eAudio, std::format("Analog audio {} channel squelch {} (overflow fraction {:.4f})",
+                                       channel.name, channel.squelched ? "on" : "off", clamp_fraction));
 
     // Resample to the output rate
     resampled.clear();
@@ -362,8 +369,7 @@ void AnalogAudioDemodulator::demodulate(const float *input_buffer, bool cx_enabl
             else if (channel.squelch_gain > squelch_target)
                 channel.squelch_gain = std::max(squelch_target, channel.squelch_gain - m_squelch_ramp_step);
 
-            const float scaled = samples[c] * channel.squelch_gain
-                * (32767.0f * c_output_level / c_deviation_clamp);
+            const float scaled = samples[c] * channel.squelch_gain * (32767.0f * c_output_level);
             out_sample.samples[c] = (int16_t)std::clamp(scaled, -32768.0f, 32767.0f);
         }
         output.push_back(out_sample);

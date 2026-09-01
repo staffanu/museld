@@ -8,6 +8,7 @@
 #include <complex>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 #include "logging/Logger.h"
 #include "../filter/FirFilterStage.h"
@@ -50,6 +51,8 @@ public:
 
 private:
     struct ChannelState {
+        std::string name;
+
         // NCO
         int phase_step;
         int phase_accumulator;
@@ -88,16 +91,27 @@ private:
     static constexpr double c_left_carrier_frequency = 2.3011e6;
     static constexpr double c_right_carrier_frequency = 2.8125e6;
     static constexpr double c_frequency_deviation = 100e3;
-    // Discriminator output in deviation units (1.0 = 100 kHz) is clamped here,
-    // matching the +-0.5 radian clamp of the hardware implementation.
-    static constexpr float c_deviation_clamp = 1.223f;
-    // Output level calibration.  Mapping the deviation clamp to int16 full
-    // scale plays ~10 dB louder than the EFM track of the same program:
-    // discs modulate only a fraction of the +-100 kHz peak deviation, while
-    // the digital track is mastered against digital full scale.  -10 dB
-    // aligns the two (measured on a CX disc with expansion enabled); the
-    // headroom given up is far above the medium's noise floor.
-    static constexpr float c_output_level = 0.316f;
+    // Discriminator output in deviation units (1.0 = 100 kHz) is clamped
+    // here, and the clamp hits drive the squelch.  The value sits well above
+    // anything program material produces -- pre-emphasized peaks measurably
+    // reach ~1.7 on loud passages (The Abyss's crescendo at disc time 1:50,
+    // which falsely tripped the squelch when this clamp was 1.223, the
+    // FPGA implementation's +-0.5 radian angle clamp) -- while a missing
+    // carrier demodulates to phase steps uniform across the discriminator
+    // range, most of them beyond any threshold in these units, so the
+    // headroom costs no squelch sensitivity and only noise is ever clamped.
+    // The value is exactly 1.0 radian at the FPGA's 98.333/64 MHz
+    // discriminator rate, the natural fixed-point boundary there, so the
+    // planned VHDL backport can clamp identically.
+    static constexpr float c_deviation_clamp = 2.445f;
+    // Output level calibration: 100 kHz deviation maps to this fraction of
+    // int16 full scale (-11.8 dBFS).  Discs modulate only a fraction of the
+    // peak deviation while the digital track is mastered against digital
+    // full scale; this value plays the analog track level-matched with the
+    // EFM track of the same program (measured on a CX disc with expansion
+    // enabled, and reconfirmed within 0.5 dB on The Abyss's non-CX mono
+    // track).  The headroom given up is far above the medium's noise floor.
+    static constexpr float c_output_level = 0.2584f;
 
     int m_pre_mix_decimation_factor;
     int m_post_mix_decimation_factor;
