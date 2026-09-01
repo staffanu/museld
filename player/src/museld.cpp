@@ -337,6 +337,7 @@ static void runPlayer(Logger &log,
                       Decoder::FieldInterpolationMode initial_field_interpolation_mode,
                       bool initial_use_3d_comb,
                       bool initial_film_mode,
+                      Decoder::CxMode initial_cx_mode,
                       DropoutMode dropout_mode,
                       AudioTrack audio_track,
                       bool benchmark_shaders,
@@ -370,6 +371,7 @@ static void runPlayer(Logger &log,
         state.field_interpolation_mode = initial_field_interpolation_mode;
         state.use_3d_comb = initial_use_3d_comb;
         state.film_mode = initial_film_mode;
+        state.analog_cx_mode = initial_cx_mode;
 
         OsdOverlay osd;
         FrameBlitter blitter;
@@ -784,7 +786,7 @@ template<class InputBlock>
 void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, FrameReader<InputBlock> &reader,
                   bool decode_all_fields, bool full_screen, bool no_sync,
                   bool start_paused, Decoder::FieldInterpolationMode field_interpolation_mode,
-                  bool use_3d_comb, bool film_mode, bool decode_video, DropoutMode dropout_mode,
+                  bool use_3d_comb, bool film_mode, Decoder::CxMode cx_mode, bool decode_video, DropoutMode dropout_mode,
                   bool decode_audio, AudioTrack audio_track, bool benchmark_shaders,
                   MuseAdaptiveEqualizer::Mode eq_mode, float eq_alpha,
                   float tint_degrees, float saturation,
@@ -933,7 +935,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         const double seconds_per_iteration = (decode_all_fields ? 1 : 2) / fields_per_second;
 
         runPlayer(log, manager, *decoder, reader_controls, window, full_screen, start_paused,
-                  field_interpolation_mode, use_3d_comb, film_mode, dropout_mode, audio_track, benchmark_shaders,
+                  field_interpolation_mode, use_3d_comb, film_mode, cx_mode, dropout_mode, audio_track, benchmark_shaders,
                   output_filename.has_value(),
                   vfw, audio_playback.get(), executable_dir,
                   subtitle_setup,
@@ -1051,6 +1053,7 @@ int main(int argc, char *argv[]) {
     DropoutMode dropout_mode = DropoutMode::eNormal;
     bool decode_audio = true;
     AudioTrack audio_track = AudioTrack::eDefault;
+    Decoder::CxMode cx_mode = Decoder::CxMode::eAuto;
     bool benchmark_shaders = false;
     MuseAdaptiveEqualizer::Mode eq_mode = MuseAdaptiveEqualizer::Mode::eAdapt;
     constexpr float eq_alpha = 0.005f;
@@ -1184,6 +1187,21 @@ int main(int argc, char *argv[]) {
     });
     options.option("--saturation", "FACTOR", "NTSC: scale the chroma gain (default 1.0)", [&] () -> void {
         saturation = (float)stod(*(it++));
+    });
+    options.option("--cx", "MODE", "NTSC analog audio CX expansion: auto follows the disc's VBI "
+                                   "flag (default), on/off force it (also toggled with the X key)",
+                   [&] () -> void {
+        const string mode = *(it++);
+        if (mode == "auto")
+            cx_mode = Decoder::CxMode::eAuto;
+        else if (mode == "on")
+            cx_mode = Decoder::CxMode::eOn;
+        else if (mode == "off")
+            cx_mode = Decoder::CxMode::eOff;
+        else {
+            cerr << "--cx must be auto, on or off" << endl;
+            exit(1);
+        }
     });
     options.flag("--subtitles", "Display SRT subtitles synced to the disc's own time code, or to "
                                 "the playback position when the capture carries no disc code "
@@ -1544,7 +1562,7 @@ int main(int argc, char *argv[]) {
                                         file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
                                         muse_output_filename);
                         process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                                     full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
+                                                     full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, decode_video, dropout_mode, decode_audio,
                                                      audio_track,
                                                      benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
@@ -1556,7 +1574,7 @@ int main(int argc, char *argv[]) {
                         auto reader = make_unique<PhaseCorrect16MHzFrameReader>(
                                 log, *it, input_format, initial_seek_seconds, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                     full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
+                                     full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, decode_video, dropout_mode, decode_audio,
                                      audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
@@ -1570,7 +1588,7 @@ int main(int argc, char *argv[]) {
                                 file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
                                 audio_track == AudioTrack::eEfm, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                     full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, decode_video, dropout_mode, decode_audio,
+                                     full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, decode_video, dropout_mode, decode_audio,
                                      audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,

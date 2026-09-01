@@ -125,6 +125,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
 | `--saturation <factor>` | NTSC: scale the chroma gain (default 1.0, applied on top of the burst-referenced AGC) |
+| `--cx <mode>` | NTSC analog audio CX expansion: `auto` (default, follow the disc's VBI flag), `on`, or `off` — same as the X key. `off` is also how to record the un-expanded signal for comparisons |
 | `--subtitles` | Display SRT subtitles synced to the disc's own time code — or to the playback position when the capture carries no disc code (baseband captures usually do not). The available tracks are the `.srt` files next to the input file whose names start with the input's name minus its extension (`capture.srt`, `capture.ja.srt`, … for `capture.raw`). The first one alphabetically starts as the primary (bottom) track; the `[` and `]` keys cycle the primary and secondary (top) track through all of them |
 | `--subtitles-file <file.srt>` | Start with this file as the primary subtitle track (implies `--subtitles`; the file need not match the naming pattern) |
 | `--subtitle-offset <seconds>` | Delay the subtitles by this much; negative shows them earlier. Useful for tracks timed against a `--write` render rather than the disc's own time code |
@@ -270,7 +271,7 @@ also given, which is the mode to use for batch rendering.
 | D | Cycle dropout handling: conceal → ignore → highlight (red = luminance dropout, green = color dropout) |
 | A | Cycle the audio track: MUSE (or NTSC analog) → EFM → AC3 (NTSC only) (RF input only) |
 | B | Cycle the audio channels heard: stereo → left only → right only (bilingual discs, or the left-only analog track on AC3 discs; `--write` output always keeps stereo) |
-| X | Cycle CX noise reduction for the NTSC analog audio: auto (follow the VBI flag, the default) → off → on. Shown in parentheses when the audio playing is not the analog track (the setting is remembered but inaudible). The V info line shows the CX status: the disc's flag in auto mode, or e.g. "CX off forced (disc on)" when overridden. |
+| X | Cycle CX noise reduction for the NTSC analog audio: auto (follow the VBI flag, the default) → off → on; `--cx` sets the initial mode. Shown in parentheses when the audio playing is not the analog track (the setting is remembered but inaudible). The V info line shows the CX status: the disc's flag in auto mode, or e.g. "CX off forced (disc on)" when overridden. |
 | V | Toggle disc code / chapter / frame display, plus the NTSC film mode status (TOC reading is not implemented) |
 | C | Show cursor coordinates and input-file offsets (see below) |
 | L | Toggle non-linear de-emphasis processing |
