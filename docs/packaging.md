@@ -11,20 +11,24 @@ Six packages, three per platform, all built from the same commit:
 | Package | Zipped | Contents |
 |---|---|---|
 | `museld-windows-x86_64.zip` | ~7 MB | `museld.exe`, `ac3rf-efm-decode.exe` |
-| `museld-windows-x86_64-video-export.zip` | ~57 MB | the same, plus FFmpeg for `--write` |
+| `museld-windows-x86_64-full.zip` | ~70 MB | the same, plus FFmpeg for `--write` and ONNX Runtime for `--ocr` |
 | `ac3rf-efm-decode-windows-x86_64.zip` | ~2 MB | `ac3rf-efm-decode.exe` alone |
 | `museld-macos-universal.zip` | ~10 MB | `museld`, `ac3rf-efm-decode` |
-| `museld-macos-universal-video-export.zip` | ~42 MB | the same, plus FFmpeg for `--write` |
+| `museld-macos-universal-full.zip` | ~55 MB | the same, plus FFmpeg for `--write` and ONNX Runtime for `--ocr` |
 | `ac3rf-efm-decode-macos-universal.zip` | ~1 MB | `ac3rf-efm-decode` alone |
+
+(The full-package sizes are estimates until a CI run confirms them.)
 
 Each is self-contained: it carries the libraries the programs need, so nothing has to be
 installed first. Only the graphics driver comes from the system.
 
-The video export split exists because FFmpeg dominates the size — on Windows it is 92 of
-the 100 DLLs museld would otherwise need, all to encode H.264 and AAC. `ac3rf-efm-decode`
-links neither FFmpeg, Vulkan nor GLFW, so it also gets a package of its own, which is what
-most people who only want the audio decoded need. Using `--write` in a build without
-FFmpeg fails with "FFMPEG is not available".
+The minimal/full split exists because FFmpeg and ONNX Runtime dominate the size — FFmpeg
+alone is 92 of the 100 DLLs the Windows museld would otherwise need, all to encode H.264
+and AAC. The minimal build turns both off (`-DUSE_LIBAV=OFF -DUSE_OCR=OFF`);
+`ac3rf-efm-decode` links neither of them nor Vulkan/GLFW, so it also gets a package of
+its own, which is what most people who only want the audio decoded need. Using `--write`
+in a minimal build fails with "FFMPEG is not available", and `--ocr` with "requires a
+build with -DUSE_OCR=ON".
 
 The macOS packages are universal and run natively on both Apple Silicon and Intel. They
 need macOS 15 or newer, which is what the Homebrew libraries they are built against

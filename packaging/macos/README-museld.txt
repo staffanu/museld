@@ -48,18 +48,21 @@ Keep the files together and run the programs from a terminal: museld looks for
 shaders/, fonts/ and vulkan/ next to itself. Run ./museld, not ./museld-bin —
 the latter will not find the graphics driver.
 
-Video file output
------------------
+Minimal and full downloads
+--------------------------
 
-museld can write what it decodes to a video file with --write, which needs
-FFmpeg. That is what the two downloads differ in:
+museld can write what it decodes to a video file with --write (needs FFmpeg)
+and OCR burned-in subtitles with --ocr (needs ONNX Runtime). That is what the
+two downloads differ in:
 
-    museld-macos-universal.zip               --write is not available
-    museld-macos-universal-video-export.zip  --write works (bundles FFmpeg)
+    museld-macos-universal.zip       --write and --ocr are not available
+    museld-macos-universal-full.zip  everything works (bundles FFmpeg and
+                                     ONNX Runtime)
 
-Everything else is identical. The FFmpeg libraries are most of the size of the
-larger download, so take the small one unless you want to write video files.
-Using --write in the small build fails with "FFMPEG is not available".
+Everything else is identical. Those libraries are most of the size of the
+larger download, so take the small one unless you want the features. Using
+--write in the small build fails with "FFMPEG is not available", and --ocr
+with "requires a build with -DUSE_OCR=ON".
 
 Requirements
 ------------

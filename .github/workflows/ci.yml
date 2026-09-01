@@ -30,9 +30,19 @@ jobs:
             libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
             catch2
 
+      # No Ubuntu package exists for ONNX Runtime (USE_OCR), so use the
+      # official release tarball.
+      - name: Install ONNX Runtime
+        run: |
+          curl -fsSL -o onnxruntime.tgz \
+            https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-1.22.0.tgz
+          tar -xzf onnxruntime.tgz
+          mv onnxruntime-linux-x64-1.22.0 "$HOME/onnxruntime"
+
       - name: Configure
         run: >
           cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+          -DCMAKE_PREFIX_PATH=$HOME/onnxruntime
           -S player -B build
 
       - name: Build
@@ -68,7 +78,10 @@ jobs:
               flac ffmpeg catch2
           run: |
             set -e
+            # USE_OCR=OFF: whether a prebuilt onnxruntime package is available
+            # in the quarterly pkg repo is not reliable enough for CI.
             cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
+              -DUSE_OCR=OFF \
               -S player -B build
             cmake --build build
             ctest --test-dir build --output-on-failure
@@ -87,7 +100,7 @@ jobs:
       - name: Install dependencies
         run: >
           brew install ninja glfw vulkan-headers vulkan-loader molten-vk shaderc
-          flac catch2 ffmpeg
+          flac catch2 ffmpeg onnxruntime
 
       - name: Configure
         run: >
@@ -132,16 +145,18 @@ jobs:
       - name: Install dependencies
         run: >-
           brew install ninja glfw vulkan-headers vulkan-loader molten-vk shaderc
-          flac ffmpeg
+          flac ffmpeg onnxruntime
 
-      - name: Build without video export
+      # Two package flavors: minimal (no FFmpeg video export, no OCR) and full
+      # (everything).
+      - name: Build minimal
         run: |
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DMUSELD_ARCH=${{ matrix.march }} -DUSE_LIBAV=OFF \
+            -DMUSELD_ARCH=${{ matrix.march }} -DUSE_LIBAV=OFF -DUSE_OCR=OFF \
             -S player -B build-lean
           cmake --build build-lean
 
-      - name: Build with video export
+      - name: Build full
         run: |
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DMUSELD_ARCH=${{ matrix.march }} \
@@ -155,7 +170,7 @@ jobs:
           out=stage/${{ matrix.arch }}
           mkdir -p "$out"
           "$stage" build-lean "$out/museld-macos" museld ac3rf-efm-decode
-          "$stage" build-full "$out/museld-macos-video-export" museld ac3rf-efm-decode
+          "$stage" build-full "$out/museld-macos-full" museld ac3rf-efm-decode
           "$stage" build-lean "$out/ac3rf-efm-decode-macos" ac3rf-efm-decode
 
       - name: Check the staged packages
@@ -201,10 +216,10 @@ jobs:
         run: |
           set -euo pipefail
           merge=packaging/macos/merge-universal.sh
-          for name in museld-macos museld-macos-video-export ac3rf-efm-decode-macos; do
+          for name in museld-macos museld-macos-full ac3rf-efm-decode-macos; do
             case "$name" in
               museld-macos)                  out=museld-macos-universal ;;
-              museld-macos-video-export)     out=museld-macos-universal-video-export ;;
+              museld-macos-full)             out=museld-macos-universal-full ;;
               ac3rf-efm-decode-macos)        out=ac3rf-efm-decode-macos-universal ;;
             esac
             "$merge" "stage/arm64/$name" "stage/x86_64/$name" "$out"
@@ -214,7 +229,7 @@ jobs:
       - name: Smoke test the packages
         run: |
           set -euo pipefail
-          for pkg in museld-macos-universal museld-macos-universal-video-export \
+          for pkg in museld-macos-universal museld-macos-universal-full \
                      ac3rf-efm-decode-macos-universal; do
             (packaging/macos/smoke-test.sh "$pkg" --universal)
           done
@@ -257,8 +272,10 @@ jobs:
           update: true
           # diffutils supplies the cmp that ldconv's round-trip test compares with
           install: git diffutils
+          # onnxruntime: USE_OCR defaults on and builds subocr-test even with
+          # BUILD_MUSE=OFF
           pacboy: >-
-            gcc:p cmake:p ninja:p pkgconf:p flac:p catch:p
+            gcc:p cmake:p ninja:p pkgconf:p flac:p catch:p onnxruntime:p
 
       # BUILD_MUSE=OFF until museld is ported to Windows.
       #
@@ -304,8 +321,9 @@ jobs:
   # runtime is still experimental, but the build has to keep working since the
   # published packages come from here.
   #
-  # Two builds: FFmpeg is over 90% of the bytes museld needs, so the video export
-  # it provides gets its own download rather than being forced on everyone.
+  # Two builds: FFmpeg and ONNX Runtime dominate the bytes museld needs, so the
+  # video export and subtitle OCR they provide go in a "full" download rather
+  # than being forced on everyone.
   windows-package:
     name: Windows MSYS2 museld + packages
     runs-on: windows-latest
@@ -323,7 +341,7 @@ jobs:
           update: true
           install: git zip
           pacboy: >-
-            gcc:p cmake:p ninja:p pkgconf:p flac:p ffmpeg:p
+            gcc:p cmake:p ninja:p pkgconf:p flac:p ffmpeg:p onnxruntime:p
             vulkan-headers:p vulkan-loader:p glfw:p shaderc:p
 
       # The default -march=native would target whatever CPU this runner happens
@@ -331,15 +349,17 @@ jobs:
       # published binaries. This does not cost the AVX filter paths: those are
       # compiled in regardless of -march and selected at runtime, so the floor
       # here only decides which CPUs can run the binary at all.
-      - name: Build without video export
+      # Two package flavors: minimal (no FFmpeg video export, no OCR) and full
+      # (everything).
+      - name: Build minimal
         run: |
           git config --global --add safe.directory '*'
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DMUSELD_ARCH=x86-64-v2 -DUSE_LIBAV=OFF \
+            -DMUSELD_ARCH=x86-64-v2 -DUSE_LIBAV=OFF -DUSE_OCR=OFF \
             -S player -B build-lean
           cmake --build build-lean
 
-      - name: Build with video export
+      - name: Build full
         run: |
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DMUSELD_ARCH=x86-64-v2 \
@@ -351,13 +371,13 @@ jobs:
           set -euo pipefail
           stage=packaging/windows/stage-package.sh
           "$stage" build-lean museld-windows-x86_64 museld.exe ac3rf-efm-decode.exe
-          "$stage" build-full museld-windows-x86_64-video-export museld.exe ac3rf-efm-decode.exe
+          "$stage" build-full museld-windows-x86_64-full museld.exe ac3rf-efm-decode.exe
           "$stage" build-lean ac3rf-efm-decode-windows-x86_64 ac3rf-efm-decode.exe
 
       - name: Smoke test the packages
         run: |
           set -euo pipefail
-          for pkg in museld-windows-x86_64 museld-windows-x86_64-video-export \
+          for pkg in museld-windows-x86_64 museld-windows-x86_64-full \
                      ac3rf-efm-decode-windows-x86_64; do
             (packaging/windows/smoke-test.sh "$pkg")
           done

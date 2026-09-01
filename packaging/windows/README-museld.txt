@@ -19,18 +19,21 @@ Keep the files together — museld.exe looks for shaders\ and fonts\ next to
 itself and will not start if they are missing. Unpack the whole folder
 somewhere and run the programs from a terminal (cmd.exe or PowerShell).
 
-Video file output
------------------
+Minimal and full downloads
+--------------------------
 
-museld can write what it decodes to a video file with --write, which needs
-FFmpeg. That is what the two downloads differ in:
+museld can write what it decodes to a video file with --write (needs FFmpeg)
+and OCR burned-in subtitles with --ocr (needs ONNX Runtime). That is what the
+two downloads differ in:
 
-    museld-windows-x86_64.zip               --write is not available
-    museld-windows-x86_64-video-export.zip  --write works (bundles FFmpeg)
+    museld-windows-x86_64.zip       --write and --ocr are not available
+    museld-windows-x86_64-full.zip  everything works (bundles FFmpeg and
+                                    ONNX Runtime)
 
-Everything else is identical. The FFmpeg libraries are most of the size of the
-larger download, so take the small one unless you want to write video files.
-Using --write in the small build fails with "FFMPEG is not available".
+Everything else is identical. Those libraries are most of the size of the
+larger download, so take the small one unless you want the features. Using
+--write in the small build fails with "FFMPEG is not available", and --ocr
+with "requires a build with -DUSE_OCR=ON".
 
 Requirements
 ------------

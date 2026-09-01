@@ -23,7 +23,7 @@ universal, running natively on both Apple Silicon and Intel, and need macOS 15 o
 | Download | Contains |
 |---|---|
 | `museld-windows-x86_64.zip`<br>`museld-macos-universal.zip` | The player and the decoder CLI. |
-| `museld-windows-x86_64-video-export.zip`<br>`museld-macos-universal-video-export.zip` | The same, plus FFmpeg so that `--write` works. Several times the size. |
+| `museld-windows-x86_64-full.zip`<br>`museld-macos-universal-full.zip` | The same, plus FFmpeg so that `--write` works and ONNX Runtime so that `--ocr` works. Several times the size. |
 | `ac3rf-efm-decode-windows-x86_64.zip`<br>`ac3rf-efm-decode-macos-universal.zip` | The decoder CLI on its own, if you don't want the player. |
 
 museld needs a GPU with Vulkan support and current graphics drivers; on macOS it reaches
