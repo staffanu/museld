@@ -76,12 +76,17 @@ private:
   Logger &m_log;
   musevk::VulkanManager &m_vulkan_manager;
 
+  std::shared_ptr<musevk::ComputeShader> m_pack_dropout_bits_algo;
   std::shared_ptr<musevk::ComputeShader> m_extend_dropouts_algo;
   std::shared_ptr<musevk::ComputeShader> m_copy_to_frame_algo;
   std::shared_ptr<musevk::ComputeShader> m_detect_color_burst_phase_algo;
   std::shared_ptr<musevk::ComputeShader> m_decode_single_field_algo;
   std::shared_ptr<musevk::ComputeShader> m_detect_motion_algo;
   std::shared_ptr<musevk::ComputeShader> m_combine_still_and_moving_algo;
+
+  // one bit per column of raw dropout flags, the intermediate between the
+  // pack and the extend shader (NTSC_TOTAL_HEIGHT rows of NTSC_DROPOUT_BIT_WORDS)
+  std::shared_ptr<musevk::VulkanBuffer> m_dropout_bits;
 
   // output from the single field decoder, one set per field parity so that
   // the previous field is still available for weaving in the combine

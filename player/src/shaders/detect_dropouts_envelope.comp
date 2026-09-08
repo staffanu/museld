@@ -7,8 +7,9 @@
 // level, so no absolute threshold or per-capture gain calibration is needed.
 //
 // It should be invoked with global invocation ids from 0 to dest_size - 1.
-// The analytic signal is indexed from source_offset; the destination from
-// dest_offset up to dest_offset + dest_size - 1.
+// The envelope buffers (from envelope_local.comp, one entry per raw sample)
+// are indexed from source_offset; the destination from dest_offset up to
+// dest_offset + dest_size - 1.
 
 #include "muse.h"
 
@@ -27,12 +28,12 @@ layout(push_constant) uniform PushConstants {
     uint deep_min_exceedances; // ... and the deep condition (0: confident on its own)
 };
 
-layout(set = 0, binding = 0) buffer readonly analytic_re_buffer {
-    float analytic_re[];
+layout(set = 0, binding = 0) buffer readonly local_envelope_buffer {
+    float local_envelope_in[];
 };
 
-layout(set = 0, binding = 1) buffer readonly analytic_im_buffer {
-    float analytic_im[];
+layout(set = 0, binding = 1) buffer readonly envelope_buffer {
+    float envelope[];
 };
 
 layout(set = 0, binding = 2) buffer writeonly dest_buffer {
@@ -45,17 +46,13 @@ layout(set = 0, binding = 3) buffer readonly demodulated_buffer {
 
 float envelope_squared(int i) {
     i = clamp(i, 0, int(source_offset + dest_size * video_decimation_rate) - 1);
-    float re = analytic_re[i];
-    float im = analytic_im[i];
-    return re * re + im * im;
+    return envelope[i];
 }
 
 // local envelope over ±4 raw samples around i
 float local_envelope(int i) {
-    float sum = 0.0;
-    for (int k = -4; k <= 4; k++)
-        sum += envelope_squared(i + k);
-    return sum / 9.0;
+    i = clamp(i, 0, int(source_offset + dest_size * video_decimation_rate) - 1);
+    return local_envelope_in[i];
 }
 
 void main() {

@@ -46,8 +46,14 @@ NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk:
   m_image_U_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_Y_BUF_WIDTH / 2, NTSC_FIELD_HEIGHT), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_image_V_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_Y_BUF_WIDTH / 2, NTSC_FIELD_HEIGHT), 2,
-                                          vk::BufferUsageFlagBits::eStorageBuffer, eHostRead))
+                                          vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
+  m_dropout_bits(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_DROPOUT_BIT_WORDS, NTSC_TOTAL_HEIGHT), sizeof(uint32_t),
+                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostNone))
 {
+  m_pack_dropout_bits_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
+          "ntsc_pack_dropout_bits",
+          {eBuffer, eBuffer}, sizeof(uint32_t) * 0,
+          VulkanUtil::loadSpirv(executable_dir, "ntsc_pack_dropout_bits.comp"), Size(NTSC_DROPOUT_BIT_WORDS, NTSC_TOTAL_HEIGHT)));
   m_extend_dropouts_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "ntsc_extend_dropouts",
           {eBuffer, eBuffer}, sizeof(uint32_t) * 0,
@@ -81,7 +87,9 @@ std::shared_ptr<musevk::VulkanBuffer> NtscShaders::createVulkanBuffer(unsigned i
 
 void NtscShaders::extendDropouts(musevk::CommandBuffer &sq, std::shared_ptr<musevk::VulkanBuffer> const &dropout_input,
   std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane) {
-  m_extend_dropouts_algo->updateBufferDescriptorsInSet(0, {dropout_input, dropout_plane});
+  m_pack_dropout_bits_algo->updateBufferDescriptorsInSet(0, {dropout_input, m_dropout_bits});
+  sq.enqueueComputeShader<uint32_t>(m_pack_dropout_bits_algo, {});
+  m_extend_dropouts_algo->updateBufferDescriptorsInSet(0, {m_dropout_bits, dropout_plane});
   sq.enqueueComputeShader<uint32_t>(m_extend_dropouts_algo, {});
 }
 
