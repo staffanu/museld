@@ -149,6 +149,15 @@ void NtscRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> dropout_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(dropout_buffer_size), sizeof(uint8_t), buffer_usage_flags, HostAccess::eHostNone);
 
+    // Squared envelope of the analytic signal and its 9-sample box average, one
+    // entry per analytic sample, recomputed in full for every block (the
+    // recycled sample at index 0 included) so nothing needs recycling here.
+    shared_ptr<VulkanBuffer> envelope_buffer = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+
+    shared_ptr<VulkanBuffer> local_envelope_buffer = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+
 
     // Create shaders
     shared_ptr<ComputeShader> input_fir_filter_shader = unique_ptr<ComputeShader>(
@@ -177,10 +186,15 @@ void NtscRfDemodulator::demodulate() {
                               {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer}, 7 * sizeof(float),
                               VulkanUtil::loadSpirv(m_executable_dir, "fm_quadrature.comp"), Size(c_sample_block_size)));
 
+    shared_ptr<ComputeShader> envelope_local_shader = unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager, "envelope_local",
+                              {analytic_buffer_re, analytic_buffer_im, envelope_buffer, local_envelope_buffer}, sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "envelope_local.comp"), Size(analytic_buffer_size)));
+
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager,
                               "detect_dropouts_envelope",
-                              {analytic_buffer_re, analytic_buffer_im, dropout_buffer, lowpass_in_buffer}, 12 * sizeof(uint32_t),
+                              {local_envelope_buffer, envelope_buffer, dropout_buffer, lowpass_in_buffer}, 12 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts_envelope.comp"), Size(NtscRfDemodulatorConstants::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
@@ -378,6 +392,10 @@ void NtscRfDemodulator::demodulate() {
                 fir_filter_shader,
                 {(uint32_t)decimated_lowpass_filter_def.size(), c_video_block_size, /* out offset */ 0, /* decimation */ 1}, 1);
 
+        // The envelope and its local average per raw sample, read by the dropout
+        // detector at five positions per output sample
+        command_buffer->enqueueComputeShader<uint32_t>(envelope_local_shader, {(uint32_t)analytic_buffer_size});
+
         // Detect dropouts from the RF envelope, against two references: the
         // same position on the neighbouring lines (brightness-matched, since
         // the disc MTF lowers the envelope at the bright end of the deviation
@@ -391,9 +409,9 @@ void NtscRfDemodulator::demodulate() {
         // illegally on most samples (The Abyss title cards vs a repeating
         // per-revolution scratch on the same capture: text flags fell from
         // ~84k to ~0.3k painted pixels over 10 s with the scratch still
-        // flagged on every pass).  The analytic signal is written with
-        // offset 1 into its buffers, and the flags are delayed like the
-        // video to compensate the decimating lowpass.
+        // flagged on every pass).  The analytic signal, and so the envelope
+        // buffers, are written with offset 1, and the flags are delayed like
+        // the video to compensate the decimating lowpass.
         const uint32_t line_period = (uint32_t)lround(m_sample_frequency / (30000.0 / 1001.0 * 525.0));
         const float slew_threshold = 1.0f * 40e6f / m_sample_frequency; // legal slew scales with the sample interval
         // 32 taps spanning ~205 us, so a maximum-length dropout cannot drag the

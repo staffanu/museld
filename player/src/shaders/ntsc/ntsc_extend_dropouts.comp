@@ -7,31 +7,48 @@
 // interval is never flagged: concealment there would corrupt the white flag
 // and the picture number codes.
 //
+// The flags arrive packed one bit per column by ntsc_pack_dropout_bits.comp
+// (which also masks out the columns outside the active picture), so each
+// pixel's 47-column neighbourhood is at most four words, and the run
+// statistics are bit counts and bit scans rather than one byte load per
+// neighbour -- the byte version cost ~70 loads on every clean pixel.
+//
 // This shader should be invoked with global invocation ids ranging from
 // (0, 0) to (NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT).
 
 #include "muse.h"
 
-layout(set = 0, binding = 0) buffer readonly dropout_in_buffer {
-    uint8_t dropout_in[][NTSC_TOTAL_WIDTH];
+layout(set = 0, binding = 0) buffer readonly dropout_bits_buffer {
+    uint dropout_bits[][NTSC_DROPOUT_BIT_WORDS];
 };
 
 layout(set = 0, binding = 1) buffer writeonly dropout_out_buffer {
     uint8_t dropout_out[][NTSC_TOTAL_WIDTH];
 };
 
-// Flags outside the active picture columns are ignored: the detector also
-// fires around sync and burst, and extending those runs would leak into the
-// picture edges.
-bool raw_flag(uint row, int c) {
-    if (c < NTSC_FIELD_START_X || c >= NTSC_FIELD_START_X + NTSC_Y_BUF_WIDTH)
-        return false;
-    return dropout_in[row][c] != 0;
+uint word(uint row, int w) {
+    return (w < 0 || w >= NTSC_DROPOUT_BIT_WORDS) ? 0u : dropout_bits[row][w];
+}
+
+uint pick(uvec4 words, int k) {
+    return k == 0 ? words.x : k == 1 ? words.y : k == 2 ? words.z : k == 3 ? words.w : 0u;
+}
+
+// The flags of the n (1..32) columns from column first upwards, bit k for
+// column first + k.  words holds the four consecutive words from base_word.
+uint window(uvec4 words, int base_word, int first, int n) {
+    int off = first - base_word * 32;
+    int k = off >> 5;
+    int sh = off & 31;
+    uint v = pick(words, k) >> sh;
+    if (sh != 0)
+        v |= pick(words, k + 1) << (32 - sh);
+    return n == 32 ? v : v & ((1u << n) - 1u);
 }
 
 void main() {
     uint row = gl_GlobalInvocationID.y;
-    uint col = gl_GlobalInvocationID.x;
+    int col = int(gl_GlobalInvocationID.x);
 
     if (row >= NTSC_TOTAL_HEIGHT || col >= NTSC_TOTAL_WIDTH)
         return;
@@ -41,38 +58,36 @@ void main() {
         return;
     }
 
+    // The neighbourhood examined below spans columns col - 34 to col + 12,
+    // which starts in base_word and ends at most three words later.  The
+    // arithmetic shift rounds towards minus infinity, so columns left of
+    // the row map to negative words, which read as zero.
+    int base_word = (col - 34) >> 5;
+    uvec4 words = uvec4(word(row, base_word), word(row, base_word + 1),
+                        word(row, base_word + 2), word(row, base_word + 3));
+
     // The plane distinguishes core detections (1) from the precautionary
     // extension around them (2): concealment repairs both but only refuses
     // donor lines carrying a core detection -- refusing the soft skirts too
     // was observed to push donors out of reach and leave dropouts uncorrected.
 
     // core: fixed pad around a detection
-    bool core = false;
-    for (int i = -4; i <= 4 && !core; i++)
-        core = raw_flag(row, int(col) + i);
+    bool core = window(words, base_word, col - 4, 9) != 0u;
 
     // bridge: flags on both sides within a short gap
     bool soft = false;
-    if (!core) {
-        bool left = false;
-        bool right = false;
-        for (int i = 1; i <= 12; i++) {
-            left = left || raw_flag(row, int(col) - i);
-            right = right || raw_flag(row, int(col) + i);
-        }
-        soft = left && right;
-    }
+    if (!core)
+        soft = window(words, base_word, col - 12, 12) != 0u && window(words, base_word, col + 1, 12) != 0u;
 
     // proportional trailing extension: the more flagged samples just before
     // this one, the further the run is allowed to reach (capped)
     if (!core && !soft) {
-        int count = 0;
-        int last = 1000;
-        for (int i = 1; i <= 34; i++)
-            if (raw_flag(row, int(col) - i)) {
-                count++;
-                last = min(last, i);
-            }
+        // near: columns col - 32 .. col - 1, bit j at distance 32 - j;
+        // far: columns col - 34 and col - 33, bit j at distance 34 - j
+        uint near = window(words, base_word, col - 32, 32);
+        uint far = window(words, base_word, col - 34, 2);
+        int count = bitCount(near) + bitCount(far);
+        int last = near != 0u ? 32 - findMSB(near) : far != 0u ? 34 - findMSB(far) : 1000;
         soft = last <= min(count, 24);
     }
 

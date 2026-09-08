@@ -1,0 +1,36 @@
+#version 450
+
+// Packs the raw per-sample dropout flags of a frame into one bit per column,
+// NTSC_DROPOUT_BIT_WORDS words per row, for ntsc_extend_dropouts.comp.  Flags
+// outside the active picture columns are dropped here: the detector also
+// fires around sync and burst, and extending those runs would leak into the
+// picture edges.
+//
+// This shader should be invoked with global invocation ids ranging from
+// (0, 0) to (NTSC_DROPOUT_BIT_WORDS, NTSC_TOTAL_HEIGHT).
+
+#include "muse.h"
+
+layout(set = 0, binding = 0) buffer readonly dropout_in_buffer {
+    uint8_t dropout_in[][NTSC_TOTAL_WIDTH];
+};
+
+layout(set = 0, binding = 1) buffer writeonly dropout_bits_buffer {
+    uint dropout_bits[][NTSC_DROPOUT_BIT_WORDS];
+};
+
+void main() {
+    uint word = gl_GlobalInvocationID.x;
+    uint row = gl_GlobalInvocationID.y;
+
+    if (word >= NTSC_DROPOUT_BIT_WORDS || row >= NTSC_TOTAL_HEIGHT)
+        return;
+
+    uint bits = 0u;
+    for (uint b = 0; b < 32; b++) {
+        uint col = word * 32 + b;
+        if (col >= NTSC_FIELD_START_X && col < NTSC_FIELD_START_X + NTSC_Y_BUF_WIDTH && dropout_in[row][col] != 0)
+            bits |= 1u << b;
+    }
+    dropout_bits[row][word] = bits;
+}
