@@ -89,15 +89,6 @@ void MuseRfDemodulator::demodulate() {
     std::reverse(rrc_filter_def.begin(), rrc_filter_def.end()); // symmetric, but the shader correlates
     const int rrc_filter_size = (int)rrc_filter_def.size();
 
-    // Each shader is specialized to the longest filter and largest decimation it will be
-    // dispatched with, which is what its shared memory is then sized from.  input_fir_filter
-    // runs the band-pass twice without decimating; fir_filter runs the low-pass decimating by
-    // two and then the root raised cosine at the decimated rate.
-    const uint32_t input_fir_max_filter_size = bandpass_filter_size;
-    const uint32_t input_fir_max_decimation = 1;
-    const uint32_t fir_max_filter_size = std::max(lowpass_filter_size, rrc_filter_size);
-    const uint32_t fir_max_decimation = MuseDemodulatedBlock::c_video_decimation_rate;
-
     shared_ptr<VulkanBuffer> rrc_filter =
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(rrc_filter_size), rrc_filter_def);
 
@@ -137,37 +128,61 @@ void MuseRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> dropout_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(c_dropout_buffer_size), sizeof(uint8_t), buffer_usage_flags, HostAccess::eHostNone);
 
-    // Create shaders
-    shared_ptr<ComputeShader> input_fir_filter_shader = unique_ptr<ComputeShader>(
-            new ComputeShader(m_vulkan_manager, "input_fir_filter",
-                              {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "input_fir_filter.comp"), Size(0), 2,
-                              {input_fir_max_filter_size, input_fir_max_decimation}));
+    // Squared envelope of the analytic signal and its 9-sample box average, one
+    // entry per analytic sample, recomputed in full for every block (the
+    // recycled sample at index 0 included) so nothing needs recycling here.
+    shared_ptr<VulkanBuffer> envelope_buffer = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
-    input_fir_filter_shader->updateBufferDescriptorsInSet(0, {bandpass_filter_re, input_buffer, analytic_buffer_re});
-    input_fir_filter_shader->updateBufferDescriptorsInSet(1, {bandpass_filter_im, input_buffer, analytic_buffer_im});
+    shared_ptr<VulkanBuffer> local_envelope_buffer = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
-    shared_ptr<ComputeShader> fir_filter_shader = unique_ptr<ComputeShader>(
-            new ComputeShader(m_vulkan_manager, "fir_filter",
-                              {eBuffer, eBuffer, eBuffer}, 4 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"), Size(0), 2,
-                              {fir_max_filter_size, fir_max_decimation}));
+    // Create shaders.  Each FIR pipeline is specialized to its exact tap count and decimation
+    // (fir_filter.comp), so the band-pass, the decimating low-pass and the root raised cosine
+    // are three pipelines of the same shader.
+    constexpr uint32_t c_fir_outputs_per_invocation = 2;
+    auto fir_dispatch_size = [](uint32_t output_size) {
+        return Size((output_size + c_fir_outputs_per_invocation - 1) / c_fir_outputs_per_invocation);
+    };
 
-    fir_filter_shader->updateBufferDescriptorsInSet(0, {lowpass_filter, lowpass_in_buffer, rrc_in_buffer});
+    shared_ptr<ComputeShader> bandpass_fir_shader = unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager, "bandpass_fir",
+                              {eBuffer, eBuffer, eBuffer}, 2 * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"),
+                              fir_dispatch_size(MuseDemodulatedBlock::c_sample_block_size), 2,
+                              {(uint32_t)bandpass_filter_size, /* decimation */ 1, c_fir_outputs_per_invocation}));
 
-    checkFirShaderFits("input_fir_filter.comp", *input_fir_filter_shader,
-                       input_fir_max_filter_size, input_fir_max_decimation);
-    checkFirShaderFits("fir_filter.comp", *fir_filter_shader, fir_max_filter_size, fir_max_decimation);
+    bandpass_fir_shader->updateBufferDescriptorsInSet(0, {bandpass_filter_re, input_buffer, analytic_buffer_re});
+    bandpass_fir_shader->updateBufferDescriptorsInSet(1, {bandpass_filter_im, input_buffer, analytic_buffer_im});
+
+    shared_ptr<ComputeShader> lowpass_fir_shader = unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager, "lowpass_fir",
+                              {lowpass_filter, lowpass_in_buffer, rrc_in_buffer}, 2 * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"),
+                              fir_dispatch_size(MuseDemodulatedBlock::c_video_block_size), 1,
+                              {(uint32_t)lowpass_filter_size, MuseDemodulatedBlock::c_video_decimation_rate, c_fir_outputs_per_invocation}));
+
+    shared_ptr<ComputeShader> rrc_fir_shader = unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager, "rrc_fir",
+                              {eBuffer, eBuffer, eBuffer}, 2 * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"),
+                              fir_dispatch_size(MuseDemodulatedBlock::c_video_block_size), 1,
+                              {(uint32_t)rrc_filter_size, /* decimation */ 1, c_fir_outputs_per_invocation}));
 
     shared_ptr<ComputeShader> fm_quadrature_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager, "fm_quadrature",
                               {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer}, 7 * sizeof(float),
                               VulkanUtil::loadSpirv(m_executable_dir, "fm_quadrature.comp"), Size(MuseDemodulatedBlock::c_sample_block_size)));
 
+    shared_ptr<ComputeShader> envelope_local_shader = unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager, "envelope_local",
+                              {analytic_buffer_re, analytic_buffer_im, envelope_buffer, local_envelope_buffer}, sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "envelope_local.comp"), Size(analytic_buffer_size)));
+
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager,
                               "detect_dropouts_envelope",
-                              {analytic_buffer_re, analytic_buffer_im, dropout_buffer, lowpass_in_buffer}, 12 * sizeof(uint32_t),
+                              {local_envelope_buffer, envelope_buffer, dropout_buffer, lowpass_in_buffer}, 12 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts_envelope.comp"), Size(MuseDemodulatedBlock::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
@@ -302,13 +317,8 @@ void MuseRfDemodulator::demodulate() {
         input_buffer->synchronizeHostWrites(*command_buffer);
 
         // Run the input signal through the bandpass filter that also converts the signal to an analytic signal
-        input_fir_filter_shader->updateWorkgroup(Size(MuseDemodulatedBlock::c_sample_block_size));
-        command_buffer->enqueueComputeShader<uint32_t>(
-                input_fir_filter_shader,
-                {(uint32_t)bandpass_filter_size, MuseDemodulatedBlock::c_sample_block_size, /* out offset */ 1, /* decimation */ 1}, 0);
-        command_buffer->enqueueComputeShader<uint32_t>(
-                input_fir_filter_shader,
-                {(uint32_t)bandpass_filter_size, MuseDemodulatedBlock::c_sample_block_size, /* out offset */ 1, /* decimation */ 1}, 1);
+        command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {MuseDemodulatedBlock::c_sample_block_size, /* out offset */ 1}, 0);
+        command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {MuseDemodulatedBlock::c_sample_block_size, /* out offset */ 1}, 1);
 
         // Demodulate the analytic signal, and scale to the standard MUSE range
         // +/- 1 corresponds to the white/black level, which is 128+/-112 (16, 240) in MUSE
@@ -318,18 +328,16 @@ void MuseRfDemodulator::demodulate() {
                                                      m_sample_frequency, c_frequency_deviation, c_center_frequency, /* scale */ 112.f, /* add */ 128.f});
 
         // Lowpass filter the demodulated signal, and down-sample (decimate by factor 2) before rrc filtering
-        fir_filter_shader->updateWorkgroup(Size(MuseDemodulatedBlock::c_video_block_size));
         command_buffer->enqueueComputeShader<uint32_t>(
-                fir_filter_shader,
-                {(uint32_t)lowpass_filter_size, MuseDemodulatedBlock::c_video_block_size,
-                 /* out offset */ (uint32_t)rrc_filter_size - 1, MuseDemodulatedBlock::c_video_decimation_rate}, 0);
+                lowpass_fir_shader, {MuseDemodulatedBlock::c_video_block_size, /* out offset */ (uint32_t)rrc_filter_size - 1});
 
         // Run the down-sampled signal through the root raised cosine pulse-shaping filter and store in the output block
-        fir_filter_shader->updateBufferDescriptorsInSet(1, {rrc_filter, rrc_in_buffer, block->video_data});
-        command_buffer->enqueueComputeShader<uint32_t>(
-                fir_filter_shader,
-                {(uint32_t)rrc_filter_size, MuseDemodulatedBlock::c_video_block_size,
-                 /* out offset */ 0, /* decimation */ 1}, 1);
+        rrc_fir_shader->updateBufferDescriptorsInSet(0, {rrc_filter, rrc_in_buffer, block->video_data});
+        command_buffer->enqueueComputeShader<uint32_t>(rrc_fir_shader, {MuseDemodulatedBlock::c_video_block_size, /* out offset */ 0});
+
+        // The envelope and its local average per raw sample, read by the dropout
+        // detector at five positions per output sample
+        command_buffer->enqueueComputeShader<uint32_t>(envelope_local_shader, {(uint32_t)analytic_buffer_size});
 
         // Detect dropouts from the RF envelope, against two references: the same
         // position on the neighbouring lines (brightness-matched, since the disc
