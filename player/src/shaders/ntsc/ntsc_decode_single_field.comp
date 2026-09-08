@@ -75,6 +75,13 @@ layout(set = 0, binding = 13) buffer readonly next_dropout_buffer {
     uint8_t next_dropout[][NTSC_TOTAL_WIDTH];
 };
 
+// Per-column chroma estimates from ntsc_chroma_taps.comp: (spatial comb,
+// pure temporal, motion-gated temporal, unused), field-row indexed, column
+// x holding frame column x + NTSC_FIELD_START_X - NTSC_CHROMA_TAP_HALO
+layout(set = 0, binding = 14) buffer readonly chroma_taps_buffer {
+    f16vec4 chroma_taps[][NTSC_CHROMA_TAPS_WIDTH];
+};
+
 float16_t cosine_lut[] = { 1.hf, 0.hf, -1.hf, 0.hf };
 float16_t sine_lut[] = { 0.hf, 1.hf, 0.hf, -1.hf };
 
@@ -96,89 +103,21 @@ const float16_t chroma_lowpass[19] = float16_t[](
     0.14079925hf, 0.11698703hf, 0.08466937hf, 0.05192392hf, 0.02546721hf,
     0.00857601hf, 0.00063727hf, -0.00165572hf, -0.00218987hf);
 
-// 3-line comb Y/C separation: the same-field adjacent lines are 180 degrees
-// apart in subcarrier phase.  It beat 1D notch/bandpass separation clearly in
-// an A/B comparison (both halves of the picture, three captures): both its Y
-// and C paths carry about 4 dB less noise, at the price of some vertical
-// resolution.
-float16_t chroma_sample(uint frame_line, uint next_line, uint fcol) {
-    return -0.25hf * input_frame[frame_line - 1][fcol]
-           + 0.5hf * input_frame[frame_line][fcol]
-           - 0.25hf * input_frame[next_line][fcol];
-}
-
 float16_t comb_luma(uint frame_line, uint next_line, uint frame_col) {
     return 0.25hf * input_frame[frame_line - 1][frame_col]
            + 0.5hf * input_frame[frame_line][frame_col]
            + 0.25hf * input_frame[next_line][frame_col];
 }
 
-// Comb and chroma taps on the neighbour frames, for temporal dropout
-// concealment: a still neighbour's same pixel is a far better donor than
-// the surrounding lines.  The donor's chroma is demodulated against its own
-// frame's burst reference, which absorbs the frame-to-frame subcarrier
-// inversion and the sampling phase jitter in one step.
-float16_t chroma_sample_prev(uint fl, uint nl, uint fc) {
-    return -0.25hf * prev_frame[fl - 1][fc] + 0.5hf * prev_frame[fl][fc] - 0.25hf * prev_frame[nl][fc];
-}
-
 float16_t comb_luma_prev(uint fl, uint nl, uint fc) {
     return 0.25hf * prev_frame[fl - 1][fc] + 0.5hf * prev_frame[fl][fc] + 0.25hf * prev_frame[nl][fc];
-}
-
-float16_t chroma_sample_next(uint fl, uint nl, uint fc) {
-    return -0.25hf * next_frame[fl - 1][fc] + 0.5hf * next_frame[fl][fc] - 0.25hf * next_frame[nl][fc];
 }
 
 float16_t comb_luma_next(uint fl, uint nl, uint fc) {
     return 0.25hf * next_frame[fl - 1][fc] + 0.5hf * next_frame[fl][fc] + 0.25hf * next_frame[nl][fc];
 }
 
-// Sampling phase correction for the temporal pairs: the DPLL grid jitters a
-// few degrees of subcarrier line to line (the sync loop must stay wide to
-// track player wow, so this floor cannot be tuned away), and the pair
-// difference (f0 - fneighbour)/2 comes out as the chroma rotated by half the
-// lines' phase offset.  The offset is measured exactly by the two lines' own
-// colour bursts: e^(-j delta) = -b_n conj(b_0) / |...|, and the estimate is
-// de-rotated by delta/2 using the one-sample-shift quadrature, which is
-// exact at fsc on the 4 fsc grid.  Returns (cos, sin) of delta/2.
-f16vec2 pair_rotation(f16vec2 bn, f16vec2 b0) {
-    float rx = float(bn.x) * float(b0.x) + float(bn.y) * float(b0.y);
-    float ry = float(bn.y) * float(b0.x) - float(bn.x) * float(b0.y);
-    float m = sqrt(rx * rx + ry * ry);
-    if (m < 1e-4)
-        return f16vec2(1.hf, 0.hf); // no usable burst on one of the lines
-    float cd = -rx / m;
-    float sd = ry / m;
-    float ch = sqrt(max(0.5 * (1.0 + cd), 0.0));
-    float sh = (sd >= 0.0 ? 1.0 : -1.0) * sqrt(max(0.5 * (1.0 - cd), 0.0));
-    return f16vec2(float16_t(ch), float16_t(sh));
-}
-
-// Interpolate two rotations: the grid phase is continuous in scan time, so
-// between this line's burst and the next line's burst the phase offset
-// drifts linearly, and the correction at a column is the interpolation of
-// the two measurements.  Without it the correction is exact at the burst and
-// decays across the line (measured: half the artifact left at the far edge).
-f16vec2 lerp_rotation(f16vec2 a, f16vec2 b, float t) {
-    vec2 v = mix(vec2(a), vec2(b), t);
-    float l = max(length(v), 1e-4);
-    return f16vec2(v / l);
-}
-
-float16_t rotated_prev_pair(uint fl, uint fc, f16vec2 r) {
-    float16_t c0 = 0.5hf * (input_frame[fl][fc] - prev_frame[fl][fc]);
-    float16_t cm = 0.5hf * (input_frame[fl][fc - 1] - prev_frame[fl][fc - 1]);
-    float16_t cp = 0.5hf * (input_frame[fl][fc + 1] - prev_frame[fl][fc + 1]);
-    return c0 * r.x + 0.5hf * (cm - cp) * r.y;
-}
-
-float16_t rotated_next_pair(uint fl, uint fc, f16vec2 r) {
-    float16_t c0 = 0.5hf * (input_frame[fl][fc] - next_frame[fl][fc]);
-    float16_t cm = 0.5hf * (input_frame[fl][fc - 1] - next_frame[fl][fc - 1]);
-    float16_t cp = 0.5hf * (input_frame[fl][fc + 1] - next_frame[fl][fc + 1]);
-    return c0 * r.x + 0.5hf * (cm - cp) * r.y;
-}
+#include "ntsc/ntsc_comb_taps.h"
 
 // The absolute burst reference drifts across the line for the same reason
 // the pair rotations do, so interpolate it per column between this line's
@@ -338,11 +277,6 @@ void main() {
         burst_ref = donor < 0 ? interpolated_burst(prev_phase_data[frame_line], prev_phase_data[next_line], t_burst)
                               : interpolated_burst(next_phase_data[frame_line], next_phase_data[next_line], t_burst);
     } else if (temporal) {
-        f16vec2 rot_p0 = pair_rotation(prev_phase_data[frame_line], phase_data[frame_line]);
-        f16vec2 rot_n0 = pair_rotation(next_phase_data[frame_line], phase_data[frame_line]);
-        uint nl = row + 1 < NTSC_FIELD_HEIGHT ? frame_line + 1 : frame_line;
-        f16vec2 rot_p1 = pair_rotation(prev_phase_data[nl], phase_data[nl]);
-        f16vec2 rot_n1 = pair_rotation(next_phase_data[nl], phase_data[nl]);
         // 3D comb: the subcarrier inverts between adjacent frames, so for
         // still content the temporal pair differences are pure modulated
         // chroma, with no vertical resolution cost and full-bandwidth luma.
@@ -353,20 +287,15 @@ void main() {
         // masks answer whether temporal data is safe, the selector whether
         // it is worth anything -- feeding it the gated blend would let a
         // half-raised mask erase the disagreement it needs to see.
+        // All three estimates are properties of the column, not of this
+        // pixel, so ntsc_chroma_taps.comp evaluates them once per column
+        // (this window used to recompute each of them 19 times).
         float16_t cs_arr[19], ct_arr[19], pure_arr[19];
         for (int n = 0; n < 19; n++) {
-            uint fc = uint(int(frame_col) + n - 9);
-            cs_arr[n] = chroma_sample(frame_line, next_line, fc);
-            float t = clamp((float(fc) - 94.0) / 910.0, 0.0, 1.0); // burst sits at ~column 94
-            float16_t rp = rotated_prev_pair(frame_line, fc, lerp_rotation(rot_p0, rot_p1, t));
-            float16_t rn = rotated_next_pair(frame_line, fc, lerp_rotation(rot_n0, rot_n1, t));
-            pure_arr[n] = 0.5hf * (rp + rn);
-            uint mc = uint(clamp(int(fc) - NTSC_FIELD_START_X, 0, NTSC_Y_BUF_WIDTH - 1));
-            float16_t wp = 1.hf - past_motion[mask_row][mc];
-            float16_t wf = 1.hf - future_motion[mask_row][mc];
-            float16_t sm = max(wp, wf);
-            ct_arr[n] = sm <= 0.hf ? cs_arr[n]
-                      : mix(cs_arr[n], (wp * rp + wf * rn) / (wp + wf), sm);
+            f16vec4 taps = chroma_taps[row][col + n];
+            cs_arr[n] = taps.x;
+            pure_arr[n] = taps.y;
+            ct_arr[n] = taps.z;
         }
         float16_t w_t = temporal_weight(cs_arr, pure_arr);
         for (int n = 0; n < 19; n++)
@@ -398,6 +327,9 @@ void main() {
         float16_t ct_band = 0.5hf * ct_arr[9] - 0.25hf * (ct_arr[7] + ct_arr[11]);
         float16_t f0 = input_frame[frame_line][frame_col];
         Y = mix(y_avg, f0 - ct_band, w_t);
+    } else if (!rescued) {
+        for (int n = 0; n < 19; n++)
+            c_src[n] = chroma_taps[row][col + n].x;
     } else {
         for (int n = 0; n < 19; n++)
             c_src[n] = chroma_sample(frame_line, next_line, uint(int(frame_col) + n - 9));

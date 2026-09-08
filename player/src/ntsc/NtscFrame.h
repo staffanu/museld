@@ -20,7 +20,7 @@ public:
     // Robust noise sigmas measured on the flat reference regions of the raw
     // input frame, in the reader's voltage units (0.0 = sync tip, 0.3 =
     // blanking, 1.0 = white).  Measured before the frame-domain de-emphasis
-    // (ntsc_copy_to_frame.comp), i.e. on the raw demodulated baseband.
+    // (ntsc_deemphasis.comp), i.e. on the raw demodulated baseband.
     struct NoiseEstimate {
         float sigma_blanking; // back porch windows of the picture lines
         float sigma_sync;     // sync tip windows

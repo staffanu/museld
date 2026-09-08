@@ -249,7 +249,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
             if (m_noise_psd_windows > 0) {
                 // Band-limit to the 4.2 MHz System M video bandwidth, apply the
                 // frame-domain de-emphasis response (|D|² of the bilinear
-                // transform in ntsc_copy_to_frame.comp), and weight with the
+                // transform in ntsc_deemphasis.comp), and weight with the
                 // Rec. 567 unified network (BT.1439 Annex 2 §3: τ = 245 ns,
                 // a = 4.5).  IEC 60857 12.2.2 requires ≥ 30 dB unweighted at
                 // the video output, i.e. the after-de-emphasis figure.
