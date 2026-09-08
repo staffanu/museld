@@ -93,7 +93,7 @@ void NtscRfDemodulator::demodulate() {
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(lowpass_filter_def.size()), lowpass_filter_def);
 
     // FIR cleanup lowpass at the decimated rate.  The video de-emphasis is NOT
-    // applied here: it lives in the frame domain (ntsc_copy_to_frame.comp),
+    // applied here: it lives in the frame domain (ntsc_deemphasis.comp),
     // where the line-locked 4 fsc grid makes its coefficients independent of
     // the capture sample rate.
     const float decimated_frequency = m_sample_frequency / c_video_decimation_rate;

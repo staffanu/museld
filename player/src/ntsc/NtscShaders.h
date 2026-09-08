@@ -78,7 +78,9 @@ private:
 
   std::shared_ptr<musevk::ComputeShader> m_pack_dropout_bits_algo;
   std::shared_ptr<musevk::ComputeShader> m_extend_dropouts_algo;
-  std::shared_ptr<musevk::ComputeShader> m_copy_to_frame_algo;
+  std::shared_ptr<musevk::ComputeShader> m_conceal_composite_algo;
+  std::shared_ptr<musevk::ComputeShader> m_deemphasis_algo;
+  std::shared_ptr<musevk::ComputeShader> m_chroma_taps_algo;
   std::shared_ptr<musevk::ComputeShader> m_detect_color_burst_phase_algo;
   std::shared_ptr<musevk::ComputeShader> m_decode_single_field_algo;
   std::shared_ptr<musevk::ComputeShader> m_detect_motion_algo;
@@ -87,6 +89,15 @@ private:
   // one bit per column of raw dropout flags, the intermediate between the
   // pack and the extend shader (NTSC_TOTAL_HEIGHT rows of NTSC_DROPOUT_BIT_WORDS)
   std::shared_ptr<musevk::VulkanBuffer> m_dropout_bits;
+
+  // the dropout-concealed raw composite, between the conceal and the
+  // de-emphasis shader (NTSC_TOTAL_HEIGHT rows of NTSC_TOTAL_WIDTH floats)
+  std::shared_ptr<musevk::VulkanBuffer> m_concealed_composite;
+
+  // per-column chroma estimates for the field being decoded, between the
+  // chroma taps and the single field shader (NTSC_FIELD_HEIGHT rows of
+  // NTSC_CHROMA_TAPS_WIDTH f16vec4)
+  std::shared_ptr<musevk::VulkanBuffer> m_chroma_taps;
 
   // output from the single field decoder, one set per field parity so that
   // the previous field is still available for weaving in the combine

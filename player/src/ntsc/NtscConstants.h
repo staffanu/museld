@@ -11,5 +11,7 @@
 
 #define NTSC_FIELD_HEIGHT 240
 #define NTSC_Y_BUF_WIDTH 764
+#define NTSC_CHROMA_TAP_HALO 9 // the chroma demodulation window reaches this far past the picture columns
+#define NTSC_CHROMA_TAPS_WIDTH (NTSC_Y_BUF_WIDTH + 2 * NTSC_CHROMA_TAP_HALO)
 
 #endif //MUSECPP_NTSCCONSTANTS_H

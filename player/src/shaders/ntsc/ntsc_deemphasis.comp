@@ -1,0 +1,78 @@
+#version 450
+
+// Video de-emphasis of the concealed composite, the second half of what was
+// ntsc_copy_to_frame.comp.  The filter is causal and reads backwards in
+// time; rows are contiguous in time, so before column 0 it continues on the
+// tail of the previous row, which makes it a plain 1D FIR over the frame
+// flattened row-major (before the first sample it repeats the first
+// sample).  The output is float16_t, since all further processing is
+// performed on half floats.
+//
+// Each invocation produces PER_INVOCATION consecutive outputs from one
+// register-held window of samples, which amortizes the loads: on an Apple
+// M2 this ran 4x faster than one output per invocation from a
+// shared-memory tile (plain cached loads beat the tile there too).  The
+// taps are accumulated with explicit fma(), which is what the driver made
+// of the plain expression in the original per-pixel shader, so the output
+// stays bit-identical to it.
+//
+// This shader should be invoked with global invocation ids from 0 to
+// NTSC_TOTAL_WIDTH * NTSC_TOTAL_HEIGHT / PER_INVOCATION - 1, in
+// one-dimensional workgroups.
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    float level_offset; // measured blanking level in reader voltage units
+    float level_scale;  // output units per volt: 1 / (white - blanking)
+};
+
+layout(set = 0, binding = 0) buffer readonly concealed_in_buffer {
+    float concealed_in[]; // NTSC_TOTAL_HEIGHT rows of NTSC_TOTAL_WIDTH, flattened
+};
+
+layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
+    float16_t frame_out[];
+};
+
+// LaserVision video de-emphasis (IEC 60857 Figure 9): flat to omega1 = 1/320 ns,
+// -6 dB/octave to omega2 = 1/120 ns, -8.5 dB above.  Bilinear transform of
+// D(s) = (1 + s 120ns)/(1 + s 320ns) on the line-locked 4 fsc grid (which makes
+// the taps independent of the capture sample rate), with the impulse response
+// truncated to 24 taps and renormalized to unity DC gain.  The emphasis was
+// applied to the whole composite signal, so no area gating -- and the filter
+// must run before the clamp below, while emphasis overshoots are still intact.
+const float deemphasis[24] = float[](
+    0.43809204, 0.11129277, 0.08939259, 0.07180192, 0.05767274, 0.04632390,
+    0.03720828, 0.02988644, 0.02400539, 0.01928161, 0.01548737, 0.01243977,
+    0.00999187, 0.00802567, 0.00644638, 0.00517786, 0.00415896, 0.00334056,
+    0.00268321, 0.00215520, 0.00173110, 0.00139046, 0.00111684, 0.00089707);
+
+const int TAPS = 24;
+const int PER_INVOCATION = 4;
+
+void main() {
+    const int total = NTSC_TOTAL_WIDTH * NTSC_TOTAL_HEIGHT;
+    int first_out = int(gl_GlobalInvocationID.x) * PER_INVOCATION;
+
+    if (first_out >= total)
+        return;
+
+    // window[k] is the flattened sample first_out - (TAPS - 1) + k; before
+    // the first sample the filter repeats the first sample
+    float window[TAPS - 1 + PER_INVOCATION];
+    for (int k = 0; k < TAPS - 1 + PER_INVOCATION; k++)
+        window[k] = concealed_in[clamp(first_out - (TAPS - 1) + k, 0, total - 1)];
+
+    for (int i = 0; i < PER_INVOCATION; i++) {
+        float v = 0.0;
+        for (int n = 0; n < TAPS; n++)
+            v = fma(deemphasis[n], window[(TAPS - 1) + i - n], v);
+
+        // A loose clamp: the picture path re-clamps to 0..1 at the end, and the
+        // colour burst swings below blanking level -- clipping it would corrupt the
+        // burst phase and amplitude reference.
+        if (first_out + i < total)
+            frame_out[first_out + i] = clamp(float16_t((v - level_offset) * level_scale), -0.5hf, 1.5hf);
+    }
+}

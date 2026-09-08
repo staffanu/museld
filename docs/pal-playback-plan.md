@@ -102,7 +102,7 @@ Every stage of the chroma chain assumes NTSC subcarrier topology on a line-locke
   temporal (3D) comb assuming the subcarrier inverts frame to frame.
 - `ntsc_combine_still_and_moving.comp:117-140`: SMPTE C primaries → sRGB and the
   NTSC CRT EOTF.
-- `ntsc_copy_to_frame.comp:55-62`: LaserVision de-emphasis FIR precomputed for the
+- `ntsc_deemphasis.comp`: LaserVision de-emphasis FIR precomputed for the
   4 × 3.58 MHz grid (same time constants on PAL, taps must be regenerated at 4 × 4.43 MHz).
 - Chroma rotation `185.8° + tint` in `NtscDecoder.cpp:72-74` is calibrated for I/Q.
 

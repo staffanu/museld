@@ -1,16 +1,21 @@
 #version 450
 
+// Dropout concealment of the raw composite, the first half of what was
+// ntsc_copy_to_frame.comp: the de-emphasis FIR that follows
+// (ntsc_deemphasis.comp) read this concealed value at each of its 24 taps,
+// so doing the concealment once per sample here instead of once per tap
+// saves the flag and motion mask loads 24 times over.  The columns before
+// the colour burst are replaced by blanking level here as well, see the
+// comment at the end.
+//
 // This shader should be invoked with global invocation ids
 // ranging from (0, 0) to (NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT).
-// The input are floats, but outputs are float16_t, since all
-// further processing is performed on half floats.
 
 #include "muse.h"
 
 layout(push_constant) uniform PushConstants {
     uint dropout_mode;  // 0: normal, 1: disabled, 2: highlight
     float level_offset; // measured blanking level in reader voltage units
-    float level_scale;  // output units per volt: 1 / (white - blanking)
 };
 
 layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
@@ -23,8 +28,8 @@ layout(set = 0, binding = 1) buffer readonly dropout_data_buffer {
     uint8_t dropout_data[][NTSC_TOTAL_WIDTH];
 };
 
-layout(set = 0, binding = 2) buffer writeonly frame_out_buffer {
-    float16_t frame_out[][NTSC_TOTAL_WIDTH];
+layout(set = 0, binding = 2) buffer writeonly concealed_out_buffer {
+    float concealed_out[][NTSC_TOTAL_WIDTH];
 };
 
 // Motion masks of the previous frame (this frame's are not computed yet);
@@ -51,19 +56,6 @@ float motion_at(int r, int c) {
     int oc = clamp(c - NTSC_FIELD_START_X, 0, NTSC_Y_BUF_WIDTH - 1);
     return max(float(past_motion[orow][oc]), float(future_motion[orow][oc]));
 }
-
-// LaserVision video de-emphasis (IEC 60857 Figure 9): flat to omega1 = 1/320 ns,
-// -6 dB/octave to omega2 = 1/120 ns, -8.5 dB above.  Bilinear transform of
-// D(s) = (1 + s 120ns)/(1 + s 320ns) on the line-locked 4 fsc grid (which makes
-// the taps independent of the capture sample rate), with the impulse response
-// truncated to 24 taps and renormalized to unity DC gain.  The emphasis was
-// applied to the whole composite signal, so no area gating -- and the filter
-// must run before the clamp below, while emphasis overshoots are still intact.
-const float deemphasis[24] = float[](
-    0.43809204, 0.11129277, 0.08939259, 0.07180192, 0.05767274, 0.04632390,
-    0.03720828, 0.02988644, 0.02400539, 0.01928161, 0.01548737, 0.01243977,
-    0.00999187, 0.00802567, 0.00644638, 0.00517786, 0.00415896, 0.00334056,
-    0.00268321, 0.00215520, 0.00173110, 0.00139046, 0.00111684, 0.00089707);
 
 bool is_dropout(int r, int c) {
     int cc = clamp(c, 0, NTSC_TOTAL_WIDTH - 1);
@@ -123,32 +115,12 @@ void main() {
     if (row >= NTSC_TOTAL_HEIGHT || col >= NTSC_TOTAL_WIDTH)
         return;
 
-    // The causal filter reads backwards in time; rows are contiguous in time,
-    // so before column 0 it continues on the tail of the previous row.  The
-    // sync pulse is replaced by blanking level so that the settling tail of
-    // the channel's imperfectly inverted sync edge cannot reach the colour
-    // burst.  (Measured effect on the Video Essentials capture: none -- the
-    // full-cycle burst correlation already rejects the smooth transient --
-    // but this makes the burst reference immune to worse sync edges.)  Only
-    // columns before the burst can see the pulse, so the picture is
-    // unaffected.
-    float v = 0.0;
-    for (int n = 0; n < 24; n++) {
-        int c = int(col) - n;
-        int r = int(row);
-        if (c < 0) {
-            c += NTSC_TOTAL_WIDTH;
-            r--;
-            if (r < 0) {
-                r = 0;
-                c = 0;
-            }
-        }
-        v += deemphasis[n] * (c < 74 ? level_offset : composite_sample(r, c));
-    }
-
-    // A loose clamp: the picture path re-clamps to 0..1 at the end, and the
-    // colour burst swings below blanking level -- clipping it would corrupt the
-    // burst phase and amplitude reference.
-    frame_out[row][col] = clamp(float16_t((v - level_offset) * level_scale), -0.5hf, 1.5hf);
+    // The sync pulse is replaced by blanking level so that the settling tail
+    // of the channel's imperfectly inverted sync edge cannot reach the colour
+    // burst through the causal de-emphasis filter.  (Measured effect on the
+    // Video Essentials capture: none -- the full-cycle burst correlation
+    // already rejects the smooth transient -- but this makes the burst
+    // reference immune to worse sync edges.)  Only columns before the burst
+    // can see the pulse, so the picture is unaffected.
+    concealed_out[row][col] = col < 74 ? level_offset : composite_sample(int(row), int(col));
 }
