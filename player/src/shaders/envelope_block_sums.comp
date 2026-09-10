@@ -1,0 +1,49 @@
+#version 450
+
+// Sums of the squared envelope over consecutive blocks of BLOCK samples, the
+// first stage of the dropout detector's carrier reference: envelope_prefix.comp
+// turns these into a prefix sum, from which the detector gets the mean
+// envelope over any run of whole blocks with two loads.
+//
+// One workgroup covers gl_WorkGroupSize.x consecutive samples, i.e.
+// gl_WorkGroupSize.x / BLOCK blocks, staged through shared memory and then
+// added up serially by one thread per block (a tree reduction with its
+// barrier rounds measured slower on an Apple M2).  It should be invoked with
+// global invocation ids from 0 to block_count * BLOCK - 1.
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint size;        // entries in the envelope buffer
+    uint block_count; // = size / BLOCK
+};
+
+layout(set = 0, binding = 0) buffer readonly envelope_buffer {
+    float envelope[];
+};
+
+layout(set = 0, binding = 1) buffer writeonly block_sums_buffer {
+    float block_sums[];
+};
+
+const uint BLOCK = 256;
+
+shared float tile[gl_WorkGroupSize.x];
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    uint lid = gl_LocalInvocationID.x;
+
+    tile[lid] = envelope[min(gid, size - 1)];
+    barrier();
+
+    if (lid < gl_WorkGroupSize.x / BLOCK) {
+        uint block = (gid - lid) / BLOCK + lid;
+        if (block < block_count) {
+            float sum = 0.0;
+            for (uint k = 0; k < BLOCK; k++)
+                sum += tile[lid * BLOCK + k];
+            block_sums[block] = sum;
+        }
+    }
+}

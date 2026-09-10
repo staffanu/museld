@@ -7,9 +7,10 @@
 // level, so no absolute threshold or per-capture gain calibration is needed.
 //
 // It should be invoked with global invocation ids from 0 to dest_size - 1.
-// The envelope buffers (from envelope_local.comp, one entry per raw sample)
-// are indexed from source_offset; the destination from dest_offset up to
-// dest_offset + dest_size - 1.
+// The local envelope (envelope_box.comp, one entry per raw sample) is indexed
+// from source_offset; the carrier reference comes from the prefix sum of the
+// envelope block sums (envelope_block_sums.comp, envelope_prefix.comp); the
+// destination is indexed from dest_offset up to dest_offset + dest_size - 1.
 
 #include "muse.h"
 
@@ -23,7 +24,7 @@ layout(push_constant) uniform PushConstants {
     float deep_ratio_squared; // envelope condition: local² < ratio² × long average
     uint demod_offset; // index of the first new sample in the demodulated buffer
     float slew_threshold; // noise condition: max sample-to-sample step nearby
-    uint long_stride; // spacing of the 32 carrier-reference taps, in raw samples
+    uint window_blocks; // carrier reference: mean envelope over this many BLOCK-sample blocks around the sample
     uint line_min_exceedances; // slew exceedances required to corroborate the line condition
     uint deep_min_exceedances; // ... and the deep condition (0: confident on its own)
 };
@@ -32,8 +33,8 @@ layout(set = 0, binding = 0) buffer readonly local_envelope_buffer {
     float local_envelope_in[];
 };
 
-layout(set = 0, binding = 1) buffer readonly envelope_buffer {
-    float envelope[];
+layout(set = 0, binding = 1) buffer readonly prefix_buffer {
+    float prefix[]; // exclusive prefix sum of the envelope block sums, envelope_prefix.comp
 };
 
 layout(set = 0, binding = 2) buffer writeonly dest_buffer {
@@ -44,9 +45,9 @@ layout(set = 0, binding = 3) buffer readonly demodulated_buffer {
     float demodulated[];
 };
 
-float envelope_squared(int i) {
-    i = clamp(i, 0, int(source_offset + dest_size * video_decimation_rate) - 1);
-    return envelope[i];
+const int BLOCK = 256; // as in envelope_block_sums.comp
+int first_block_of(int center, int W, int block_count) {
+    return clamp((center - W * BLOCK / 2) / BLOCK, 0, block_count - W);
 }
 
 // local envelope over ±4 raw samples around i
@@ -75,14 +76,16 @@ void main() {
     float line_ref = max(max(local_envelope(center - H), local_envelope(center + H)),
                          max(local_envelope(center - 2 * H), local_envelope(center + 2 * H)));
 
-    // carrier reference: 32 samples strided over ±16 × long_stride raw samples,
-    // which the caller sizes to ~200 µs -- long enough that even a maximum-length
-    // 100 µs dropout cannot drag it down; catches dropouts spanning several lines
-    float long_sum = 0.0;
-    int stride = int(long_stride);
-    for (int i = -16; i < 16; i++)
-        long_sum += envelope_squared(center + i * stride + stride / 2);
-    float long_avg = long_sum / 32.0;
+    // carrier reference: the mean envelope over window_blocks whole blocks
+    // around the sample, which the caller sizes to ~200 us -- long enough that
+    // even a maximum-length 100 us dropout cannot drag it down; catches
+    // dropouts spanning several lines.  (Used to be 32 single samples strided
+    // over the same span, 32 loads; the block mean is the same quantity with
+    // far less noise, and two loads of the prefix sum.)
+    int block_count = int(source_offset + dest_size * video_decimation_rate) / BLOCK;
+    int W = int(window_blocks);
+    int first_block = first_block_of(center, W, block_count);
+    float long_avg = (prefix[first_block + W] - prefix[first_block]) / float(W * BLOCK);
 
     bool deep_low = local_avg < deep_ratio_squared * long_avg;
     bool envelope_low = local_avg < line_ratio_squared * line_ref;
