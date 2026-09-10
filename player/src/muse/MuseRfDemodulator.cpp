@@ -137,6 +137,22 @@ void MuseRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> local_envelope_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
+    // The dropout detector's carrier reference: the envelope summed over blocks of
+    // c_envelope_block samples, and the prefix sum of those, so that the mean over
+    // any run of blocks is two loads.  envelope_prefix.comp scans in one workgroup
+    // and is limited to c_envelope_max_blocks.
+    constexpr uint32_t c_envelope_block = 256;      // BLOCK in the shaders
+    constexpr uint32_t c_envelope_max_blocks = 4096; // MAX_BLOCKS in envelope_prefix.comp
+    const uint32_t envelope_block_count = analytic_buffer_size / c_envelope_block;
+    if (envelope_block_count > c_envelope_max_blocks)
+        throw std::runtime_error("envelope_prefix.comp: too many envelope blocks for one workgroup");
+
+    shared_ptr<VulkanBuffer> envelope_block_sums = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(envelope_block_count), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+
+    shared_ptr<VulkanBuffer> envelope_prefix = make_unique<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(envelope_block_count + 1), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+
     // Create shaders.  Each FIR pipeline is specialized to its exact tap count and decimation
     // (fir_filter.comp), so the band-pass, the decimating low-pass and the root raised cosine
     // are three pipelines of the same shader.
@@ -181,10 +197,22 @@ void MuseRfDemodulator::demodulate() {
                               VulkanUtil::loadSpirv(m_executable_dir, "envelope_box.comp"),
                               Size((analytic_buffer_size + c_envelope_box_outputs - 1) / c_envelope_box_outputs)));
 
+    shared_ptr<ComputeShader> envelope_block_sums_shader = unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager, "envelope_block_sums",
+                              {envelope_buffer, envelope_block_sums}, 2 * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "envelope_block_sums.comp"),
+                              Size(envelope_block_count * c_envelope_block)));
+
+    // exactly one workgroup: the scan runs in shared memory
+    shared_ptr<ComputeShader> envelope_prefix_shader = unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager, "envelope_prefix",
+                              {envelope_block_sums, envelope_prefix}, sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "envelope_prefix.comp"), Size(1)));
+
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager,
                               "detect_dropouts_envelope",
-                              {local_envelope_buffer, envelope_buffer, dropout_buffer, lowpass_in_buffer}, 12 * sizeof(uint32_t),
+                              {local_envelope_buffer, envelope_prefix, dropout_buffer, lowpass_in_buffer}, 12 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts_envelope.comp"), Size(MuseDemodulatedBlock::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
@@ -343,6 +371,8 @@ void MuseRfDemodulator::demodulate() {
         // comes from fm_quadrature), read by the dropout detector at five
         // positions per output sample
         command_buffer->enqueueComputeShader<uint32_t>(envelope_box_shader, {(uint32_t)analytic_buffer_size});
+        command_buffer->enqueueComputeShader<uint32_t>(envelope_block_sums_shader, {(uint32_t)analytic_buffer_size, envelope_block_count});
+        command_buffer->enqueueComputeShader<uint32_t>(envelope_prefix_shader, {envelope_block_count});
 
         // Detect dropouts from the RF envelope, against two references: the same
         // position on the neighbouring lines (brightness-matched, since the disc
@@ -382,9 +412,9 @@ void MuseRfDemodulator::demodulate() {
         // the higher NTSC counts guard against white-on-black titles, which
         // MUSE's much stricter ratios already separate from content.
         const float slew_threshold = 4.0f * 112.f * 40e6f / m_sample_frequency;
-        // 32 taps spanning ~205 us, so a maximum-length dropout cannot drag the
-        // carrier reference down with it (256 samples at the NTSC path's 40 MHz)
-        const uint32_t long_stride = (uint32_t)lround(6.4e-6 * m_sample_frequency);
+        // carrier reference over ~205 us of whole envelope blocks, so a
+        // maximum-length dropout cannot drag it down (50 blocks at 62.5 MHz)
+        const uint32_t window_blocks = (uint32_t)lround(205e-6 * m_sample_frequency / c_envelope_block);
         command_buffer->enqueueComputeShader<uint32_t>(
                 detect_dropouts_shader, {MuseDemodulatedBlock::c_video_block_size, 1u, (uint32_t)c_dropout_delay,
                                          MuseDemodulatedBlock::c_video_decimation_rate,
@@ -392,7 +422,7 @@ void MuseRfDemodulator::demodulate() {
                                          std::bit_cast<uint32_t>(c_line_ratio_squared),
                                          std::bit_cast<uint32_t>(c_deep_ratio_squared),
                                          (uint32_t)lowpass_filter_size - 1, std::bit_cast<uint32_t>(slew_threshold),
-                                         long_stride, /* line_min_exceedances */ 1u, /* deep_min_exceedances */ 0u});
+                                         window_blocks, /* line_min_exceedances */ 1u, /* deep_min_exceedances */ 0u});
 
         // Barrier: ensure all compute shader writes are visible to the subsequent transfer operations
         command_buffer->enqueueBarrier(vk::AccessFlagBits::eShaderWrite,

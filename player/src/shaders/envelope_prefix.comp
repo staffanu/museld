@@ -1,0 +1,57 @@
+#version 450
+
+// Exclusive prefix sum of the envelope block sums: prefix[i] is the sum of
+// blocks 0 .. i - 1, prefix[block_count] the total.  The dropout detector's
+// mean envelope over blocks [a, b) is then (prefix[b] - prefix[a]) / (b - a)
+// / BLOCK, two loads per sample.  (Measured on an Apple M2 against the
+// detector adding up its window's block sums directly: this pass plus the
+// two-load detector is 80 us per block cheaper; a per-workgroup scan in the
+// detector's shared memory was slower than either.)
+//
+// A single workgroup scans everything in shared memory (Hillis-Steele), so it
+// must be invoked as exactly one workgroup, and block_count may not exceed
+// MAX_BLOCKS.  The host checks this.
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint block_count;
+};
+
+layout(set = 0, binding = 0) buffer readonly block_sums_buffer {
+    float block_sums[];
+};
+
+layout(set = 0, binding = 1) buffer writeonly prefix_buffer {
+    float prefix[];
+};
+
+const uint MAX_BLOCKS = 4096;
+
+shared float s[MAX_BLOCKS];
+
+void main() {
+    uint lid = gl_LocalInvocationID.x;
+    uint n = gl_WorkGroupSize.x;
+
+    for (uint i = lid; i < MAX_BLOCKS; i += n)
+        s[i] = i < block_count ? block_sums[i] : 0.0;
+    barrier();
+
+    for (uint offset = 1; offset < block_count; offset *= 2) {
+        float v[MAX_BLOCKS / 1024 + 1];
+        uint j = 0;
+        for (uint i = lid; i < block_count; i += n)
+            v[j++] = i >= offset ? s[i - offset] : 0.0;
+        barrier();
+        j = 0;
+        for (uint i = lid; i < block_count; i += n)
+            s[i] += v[j++];
+        barrier();
+    }
+
+    if (lid == 0)
+        prefix[0] = 0.0;
+    for (uint i = lid; i < block_count; i += n)
+        prefix[i + 1] = s[i];
+}
