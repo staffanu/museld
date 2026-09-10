@@ -1,0 +1,52 @@
+#version 450
+
+// The 9-sample box average of the squared envelope, one entry per analytic
+// sample, for the dropout detector: it evaluates the local envelope at five
+// positions per output sample (the sample and the same spot on four
+// neighbouring lines) and reads one value per position from here.
+//
+// Register-blocked like fir_filter.comp: each invocation loads one window and
+// produces outputs_per_invocation consecutive averages from it.  The taps are
+// added in the same order as the detector once did it inline (k = -4 .. 4), so
+// the flags are unchanged.  The window is clamped to the buffer the way the
+// detector clamped its own reads.
+//
+// It should be invoked with global invocation ids from 0 to
+// ceil(size / outputs_per_invocation) - 1.
+
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint size;
+};
+
+layout(set = 0, binding = 0) buffer readonly envelope_buffer {
+    float envelope[];
+};
+
+layout(set = 0, binding = 1) buffer writeonly local_envelope_buffer {
+    float local_envelope[];
+};
+
+const int HALF = 4;
+const int OUTPUTS = 4;
+const int WINDOW = 2 * HALF + OUTPUTS;
+
+void main() {
+    int first = int(gl_GlobalInvocationID.x) * OUTPUTS;
+    if (first >= int(size))
+        return;
+
+    float window[WINDOW];
+    for (int k = 0; k < WINDOW; k++)
+        window[k] = envelope[clamp(first - HALF + k, 0, int(size) - 1)];
+
+    for (int o = 0; o < OUTPUTS; o++) {
+        if (first + o >= int(size))
+            break;
+        float sum = 0.0;
+        for (int k = 0; k <= 2 * HALF; k++)
+            sum += window[o + k];
+        local_envelope[first + o] = sum / 9.0;
+    }
+}
