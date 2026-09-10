@@ -4,6 +4,11 @@
 //
 // The source analytic data will be indexed from 0 to size.
 // The dest data will be indexed from output_offset up to output_offset + size - 1.
+// As a by-product the squared envelope of analytic samples 1 to size is written to
+// the envelope buffer (the sample pairs are loaded here anyway), for the dropout
+// detector's envelope_box.comp and envelope_block_sums.comp.  Entry 0 of that buffer
+// is the recycled previous sample and is maintained by the caller, like the analytic
+// buffers themselves.
 //
 // For scale = 1, add = 0, the output will be between -1 and 1 if the
 // frequency deviation is +/- frequency_deviation.
@@ -32,6 +37,10 @@ layout(set = 0, binding = 2) buffer writeonly dest_buffer {
     float dest[];
 };
 
+layout(set = 0, binding = 3) buffer writeonly envelope_buffer {
+    float envelope[];
+};
+
 void main() {
     uint ix = gl_GlobalInvocationID.x;
 
@@ -56,4 +65,5 @@ void main() {
     float fm_out = phase_diff * (sample_frequency / (2 * 3.14159265f * frequency_deviation)) - center_frequency / frequency_deviation;
 
     dest[ix + uint(output_offset)] = fm_out * output_scale + output_add;
+    envelope[ix + 1] = sample_re * sample_re + sample_im * sample_im;
 }

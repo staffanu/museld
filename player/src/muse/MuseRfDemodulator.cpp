@@ -128,9 +128,9 @@ void MuseRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> dropout_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(c_dropout_buffer_size), sizeof(uint8_t), buffer_usage_flags, HostAccess::eHostNone);
 
-    // Squared envelope of the analytic signal and its 9-sample box average, one
-    // entry per analytic sample, recomputed in full for every block (the
-    // recycled sample at index 0 included) so nothing needs recycling here.
+    // Squared envelope of the analytic signal (written by fm_quadrature for the
+    // new samples, entry 0 recycled from the previous block like the analytic
+    // buffers) and its 9-sample box average, one entry per analytic sample.
     shared_ptr<VulkanBuffer> envelope_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
@@ -171,13 +171,15 @@ void MuseRfDemodulator::demodulate() {
 
     shared_ptr<ComputeShader> fm_quadrature_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager, "fm_quadrature",
-                              {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer}, 7 * sizeof(float),
+                              {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer, envelope_buffer}, 7 * sizeof(float),
                               VulkanUtil::loadSpirv(m_executable_dir, "fm_quadrature.comp"), Size(MuseDemodulatedBlock::c_sample_block_size)));
 
-    shared_ptr<ComputeShader> envelope_local_shader = unique_ptr<ComputeShader>(
-            new ComputeShader(m_vulkan_manager, "envelope_local",
-                              {analytic_buffer_re, analytic_buffer_im, envelope_buffer, local_envelope_buffer}, sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "envelope_local.comp"), Size(analytic_buffer_size)));
+    constexpr uint32_t c_envelope_box_outputs = 4; // OUTPUTS in envelope_box.comp
+    shared_ptr<ComputeShader> envelope_box_shader = unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager, "envelope_box",
+                              {envelope_buffer, local_envelope_buffer}, sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "envelope_box.comp"),
+                              Size((analytic_buffer_size + c_envelope_box_outputs - 1) / c_envelope_box_outputs)));
 
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager,
@@ -195,6 +197,8 @@ void MuseRfDemodulator::demodulate() {
     command_buffer->enqueueFillBuffer(*input_buffer, 0);
     command_buffer->enqueueFillBuffer(*analytic_buffer_re, reinterpret_cast<uint32_t &>(one));
     command_buffer->enqueueFillBuffer(*analytic_buffer_im, reinterpret_cast<uint32_t &>(one));
+    float two = 2.f; // the envelope of the (1, 1) analytic fill
+    command_buffer->enqueueFillBuffer(*envelope_buffer, reinterpret_cast<uint32_t &>(two));
     command_buffer->enqueueFillBuffer(*lowpass_in_buffer, reinterpret_cast<uint32_t &>(zero));
     command_buffer->enqueueFillBuffer(*rrc_in_buffer, reinterpret_cast<uint32_t &>(zero));
     command_buffer->submit({}, {}, {});
@@ -335,9 +339,10 @@ void MuseRfDemodulator::demodulate() {
         rrc_fir_shader->updateBufferDescriptorsInSet(0, {rrc_filter, rrc_in_buffer, block->video_data});
         command_buffer->enqueueComputeShader<uint32_t>(rrc_fir_shader, {MuseDemodulatedBlock::c_video_block_size, /* out offset */ 0});
 
-        // The envelope and its local average per raw sample, read by the dropout
-        // detector at five positions per output sample
-        command_buffer->enqueueComputeShader<uint32_t>(envelope_local_shader, {(uint32_t)analytic_buffer_size});
+        // The local envelope average per raw sample (the squared envelope itself
+        // comes from fm_quadrature), read by the dropout detector at five
+        // positions per output sample
+        command_buffer->enqueueComputeShader<uint32_t>(envelope_box_shader, {(uint32_t)analytic_buffer_size});
 
         // Detect dropouts from the RF envelope, against two references: the same
         // position on the neighbouring lines (brightness-matched, since the disc
@@ -411,6 +416,7 @@ void MuseRfDemodulator::demodulate() {
         enqueue_float_copy(*input_buffer, input_buffer_size, bandpass_filter_size - 1);
         enqueue_float_copy(*analytic_buffer_re, analytic_buffer_size, 1);
         enqueue_float_copy(*analytic_buffer_im, analytic_buffer_size, 1);
+        enqueue_float_copy(*envelope_buffer, analytic_buffer_size, 1);
         enqueue_float_copy(*lowpass_in_buffer, lowpass_in_buffer_size, lowpass_filter_size - 1);
         enqueue_float_copy(*rrc_in_buffer, rrc_in_buffer_size, rrc_filter_size - 1);
         // The tail recycle below writes the start of dropout_buffer, which the
