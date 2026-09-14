@@ -11,6 +11,7 @@ add_executable(museld-tests
     NtscCadenceTrackerTest.cpp
     PrefetchingInputReaderTest.cpp
     SrtParserTest.cpp
+    DisplayGeometryTest.cpp
     ../src/subtitles/Eia608Decoder.cpp
     ../src/bch/BchDecoder.cpp
     ../src/InputProbe.cpp
@@ -20,6 +21,7 @@ add_executable(museld-tests
     ../src/input/PrefetchingInputReader.cpp
     ../src/ntsc/NtscCadenceTracker.cpp
     ../src/subtitles/SrtParser.cpp
+    ../src/DisplayGeometry.cpp
 )
 
 target_include_directories(museld-tests PRIVATE ../src ${FLAC_INCLUDE_DIRS})

@@ -28,6 +28,7 @@
 #include "PlayerState.h"
 #include "OsdOverlay.h"
 #include "FrameBlitter.h"
+#include "DisplayGeometry.h"
 #include "FrameExporter.h"
 #include "InputController.h"
 #include "subtitles/Eia608Decoder.h"
@@ -333,6 +334,9 @@ static void runPlayer(Logger &log,
                       ReaderControls &reader_controls,
                       GLFWwindow *window,
                       bool full_screen,
+                      AspectMode initial_aspect_mode,
+                      double source_aspect,
+                      int window_w, int window_h,
                       bool start_paused,
                       Decoder::FieldInterpolationMode initial_field_interpolation_mode,
                       bool initial_use_3d_comb,
@@ -372,6 +376,8 @@ static void runPlayer(Logger &log,
         state.use_3d_comb = initial_use_3d_comb;
         state.film_mode = initial_film_mode;
         state.analog_cx_mode = initial_cx_mode;
+        state.aspect_mode = initial_aspect_mode;
+        state.source_aspect = source_aspect;
 
         OsdOverlay osd;
         FrameBlitter blitter;
@@ -688,6 +694,20 @@ static void runPlayer(Logger &log,
             }
 
             auto swap_chain_image = manager.acquireNextImage(image_available_semaphore);
+            // (after the acquire: it may have recreated the swap chain at a new size)
+            const vk::Extent2D swap_extent = manager.getSwapChainExtent();
+            const DisplayGeometry geometry = computeDisplayGeometry({
+                    state.aspect_mode, state.source_aspect, src_dims.width, src_dims.height,
+                    state.zoom_factor, state.zoom_center.first, state.zoom_center.second,
+                    FrameBlitter::displayPixelAspect(window, log), (int)swap_extent.width, (int)swap_extent.height});
+            state.visible_x0 = geometry.src_x0;
+            state.visible_y0 = geometry.src_y0;
+            state.visible_x1 = geometry.src_x1;
+            state.visible_y1 = geometry.src_y1;
+            state.shown_x0 = (double)geometry.dst_x0 / swap_extent.width;
+            state.shown_y0 = (double)geometry.dst_y0 / swap_extent.height;
+            state.shown_x1 = (double)geometry.dst_x1 / swap_extent.width;
+            state.shown_y1 = (double)geometry.dst_y1 / swap_extent.height;
 
             command_buffer->begin();
             state.last_cursor_string = osd.render(*command_buffer, images, state, decoder, window, text_renderer);
@@ -697,9 +717,7 @@ static void runPlayer(Logger &log,
             if (subtitle_secondary_overlay)
                 subtitle_secondary_overlay->render(*command_buffer, images, state, decoder,
                                                    state.subtitle_secondary);
-            blitter.present(*command_buffer, images, state, src_dims,
-                            swap_chain_image, manager.getSwapChainExtent(), manager,
-                            image_available_semaphore);
+            blitter.present(*command_buffer, images, geometry, swap_chain_image, image_available_semaphore);
 
             manager.present(swap_chain_image);
 
@@ -710,7 +728,7 @@ static void runPlayer(Logger &log,
             if (glfwWindowShouldClose(window))
                 break;
             if (!input.poll(window, state, reader_controls, dropout_mode, audio_track,
-                            full_screen, src_dims.width, src_dims.height))
+                            full_screen, window_w, window_h))
                 break;
         }
 
@@ -784,7 +802,7 @@ static void runPlayer(Logger &log,
 
 template<class InputBlock>
 void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, FrameReader<InputBlock> &reader,
-                  bool decode_all_fields, bool full_screen, bool no_sync,
+                  bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool no_sync,
                   bool start_paused, Decoder::FieldInterpolationMode field_interpolation_mode,
                   bool use_3d_comb, bool film_mode, Decoder::CxMode cx_mode, bool decode_video, DropoutMode dropout_mode,
                   bool decode_audio, AudioTrack audio_track, bool benchmark_shaders,
@@ -802,19 +820,38 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
+    // The decoded image size (also the size of a written video file), the
+    // picture's intended shape, and a window of that shape that downscales
+    // the image in neither direction
     int initial_w, initial_h;
+    double source_aspect;
     const char *title;
     if constexpr (std::is_same<InputBlock, MuseInputBlock>::value) {
         initial_w = MUSE_Y_BUF_WIDTH * 3;
         initial_h = MUSE_BUF_HEIGHT * 2;
+        source_aspect = 16.0 / 9.0;
         title = "MUSE";
     } else {
         initial_w = NTSC_Y_BUF_WIDTH;
         initial_h = NTSC_FIELD_HEIGHT * 2;
+        source_aspect = 4.0 / 3.0;
         title = "NTSC";
     }
-    GLFWwindow *window = glfwCreateWindow(initial_w, initial_h, title,
-                                          full_screen ? glfwGetPrimaryMonitor() : nullptr, nullptr);
+    const int window_w = max(initial_w, (int)lround(initial_h * source_aspect));
+    const int window_h = max(initial_h, (int)lround(initial_w / source_aspect));
+    GLFWwindow *window;
+    if (full_screen) {
+        // At the monitor's current mode -- no mode switch; the blit scales
+        GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode *mode = glfwGetVideoMode(monitor);
+        glfwWindowHint(GLFW_RED_BITS, mode->redBits);
+        glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
+        glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
+        glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+        window = glfwCreateWindow(mode->width, mode->height, title, monitor, nullptr);
+    } else {
+        window = glfwCreateWindow(window_w, window_h, title, nullptr, nullptr);
+    }
     glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
 
@@ -934,7 +971,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         const double fields_per_second = std::is_same<InputBlock, MuseInputBlock>::value ? 60.0 : 60000.0 / 1001.0;
         const double seconds_per_iteration = (decode_all_fields ? 1 : 2) / fields_per_second;
 
-        runPlayer(log, manager, *decoder, reader_controls, window, full_screen, start_paused,
+        runPlayer(log, manager, *decoder, reader_controls, window, full_screen, aspect_mode, source_aspect,
+                  window_w, window_h, start_paused,
                   field_interpolation_mode, use_3d_comb, film_mode, cx_mode, dropout_mode, audio_track, benchmark_shaders,
                   output_filename.has_value(),
                   vfw, audio_playback.get(), executable_dir,
@@ -1031,6 +1069,7 @@ int main(int argc, char *argv[]) {
     std::string executable_dir = get_executable_dir(argv[0]);
     bool decode_all_fields = true;
     bool full_screen = false;
+    AspectMode aspect_mode = AspectMode::eNormal;
     bool no_sync = false;
     std::optional<InputType> input_type_option;         // unset (the default) means auto-detect
     bool probe_only = false;      // --probe: print what probing finds and skip decoding
@@ -1122,6 +1161,26 @@ int main(int argc, char *argv[]) {
     options.section("Playback options:");
     options.flag("--full-screen", "Start full screen", [&] () -> void {
         full_screen = true;
+    });
+    options.option("--aspect", "MODE", "How the picture is fitted to the window (also cycled with the F key): "
+                                      "normal keeps its shape (16:9 MUSE, 4:3 NTSC) with bars where the window "
+                                      "is wider or taller (default); zoom fills the window and crops the rest, "
+                                      "showing a letterboxed film full width; squeeze is for anamorphic 4:3 discs "
+                                      "(a 16:9 picture squeezed into the frame); stretch fills the window ignoring the shape",
+                   [&] () -> void {
+        const string mode = *(it++);
+        if (mode == "normal")
+            aspect_mode = AspectMode::eNormal;
+        else if (mode == "zoom")
+            aspect_mode = AspectMode::eZoom;
+        else if (mode == "squeeze")
+            aspect_mode = AspectMode::eSqueeze;
+        else if (mode == "stretch")
+            aspect_mode = AspectMode::eStretch;
+        else {
+            cerr << "--aspect must be normal, zoom, squeeze or stretch" << endl;
+            exit(1);
+        }
     });
     options.flag("--pause", "Start paused", [&] () -> void {
         start_paused = true;
@@ -1562,7 +1621,7 @@ int main(int argc, char *argv[]) {
                                         file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
                                         muse_output_filename);
                         process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                                     full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, decode_video, dropout_mode, decode_audio,
+                                                     full_screen, aspect_mode, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, decode_video, dropout_mode, decode_audio,
                                                      audio_track,
                                                      benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
@@ -1574,7 +1633,7 @@ int main(int argc, char *argv[]) {
                         auto reader = make_unique<PhaseCorrect16MHzFrameReader>(
                                 log, *it, input_format, initial_seek_seconds, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                     full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, decode_video, dropout_mode, decode_audio,
+                                     full_screen, aspect_mode, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, decode_video, dropout_mode, decode_audio,
                                      audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
@@ -1588,7 +1647,7 @@ int main(int argc, char *argv[]) {
                                 file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
                                 audio_track == AudioTrack::eEfm, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                     full_screen, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, decode_video, dropout_mode, decode_audio,
+                                     full_screen, aspect_mode, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, decode_video, dropout_mode, decode_audio,
                                      audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,

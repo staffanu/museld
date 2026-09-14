@@ -55,6 +55,8 @@ namespace musevk {
 
         void enqueueFillBuffer(VulkanBuffer &buffer, uint32_t data);
 
+        void enqueueClearColorImage(vk::Image &image, vk::ImageLayout layout, vk::ClearColorValue color);
+
         void enqueueBufferBarrier(VulkanBuffer &buffer,
                 vk::AccessFlagBits srcAccessMask,
                 vk::AccessFlagBits dstAccessMask,

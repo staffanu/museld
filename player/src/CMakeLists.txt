@@ -195,6 +195,7 @@ if(BUILD_MUSE)
         subtitles/SubtitleFont.cpp subtitles/SubtitleFont.h
         subtitles/SubtitleOverlay.cpp subtitles/SubtitleOverlay.h
         FrameBlitter.cpp FrameBlitter.h
+        DisplayGeometry.cpp DisplayGeometry.h
         FrameExporter.cpp FrameExporter.h
         InputController.cpp InputController.h
 

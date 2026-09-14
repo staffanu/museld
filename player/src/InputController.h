@@ -55,6 +55,8 @@ private:
 
     Logger &m_log;
     std::set<int> m_keys_down;
+    // Window size to return to from full screen (0: not yet seen windowed)
+    int m_windowed_width = 0, m_windowed_height = 0;
 };
 
 #endif //MUSECPP_INPUTCONTROLLER_H

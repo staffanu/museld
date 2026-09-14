@@ -107,6 +107,13 @@ namespace musevk {
         maybeTimestamp("blit", vk::PipelineStageFlagBits::eTransfer);
     }
 
+    void CommandBuffer::enqueueClearColorImage(vk::Image &image, vk::ImageLayout layout, vk::ClearColorValue color) {
+        assert(m_recording);
+        vk::ImageSubresourceRange range(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+        m_command_buffer.clearColorImage(image, layout, color, range);
+        maybeTimestamp("clear", vk::PipelineStageFlagBits::eTransfer);
+    }
+
     void CommandBuffer::enqueueFillBuffer(VulkanBuffer &buffer, uint32_t data) {
         assert(m_recording);
         m_command_buffer.fillBuffer(buffer.buffer(), 0, VK_WHOLE_SIZE, data);
