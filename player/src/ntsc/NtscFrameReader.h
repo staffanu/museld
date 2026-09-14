@@ -5,13 +5,25 @@
 #define MUSECPP_NTSCFRAMEREADER_H
 
 #include <cstdint>
+#include <deque>
+#include <vector>
 #include "FrameReader.h"
 #include "NtscRfDemodulator.h"
 #include "input/InputReader.h"
-#include "util/PercentileFilter.h"
 #include "util/ConstExprHelpers.h"
 #include "NtscInputBlock.h"
 
+// Feed-forward timebase: instead of a causal DPLL resampling the signal as it
+// arrives, the reader finds sync pulses in a cheap lowpassed/decimated pass,
+// assigns them to an integer line lattice, fits a smooth curve T(k) -- the
+// input position of the start of line k -- through them with a fixed-lag
+// Kalman smoother, and only then resamples each line between its two curve
+// points.  Look-ahead makes disc wow trivial to follow (the white squall test
+// disc swings its line period +-0.15% once per revolution, faster at the
+// extremes than any per-line servo can slew), missing and false pulses are
+// handled by the smoother's innovation gate, and since every output sample's
+// input position is known before resampling, the resampling itself has no
+// feedback and can move to SIMD or the GPU wholesale.
 class NtscFrameReader : public FrameReader<NtscInputBlock> {
 public:
     explicit NtscFrameReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
@@ -37,104 +49,120 @@ protected:
     void threadFunc() override;
 
 private:
-    enum PulseType { NormalSync, EqualizationPulse, BroadPulse };
-    int expectedPulseSamplesForHalfLine(int line, int half);
-
-    // takes output_block as parameter in order to fill in efm data when getting a new demodulated block
-    bool resample(float *sample_out, uint8_t *dropout_out,
-                  double input_samples_per_sample,
-                  std::unique_ptr<NtscInputBlock> const &output_block);
-
-    // takes output_block as parameter in order to fill in efm data when getting a new demodulated block
-    bool readInput(std::unique_ptr<NtscInputBlock> const &output_block);
-
-    void updateFrameStartOffset();
+    // Fetch one demodulated block into the ring and run the sync pass on it;
+    // appends the audio side data to output_block while anchored
+    bool readInputBlock(std::unique_ptr<NtscInputBlock> const &output_block);
+    void syncPass(const float *data, int64_t stream_base, int count);
+    void handlePulse(double t, double width_us);
+    bool canFinalize() const;
+    void finalizeBatch();
+    void evaluateAnchors();
+    // Resample finalized lines into the frame; returns true when a frame completed
+    bool consumeFinalized(std::unique_ptr<NtscInputBlock> const &output_block);
+    void resampleLine(std::unique_ptr<NtscInputBlock> const &output_block, int row, double t0, double t1);
+    void resetTimebase(const char *why);
 
     [[nodiscard]] bool process(std::unique_ptr<NtscInputBlock> const &output_block);
-    void setUnlocked();
 
-    int m_file_fd;
-    double m_sample_rate;
-    int m_input_samples_decimation_rate;
+    int64_t inputOffsetOfStreamPos(double stream_pos) const;
 
     NtscRfDemodulator *m_demodulator;
+    double m_sample_rate;               // demodulated (video-decimated) rate
+    int m_input_samples_decimation_rate;
+    double m_p_nominal;                 // demodulated samples per line
 
-    // The input buffer (and also the input dropout buffer) is a multiple of the demodulated block size.
-    // (The same is used if reading from file for simplicity.)
-    // The total buffer size needs to be a power of two.
-    static constexpr int c_number_of_input_sub_buffers = 2;
+    // The input ring holds the last four demodulated blocks: the smoother's
+    // look-ahead lag is about one block, so a line is resampled one to two
+    // blocks after its samples arrived and the ring keeps a comfortable
+    // margin.  The total size stays a power of two for cheap masking.
+    static constexpr int c_number_of_input_sub_buffers = 4;
     static constexpr size_t c_input_sub_buffer_size = NtscRfDemodulatorConstants::c_video_block_size;
     static constexpr size_t c_input_buffer_size = c_input_sub_buffer_size * c_number_of_input_sub_buffers;
-    static_assert((c_input_sub_buffer_size & (c_input_sub_buffer_size - 1)) == 0); // ensure power of two
+    static_assert((c_input_sub_buffer_size & (c_input_sub_buffer_size - 1)) == 0);
     static_assert((c_number_of_input_sub_buffers & (c_number_of_input_sub_buffers - 1)) == 0);
     static constexpr size_t c_input_buffer_size_mask = c_input_buffer_size - 1;
-    static constexpr unsigned c_input_sub_buffer_size_bits = ConstHelpers::log2(c_input_sub_buffer_size);
 
-    uint8_t *m_input_buffer;
+    float *m_input_buffer;
     uint8_t *m_input_dropout_buffer;
-    int64_t m_input_sub_buffer_input_offsets[c_number_of_input_sub_buffers];
+    int64_t m_sub_buffer_input_offsets[c_number_of_input_sub_buffers];
+    int64_t m_blocks_fetched;
+    int64_t m_stream_pos;               // demodulated samples fetched so far
 
-    int m_last_input_sub_buffer_ix_read;
-    double m_t;
+    // --- cheap sync pass: boxcar-decimated, lowpassed pulse detection ---
+    // (this is the part that later becomes a small GPU side buffer)
+    static constexpr int c_sync_decim = 8;
+    static constexpr int c_sync_filt_ring = 512; // decimated samples of filtered history (> 1 line)
+    std::vector<float> m_sync_fir;      // lowpass at the decimated rate
+    std::vector<float> m_sync_fir_in;   // FIR input ring (boxcar outputs)
+    int m_sync_boxcar_phase;
+    int64_t m_sync_dec_count;           // decimated samples produced
+    float m_sync_filt[c_sync_filt_ring];
+    double m_sync_delay;                // group delay, in demodulated samples
+    bool m_sync_below;                  // hysteresis slicer state
+    int64_t m_sync_fall_idx;            // decimated index of the pending fall
+    int64_t m_sync_rise_idx;            // decimated index of the previous rise
+    float m_blank_level;                // slow average of the back-porch level
 
-    int m_bytes_per_sample;
-    double m_output_multiplier;
-    double m_output_add;
+    // --- lattice: integer line numbers for hsync timestamps ---
+    // Chained pulse to pulse: the nominal period is known a priori to ~0.1%
+    // (wow included), so round(dt / period) is unambiguous for gaps of
+    // hundreds of lines and needs no lock-in phase.  The period is tracked
+    // from clean consecutive intervals only, never from the filter (see
+    // handlePulse for the runaway that causes).  NTSC line numbers are
+    // attached separately by the vertical anchor below.
+    bool m_lattice_valid;
+    double m_lat_t;                     // last accepted pulse
+    double m_p_run;                     // slowly adapted local period
+    int64_t m_last_meas_k;              // its line
+    // Integer-line slip correction against the curve: a shift confirmed by
+    // this many consecutive pulses re-labels the chain
+    int64_t m_slip_shift;
+    int64_t m_slip_first_k;
+    int m_slip_count;
+    // Running measurement-noise estimate: mean |second difference| of
+    // consecutive-line pulse times (see handlePulse)
+    double m_last_dt;
+    int64_t m_last_dk;
+    double m_d2_mean;
+    std::deque<std::pair<int64_t, double>> m_meas; // (k, t) hsync measurements
+    std::deque<double> m_broad_falls;   // broad (vertical sync) pulse falls
 
-    double m_input_samples_per_sample_ref;
-    double m_input_samples_per_sample;
-    // These variable names and the computations performed are heavily influenced by
-    // the TI publication "Introduction to phase-locked loop system modeling"
-    // (Analog Applications Journal SLYT015 - May 2000 Analog and Mixed-Signal Products)
-    double m_omega; // undamped frequency
-    double m_zeta; // damping factor
-    double m_Ts; // We think of one line as one sample here since we detect the phase once per line
-    double m_G1;
-    double m_G2;
-    double m_GpdGvco;
-    double m_g1;
-    double m_g2;
-
-    enum PllState {
-        eSearching, eLocked, eLockedHoriz
+    // --- fixed-lag Kalman smoother over [position, period] ---
+    struct KalState {
+        double t, p;                    // position of line start, period
+        double P00, P01, P11;           // symmetric covariance
     };
+    static constexpr int c_kal_batch = 64;  // lines finalized per batch
+    static constexpr int c_kal_lag = 128;   // look-ahead beyond the batch
+    bool m_kal_valid;
+    KalState m_kal;                     // filtered state after line m_k_final - 1
+    KalState m_kal_head;                // newest filtered state (look-ahead head)
+    int64_t m_kal_head_k;               // its line, 0 while unset
+    int64_t m_k_final;                  // first line not yet finalized
+    // Innovation-based adaptation of the period process noise: the filter
+    // does not estimate its own noise model, so the normalized innovation
+    // variance steers a slow scale factor -- wow varies with disc radius
+    double m_qscale;
+    double m_nis_avg;
+    int64_t m_adapted_to_k;
+    // Per-frame sync quality (logged at debug level): how many lines had a
+    // sync, and how many of those disagreed with the fitted curve
+    int m_frame_resid_bad;
+    int m_frame_meas;
+    int64_t m_frame_log_k;
 
-    static constexpr double c_normalPulseTime = 4.7e-6;
-    static constexpr double c_equalizationPulseTime = c_normalPulseTime / 2;
-    static constexpr double c_broadPulseTime =  NtscInputBlock::c_samples_per_video_line / NtscInputBlock::c_video_sampling_frequency - c_normalPulseTime;
+    std::deque<double> m_curve;         // finalized T(k), k from m_curve_base
+    int64_t m_curve_base;
 
-    const int c_normalPulseSamples = c_normalPulseTime * NtscInputBlock::c_video_sampling_frequency;
-    const int c_equalizationPulseSamples = c_equalizationPulseTime * NtscInputBlock::c_video_sampling_frequency;
-    const int c_broadPulseSamples = c_broadPulseTime * NtscInputBlock::c_video_sampling_frequency;
-
-    float m_half_line_sync_pattern_error_sum; // used when locked
-    float m_half_line_sync_pattern_eq_error_sum; // used when scanning for horiz sync
-    float m_half_line_sync_pattern_br_error_sum; // used when scanning for horiz sync
-    // two bits per half line: 01: EQ, 11: BR, 00 -- other. Last half line shifted in at LSB
-    // (uses 36 bits, so a fixed 64-bit type: long is 32-bit on Windows)
-    uint64_t m_vert_sync_half_line_pattern;
-
-    int m_sample_ix;
-    int m_line;
-    PllState m_state;
-    PercentileFilter m_lower_percentile_filter;
-    int m_consecutive_good_syncs;
-    int m_missed_half_line_vert_sync_patterns;
-    // Set when the lock landed on field 2's vertical interval, so the frame
-    // being filled has no field 1 and must not be handed on
-    bool m_first_field_incomplete;
+    // --- vertical anchor: NTSC line numbers on the lattice ---
+    // A group of broad pulses starting on a lattice line boundary is field 1
+    // (the group spans lines 4-6); starting half a line in, field 2.
+    bool m_anchored;
+    int64_t m_line1_k;                  // lattice line of the current frame's NTSC line 1
+    int64_t m_pending_drift;            // re-anchor hysteresis: last unconfirmed drift
     int64_t m_frame_start_offset;
+    double m_frame_period;              // demod samples per line, at frame start
 
-    static constexpr int c_sample_history_size = 16;
-    float m_sample_history[c_sample_history_size];
-    int m_sample_history_ix;
-
-    double m_error_sum;
-
-    // Per-frame CPU timing of the reader thread, reported every
-    // c_timing_report_frames frames: the DPLL/sync loop's own time versus the
-    // time spent in readInput (fetching demodulated blocks, which blocks on
-    // the demodulator when it is the slower stage)
     static constexpr int c_timing_report_frames = 128;
     double m_process_elapsed_ms;
     double m_read_input_elapsed_ms;
