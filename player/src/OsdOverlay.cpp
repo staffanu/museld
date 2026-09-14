@@ -25,9 +25,9 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
     std::string cursor_string;
     const int zoom = state.zoom_factor;
     const auto src = decoder.getSourceDimensions();
-    const int vis_left = (int)((state.zoom_center.first - 0.5 / zoom) * src.width);
-    const int vis_top = (int)((state.zoom_center.second - 0.5 / zoom) * src.height);
-    const int vis_height = (int)(src.height / zoom);
+    const int vis_left = (int)state.visible_x0;
+    const int vis_top = (int)state.visible_y0;
+    const int vis_height = (int)(state.visible_y1 - state.visible_y0);
     auto tl_x = [&](int x) { return vis_left + x / zoom; };
     auto tl_y = [&](int y) { return vis_top + y / zoom; };
     auto comp_scale = [&](int s) { return std::max(1, s / zoom); };
@@ -62,9 +62,13 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         glfwGetWindowSize(window, &xsize, &ysize);
         double xpos, ypos;
         glfwGetCursorPos(window, &xpos, &ypos);
-        if (xpos >= 0 && ypos >= 0 && xpos < xsize && ypos < ysize) {
-            double rel_x = (xpos / xsize - 0.5) / state.zoom_factor + state.zoom_center.first;
-            double rel_y = (ypos / ysize - 0.5) / state.zoom_factor + state.zoom_center.second;
+        // Through the part of the window the picture occupies, into the
+        // part of the decoded image shown there
+        const double fx = (xpos / xsize - state.shown_x0) / (state.shown_x1 - state.shown_x0);
+        const double fy = (ypos / ysize - state.shown_y0) / (state.shown_y1 - state.shown_y0);
+        if (fx >= 0 && fy >= 0 && fx < 1 && fy < 1) {
+            double rel_x = (state.visible_x0 + fx * (state.visible_x1 - state.visible_x0)) / src.width;
+            double rel_y = (state.visible_y0 + fy * (state.visible_y1 - state.visible_y0)) / src.height;
             int field_x = (int)(rel_x * src.field_width);
             int field_y = (int)(rel_y * src.field_height);
             cursor_string = std::format("({}, {}) ({}, {})",

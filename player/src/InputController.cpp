@@ -37,10 +37,19 @@ bool InputController::poll(GLFWwindow *window,
         return false;
     if (checkKey(window, GLFW_KEY_TAB)) {
         if (full_screen) {
-            glfwSetWindowMonitor(window, nullptr, 0, 0, window_width, window_height, 60);
+            // Back to the size the window had, or the caller's default when
+            // playback started full screen
+            const int w = m_windowed_width > 0 ? m_windowed_width : window_width;
+            const int h = m_windowed_height > 0 ? m_windowed_height : window_height;
+            glfwSetWindowMonitor(window, nullptr, 0, 0, w, h, GLFW_DONT_CARE);
             full_screen = false;
         } else {
-            glfwSetWindowMonitor(window, glfwGetPrimaryMonitor(), 0, 0, window_width, window_height, 60);
+            // The monitor's current mode: no mode switch, the picture is
+            // scaled to the screen by the blit
+            glfwGetWindowSize(window, &m_windowed_width, &m_windowed_height);
+            GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+            const GLFWvidmode *mode = glfwGetVideoMode(monitor);
+            glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
             full_screen = true;
         }
     }
@@ -228,6 +237,24 @@ bool InputController::poll(GLFWwindow *window,
         cycleSubtitleSlot(state.subtitle_primary, "SUBTITLES");
     if (checkKey(window, GLFW_KEY_RIGHT_BRACKET))
         cycleSubtitleSlot(state.subtitle_secondary, "SUBTITLES 2");
+    if (checkKey(window, GLFW_KEY_F)) {
+        // Cycle the picture format; SQUEEZE only applies to a 4:3 frame
+        switch (state.aspect_mode) {
+            case AspectMode::eNormal:
+                state.aspect_mode = AspectMode::eZoom;
+                break;
+            case AspectMode::eZoom:
+                state.aspect_mode = state.source_aspect < 1.5 ? AspectMode::eSqueeze : AspectMode::eStretch;
+                break;
+            case AspectMode::eSqueeze:
+                state.aspect_mode = AspectMode::eStretch;
+                break;
+            case AspectMode::eStretch:
+                state.aspect_mode = AspectMode::eNormal;
+                break;
+        }
+        state.osd_text = std::format("ASPECT {}", aspectModeName(state.aspect_mode));
+    }
     if (checkKey(window, GLFW_KEY_Z)) {
         state.zoom_factor = (state.zoom_factor * 2) % 7;
         state.zoom_center.first = std::max(0.5 / state.zoom_factor,

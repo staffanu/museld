@@ -70,6 +70,7 @@ private:
     bool m_fallback_logged = false;
     int m_last_track_index = -1;
     int m_last_entry_index = -1;
+    int m_last_vis_x = -1, m_last_vis_y = -1, m_last_vis_w = -1, m_last_vis_h = -1;
     LaidSubtitle m_last_laid;
 
     musevk::VulkanManager &m_vulkan_manager;

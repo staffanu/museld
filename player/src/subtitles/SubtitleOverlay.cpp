@@ -114,14 +114,31 @@ void SubtitleOverlay::render(musevk::CommandBuffer &command_buffer,
     }
     if (active < 0) return;
 
-    if (active != m_last_entry_index || track_index != m_last_track_index) {
+    // The text is laid out in the part of the image that is on screen
+    // (the magnifier and the aspect ZOOM crop the rest), so it is never
+    // cut off, and the layout is cached until the entry or that part changes
+    const int vis_x = static_cast<int>(state.visible_x0);
+    const int vis_y = static_cast<int>(state.visible_y0);
+    const int vis_w = static_cast<int>(state.visible_x1 - state.visible_x0);
+    const int vis_h = static_cast<int>(state.visible_y1 - state.visible_y0);
+    if (active != m_last_entry_index || track_index != m_last_track_index
+        || vis_x != m_last_vis_x || vis_y != m_last_vis_y || vis_w != m_last_vis_w || vis_h != m_last_vis_h) {
         m_last_track_index = track_index;
         m_last_entry_index = active;
-        const auto &img = images.out_image;
-        const int frame_w = static_cast<int>(img->getWidth());
-        const int frame_h = static_cast<int>(img->getHeight());
-        const int max_width = static_cast<int>(frame_w * 0.8);
-        m_last_laid = m_font->layout(entries[active].lines, frame_w, frame_h, max_width, m_anchor_top);
+        m_last_vis_x = vis_x;
+        m_last_vis_y = vis_y;
+        m_last_vis_w = vis_w;
+        m_last_vis_h = vis_h;
+        const int max_width = static_cast<int>(vis_w * 0.8);
+        m_last_laid = m_font->layout(entries[active].lines, vis_w, vis_h, max_width, m_anchor_top);
+        for (auto &ll : m_last_laid.lines) {
+            ll.bg_x += vis_x;
+            ll.bg_y += vis_y;
+            for (auto &g : ll.glyphs) {
+                g.dst_x += vis_x;
+                g.dst_y += vis_y;
+            }
+        }
     }
     if (m_last_laid.lines.empty()) return;
 

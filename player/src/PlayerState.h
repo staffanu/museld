@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 #include "Decoder.h"
+#include "DisplayGeometry.h"
 
 // What the listener hears from a stereo audio track: both channels, or one of
 // them on both ears (bilingual discs, or the left-only analog audio on AC3
@@ -29,6 +30,14 @@ struct PlayerState {
     bool show_disc_code = false;
     int zoom_factor = 1;
     std::pair<double, double> zoom_center{0.5, 0.5};
+    AspectMode aspect_mode = AspectMode::eNormal;
+    double source_aspect = 4.0 / 3.0; // the picture's intended width over height (16:9 MUSE, 4:3 NTSC)
+    // The part of the decoded image on screen this frame (zoom and aspect
+    // cropping applied), in decoded-image pixels: the overlays keep their
+    // text inside it
+    double visible_x0 = 0, visible_y0 = 0, visible_x1 = 0, visible_y1 = 0;
+    // Where that part sits in the window, as fractions of the window size
+    double shown_x0 = 0, shown_y0 = 0, shown_x1 = 1, shown_y1 = 1;
     std::string osd_text; // Set to update text, moved to displayed_ during display
     std::string displayed_osd_text;
     int osd_text_remaining_frames = 0;
