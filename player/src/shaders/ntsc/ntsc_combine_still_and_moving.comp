@@ -11,6 +11,7 @@ layout(push_constant) uniform PushConstants {
     uint force_weave_only;  // weave: always take the missing rows from the previous field
     int field_parity;       // parity of the current field: 0 owns even output rows, 1 odd
     uint output_yuv;
+    float black_setup;      // the disc's black level above blanking, as a fraction of blanking-to-white
 };
 
 // The decoded fields, one buffer set per parity.  The set of the current
@@ -106,6 +107,15 @@ void main() {
         yuv = mix(weave, bob, m);
     }
     float16_t Y = yuv.x, U = yuv.y, V = yuv.z;
+    // The decoded signal has blanking at 0 and white at 1.  NTSC-M puts
+    // black 7.5 IRE above blanking and squeezes the whole picture, chroma
+    // included, into the remaining 92.5 IRE (the burst the chroma AGC
+    // referenced stays at 40 IRE); NTSC-J puts black at blanking.  Place
+    // black at 0 and undo the squeeze.
+    const float16_t setup_gain = 1.hf / (1.hf - float16_t(black_setup));
+    Y = (Y - float16_t(black_setup)) * setup_gain;
+    U *= setup_gain;
+    V *= setup_gain;
     Y = clamp(Y, 0.hf, 1.hf);
     U = clamp(U, -1.hf, 1.hf);
     V = clamp(V, -1.hf, 1.hf);

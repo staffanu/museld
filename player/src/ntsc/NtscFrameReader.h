@@ -158,6 +158,7 @@ private:
     // A group of broad pulses starting on a lattice line boundary is field 1
     // (the group spans lines 4-6); starting half a line in, field 2.
     bool m_anchored;
+    bool m_timebase_restarted;          // report the next frame as the first after a signal loss
     int64_t m_line1_k;                  // lattice line of the current frame's NTSC line 1
     int64_t m_pending_drift;            // re-anchor hysteresis: last unconfirmed drift
     int64_t m_frame_start_offset;

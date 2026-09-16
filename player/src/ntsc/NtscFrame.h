@@ -5,6 +5,7 @@
 #define MUSECPP_NTSCFRAME_H
 
 
+#include <array>
 #include <optional>
 #include <utility>
 
@@ -26,6 +27,17 @@ public:
         float sigma_sync;     // sync tip windows
         float blanking_level; // robust blanking level, for tracking wander
         float white_flag_level; // 100 IRE white flag level, -1 when no VBI line qualified
+        // Histogram of the active picture's luma (one-subcarrier-cycle
+        // means, so the chroma cancels) over the picture rows, relative to
+        // the blanking level, in bins of c_luma_hist_bin volts from
+        // c_luma_hist_min: the dark end, where the disc's black setup shows
+        // as a peak at 7.5 IRE (NTSC-M) or at blanking (NTSC-J).  A peak is
+        // what tells them apart: noise widens it but does not move it,
+        // while it biases any percentile.
+        static constexpr int c_luma_hist_bins = 48;
+        static constexpr float c_luma_hist_bin = 0.0035f;   // 0.5 nominal IRE
+        static constexpr float c_luma_hist_min = -0.028f;   // -4 IRE
+        std::array<uint32_t, c_luma_hist_bins> luma_hist;
         // Colour burst phase against the sampling grid (line-alternation
         // unwrapped): the amplitude-weighted circular mean over the picture
         // lines and the spread around it.  The frame-to-frame mean tracks the

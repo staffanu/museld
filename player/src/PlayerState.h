@@ -27,6 +27,7 @@ struct PlayerState {
     bool enable_cursor = false;
     AudioChannelMode audio_channel_mode = AudioChannelMode::eStereo;
     Decoder::CxMode analog_cx_mode = Decoder::CxMode::eAuto;
+    Decoder::BlackLevelMode black_level_mode = Decoder::BlackLevelMode::eAuto; // NTSC black setup
     bool show_disc_code = false;
     int zoom_factor = 1;
     std::pair<double, double> zoom_center{0.5, 0.5};

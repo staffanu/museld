@@ -16,6 +16,7 @@ public:
             : InputBlockBase(),
               input_offset(0),
               input_samples_per_video_sample(0),
+              timebase_restarted(false),
               video_data(std::move(v)),
               dropout_data(std::move(d)) {
     };
@@ -30,6 +31,9 @@ public:
 
     int64_t input_offset;
     double input_samples_per_video_sample;
+    // First frame after the reader lost the signal and re-acquired it (a
+    // disc change on live input): per-disc statistics start over
+    bool timebase_restarted;
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropout_data;
 

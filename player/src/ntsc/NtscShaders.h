@@ -59,7 +59,7 @@ public:
                     bool use_prev_movement, float motion_none, float motion_full);
 
   void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only,
-                                  unsigned int field_parity, bool output_yuv);
+                                  unsigned int field_parity, bool output_yuv, float black_setup);
 
   // Keep a copy of the combine's output image, and bring it back.  A film
   // mode hold re-shows the previous film frame this way: the copy is taken

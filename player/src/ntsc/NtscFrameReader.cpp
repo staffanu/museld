@@ -97,6 +97,7 @@ NtscFrameReader::NtscFrameReader(
           m_frame_log_k(0),
           m_curve_base(0),
           m_anchored(false),
+          m_timebase_restarted(false),
           m_line1_k(0),
           m_pending_drift(0),
           m_frame_start_offset(0),
@@ -226,6 +227,8 @@ void NtscFrameReader::threadFunc() {
         }
 
         output_block->input_offset = m_frame_start_offset;
+        output_block->timebase_restarted = m_timebase_restarted;
+        m_timebase_restarted = false;
         output_block->input_samples_per_video_sample =
                 m_frame_period / NtscInputBlock::c_samples_per_video_line * m_input_samples_decimation_rate;
         std::unique_lock<std::mutex> lock(m_mutex);
@@ -336,8 +339,10 @@ bool NtscFrameReader::readInputBlock(std::unique_ptr<NtscInputBlock> const &outp
 
     // Signal-loss guard: with no usable sync pulses for many lines the
     // lattice is stale; start over when they return
-    if (m_lattice_valid && (double)m_stream_pos - m_lat_t > 3000 * m_p_nominal)
+    if (m_lattice_valid && (double)m_stream_pos - m_lat_t > 3000 * m_p_nominal) {
         resetTimebase("no sync pulses");
+        m_timebase_restarted = true; // (a seek's reset is not a new disc, so it does not set this)
+    }
 
     return true;
 }
