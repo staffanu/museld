@@ -75,6 +75,12 @@ private:
     long m_white_flag_frames;         // frames whose white flag qualified
     float m_level_offset_v;           // rescale applied by the copy shader:
     float m_level_scale;              // out = (v - offset) * scale
+    std::array<double, NtscFrame::NoiseEstimate::c_luma_hist_bins> m_luma_hist; // decaying sum of the per-frame histograms
+    double m_black_peak_v;            // its dark peak, volts above blanking (the disc's black setup); -1 until seeded
+    double m_black_lowest_v;          // the lowest significant dark peak (letterbox mattes, fades); -1 until seeded
+    double m_black_peak_min_v;        // its minimum, decaying over minutes: the disc's black, held through bright scenes
+    float m_black_auto_ire;           // the automatic choice, 7.5 (NTSC-M) until the held black says NTSC-J
+    float m_black_ire;                // the black setup in effect this frame, from the mode and the automatic choice
     double m_prev_burst_phase;        // last frame's burst phase, NAN before the first
     double m_burst_coherence_avg;     // EWMA of the frame-to-frame burst phase error, -1 until seeded
     std::array<double, 256> m_noise_psd; // cumulative blank-VBI-line power spectrum

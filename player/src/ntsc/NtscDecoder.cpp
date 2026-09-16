@@ -41,6 +41,12 @@ NtscDecoder::NtscDecoder(
   m_white_flag_frames(0),
   m_level_offset_v(0.3f),
   m_level_scale(1.0f / 0.7f),
+  m_luma_hist{},
+  m_black_peak_v(-1),
+  m_black_lowest_v(-1),
+  m_black_auto_ire(7.5f),
+  m_black_ire(7.5f),
+  m_black_peak_min_v(-1),
   m_prev_burst_phase(std::numeric_limits<double>::quiet_NaN()),
   m_burst_coherence_avg(-1),
   m_noise_psd{},
@@ -186,6 +192,14 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
         frame->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_video_sample);
 
+        if (input_block->timebase_restarted && m_black_peak_v >= 0) {
+            // A new disc: its black is measured afresh
+            m_luma_hist.fill(0);
+            m_black_peak_v = m_black_lowest_v = m_black_peak_min_v = -1;
+            m_black_auto_ire = 7.5f;
+            m_log.info(eDecoder, "black level: signal re-acquired, measuring the disc's black afresh");
+        }
+
         auto noise_estimate = NtscFrame::EstimateNoise(input_block->video_data->data<float>());
         if (m_noise.sigma_blanking < 0) {
             m_noise = noise_estimate;
@@ -211,6 +225,75 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                                           : m_white_avg * 0.9 + noise_estimate.white_flag_level * 0.1;
             m_white_flag_frames++;
         }
+
+        // The disc's black: the peak of the dark end of the luma histogram,
+        // accumulated over the last few seconds, and that peak's minimum,
+        // decaying back over a couple of minutes -- a bright scene has its
+        // darkest greys where it likes, while every fade, cut to a dark
+        // shot or letterbox matte puts the peak at the disc's black setup,
+        // and those come far more often than the decay forgets them.  The
+        // decay is only so a spurious low (a dropout burst) washes out; a
+        // disc change resets the whole thing above.
+        {
+            using NE = NtscFrame::NoiseEstimate;
+            double total = 0;
+            for (int i = 0; i < NE::c_luma_hist_bins; i++) {
+                m_luma_hist[i] = 0.98 * m_luma_hist[i] + noise_estimate.luma_hist[i];
+                total += m_luma_hist[i];
+            }
+            // 3-bin smoothed argmax over the dark end (below ~13 IRE); a
+            // peak needs some mass behind it, else the picture has no black
+            const int dark_end = (int)((0.09f - NE::c_luma_hist_min) / NE::c_luma_hist_bin);
+            int best = -1;
+            double best_count = 0.005 * total;
+            for (int i = 1; i < std::min(dark_end, NE::c_luma_hist_bins - 1); i++) {
+                const double c = m_luma_hist[i - 1] + m_luma_hist[i] + m_luma_hist[i + 1];
+                if (c > best_count) {
+                    best_count = c;
+                    best = i;
+                }
+            }
+            if (best >= 0) {
+                // The lowest local peak with a quarter of the main one's
+                // mass: mattes and fades sit at the true black even when
+                // the picture's own shadows never get there
+                m_black_lowest_v = -1;
+                for (int i = 1; i <= best; i++) {
+                    const double c = m_luma_hist[i - 1] + m_luma_hist[i] + m_luma_hist[i + 1];
+                    if (c >= 0.25 * best_count && c >= m_luma_hist[i - 2 < 0 ? 0 : i - 2] + m_luma_hist[i - 1] + m_luma_hist[i]
+                        && c >= m_luma_hist[i] + m_luma_hist[i + 1] + m_luma_hist[i + 2 < NE::c_luma_hist_bins ? i + 2 : i + 1]) {
+                        m_black_lowest_v = NE::c_luma_hist_min + (i + 0.5) * NE::c_luma_hist_bin;
+                        break;
+                    }
+                }
+                m_black_peak_v = NE::c_luma_hist_min + (best + 0.5) * NE::c_luma_hist_bin;
+                m_black_peak_min_v = m_black_peak_min_v < 0
+                        ? m_black_peak_v
+                        : std::min(m_black_peak_v, m_black_peak_min_v + 0.00025 * (m_black_peak_v - m_black_peak_min_v));
+            }
+        }
+
+        // The automatic choice reads the held black with hysteresis: below
+        // 4 IRE the disc is NTSC-J, and it stays so until the held value
+        // decays back above 5 -- which takes minutes without a single
+        // black in the picture, so it does not flap.  M is the default
+        // while the measurement is still young.
+        std::string black_event;
+        if (m_black_peak_min_v >= 0) {
+            const double held_ire = m_black_peak_min_v * m_level_scale * 100.0;
+            const float choice = held_ire < 4.0 ? 0.0f : held_ire > 5.0 ? 7.5f : m_black_auto_ire;
+            if (choice != m_black_auto_ire) {
+                m_black_auto_ire = choice;
+                m_log.info(eDecoder, std::format("black level: the disc's black measures {:.1f} IRE, automatic choice {}",
+                                                 held_ire, choice > 3.75f ? "NTSC-M (7.5 IRE)" : "NTSC-J (0 IRE)"));
+                if (controls.black_level == BlackLevelMode::eAuto)
+                    black_event = choice > 3.75f ? "BLACK AUTO: NTSC-M" : "BLACK AUTO: NTSC-J";
+            }
+        }
+        m_black_ire = controls.black_level == BlackLevelMode::eM ? 7.5f
+                    : controls.black_level == BlackLevelMode::eJ ? 0.0f
+                    : m_black_auto_ire;
+        out.black_level_event = black_event;
 
         // Level calibration for the copy shader's rescale to blanking = 0,
         // white = 1: the offset (0 IRE) tracks the measured back porch level,
@@ -246,6 +329,24 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                     m_white_avg < 0 ? "not seen"
                                     : std::format("{:.3f} V ({} frames)", m_white_avg, m_white_flag_frames),
                     m_level_scale, 1.0f / 0.7f));
+            {
+                using NE = NtscFrame::NoiseEstimate;
+                double total = 0, dark = 0;
+                for (int i = 0; i < NE::c_luma_hist_bins; i++) {
+                    total += m_luma_hist[i];
+                    if (NE::c_luma_hist_min + (i + 0.5) * NE::c_luma_hist_bin < 0.09f)
+                        dark += m_luma_hist[i];
+                }
+                m_log.info(eDecoder, std::format(
+                        "picture black: dark peak at {} IRE (lowest peak {}), held minimum {} IRE "
+                        "(NTSC-M discs peak at 7.5, NTSC-J at 0; {:.1f}% of the picture below 13 IRE); "
+                        "black level in effect {:.1f} IRE",
+                        m_black_peak_v >= 0 ? std::format("{:.1f}", m_black_peak_v * m_level_scale * 100.0) : "none",
+                        m_black_lowest_v >= 0 ? std::format("{:.1f}", m_black_lowest_v * m_level_scale * 100.0) : "none",
+                        m_black_peak_v >= 0 ? std::format("{:.1f}", m_black_peak_min_v * m_level_scale * 100.0) : "none",
+                        total > 0 ? 100.0 * dark / total : 0.0,
+                        m_black_ire));
+            }
             if (m_noise_psd_windows > 0) {
                 // Band-limit to the 4.2 MHz System M video bandwidth, apply the
                 // frame-domain de-emphasis response (|D|² of the bilinear
@@ -376,6 +477,15 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
             }
         }
 
+        // The setting (and the automatic choice under it) and the disc's
+        // measured black; short, the overlay line has room for ~35 characters
+        out.level_status = std::format("Black: {}{} {:.1f} IRE, disc {}",
+                                       controls.black_level == BlackLevelMode::eAuto ? "auto " : "",
+                                       m_black_ire > 3.75f ? "M" : "J", m_black_ire,
+                                       m_black_peak_min_v >= 0
+                                           ? std::format("{:.1f}", m_black_peak_min_v * m_level_scale * 100.0)
+                                           : std::string("?"));
+
         // Selector noise floor: |cs - ct| accumulated over the 19-sample
         // window is ~sigma per sample for plain noise; 15 sigma keeps noise
         // from flipping the comb choice on flat areas.
@@ -400,7 +510,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                     field_interpolation_mode == FieldInterpolationMode::eForceIntraField || !m_decode_all_fields,
                     field_interpolation_mode == FieldInterpolationMode::eForceInterFrame
                             || action == NtscCadenceTracker::FieldAction::eWeave,
-                    decoded_field_index, output_yuv);
+                    decoded_field_index, output_yuv, m_black_ire / 100.0f);
             // Keep a clean copy (no OSD or subtitles drawn yet) for a
             // following hold to re-show
             m_shaders.saveCombinedOutput(*m_second_stage_command_buffer);

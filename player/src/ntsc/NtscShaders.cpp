@@ -176,7 +176,7 @@ void NtscShaders::detectMotion(CommandBuffer &sq,
 }
 
 void NtscShaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only,
-                                             unsigned int field_parity, bool output_yuv) {
+                                             unsigned int field_parity, bool output_yuv, float black_setup) {
   m_image_out->enqueueTransitionLayout(sq, vk::ImageLayout::eGeneral,
                                        vk::PipelineStageFlagBits::eTopOfPipe,
                                        vk::PipelineStageFlagBits::eComputeShader,
@@ -188,7 +188,8 @@ void NtscShaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field
            m_movement_buffers[m_current_movement_buffer_index], m_future_movement_buffer, m_image_out,
            m_image_Y_out, m_image_U_out, m_image_V_out});
   sq.enqueueComputeShader(m_combine_still_and_moving_algo,
-                          vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u, field_parity, output_yuv ? 1u : 0u});
+                          vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u, field_parity, output_yuv ? 1u : 0u,
+                                 std::bit_cast<unsigned int>(black_setup)});
 
   if (output_yuv) {
     m_image_Y_out->synchronizeForHostRead(sq);

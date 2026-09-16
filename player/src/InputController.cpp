@@ -181,6 +181,24 @@ bool InputController::poll(GLFWwindow *window,
         if (!reader.has_analog_audio || audio_track != AudioTrack::eDefault)
             state.osd_text = "(" + state.osd_text + ")";
     }
+    if (checkKey(window, GLFW_KEY_J)) {
+        // NTSC-M (US) and NTSC-J discs put black 7.5 and 0 IRE above blanking
+        switch (state.black_level_mode) {
+            case Decoder::BlackLevelMode::eAuto:
+                state.black_level_mode = Decoder::BlackLevelMode::eM;
+                state.osd_text = "BLACK 7.5 IRE (NTSC-M)";
+                break;
+            case Decoder::BlackLevelMode::eM:
+                state.black_level_mode = Decoder::BlackLevelMode::eJ;
+                state.osd_text = "BLACK 0 IRE (NTSC-J)";
+                break;
+            case Decoder::BlackLevelMode::eJ:
+                state.black_level_mode = Decoder::BlackLevelMode::eAuto;
+                state.osd_text = "BLACK AUTO";
+                break;
+        }
+        if (state.paused) state.redo_last_field = true;
+    }
     if (checkKey(window, GLFW_KEY_D)) {
         switch (dropout_mode) {
             case DropoutMode::eNormal:

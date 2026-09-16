@@ -82,6 +82,23 @@ NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data) {
     }
     est.white_flag_level = white_centers.empty() ? -1.0f : RobustNoise::median(white_centers);
 
+    // Luma histogram: means over 4 samples (one subcarrier cycle on the
+    // 4 fsc grid, so the chroma cancels) across the active picture of the
+    // same rows, a microsecond clear of both blanking edges
+    est.luma_hist.fill(0);
+    for (int field_start : {40, 303}) {
+        for (int row = field_start; row <= field_start + 210; row++) {
+            const float *line = data + row * NTSC_TOTAL_WIDTH;
+            for (int col = 152; col + 4 <= 872; col += 4) {
+                const float mean = 0.25f * (line[col] + line[col + 1] + line[col + 2] + line[col + 3]);
+                const int bin = (int)std::floor((mean - est.blanking_level - NoiseEstimate::c_luma_hist_min)
+                                                / NoiseEstimate::c_luma_hist_bin);
+                if (bin >= 0 && bin < NoiseEstimate::c_luma_hist_bins)
+                    est.luma_hist[bin]++;
+            }
+        }
+    }
+
     // Burst phase: correlate the colour burst window (columns 78..110, 8
     // subcarrier cycles on the 4 fsc grid) against the quadrature pair per
     // line.  The burst inverts line to line, so odd lines are flipped before

@@ -115,6 +115,8 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
                 film_line += " " + state.last_decoded.film_status_detail;
             disc_info_strings.push_back(film_line);
         }
+        if (!state.last_decoded.level_status.empty())
+            disc_info_strings.push_back(state.last_decoded.level_status);
         const int disc_scale = comp_scale(osd_base / 2);
         const int glyph_h = 24;
         const int bottom_margin = std::max(0, src.height - 955 - glyph_h * 2) / zoom;

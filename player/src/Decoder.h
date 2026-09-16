@@ -27,6 +27,12 @@ public:
         eAuto, eOff, eOn
     };
 
+    // NTSC black setup: 7.5 IRE above blanking (NTSC-M, US discs) or at
+    // blanking (NTSC-J); auto reads it off the picture's own dark end
+    enum class BlackLevelMode {
+        eAuto, eM, eJ
+    };
+
     struct SourceDimensions {
         int width;          // full image, both fields, all chroma planes laid out as in out_image
         int height;
@@ -53,6 +59,9 @@ public:
         bool film_mode; // NTSC: weave by the film cadence when a 3:2 pulldown lock holds
         DropoutMode dropout_mode;
         bool output_yuv;
+        // NTSC: where the disc puts black; black is placed at output zero
+        // and the picture above it (chroma included) rescaled to fill the range
+        BlackLevelMode black_level;
     };
 
     struct DecodedField {
@@ -82,6 +91,12 @@ public:
         // the overlay only appends it while paused, where it can be read.
         std::string film_status;
         std::string film_status_detail;
+        // Black level setting and the measured picture black, for the same
+        // overlay; empty for MUSE
+        std::string level_status;
+        // OSD text for the frame on which the automatic black level choice
+        // changed; empty otherwise
+        std::string black_level_event;
     };
 
     Decoder(const Decoder&) = delete;

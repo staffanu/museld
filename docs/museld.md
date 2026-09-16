@@ -124,6 +124,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--field-interpolation <mode>` | Initial de-interlacing mode: `normal` (motion-adaptive), `intra-field`, or `inter-frame` — same as keys 1/2/3 |
 | `--no-3d-comb` | NTSC: start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4 |
 | `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
+| `--black-level <mode>` | NTSC: where the disc puts black — `auto` (default) reads it off the picture, `m` forces NTSC-M (US discs: 7.5 IRE above blanking), `j` forces NTSC-J (Japanese discs: black at blanking). Same as the J key. Wrong in the M direction, a Japanese disc loses its darkest 7.5 IRE; wrong in the J direction, a US disc shows black as dark grey and slightly desaturated |
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
 | `--saturation <factor>` | NTSC: scale the chroma gain (default 1.0, applied on top of the burst-referenced AGC) |
 | `--cx <mode>` | NTSC analog audio CX expansion: `auto` (default, follow the disc's VBI flag), `on`, or `off` — same as the X key. `off` is also how to record the un-expanded signal for comparisons |
@@ -237,8 +238,21 @@ path.
 **NTSC level calibration**: video levels are calibrated automatically against references in the
 signal. Black (0 IRE) tracks the measured back porch blanking level; the gain (100 IRE) is taken
 from the white flag — a flat 100 IRE line in the vertical interval that most discs carry — when
-one is found, and stays at the nominal FM deviation mapping otherwise. The measured levels are
-logged with the noise figures (`--log D3`).
+one is found, and stays at the nominal FM deviation mapping otherwise. Where black sits above
+blanking is a property of the disc's standard rather than of the signal: NTSC-M (US) discs put it
+at 7.5 IRE with the picture, chroma included, squeezed into the 92.5 IRE above, NTSC-J (Japanese)
+discs at blanking. The decoder places black at output zero and rescales the picture accordingly,
+for the display and `--write` alike. By default it reads the disc's black off the picture: the
+black setup shows as a peak at the dark end of the luma histogram, at 7.5 IRE on an NTSC-M disc
+and near 0 on an NTSC-J one (a peak, unlike a percentile, is not shifted by noise). The lowest
+that peak has been is held for minutes — every fade, dark shot or letterbox matte refreshes it,
+while a bright scene cannot pull it up — and a held value below 4 IRE selects NTSC-J, staying
+there until it decays back above 5; a signal loss (a disc change on live input) starts the
+measurement over. An OSD message announces each automatic change, and the V overlay shows the
+setting in effect and the measured black, e.g. `Black: auto J 0.0 IRE, disc 2.3`. `--black-level`
+/ the J key force either standard for discs the measurement gets wrong (a US disc whose letterbox
+mattes are mastered below black, say). The measured levels are logged with the noise figures
+(`--log D3`).
 
 **Display rendering**: for display and PNG export, both the MUSE and NTSC paths convert the
 decoded signal to linear light (CRT law, gamma 2.2) with SMPTE C primaries mapped to sRGB;
@@ -274,7 +288,8 @@ also given, which is the mode to use for batch rendering.
 | A | Cycle the audio track: MUSE (or NTSC analog) → EFM → AC3 (NTSC only) (RF input only) |
 | B | Cycle the audio channels heard: stereo → left only → right only (bilingual discs, or the left-only analog track on AC3 discs; `--write` output always keeps stereo) |
 | X | Cycle CX noise reduction for the NTSC analog audio: auto (follow the VBI flag, the default) → off → on; `--cx` sets the initial mode. Shown in parentheses when the audio playing is not the analog track (the setting is remembered but inaudible). The V info line shows the CX status: the disc's flag in auto mode, or e.g. "CX off forced (disc on)" when overridden. |
-| V | Toggle disc code / chapter / frame display, plus the NTSC film mode status (TOC reading is not implemented) |
+| V | Toggle disc code / chapter / frame display, plus the NTSC film mode and black level status (TOC reading is not implemented) |
+| J | NTSC: cycle the black level: auto → NTSC-M (7.5 IRE) → NTSC-J (0 IRE), see `--black-level` |
 | C | Show cursor coordinates and input-file offsets (see below) |
 | L | Toggle non-linear de-emphasis processing |
 | Z | Cycle the magnifier: 1× → 2× → 4× (arrow keys pan when zoomed) |
