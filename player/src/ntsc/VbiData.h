@@ -21,6 +21,13 @@ public:
     std::optional<double> playbackTimeSeconds() const override;
     [[nodiscard]] std::optional<bool> cxEnabled() const { return m_cx_enabled; }
 
+    // Disc-level facts (CX flag, chapter, CLV) are on every frame of a disc
+    // and change only at programme boundaries; a frame whose code line
+    // failed to slice keeps them from the previous frame rather than
+    // blinking them off.  The per-frame numbers (time, picture) are not
+    // carried over.
+    void inheritDiscFlags(const VbiData &previous);
+
     // The CX state the player applies when the user forces it (nullopt in
     // auto mode); set by the decoder so asStrings() can show detected vs used
     void setCxOverride(std::optional<bool> used) { m_cx_override = used; }

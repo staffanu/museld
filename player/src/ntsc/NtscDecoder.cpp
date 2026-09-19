@@ -525,6 +525,11 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     if (input_block != nullptr) {
         m_frames[0]->processVbi();
+        if (auto vbi = m_frames[0]->getVbiData()) {
+            if (m_prev_vbi && !input_block->timebase_restarted)
+                vbi->inheritDiscFlags(*m_prev_vbi);
+            m_prev_vbi = vbi;
+        }
         // A new frame was read, so this pair has not been delivered before.
         // It leads the displayed frame (m_frames[1]) by one frame time, which
         // is well inside the caption timing tolerance.
