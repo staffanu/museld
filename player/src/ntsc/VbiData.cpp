@@ -22,6 +22,15 @@ VbiData::VbiData(bool is_lead_in, bool is_lead_out, bool is_clv, bool is_stop_co
   m_cx_enabled(cx_enabled) {
 }
 
+void VbiData::inheritDiscFlags(const VbiData &previous) {
+  if (!m_cx_enabled.has_value())
+    m_cx_enabled = previous.m_cx_enabled;
+  if (!m_chapter.has_value())
+    m_chapter = previous.m_chapter;
+  if (!m_is_clv && previous.m_is_clv && !m_cav_picture_number.has_value())
+    m_is_clv = true;
+}
+
 std::vector<std::string> VbiData::asStrings() const {
   std::string string1 = m_is_clv ? "CLV " : "CAV ";
   if (m_cx_override.has_value()) {

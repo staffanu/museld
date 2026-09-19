@@ -254,7 +254,9 @@ void NtscFrame::processVbi() {
     // CLV is flagged by the single-line 87FFFF CLV code (§10.1.7), always
     // present on a CLV disc, on the field that does NOT carry the programme
     // time code.
-    int is_clv = count(0x87ffff) >= 1;
+    // The programme time code (F0DDxx) is itself CLV-only, so it proves CLV
+    // when the marker line failed to slice this frame.
+    int is_clv = count(0x87ffff) >= 1 || find(0xf0ff00, 0xf0dd00) != -1;
     // The stop code (§10.1.11) is on lines 16 and 17 of one field.
     bool is_stop_code = count(0x82CFFF) >= 2;
 
@@ -343,6 +345,17 @@ void NtscFrame::processVbi() {
             m_log.debug(eDecoder, "VBI programme status: X4/X5 parity error");
     }
 
+    if (m_log.isEnabled(eDebug, eDecoder)) {
+        std::string hex;
+        for (int code : codes)
+            hex += std::format(" {:06X}", code);
+        m_log.debug(eDecoder, std::format("VBI frame {}: codes{}; clv {} time {} pic {} chapter {} cx {}",
+                                          m_frame_no, hex, is_clv,
+                                          clv_time_seconds ? std::to_string(*clv_time_seconds) : "-",
+                                          clv_picture_number ? std::to_string(*clv_picture_number) : "-",
+                                          chapter ? std::to_string(*chapter) : "-",
+                                          cx_enabled ? (*cx_enabled ? "on" : "off") : "-"));
+    }
     m_vbi_data = std::make_shared<VbiData>(is_lead_in, is_lead_out, is_clv, is_stop_code, chapter,
         clv_time_seconds, clv_picture_number, cav_picture_number, cx_enabled);
 
@@ -388,12 +401,21 @@ int NtscFrame::processVbiLine(int line) {
     int samples_per_half_bit = 1e-6 * NtscInputBlock::c_video_sampling_frequency;
     long half_bits = 0b01; // first two half bits are 01, already found
     int prev = 1;
+    // A half bit is 14 samples, so a one- or two-sample dip or spike (a
+    // noise hit, a speck on the disc) is not a transition: slice the
+    // 3-sample median, with hysteresis around the half-amplitude level
+    auto median3 = [](const int16_t *p) {
+        const float a = HalfFloatUtil::half_to_float(p[-1]);
+        const float b = HalfFloatUtil::half_to_float(p[0]);
+        const float c = HalfFloatUtil::half_to_float(p[1]);
+        return std::max(std::min(a, b), std::min(std::max(a, b), c));
+    };
     for (int i = 2; i < 48; i++) {
         // measure time to next transition
         int t = 0;
         while (t < samples_per_half_bit * 9 / 4) {
-            float v = HalfFloatUtil::half_to_float(*vbi++);
-            if (prev && v < 0.5 || !prev && v > 0.5) {
+            float v = median3(vbi++);
+            if (prev && v < 0.35f || !prev && v > 0.65f) {
                 prev = 1 - prev;
                 break;
             }
@@ -402,6 +424,17 @@ int NtscFrame::processVbiLine(int line) {
 
         if (t < samples_per_half_bit * 3 / 4) {
             m_log.debug(eDecoder, std::format("VBI line {}: transition time too short", line));
+            // Debug aid: MUSELD_DUMP_VBI_FAIL=<path> appends the failing line (910 floats)
+            if (static const char *dump = getenv("MUSELD_DUMP_VBI_FAIL"); dump != nullptr) {
+                if (FILE *f = fopen(dump, "ab")) {
+                    const int16_t *row = m_data->data<int16_t>() + (line - 1) * NtscInputBlock::c_samples_per_video_line;
+                    for (int j = 0; j < NtscInputBlock::c_samples_per_video_line; j++) {
+                        float v = HalfFloatUtil::half_to_float(row[j]);
+                        fwrite(&v, sizeof v, 1, f);
+                    }
+                    fclose(f);
+                }
+            }
             return -1;
         } else if (t < samples_per_half_bit * 5 / 4) {
             half_bits = (half_bits << 1) | prev;
