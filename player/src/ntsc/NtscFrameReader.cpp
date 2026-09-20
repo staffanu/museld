@@ -53,7 +53,7 @@ NtscFrameReader::NtscFrameReader(
         Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
         const std::string &filename, InputFormat input_format, double sample_rate,
         double initial_seek_seconds, bool benchmark_shaders, AudioTrack audio_track,
-        const std::optional<std::string> &output_filename)
+        int efm_adaptive_filter_size, const std::optional<std::string> &output_filename)
         : FrameReader(log, filename,
                       filesystem::is_fifo(filename),
                       initial_seek_seconds, output_filename),
@@ -106,7 +106,7 @@ NtscFrameReader::NtscFrameReader(
           m_read_input_elapsed_ms(0),
           m_timed_frames(0) {
     m_demodulator = new NtscRfDemodulator(log, executable_dir, m_filename, sample_rate, vulkan_manager,
-                                          input_format, benchmark_shaders, audio_track);
+                                          input_format, benchmark_shaders, audio_track, efm_adaptive_filter_size);
 }
 
 bool NtscFrameReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) {
@@ -164,6 +164,15 @@ void NtscFrameReader::setAudioTrack(AudioTrack track) {
     // The audio tracks are alternatives: only the selected one is demodulated
     if (m_demodulator != nullptr)
         m_demodulator->setAudioTrack(track);
+}
+
+void NtscFrameReader::setEfmAdaptiveFilterSize(int size) {
+    if (m_demodulator != nullptr)
+        m_demodulator->setEfmAdaptiveFilterSize(size);
+}
+
+int NtscFrameReader::efmAdaptiveFilterSize() const {
+    return m_demodulator != nullptr ? m_demodulator->efmAdaptiveFilterSize() : -1;
 }
 
 void NtscFrameReader::setAnalogCx(bool enabled) {

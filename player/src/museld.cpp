@@ -943,6 +943,10 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 !is_muse, // has_analog_audio
                 !is_muse, // has_ac3_audio
         };
+        if (reader.efmAdaptiveFilterSize() >= 0) { // RF input: the reader runs an EFM demodulator
+            reader_controls.efmFilterSize = [&reader]() { return reader.efmAdaptiveFilterSize(); };
+            reader_controls.setEfmFilterSize = [&reader](int size) { reader.setEfmAdaptiveFilterSize(size); };
+        }
 
         std::unique_ptr<Decoder> decoder;
         if constexpr (std::is_same<InputBlock, MuseInputBlock>::value) {
@@ -1099,6 +1103,7 @@ int main(int argc, char *argv[]) {
     DropoutMode dropout_mode = DropoutMode::eNormal;
     bool decode_audio = true;
     AudioTrack audio_track = AudioTrack::eDefault;
+    int efm_adaptive_filter_size = 3;
     Decoder::CxMode cx_mode = Decoder::CxMode::eAuto;
     bool benchmark_shaders = false;
     MuseAdaptiveEqualizer::Mode eq_mode = MuseAdaptiveEqualizer::Mode::eAdapt;
@@ -1207,6 +1212,14 @@ int main(int argc, char *argv[]) {
     options.flag("--ac3", "NTSC: take the audio from the AC3-RF surround track, downmixed to "
                           "stereo (RF input only; decoding needs an FFmpeg build)", [&] () -> void {
         audio_track = AudioTrack::eAc3;
+    });
+    options.option("--efm-filter-size", "N",
+                   "Adaptive FIR filter size in the EFM timing recovery (default 3, 0 disables it); "
+                   "try 9 or 11 when a distorted signal causes many errors.  The E key cycles it "
+                   "during playback", [&] () -> void {
+        efm_adaptive_filter_size = stoi(*(it++));
+        if (efm_adaptive_filter_size < 0 || efm_adaptive_filter_size > 100)
+            throw std::runtime_error("Invalid --efm-filter-size (expected 0..100)");
     });
     options.flag("--all-fields", "Update the display once per field, at 60 Hz (default)", [&] () -> void {
         decode_all_fields = true;
@@ -1643,7 +1656,7 @@ int main(int argc, char *argv[]) {
                         auto reader = make_unique<NtscFrameReader>(
                                         log, executable_dir, manager, *it, input_format,
                                         file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
-                                        muse_output_filename);
+                                        efm_adaptive_filter_size, muse_output_filename);
                         process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                                      full_screen, aspect_mode, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                      audio_track,
@@ -1669,7 +1682,7 @@ int main(int argc, char *argv[]) {
                         auto reader = make_unique<ResamplingFrameReader>(
                                 log, executable_dir, manager, *it, input_format,
                                 file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
-                                audio_track == AudioTrack::eEfm, muse_output_filename);
+                                audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
                                      full_screen, aspect_mode, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                      audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,

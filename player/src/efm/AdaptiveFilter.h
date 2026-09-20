@@ -19,6 +19,10 @@ public:
     AdaptiveFilter(AdaptiveFilter &&) = delete;
     AdaptiveFilter &operator=(AdaptiveFilter &&) = delete;
 
+    // Change the number of taps; the taps restart from identity and the
+    // sample window from zeros
+    void resize(int filter_size);
+
     void addSample(float sample);
     void adaptError(float desired, float actual);
     [[nodiscard]] float getOutput() const;
@@ -27,7 +31,7 @@ public:
     [[nodiscard]] std::string filterString() const;
 
 private:
-    const int m_filter_size;
+    int m_filter_size;
     const float m_mu;
     std::vector<float> m_window;
     std::vector<float> m_coeffs;

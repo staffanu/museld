@@ -50,6 +50,10 @@ public:
     virtual void setAudioTrack(AudioTrack track) { setEfmEnabled(track == AudioTrack::eEfm); }
     // CX noise reduction for the NTSC analog audio; a no-op elsewhere
     virtual void setAnalogCx(bool) {}
+    // Taps in the EFM timing recovery's adaptive filter (0 disables it).
+    // efmAdaptiveFilterSize() is negative when the reader has no EFM demodulator.
+    virtual void setEfmAdaptiveFilterSize(int) {}
+    [[nodiscard]] virtual int efmAdaptiveFilterSize() const { return -1; }
 
 protected:
     // input_is_realtime is separate from input_is_fifo since we could have non-real-time input from a pipe

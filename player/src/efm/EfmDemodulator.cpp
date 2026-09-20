@@ -29,6 +29,7 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
       m_phase_adjust_filter(nullptr),
       m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
           adaptive_filter_size, retiming_debug_filename),
+      m_adaptive_filter_size(adaptive_filter_size),
       m_timing_log_period(std::max(1, (int)std::round(input_sample_frequency / input_block_size))) {
 
     assert(m_log2_decimation >= 0);
@@ -128,6 +129,12 @@ void EfmDemodulator::demodulate(const float *input_buffer, std::vector<float> &r
     }
     auto t2 = clock::now();
 
+    // Apply a filter size change requested from another thread; only this
+    // thread touches the timing recovery
+    if (const int size = m_adaptive_filter_size; size != m_timing_recovery.adaptiveFilterSize()) {
+        m_timing_recovery.setAdaptiveFilterSize(size);
+        m_log.info(eAudio, std::format("EFM adaptive filter size {}", size));
+    }
     m_timing_recovery.reclock(m_filtered_input.data(), reclocked_data);
     auto t3 = clock::now();
 
