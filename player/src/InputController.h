@@ -34,6 +34,10 @@ struct ReaderControls {
     // decoder doesn't support adaptive equalization (NTSC).
     std::function<std::string()> cycleEqMode;
     std::function<void()> resetEqTaps;
+    // EFM timing recovery adaptive filter size (RF input only): the current
+    // number of taps and a setter, empty when the reader has no EFM demodulator.
+    std::function<int()> efmFilterSize;
+    std::function<void(int)> setEfmFilterSize;
 };
 
 class InputController {

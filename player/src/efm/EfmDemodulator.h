@@ -4,6 +4,7 @@
 #ifndef AC3RF_EFM_DECODE_EFMDEMODULATOR_H
 #define AC3RF_EFM_DECODE_EFMDEMODULATOR_H
 
+#include <atomic>
 #include <string>
 #include <cstdint>
 
@@ -29,6 +30,13 @@ public:
     // The largest power-of-two decimation that keeps the decimated sample rate above 8 MHz.
     static int defaultLog2Decimation(double input_sample_frequency);
 
+    // Adaptive FIR filter size in the timing recovery (0 disables the filter).
+    // May be called from any thread; the change takes effect at the start of
+    // the next demodulate() call, and adaptiveFilterSize() reports the size
+    // requested so far.
+    void setAdaptiveFilterSize(int size) { m_adaptive_filter_size = size; }
+    [[nodiscard]] int adaptiveFilterSize() const { return m_adaptive_filter_size; }
+
 private:
     static IirFilter<5> *makeEllipticLowpassFilter(double Fs);
 
@@ -45,6 +53,7 @@ private:
     std::vector<float> m_filtered_input;
 
     TimingRecovery m_timing_recovery;
+    std::atomic<int> m_adaptive_filter_size;
 
     int m_timing_log_period;
     int m_timing_blocks = 0;

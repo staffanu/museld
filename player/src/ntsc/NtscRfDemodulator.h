@@ -66,7 +66,7 @@ class NtscRfDemodulator : public RfDemodulator<NtscDemodulatedBlock> {
 public:
     NtscRfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
                       musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
-                      AudioTrack audio_track);
+                      AudioTrack audio_track, int efm_adaptive_filter_size);
     NtscRfDemodulator(const NtscRfDemodulator&) = delete;
     void operator=(const NtscRfDemodulator&) = delete;
 
@@ -84,6 +84,9 @@ public:
     }
     // CX expansion for the analog audio, driven by the VBI status decoded downstream
     void setAnalogCx(bool enabled) { m_analog_cx = enabled; }
+    // Taps in the EFM timing recovery's adaptive filter (0 disables it); applied at the next block
+    void setEfmAdaptiveFilterSize(int size) { m_efm_demodulator.setAdaptiveFilterSize(size); }
+    [[nodiscard]] int efmAdaptiveFilterSize() const { return m_efm_demodulator.adaptiveFilterSize(); }
 
     // enough buffers for two frames
     [[nodiscard]] int numberOfBlockBuffers() const {

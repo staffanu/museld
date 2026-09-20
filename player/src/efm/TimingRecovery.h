@@ -25,6 +25,11 @@ public:
 
     void reclock(const float *input, std::vector<float> &output);
 
+    // Number of taps in the adaptive filter ahead of the timing detector (0
+    // bypasses it).  Not safe to call while reclock() runs.
+    void setAdaptiveFilterSize(int size) { m_filter.resize(size); }
+    [[nodiscard]] int adaptiveFilterSize() const { return m_filter.size(); }
+
 private:
     Logger &m_log;
     const double m_input_sample_frequency;

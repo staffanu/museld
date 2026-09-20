@@ -19,6 +19,7 @@ public:
                                    const std::string &filename, InputFormat input_format,
                                    double sample_rate, double initial_seek_seconds,
                                    bool demodulate, bool benchmark_shaders, bool efm_enabled,
+                                   int efm_adaptive_filter_size,
                                    const std::optional<std::string> &output_filename);
     ResamplingFrameReader(const ResamplingFrameReader&) = delete;
     void operator=(const ResamplingFrameReader&) = delete;
@@ -32,6 +33,8 @@ public:
     void cleanup() override;
     void seek(double seconds) override;
     void setEfmEnabled(bool enabled) override;
+    void setEfmAdaptiveFilterSize(int size) override;
+    [[nodiscard]] int efmAdaptiveFilterSize() const override;
 
 protected:
     void threadFunc() override;

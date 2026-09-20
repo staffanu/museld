@@ -26,14 +26,14 @@ using namespace NtscRfDemodulatorConstants;
 
 NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string executable_dir, std::string filename,  float sample_frequency,
                                      musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
-                                     AudioTrack audio_track)
+                                     AudioTrack audio_track, int efm_adaptive_filter_size)
 : RfDemodulator<NtscDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency,
                                       vulkan_manager, input_format,
                                       NtscRfDemodulatorConstants::c_sample_block_size,
                                       benchmark_shaders),
   m_efm_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
                     FirFilterStage::simdSupported(), true,
-                    EfmDemodulator::defaultLog2Decimation(sample_frequency), 3, std::nullopt),
+                    EfmDemodulator::defaultLog2Decimation(sample_frequency), efm_adaptive_filter_size, std::nullopt),
   m_analog_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
                        48000.0, FirFilterStage::simdSupported()),
   m_ac3_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,

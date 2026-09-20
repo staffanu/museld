@@ -7,14 +7,19 @@
 #include "AdaptiveFilter.h"
 
 AdaptiveFilter::AdaptiveFilter(int filter_size, float mu)
-    : m_filter_size(filter_size),
+    : m_filter_size(0),
       m_mu(mu),
-      m_window(filter_size, 0.f),
-      m_coeffs(filter_size, 0.f),
-      m_filtered(filter_size, 0.f),
       m_sample(0.f)
 {
+    resize(filter_size);
+}
+
+void AdaptiveFilter::resize(int filter_size) {
     assert(filter_size >= 0);
+    m_filter_size = filter_size;
+    m_window.assign(filter_size, 0.f);
+    m_coeffs.assign(filter_size, 0.f);
+    m_filtered.assign(filter_size, 0.f);
     if (filter_size > 0)
         m_coeffs[filter_size / 2] = 1.0f;
 }
