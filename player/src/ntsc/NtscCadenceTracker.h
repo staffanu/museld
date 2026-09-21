@@ -76,6 +76,7 @@ private:
     float m_floor;             // adaptive repeat/noise floor, -1 until seeded
     int m_locked_hypothesis;   // h with phase(f) = (f + h) % 5; -1 when unlocked
     int m_consecutive_misses;  // expected repeats that failed to materialize
+    int m_frames_since_break;  // frames since a confirmed cadence break (large when none)
     std::array<float, 5> m_score;
     std::array<FrameClass, 8> m_classes; // ring, indexed by frame_no % size
 };

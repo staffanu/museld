@@ -228,9 +228,9 @@ half a second of unambiguous cadence, coasts through cuts and static scenes, dro
 missed repeats when the cadence breaks (film/video splices), and any frame whose expected repeat
 is missing falls back to the motion-adaptive path on its own. Lock transitions are logged at
 `--log D3`. Key 5 switches between auto and off; it is only active in the `normal` de-interlacing
-mode with all fields decoded. The disc code overlay (V key) shows the state: `Film: off`,
-`Film: auto` (watching, nothing detected), or `Film: 3:2` while locked. When paused, the locked
-line also shows what the displayed field is, e.g. `Film: 3:2 A weave` — the letter is the film
+mode with all fields decoded. The disc code overlay (V key) shows the state: `Telecine: off`,
+`Telecine: searching` (watching, nothing detected), or `Telecine: 3:2 locked`. When paused,
+the locked line also shows what the displayed field is, e.g. `Telecine: 3:2 locked A weave` — the letter is the film
 frame within the (A1A2)(A3B1)(B2C1)(C2C3)(D1D2) pulldown cycle the output currently shows (step
 with N to watch its 3, 2, 3, 2 rhythm), `hold` marks the fields that re-show the previous film
 frame, and `adapt` a locked frame whose missing repeat made it fall back to the motion-adaptive

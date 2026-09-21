@@ -47,6 +47,13 @@ namespace {
     constexpr float c_lock_score = 12.0f;  // 4 matched repeats = 2 full cycles
     constexpr float c_lock_margin = 6.0f;
     constexpr float c_unlock_score = 6.0f;
+    // Right after a confirmed break the cadence has usually just jumped
+    // phase at a video edit (the Godzilla disc: a cut, and the repeats
+    // resume one frame late), so one full cycle -- its two clean repeats,
+    // two frames apart, with no other phase supported -- re-locks; waiting
+    // for the usual two cycles left seven adaptive frames per edit.
+    constexpr float c_relock_score = 6.0f;
+    constexpr int c_relock_window = 10;
 
     int phaseOf(int frame_no, int hypothesis) {
         return (frame_no + hypothesis) % 5;
@@ -58,6 +65,7 @@ NtscCadenceTracker::NtscCadenceTracker(Logger &log)
   m_floor(-1.0f),
   m_locked_hypothesis(-1),
   m_consecutive_misses(0),
+  m_frames_since_break(1000),
   m_score{},
   m_classes{} {
 }
@@ -108,6 +116,8 @@ void NtscCadenceTracker::update(int frame_no, float d0, float d1, float noise_si
 
     Level l0 = classify(d0);
     Level l1 = classify(d1);
+    if (m_frames_since_break < 1000)
+        m_frames_since_break++;
     m_classes[frame_no % m_classes.size()] = {frame_no, l0, l1};
 
     // A missed repeat at the locked phase means the cadence broke there, no
@@ -150,14 +160,16 @@ void NtscCadenceTracker::update(int frame_no, float d0, float d1, float noise_si
                 best_other = std::max(best_other, m_score[h]);
         char const *reason = m_consecutive_misses >= 2 ? "cadence broke"
                 : m_score[m_locked_hypothesis] < c_unlock_score ? "score decayed"
-                : best_other > m_score[m_locked_hypothesis] ? "another phase took over"
+                : best_other >= m_score[m_locked_hypothesis] + c_lock_margin ? "another phase took over"
                 : nullptr;
         if (reason != nullptr) {
             m_log.info(eDecoder, std::format("film cadence: unlocked at frame {} ({})", frame_no, reason));
             // A confirmed break restarts acquisition from scratch; keeping
             // the old score would re-lock the stale phase immediately.
-            if (m_consecutive_misses >= 2)
+            if (m_consecutive_misses >= 2) {
                 m_score[m_locked_hypothesis] = 0;
+                m_frames_since_break = 0;
+            }
             m_locked_hypothesis = -1;
         }
     }
@@ -178,7 +190,8 @@ void NtscCadenceTracker::update(int frame_no, float d0, float d1, float noise_si
         for (int h = 0; h < 5; h++)
             if (h != best)
                 second = std::max(second, m_score[h]);
-        if (m_score[best] >= c_lock_score && m_score[best] - second >= c_lock_margin) {
+        const float need = m_frames_since_break < c_relock_window ? c_relock_score : c_lock_score;
+        if (m_score[best] >= need && m_score[best] - second >= c_lock_margin) {
             m_locked_hypothesis = best;
             m_consecutive_misses = 0;
             m_log.info(eDecoder, std::format("film cadence: 3:2 lock at frame {}, phase {} (floor {:.4f})",
@@ -196,6 +209,13 @@ NtscCadenceTracker::FieldAction NtscCadenceTracker::actionForField(int frame_no,
         return FieldAction::eAdaptive;
     FrameClass const &fc = m_classes[frame_no % m_classes.size()];
     if (fc.frame_no != frame_no)
+        return FieldAction::eAdaptive;
+
+    // A missed repeat puts the lock in doubt (a cut on a repeat phase, or
+    // the start of a phase jump): weave nothing until the next expected
+    // repeat shows up.  Costs one adaptive frame at such a cut; without
+    // it the frame after a phase jump was woven from two film frames.
+    if (m_consecutive_misses > 0)
         return FieldAction::eAdaptive;
 
     int ph = phaseOf(frame_no, m_locked_hypothesis);
