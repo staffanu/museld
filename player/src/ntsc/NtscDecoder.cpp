@@ -459,13 +459,13 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // rhythm visible; a hold re-shows the previous film frame.
         if (!controls.film_mode || !m_decode_all_fields
             || field_interpolation_mode != FieldInterpolationMode::eNormal) {
-            out.film_status = "Film: off";
+            out.film_status = "Telecine: off";
             out.film_status_detail.clear();
         } else if (int phase = m_cadence.phaseForFrame(m_frame_no - 1); phase < 0) {
-            out.film_status = "Film: auto";
+            out.film_status = "Telecine: searching";
             out.film_status_detail.clear();
         } else {
-            out.film_status = "Film: 3:2";
+            out.film_status = "Telecine: 3:2 locked";
             if (action == NtscCadenceTracker::FieldAction::eAdaptive) {
                 out.film_status_detail = "adapt"; // locked, but this frame's repeat is missing
             } else {
