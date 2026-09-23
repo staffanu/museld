@@ -70,12 +70,14 @@ namespace {
 int cmdEfmScore(int argc, char **argv) {
     if (argc < 4) { fprintf(stderr, "usage: ldstack efmscore <audio.pcm> <symbols.f32> [--phase P] [--range MIN-MAX]\n"); return 1; }
     int only_phase = -1, local = 0, blocks = 0; int64_t dmin = -3000, dmax = 3000, force_offset = 1 << 30;
+    string dump_symbols;
     for (int i = 4; i < argc; i++) {
         const string a = argv[i];
         if (a == "--phase" && i + 1 < argc) only_phase = atoi(argv[++i]);
         else if (a == "--local" && i + 1 < argc) local = atoi(argv[++i]);
         else if (a == "--offset" && i + 1 < argc) force_offset = atoll(argv[++i]);
         else if (a == "--blocks" && i + 1 < argc) blocks = atoi(argv[++i]);
+        else if (a == "--dump-symbols" && i + 1 < argc) dump_symbols = argv[++i];
         else if (a == "--range" && i + 1 < argc) { long long x, y; if (sscanf(argv[++i], "%lld-%lld", &x, &y) == 2) { dmin = x; dmax = y; } }
     }
     // Records
@@ -172,13 +174,31 @@ int cmdEfmScore(int argc, char **argv) {
     // Bit-level explanation of the wrong decisions: shift of the read pattern against the predicted bits
     int64_t sh_wrong_hit[8] = {}, sh_miss[8] = {}; // index: 0 = exact, 1..3 = |shift|, 7 = none
     uint8_t tog[588], known[588];
+    FILE *ds = dump_symbols.empty() ? nullptr : fopen(dump_symbols.c_str(), "w");
+    if (ds) fprintf(ds, "# frame\tslot\ttruth\thit\ttable\tml_best\tml_second\tratio\n");
+    // The decoder's frame count drifts slowly (spurious re-syncs), so the
+    // offset is re-searched per block of 300 frames around the global one
+    map<int64_t, int64_t> block_delta;
+    for (size_t b = 0; b < keys.size(); b += 300) {
+        double bb = -1; int64_t bd = best_delta;
+        for (int64_t d = best_delta - 40; d <= best_delta + 40; d++) {
+            auto [mm, tt] = score(P, d, b, min(keys.size(), b + 300));
+            if (tt > 50 && (double)mm / tt > bb) { bb = (double)mm / tt; bd = d; }
+        }
+        block_delta[keys[b]] = bb >= 0.15 ? bd : (int64_t)(1 << 30);
+    }
+    int64_t cur_delta = best_delta;
     for (auto &[m, F] : frames) {
-        const int64_t g = m + best_delta;
+        if (auto it = block_delta.find(m); it != block_delta.end()) cur_delta = it->second;
+        if (cur_delta == (int64_t)(1 << 30)) continue; // block with no usable alignment
+        const int64_t g = m + cur_delta;
         if (g < P.first_valid || g >= (int64_t)P.frames.size()) continue;
         frameBits(P.frames[g], tog, known);
         for (int s = 1; s <= 32; s++) {
             if (!F.seen[s]) continue;
             const Slot &S = F.s[s]; const uint8_t truth = P.frames[g][s - 1];
+            if (ds) fprintf(ds, "%lld\t%d\t%d\t%d\t%d\t%d\t%d\t%.5f\n", (long long)m, s, truth, S.hit ? 1 : 0, S.table, S.best, S.second,
+                            S.p_best > 0 ? S.p_second / S.p_best : 1.0);
             const int k = bestShift(S.efm, tog, known, 27 + 17 * s);
             const int kk = k == 99 ? 7 : abs(k);
             if (S.hit && S.table != truth) sh_wrong_hit[kk]++;
@@ -203,6 +223,7 @@ int cmdEfmScore(int argc, char **argv) {
     printf("  of the correct hits, the ML estimate would have chosen differently: %.3f%%\n", pc(hit_ok_ml_differs, hit_ok));
     printf("table misses: %lld (%.2f%% of symbols); ML guess correct %.1f%%, truth is runner-up %.1f%%, neither %.1f%%\n",
            (long long)miss, pc(miss, n), pc(miss_ml_ok, miss), pc(miss_ml_second, miss), pc(miss - miss_ml_ok - miss_ml_second, miss));
+    if (ds) fclose(ds);
     auto shifts = [&](const char *label, int64_t *h) {
         int64_t t = 0; for (int i = 0; i < 8; i++) t += h[i];
         printf("  %s: read pattern equals the predicted bits at shift 0: %.1f%%, |1| bit: %.1f%%, |2|: %.1f%%, |3|: %.1f%%, no shift fits (edge errors): %.1f%%\n",

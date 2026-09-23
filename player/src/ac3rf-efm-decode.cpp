@@ -49,6 +49,7 @@ void processFile(Logger &logger, Operation input_type,
     int efm_adaptive_filter_size, std::optional<std::string> efm_retiming_debug_filename,
     std::optional<std::string> efm_t_values_output_filename, std::optional<std::string> efm_circ_debug_filename,
     std::optional<std::string> efm_symbol_debug_filename, TimingRecovery::RateSource efm_rate_source,
+    DecodingStrategy efm_c1_strategy, std::optional<std::string> concealment_debug_filename,
     ErasureConcealer::ConcealmentImplementation concealment_impl,
     double target_sample_frequency, bool analog_cx, double analog_output_frequency) {
 
@@ -70,10 +71,10 @@ void processFile(Logger &logger, Operation input_type,
             EfmDemodulator efm_demodulator(logger, input_sample_frequency, reader->block_size(), use_simd,
                 input_type == EfmRf, efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
             efm_demodulator.setRateSource(efm_rate_source);
-            EfmDecoder efm_decoder(logger, efm_circ_debug_filename, efm_t_values_output_filename);
+            EfmDecoder efm_decoder(logger, efm_circ_debug_filename, efm_t_values_output_filename, efm_c1_strategy);
             if (efm_symbol_debug_filename)
                 efm_decoder.setSymbolDebugFilename(*efm_symbol_debug_filename);
-            EfmPcmProcessor efm_pcm_processor(logger, concealment_impl);
+            EfmPcmProcessor efm_pcm_processor(logger, concealment_impl, concealment_debug_filename);
 
             std::vector<float> reclocked_data;
             double processed_time = 0.0;
@@ -105,10 +106,10 @@ void processFile(Logger &logger, Operation input_type,
         case EfmTValues: {
             logger.info(eApplication, "Processing EFM t-values");
 
-            EfmDecoder efm_decoder(logger, efm_circ_debug_filename, efm_t_values_output_filename);
+            EfmDecoder efm_decoder(logger, efm_circ_debug_filename, efm_t_values_output_filename, efm_c1_strategy);
             if (efm_symbol_debug_filename)
                 efm_decoder.setSymbolDebugFilename(*efm_symbol_debug_filename);
-            EfmPcmProcessor efm_pcm_processor(logger, concealment_impl);
+            EfmPcmProcessor efm_pcm_processor(logger, concealment_impl, concealment_debug_filename);
 
             // Reading floats is "wrong" but this is a very unusual use case, so whatever makes the shortest code
             std::vector<float> reclocked_data;
@@ -231,6 +232,8 @@ int main(int argc, char *argv[]) {
     std::optional<std::string> efm_circ_debug_filename = std::nullopt;
     std::optional<std::string> efm_symbol_debug_filename = std::nullopt;
     TimingRecovery::RateSource efm_rate_source = TimingRecovery::RateSource::eSync;
+    DecodingStrategy efm_c1_strategy = RS_C1;
+    std::optional<std::string> concealment_debug_filename = std::nullopt;
     ErasureConcealer::ConcealmentImplementation concealment_impl = ErasureConcealer::AutoregressiveModel;
     bool analog_cx = false;
     constexpr double analog_output_frequency = 48000;
@@ -403,6 +406,20 @@ int main(int argc, char *argv[]) {
                    "format as ld-decode .efm files", [&] () -> void {
         efm_t_values_output_filename = *(it++);
     });
+    options.option("--concealment-debug-filename", "FILE", "Write six int16 per output sample to FILE: the "
+                                                            "decoded L/R, the concealed L/R and the erasure flags", [&] () -> void {
+        concealment_debug_filename = *(it++);
+    });
+    options.option("--c1-strategy", "MODE", "How much the C1 Reed-Solomon stage may correct: c1 (default; one error "
+                                            "or two erasures, otherwise the frame is erased), c2 (also three erasures "
+                                            "and two errors) or max (two errors, no erasure decoding).  Beyond c1 a "
+                                            "wrong correction can slip through to C2", [&] () -> void {
+        const std::string mode = *(it++);
+        if (mode == "c1") efm_c1_strategy = RS_C1;
+        else if (mode == "c2") efm_c1_strategy = RS_C2;
+        else if (mode == "max") efm_c1_strategy = RS_MAX;
+        else throw std::runtime_error("--c1-strategy must be c1, c2 or max");
+    });
     options.option("--efm-timing", "MODE", "Bit rate source of the EFM timing recovery: sync (default; the rate "
                                           "is measured from the frame sync spacing, the loop only steers the "
                                           "phase) or pll (the classic second-order loop, whose integrator can "
@@ -466,7 +483,7 @@ int main(int argc, char *argv[]) {
                           r->setDcBlocking(true); // RF carries no legitimate DC
                           return r; }(), block_size, out_fd, use_simd,
                     efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,
-                    efm_t_values_output_filename, efm_circ_debug_filename, efm_symbol_debug_filename, efm_rate_source, concealment_impl, target_sample_frequency,
+                    efm_t_values_output_filename, efm_circ_debug_filename, efm_symbol_debug_filename, efm_rate_source, efm_c1_strategy, concealment_debug_filename, concealment_impl, target_sample_frequency,
                     analog_cx, analog_output_frequency);
 
                 it++;
@@ -482,7 +499,7 @@ int main(int argc, char *argv[]) {
             processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
                 std::move(stdin_reader), block_size, out_fd, use_simd,
                 efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,
-                efm_t_values_output_filename, efm_circ_debug_filename, efm_symbol_debug_filename, efm_rate_source, concealment_impl, target_sample_frequency,
+                efm_t_values_output_filename, efm_circ_debug_filename, efm_symbol_debug_filename, efm_rate_source, efm_c1_strategy, concealment_debug_filename, concealment_impl, target_sample_frequency,
                 analog_cx, analog_output_frequency);
         }
         if (out_fd != 1)

@@ -22,6 +22,7 @@ add_executable(ldstack
         src/EfmPredict.cpp
         src/EfmBits.cpp
         src/EfmScore.cpp
+        src/EfmC1Score.cpp
 )
 target_compile_options(ldstack PRIVATE -Wall -Wextra)
 target_include_directories(ldstack PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../player/src)

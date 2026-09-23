@@ -23,6 +23,7 @@ int cmdEfmPredict(int argc, char **argv);
 int cmdEfmBits(int argc, char **argv);
 int cmdEfmExport(int argc, char **argv);
 int cmdEfmScore(int argc, char **argv);
+int cmdEfmC1(int argc, char **argv);
 
 using namespace std;
 
@@ -186,6 +187,7 @@ int main(int argc, char **argv) {
         if (cmd == "efmbits") return cmdEfmBits(argc, argv);
         if (cmd == "efmexport") return cmdEfmExport(argc, argv);
         if (cmd == "efmscore") return cmdEfmScore(argc, argv);
+        if (cmd == "efmc1") return cmdEfmC1(argc, argv);
         usage();
     } catch (const exception &e) {
         cerr << "ldstack: " << e.what() << endl;

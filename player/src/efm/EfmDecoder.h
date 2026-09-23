@@ -17,8 +17,11 @@ class Logger;
 
 class EfmDecoder {
 public:
+    // c1_strategy: how much C1 may correct (RS_C1 is the conservative default;
+    // RS_C2 also decodes three erasures and two errors, RS_MAX two errors)
     explicit EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt,
-                        std::optional<std::string> t_values_filename_opt);
+                        std::optional<std::string> t_values_filename_opt,
+                        DecodingStrategy c1_strategy = RS_C1);
     ~EfmDecoder();
 
     EfmDecoder(const EfmDecoder &) = delete;

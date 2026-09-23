@@ -107,7 +107,7 @@ const std::array<std::pair<int, int>, 6> EfmDecoder::c_right_output_map =
         array<pair<int, int>, 6> { pair{6, 7}, pair{18, 19}, pair{8, 9}, pair{20, 21}, pair{10, 11}, pair{22, 23}};
 
 EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt,
-                       std::optional<std::string> t_values_filename_opt)
+                       std::optional<std::string> t_values_filename_opt, DecodingStrategy c1_strategy)
         : m_log(log),
           m_circ_debug_file(nullptr),
           m_symbol_debug_file(nullptr),
@@ -129,7 +129,7 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
           m_subcode_p_start_flag(false),
           m_subcode_q_use(nullopt),
           m_subcode_q_undefined_control(nullopt),
-          m_c1(32, 28, 0, RS_C1, false),
+          m_c1(32, 28, 0, c1_strategy, false),
           m_c2(28, 24, 0, RS_C2, false),
           m_initial_delay_lines{},
           m_initial_delay_lines_ix{},
