@@ -62,6 +62,10 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
 fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device
 picostream/        — Standalone: Picoscope oscilloscope capture tool (analog + MSO digital)
 ldconv/            — Standalone: converter between capture formats (.lds/.ldf/.s16/...)
+ldstack/           — Standalone: offline analysis of several RF captures of one pressing
+                     (scan/extract/stack/stackbb), plus an EFM test bench: a CIRC encoder that
+                     predicts a disc's exact symbol stream from its audio and `efmscore`, which
+                     scores an ac3rf-efm-decode --symbol-debug-filename dump against it
 octave/            — Octave/Matlab scripts for filter design and algorithm exploration
 tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parseQ.awk,
                      srt-furigana.py for beginner-friendly Japanese subtitle variants,
