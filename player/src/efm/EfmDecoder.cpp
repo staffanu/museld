@@ -110,6 +110,7 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
                        std::optional<std::string> t_values_filename_opt)
         : m_log(log),
           m_circ_debug_file(nullptr),
+          m_symbol_debug_file(nullptr),
           m_t_values_file(nullptr),
           m_t_value_run_length(0),
           m_t_value_carry(0),
@@ -165,9 +166,19 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
     }
 }
 
+void EfmDecoder::setSymbolDebugFilename(const std::string &filename) {
+    if (m_symbol_debug_file != nullptr)
+        fclose(m_symbol_debug_file);
+    m_symbol_debug_file = fopen(filename.c_str(), "wb");
+    if (m_symbol_debug_file == nullptr)
+        throw std::runtime_error(std::format("Cannot open symbol debug file {}", filename));
+}
+
 EfmDecoder::~EfmDecoder() {
     if (m_circ_debug_file != nullptr)
         fclose(m_circ_debug_file);
+    if (m_symbol_debug_file != nullptr)
+        fclose(m_symbol_debug_file);
     if (m_t_values_file != nullptr)
         fclose(m_t_values_file);
 
@@ -262,6 +273,17 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
                 if (octet.isErased()) {
                     m_total_erasures_in_last_second++;
                     m_frame[m_byte_index] = ByteWithErasureFlag(estimateSymbol(), true);
+                }
+                if (m_symbol_debug_file != nullptr) {
+                    uint8_t best, second;
+                    double p_best, p_second;
+                    estimateSymbolScored(best, second, p_best, p_second);
+                    float rec[24] = {(float)m_total_efm_frame_count, (float)m_byte_index, octet.isErased() ? 0.0f : 1.0f,
+                                     octet.isErased() ? 0.0f : (float)octet.byteValue(), (float)best, (float)second,
+                                     (float)efm_value, (float)p_best, (float)p_second};
+                    for (int j = 0; j < 15; j++)
+                        rec[9 + j] = j < (int)m_symbol_history.size() ? m_symbol_history[j] : 0.0f;
+                    fwrite(rec, sizeof rec, 1, m_symbol_debug_file);
                 }
 
                 if (m_byte_index == 0) {
@@ -400,11 +422,20 @@ void EfmDecoder::handleSubcode() {
 
 // ML estimation of the received symbol -- used only when we do not have a perfect match
 uint8_t EfmDecoder::estimateSymbol() const {
-    double max_p = 0;
-    uint8_t found = 0;
+    uint8_t best, second;
+    double p_best, p_second;
+    estimateSymbolScored(best, second, p_best, p_second);
+    return best;
+}
+
+void EfmDecoder::estimateSymbolScored(uint8_t &best, uint8_t &second, double &p_best, double &p_second) const {
+    p_best = -1;
+    p_second = -1;
+    best = second = 0;
     for (int i = 0; i < 256; i++) {
         const int symbol_sequence = c_byte_to_channel_symbols_table[i];
         const int seqs[2] = {symbol_sequence, ~symbol_sequence}; // two possibilities
+        double p_sym = 0;
         for (auto seq: seqs) {
             double p_tot = 1.0;
             for (int j = 0; j < 15; j++) {
@@ -413,13 +444,18 @@ uint8_t EfmDecoder::estimateSymbol() const {
                 double p = d > 0 ? (v > 0.5 ? 1.0 : std::max(0.0, v + 0.5)) : (v < -0.5 ? 1.0 : std::max(0.0, 0.5 - v));
                 p_tot *= p;
             }
-            if (p_tot > max_p) {
-                max_p = p_tot;
-                found = i;
-            }
+            p_sym = std::max(p_sym, p_tot);
+        }
+        if (p_sym > p_best) {
+            p_second = p_best;
+            second = best;
+            p_best = p_sym;
+            best = (uint8_t)i;
+        } else if (p_sym > p_second) {
+            p_second = p_sym;
+            second = (uint8_t)i;
         }
     }
-    return found;
 }
 
 // Dumps data to the CIRC debug file, in the same format as can be done from the VHDL code

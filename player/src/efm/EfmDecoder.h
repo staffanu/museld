@@ -34,6 +34,16 @@ public:
     // audio samples needs no compensation.  A failed Q CRC leaves the last good value in place.
     [[nodiscard]] bool preEmphasis() const { return m_subcode_q_use == Audio2ChannelWithPreEmphasis; }
 
+    // Instrumentation: write one record per EFM symbol slot to FILE, for
+    // scoring the symbol decisions against a known stream offline.  Each
+    // record is 24 little-endian floats: frame count, slot (0 = subcode),
+    // table hit (0/1), the byte from the table (0 on a miss), the ML
+    // estimate's best and second-best byte, the 14-bit pattern read, the
+    // ML scores of the best and second-best byte, and the 15 sliced samples
+    // the estimate looks at.  The ML estimate runs on every symbol here,
+    // not only on table misses, so it costs decoding speed.
+    void setSymbolDebugFilename(const std::string &filename);
+
 private:
     static constexpr int c_minimum_frames_before_c1_c2_valid = 97;
 
@@ -59,9 +69,12 @@ private:
     void handleSubcode();
 
     uint8_t estimateSymbol() const;
+    // ML estimate with the runner-up and both scores (the estimate is the best)
+    void estimateSymbolScored(uint8_t &best, uint8_t &second, double &p_best, double &p_second) const;
 
     Logger &m_log;
     FILE *m_circ_debug_file;
+    FILE *m_symbol_debug_file;
     // Run lengths between NRZI transitions, written as one u8 per value (the format
     // used by ld-decode .efm files).  Values are kept in the EFM-legal range [3, 11]
     // without changing the total bit count, so consumers never lose 588-bit frame

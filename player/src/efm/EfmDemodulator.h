@@ -35,6 +35,8 @@ public:
     // the next demodulate() call, and adaptiveFilterSize() reports the size
     // requested so far.
     void setAdaptiveFilterSize(int size) { m_adaptive_filter_size = size; }
+    // Bit rate source of the timing recovery (see TimingRecovery::RateSource); applied at the next block
+    void setRateSource(TimingRecovery::RateSource source) { m_rate_source = source; }
     [[nodiscard]] int adaptiveFilterSize() const { return m_adaptive_filter_size; }
 
 private:
@@ -54,6 +56,7 @@ private:
 
     TimingRecovery m_timing_recovery;
     std::atomic<int> m_adaptive_filter_size;
+    std::atomic<TimingRecovery::RateSource> m_rate_source;
 
     int m_timing_log_period;
     int m_timing_blocks = 0;
