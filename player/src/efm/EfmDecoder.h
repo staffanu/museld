@@ -21,7 +21,7 @@ public:
     // RS_C2 also decodes three erasures and two errors, RS_MAX two errors)
     explicit EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt,
                         std::optional<std::string> t_values_filename_opt,
-                        DecodingStrategy c1_strategy = RS_C1);
+                        DecodingStrategy c1_strategy = RS_C1, int c1_gate_rank = 8);
     ~EfmDecoder();
 
     EfmDecoder(const EfmDecoder &) = delete;
@@ -118,6 +118,10 @@ private:
 
     ReedSolomon<0x11d, 2> m_c1;
     ReedSolomon<0x11d, 2> m_c2;
+    // Per-symbol reliability (the smallest sample magnitude the slicer saw in
+    // the symbol), delayed like the symbols into the C1 words
+    std::array<float, 33> m_frame_reliability;
+    std::array<float *, 32> m_initial_reliability_lines;
     std::array<ByteWithErasureFlag *, 32> m_initial_delay_lines;
     std::array<int, 32> m_initial_delay_lines_ix;
     std::array<ByteWithErasureFlag *, 28> m_c1_to_c2_delay_lines;

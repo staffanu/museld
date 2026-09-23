@@ -107,7 +107,7 @@ const std::array<std::pair<int, int>, 6> EfmDecoder::c_right_output_map =
         array<pair<int, int>, 6> { pair{6, 7}, pair{18, 19}, pair{8, 9}, pair{20, 21}, pair{10, 11}, pair{22, 23}};
 
 EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt,
-                       std::optional<std::string> t_values_filename_opt, DecodingStrategy c1_strategy)
+                       std::optional<std::string> t_values_filename_opt, DecodingStrategy c1_strategy, int c1_gate_rank)
         : m_log(log),
           m_circ_debug_file(nullptr),
           m_symbol_debug_file(nullptr),
@@ -146,8 +146,12 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
           m_subcodes_last_second(0),
           m_q_subcode_crc_failures_last_second(0)
 {
-    for (int i = 0; i < m_initial_delay_lines.size(); i++)
+    m_c1.setGateRank(c1_gate_rank);
+    m_frame_reliability.fill(0);
+    for (int i = 0; i < m_initial_delay_lines.size(); i++) {
         m_initial_delay_lines[i] = new ByteWithErasureFlag[c_initial_delays[i].first + 1];
+        m_initial_reliability_lines[i] = new float[c_initial_delays[i].first + 1]();
+    }
     for (int i = 0; i < m_c1_to_c2_delay_lines.size(); i++)
         m_c1_to_c2_delay_lines[i] = new ByteWithErasureFlag[c_c1_to_c2_delays[i] + 1];
     for (int i = 0; i < m_output_delay_lines.size(); i++)
@@ -183,6 +187,8 @@ EfmDecoder::~EfmDecoder() {
         fclose(m_t_values_file);
 
     for (auto p: m_initial_delay_lines)
+        delete[] p;
+    for (auto p: m_initial_reliability_lines)
         delete[] p;
     for (auto p: m_c1_to_c2_delay_lines)
         delete[] p;
@@ -270,6 +276,12 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
                 int efm_value = m_shift_register & 0x3fff; // 14 bits
                 ByteWithErasureFlag octet = c_efm_toggles_to_byte_table[efm_value];
                 m_frame[m_byte_index] = octet;
+                {
+                    float r = 1e9f;
+                    for (float v : m_symbol_history)
+                        r = std::min(r, std::abs(v));
+                    m_frame_reliability[m_byte_index] = m_symbol_history.empty() ? 0.0f : r;
+                }
                 if (octet.isErased()) {
                     m_total_erasures_in_last_second++;
                     m_frame[m_byte_index] = ByteWithErasureFlag(estimateSymbol(), true);
@@ -474,17 +486,20 @@ void EfmDecoder::handleFrame(std::vector<TwoChannelSampleWithErasureFlags> &outp
     dumpArray("F:", std::span(m_frame).subspan(1, 32));
 
     std::vector<ByteWithErasureFlag> c1_data(32);
+    std::vector<float> c1_reliability(32);
 
     for (int i = 0; i < 32; i++) {
-        m_initial_delay_lines[i][m_initial_delay_lines_ix[i]++] = m_frame[i + 1];
-        if (m_initial_delay_lines_ix[i] == c_initial_delays[i].first + 1)
+        m_initial_delay_lines[i][m_initial_delay_lines_ix[i]] = m_frame[i + 1];
+        m_initial_reliability_lines[i][m_initial_delay_lines_ix[i]] = m_frame_reliability[i + 1];
+        if (++m_initial_delay_lines_ix[i] == c_initial_delays[i].first + 1)
             m_initial_delay_lines_ix[i] = 0;
         auto v = m_initial_delay_lines[i][m_initial_delay_lines_ix[i]];
         c1_data[i] = c_initial_delays[i].second ? ByteWithErasureFlag{(uint8_t)~v.byteValue(), v.isErased()} : v;
+        c1_reliability[i] = m_initial_reliability_lines[i][m_initial_delay_lines_ix[i]];
     }
 
     dumpArray("C1:", c1_data);
-    m_c1.decode(c1_data);
+    m_c1.decode(c1_data, c1_reliability);
     dumpArray("D1:", c1_data);
 
     std::vector<ByteWithErasureFlag> c2_data(28);
