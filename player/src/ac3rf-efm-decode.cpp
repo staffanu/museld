@@ -50,6 +50,7 @@ void processFile(Logger &logger, Operation input_type,
     std::optional<std::string> efm_t_values_output_filename, std::optional<std::string> efm_circ_debug_filename,
     std::optional<std::string> efm_symbol_debug_filename, TimingRecovery::RateSource efm_rate_source,
     DecodingStrategy efm_c1_strategy, int efm_c1_gate_rank, std::optional<std::string> concealment_debug_filename,
+    float efm_test_noise,
     ErasureConcealer::ConcealmentImplementation concealment_impl,
     double target_sample_frequency, bool analog_cx, double analog_output_frequency) {
 
@@ -71,6 +72,7 @@ void processFile(Logger &logger, Operation input_type,
             EfmDemodulator efm_demodulator(logger, input_sample_frequency, reader->block_size(), use_simd,
                 input_type == EfmRf, efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename);
             efm_demodulator.setRateSource(efm_rate_source);
+            efm_demodulator.setTestNoise(efm_test_noise);
             EfmDecoder efm_decoder(logger, efm_circ_debug_filename, efm_t_values_output_filename, efm_c1_strategy, efm_c1_gate_rank);
             if (efm_symbol_debug_filename)
                 efm_decoder.setSymbolDebugFilename(*efm_symbol_debug_filename);
@@ -234,6 +236,7 @@ int main(int argc, char *argv[]) {
     TimingRecovery::RateSource efm_rate_source = TimingRecovery::RateSource::eSync;
     DecodingStrategy efm_c1_strategy = RS_C1;
     int efm_c1_gate_rank = 8;
+    float efm_test_noise = 0;
     std::optional<std::string> concealment_debug_filename = std::nullopt;
     ErasureConcealer::ConcealmentImplementation concealment_impl = ErasureConcealer::AutoregressiveModel;
     bool analog_cx = false;
@@ -423,6 +426,11 @@ int main(int argc, char *argv[]) {
         else if (mode == "gated") efm_c1_strategy = RS_C1_GATED;
         else throw std::runtime_error("--c1-strategy must be c1, c2, max or gated");
     });
+    options.option("--test-noise", "SIGMA", "Test aid: add white Gaussian noise with this standard deviation (input "
+                                            "sample units; a 10-bit capture has an RF rms of roughly 80) before EFM "
+                                            "demodulation, to degrade a clean capture reproducibly", [&] () -> void {
+        efm_test_noise = stof(*(it++));
+    });
     options.option("--c1-gate", "N", "With --c1-strategy gated: a two-error correction is accepted only if both "
                                      "corrected symbols rank among the N least reliable of the word's 32 (a "
                                      "single-error correction among the 2N least reliable); default 8", [&] () -> void {
@@ -491,7 +499,7 @@ int main(int argc, char *argv[]) {
                           r->setDcBlocking(true); // RF carries no legitimate DC
                           return r; }(), block_size, out_fd, use_simd,
                     efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,
-                    efm_t_values_output_filename, efm_circ_debug_filename, efm_symbol_debug_filename, efm_rate_source, efm_c1_strategy, efm_c1_gate_rank, concealment_debug_filename, concealment_impl, target_sample_frequency,
+                    efm_t_values_output_filename, efm_circ_debug_filename, efm_symbol_debug_filename, efm_rate_source, efm_c1_strategy, efm_c1_gate_rank, concealment_debug_filename, efm_test_noise, concealment_impl, target_sample_frequency,
                     analog_cx, analog_output_frequency);
 
                 it++;
@@ -507,7 +515,7 @@ int main(int argc, char *argv[]) {
             processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
                 std::move(stdin_reader), block_size, out_fd, use_simd,
                 efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,
-                efm_t_values_output_filename, efm_circ_debug_filename, efm_symbol_debug_filename, efm_rate_source, efm_c1_strategy, efm_c1_gate_rank, concealment_debug_filename, concealment_impl, target_sample_frequency,
+                efm_t_values_output_filename, efm_circ_debug_filename, efm_symbol_debug_filename, efm_rate_source, efm_c1_strategy, efm_c1_gate_rank, concealment_debug_filename, efm_test_noise, concealment_impl, target_sample_frequency,
                 analog_cx, analog_output_frequency);
         }
         if (out_fd != 1)

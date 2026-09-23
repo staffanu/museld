@@ -2,6 +2,7 @@
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
 #include <iostream>
+#include <cmath>
 #include <valarray>
 #include <unistd.h>
 #include <complex.h>
@@ -102,6 +103,21 @@ EfmDemodulator::~EfmDemodulator() {
 void EfmDemodulator::demodulate(const float *input_buffer, std::vector<float> &reclocked_data) {
     using clock = std::chrono::steady_clock;
 
+    if (m_test_noise_sigma > 0) {
+        // Box-Muller on a 64-bit LCG: reproducible, fast enough for a test aid
+        m_noisy_input.resize(m_input_block_size);
+        auto uniform = [this]() {
+            m_noise_state = m_noise_state * 6364136223846793005ull + 1442695040888963407ull;
+            return ((m_noise_state >> 11) + 1.0) / 9007199254740994.0;
+        };
+        for (int i = 0; i < m_input_block_size; i += 2) {
+            const double r = std::sqrt(-2.0 * std::log(uniform())), t = 2 * M_PI * uniform();
+            m_noisy_input[i] = input_buffer[i] + m_test_noise_sigma * (float)(r * std::cos(t));
+            if (i + 1 < m_input_block_size)
+                m_noisy_input[i + 1] = input_buffer[i + 1] + m_test_noise_sigma * (float)(r * std::sin(t));
+        }
+        input_buffer = m_noisy_input.data();
+    }
     const float *iir_input;
     auto t0 = clock::now();
     if (m_decimation_filter_stages.empty()) {
