@@ -49,6 +49,7 @@ public:
 
 private:
     static constexpr int c_minimum_frames_before_c1_c2_valid = 97;
+    static constexpr int c_sync_lost_frames = 7;
 
     static const std::array<uint16_t, 256> c_byte_to_efm_toggles_table;
     static const std::array<ByteWithErasureFlag, 1 << 14> c_efm_toggles_to_byte_table;
@@ -96,6 +97,11 @@ private:
     int m_consecutive_syncs;
     bool m_locked;
     int m_frames_since_sync; // if not at the exact expected place
+    // An off-lattice sync seen while the lattice was recently confirmed: the
+    // decoder re-frames to it only when a second sync follows exactly one
+    // frame later (bit position of the candidate, -1 when none)
+    int64_t m_sync_candidate_bit;
+    int64_t m_reframes_deferred = 0, m_reframes_confirmed = 0;
     int m_efm_frames_since_lock;
 
     // -3 -- 95; the symbol itself is in m_frame[0] for indices 0--95

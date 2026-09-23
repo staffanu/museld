@@ -125,6 +125,7 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
           m_frames_since_sync(0), // if not at the exact expected place
           m_efm_frames_since_lock(0),
           m_subcode_symbol_index(-3),
+          m_sync_candidate_bit(-1),
           m_frame{},
           m_subcode_p_start_flag(false),
           m_subcode_q_use(nullopt),
@@ -245,6 +246,7 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
         if (sync && m_bits_in_frame == 588) {
             m_frames_since_sync = 0;
             m_consecutive_syncs += 1;
+            m_sync_candidate_bit = -1;
             if (m_consecutive_syncs >= 7 && !m_locked) {
                 m_locked = true;
                 m_efm_frames_since_lock = 0;
@@ -252,13 +254,31 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
             }
             new_frame = true;
         } else if (sync && m_consecutive_syncs == 0) {
-            m_frames_since_sync = 0;
-            m_consecutive_syncs = 1;
-            new_frame = true;
-        } else if (m_bits_in_frame == 588) {
+            // A sync off the lattice.  With the lattice lost (no sync for
+            // c_sync_lost_frames frames) re-frame at once; while it was
+            // recently confirmed, a lone sync pattern is more likely a
+            // damaged run than a real frame start (one missed sync would
+            // otherwise open the door to any false pattern), so re-frame
+            // only when a second sync follows exactly one frame after it
+            if (m_frames_since_sync >= c_sync_lost_frames) {
+                m_frames_since_sync = 0;
+                m_consecutive_syncs = 1;
+                new_frame = true;
+            } else if (m_sync_candidate_bit >= 0 && m_total_bits - m_sync_candidate_bit == 588) {
+                m_frames_since_sync = 0;
+                m_consecutive_syncs = 2;
+                m_sync_candidate_bit = -1;
+                m_reframes_confirmed++;
+                new_frame = true;
+            } else {
+                m_sync_candidate_bit = m_total_bits;
+                m_reframes_deferred++;
+            }
+        }
+        if (!new_frame && m_bits_in_frame == 588) {
             m_frames_since_sync += 1;
             m_consecutive_syncs = 0;
-            if (m_frames_since_sync >= 7 && m_locked) {
+            if (m_frames_since_sync >= c_sync_lost_frames && m_locked) {
                 m_locked = false;
                 m_log.debug(eAudio, std::format("efm lock lost index {}", m_total_bits));
                 if (m_efm_frames_since_lock > c_minimum_frames_before_c1_c2_valid)
@@ -330,7 +350,7 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
         m_log.info(eAudio | ePerformance,
                    std::format("EFM time = {:.2f} s. Time spent decoding: {:.1f} ms; frame count: {}, "
                                "input erasures: {} ({:.0f} ppm), past c1 erasures: {} ({:.0f} ppm), output erasures: {} ({:.0f} ppm), "
-                               "q crc failures: {:.1f} %",
+                               "q crc failures: {:.1f} %, off-lattice syncs deferred: {}, re-framed on confirmation: {}",
                                m_total_efm_frame_count / 7350.0,
                                (double)m_total_time_us_last_second / 1000.0,
                                m_efm_frame_count_last_second,
@@ -340,7 +360,7 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
                                1000000.0 * m_total_erasures_past_c1_last_second / m_efm_frame_count_last_second / 28,
                                m_total_erasures_out_last_second,
                                1000000.0 * m_total_erasures_out_last_second / m_efm_frame_count_last_second / 24,
-                               100.0 * m_q_subcode_crc_failures_last_second / m_subcodes_last_second));
+                               100.0 * m_q_subcode_crc_failures_last_second / m_subcodes_last_second, m_reframes_deferred, m_reframes_confirmed));
         m_efm_frame_count_last_second = 0;
         m_total_time_us_last_second = 0;
         m_total_erasures_in_last_second = 0;
