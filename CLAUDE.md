@@ -148,9 +148,58 @@ cd player/build-debug && ctest -V
 
 Tests are only built when `-DBUILD_TESTING=ON` is passed. They are in `player/tests/`
 (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`, `FilterSimdParityTest.cpp`, `InputProbeTest.cpp`,
-`NtscCadenceTrackerTest.cpp`, `PrefetchingInputReaderTest.cpp`, `SrtParserTest.cpp`). On macOS
+`NtscCadenceTrackerTest.cpp`, `PrefetchingInputReaderTest.cpp`, `SrtParserTest.cpp`,
+`DisplayGeometryTest.cpp`). On macOS
 the Homebrew Catch2 is not ASan-instrumented, so run them with
 `ASAN_OPTIONS=detect_container_overflow=0` to avoid a false container-overflow abort at startup.
+
+## Debugging the NTSC decode
+
+Judge sync and level quality from measurements, never from single frames or
+downscaled montages (they lie — clean stretches land in the sample). The
+instruments, all in the RelWithDebInfo build:
+
+**Log categories** (`--log <letter><level>…`, letters MPAVDIO = Main, Performance,
+Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, debug):
+- `P3` — per-stage timing (demodulator per block, reader and decoder per frame) and
+  the final frames/s; the frame rate is set by the slowest stage, the demodulator.
+- `I3` — timebase: anchoring, resets, lattice slips, re-anchors. `I4` adds one line
+  per frame, `N of M lines unsupported by a nearby sync pulse`; exactly 18 per
+  frame (the two vertical intervals) means every hsync was found.
+- `D3` — every 30 frames: noise/SNR, levels (blanking, white flag, gain), the black
+  level statistic (`picture black: dark peak … held minimum …`, with the automatic
+  NTSC-M/J choice), film cadence lock/unlock events with their reason.
+- `D4` adds per frame: `VBI frame N: codes …; clv/time/pic/chapter/cx`, the VBI
+  slicer's failure reasons per line, and `film cadence: frame N d0 d1 floor locked
+  misses scores`.
+- Options must precede the input file they apply to; trailing options are ignored
+  with a warning.
+
+**Dumps** (environment variables, append to the file; delete old dumps first):
+- `MUSELD_DUMP_DEMOD=<path>` with `MUSELD_DUMP_DEMOD_BLOCKS=<n>` (default 32; a block
+  is 262144 demodulated samples, 8.4 ms at 62.5 MHz input) — the demodulated
+  composite as float32 at the video-decimated rate (31.25 MHz for 62.5 MHz captures,
+  20 MHz for 40 MHz). Sync tip ≈ 0.0, blanking ≈ 0.3, white ≈ 1.0; no de-emphasis.
+- `MUSELD_DUMP_TIMEBASE=<prefix>` — `<prefix>.curve.f64`: (line k, input sample
+  position of its start) per finalized line; `<prefix>.meas.f64`: the accepted sync
+  measurements. Use together with a demod dump **from the same run**.
+- `MUSELD_DUMP_VBI_FAIL=<path>` — each VBI code line that failed to slice, as 910
+  floats (the 4 fsc frame-buffer row).
+
+**Offline checks** (`tools/`, numpy + scipy + PIL): `ntsc-sync-delta.py <fs> <demod
+dump> <timebase prefix> <out>` plots detected minus reconstructed sync per line —
+must stay within ±0.1 µs with no walks; `ntsc-burst-check.py <prefix> <dump> <out>
+<fs>` measures the curve's timing error against the colour burst phase, content-
+independent — expect ±40 ns and ~1 ns line-to-line jitter.
+
+**Frames**: `--seek T --export-frame-at T2 --export-frame f.png` writes the displayed
+764×480 frame (`--field-interpolation intra-field` for a single field, `--no-3d-comb`,
+`--no-film-mode`, `--black-level m|j` to isolate stages). `--export-frame-at` counts
+displayed fields, so do not combine it with `--no-sync`. The GNOME session must be
+unlocked or the PNGs come out black. Test captures on the development machine:
+`~/alien2.ldf` (40 MHz, clean reference), `~/data/white-squall-*.s8` (62.5 MHz s8, noisy,
+strong wow) and `~/data/godzilla*.s8` (62.5 MHz s8, an NTSC-J disc; the first file has a
+cadence phase jump at ~25 s).
 
 ## CI and Packaging
 
