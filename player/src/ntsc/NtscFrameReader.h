@@ -19,9 +19,10 @@
 // input position of the start of line k -- through them with a fixed-lag
 // Kalman smoother, and only then resamples each line between its two curve
 // points.  Look-ahead makes disc wow trivial to follow (the white squall test
-// disc swings its line period +-0.15% once per revolution, faster at the
+// disc swings its line period +-0.24% once per revolution, faster at the
 // extremes than any per-line servo can slew), missing and false pulses are
-// handled by the smoother's innovation gate, and since every output sample's
+// handled in the smoother (an outlier is rejected unless the next pulse
+// corroborates it), and since every output sample's
 // input position is known before resampling, the resampling itself has no
 // feedback and can move to SIMD or the GPU wholesale.
 class NtscFrameReader : public FrameReader<NtscInputBlock> {

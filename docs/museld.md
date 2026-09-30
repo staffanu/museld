@@ -125,7 +125,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--overscan <percent>` | How much of the edges to hide, as a TV does — same as the O key. `0` (default) shows the standard picture: for NTSC the part of the decoded image that is exactly 4:3, which leaves out the blanking margins at the sides (black on most discs). A percentage hides that much more in each dimension, half on either side (`5` shows the central 95 %). `full` shows the whole decoded image, margins included |
 | `--seek <seconds>` | Seek to position before starting playback |
 | `--pause` | Start paused |
-| `--export-frame <file>` | Save one decoded frame as PNG to `<file>` and quit. Combine with `--export-frame-at` to give the decoder (DPLL, adaptive equaliser, motion detection) a warm-up run from the `--seek` position. |
+| `--export-frame <file>` | Save one decoded frame as PNG to `<file>` and quit. Combine with `--export-frame-at` to give the decoder (sync lock, adaptive equaliser, motion detection) a warm-up run from the `--seek` position. |
 | `--export-frame-at <seconds>` | Stream position of the frame saved by `--export-frame` (absolute, same units as `--seek` — not a delay after it). Default: the first decoded frame. |
 | `--no-dropout` / `--highlight-dropout` | Disable dropout concealment, or highlight dropouts instead of concealing them (see below) |
 | `--write-muse16 <file>` | Re-encode input to the 16.2 MHz format (see below) |
@@ -161,7 +161,8 @@ are supported; the channel-2 services and field 2 (CC3/CC4, XDS) are not.
 ### Live subtitle OCR and translation (experimental)
 
 Discs with burned-in subtitles can be read and translated during playback. This
-needs a build with `-DUSE_OCR=ON` (requires ONNX Runtime) and the PP-OCR text
+needs a build with OCR support (`USE_OCR`, on by default, requires ONNX Runtime; the full
+release packages have it, the minimal ones do not) and the PP-OCR text
 detection and recognition models as `.onnx` files (with "det" and "rec" in
 their names) in a directory of your choice.
 
@@ -369,7 +370,7 @@ of components.
 ### Data flow — MUSE
 
 ```
-RF capture (62.5 MHz) → MuseRfDemodulator → ResamplingInputReader (DPLL, 16.2 MHz)
+RF capture (62.5 MHz) → MuseRfDemodulator → ResamplingFrameReader (DPLL, 16.2 MHz)
   → FrameBuffer → Vulkan GPU shaders (de-emphasis, gamma, color decode, motion detection)
   → GLFW window + miniaudio
 ```
@@ -380,10 +381,15 @@ run on the main thread. The GPU pipeline has two stages separated by a semaphore
 ### Data flow — NTSC
 
 ```
-RF capture (40 MHz) → NtscRfDemodulator → NtscInputReader (DPLL)
+RF capture (40 MHz) → NtscRfDemodulator → NtscFrameReader (timebase, resampling to 4 fsc)
   → NtscFrame → Vulkan GPU shaders (sync burst detection, color filtering, field decode)
   → GLFW window
 ```
+
+The NTSC reader has no phase-locked loop. It finds the sync pulses in a cheap lowpassed pass,
+numbers them on a line lattice, fits a smooth curve through them with a fixed-lag Kalman
+smoother (about 190 lines of look-ahead, which is what lets it follow disc wow), and resamples
+each line between its two curve points. It takes about 2 ms of CPU per frame.
 
 ### Data flow — EFM (inside museld)
 
@@ -451,7 +457,7 @@ DTS: EFM stereo samples → DTS sync detection → byte stream → libavcodec dc
 - **LD MUSE vs BS MUSE**: Available documentation describes the satellite broadcasting standard. MUSE decoders have separate inputs for the two signals, so presumably there is some difference, but it is unknown what it is.
 - **Input detection on fifos, live MUSE/NTSC switching**: For the decoder-box use case (fifo from a capture device to the TV), detection should run on the live stream and the player should switch type when the disc changes. Needs the per-type reader/demodulator/decoder pipeline setup refactored so it can be swapped mid-playback; the detection itself is the easy part.
 - **Subtitle OCR** (experimental; see the option section above):
-  - Not in the release packages: `USE_OCR` is off by default, and distributing ONNX Runtime and the PP-OCR models is undecided (see docs/packaging.md).
+  - The full release packages include ONNX Runtime but not the PP-OCR models, which have to be downloaded separately (see above); the minimal packages are built without OCR (see docs/packaging.md).
   - `--ocr-translate` speaks plain HTTP only; hosted TLS endpoints would need an OpenSSL-enabled cpp-httplib build.
   - The live tracks lag the burned-in text by about a second. A presentation-delay buffer would fix the sync, and would also enable inpainting the burned-in text away.
   - A translation still in flight when playback ends is dropped instead of flushed into the `--ocr-write` file.
