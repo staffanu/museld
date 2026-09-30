@@ -228,7 +228,8 @@ for each side, between temporal Y/C separation against the still neighbouring fr
 full vertical resolution, no dot crawl) and the 3-line spatial comb where the picture moves. The
 spatial comb only acts on the band around the subcarrier: the luma is the composite less that
 band of the comb's chroma estimate, so horizontal edges and thin strokes keep their vertical
-sharpness, and only fine horizontal detail is averaged over the lines. The
+sharpness, and only fine horizontal detail is averaged over the lines. Still parts average that
+luma over the three frames as well, which is where most of the noise reduction comes from. The
 same masks drive motion-adaptive de-interlacing: still parts weave the previous field, moving
 parts are interpolated from the current field (keys 1/2/3 select adaptive/bob/weave).
 
