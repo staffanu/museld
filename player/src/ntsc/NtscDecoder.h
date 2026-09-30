@@ -81,6 +81,7 @@ private:
     double m_black_lowest_v;          // the lowest significant dark peak (letterbox mattes, fades); -1 until seeded
     double m_black_peak_min_v;        // its minimum, decaying over minutes: the disc's black, held through bright scenes
     float m_black_auto_ire;           // the automatic choice, 7.5 (NTSC-M) until the held black says NTSC-J
+    bool m_black_decided;             // the disc's black has been measured at least once since start or a disc change
     float m_black_ire;                // the black setup in effect this frame, from the mode and the automatic choice
     std::shared_ptr<VbiData> m_prev_vbi; // last frame's VBI data, for the disc-level flags a frame may miss
     double m_prev_burst_phase;        // last frame's burst phase, NAN before the first
