@@ -10,6 +10,7 @@
 #include "musevk/VulkanBuffer.h"
 #include "ResamplingFrameReader.h"
 #include "input/InputReaderFactory.h"
+#include "input/ByteSource.h"
 #include "logging/Logger.h"
 #include "MuseConstants.h"
 #include "MuseInputBlock.h"
@@ -23,7 +24,7 @@ ResamplingFrameReader::ResamplingFrameReader(
         double initial_seek_seconds, bool demodulate, bool benchmark_shaders, bool efm_enabled,
         int efm_adaptive_filter_size, const std::optional<std::string> &output_filename)
         : FrameReader(log, filename,
-                      filesystem::is_fifo(filename),
+                      inputIsLive(filename),
                       initial_seek_seconds, output_filename),
           m_input_format(input_format),
           m_demodulate(demodulate),
@@ -97,7 +98,7 @@ ResamplingFrameReader::ResamplingFrameReader(
 
 bool ResamplingFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
     if (m_demodulator == nullptr) {
-        m_input_reader = makeInputReader(m_filename, m_input_format, c_input_sub_buffer_size);
+        m_input_reader = makeInputReader(m_filename, m_input_format, c_input_sub_buffer_size, &m_log);
         m_input_reader->initialize();
         if (m_input_scale == 0.f) {
             int bps = m_input_reader->bitsPerSample();

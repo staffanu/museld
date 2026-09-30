@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include "input/ByteSource.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -55,7 +56,7 @@ NtscFrameReader::NtscFrameReader(
         double initial_seek_seconds, bool benchmark_shaders, AudioTrack audio_track,
         int efm_adaptive_filter_size, const std::optional<std::string> &output_filename)
         : FrameReader(log, filename,
-                      filesystem::is_fifo(filename),
+                      inputIsLive(filename),
                       initial_seek_seconds, output_filename),
           m_demodulator(nullptr),
           m_sample_rate(sample_rate / NtscRfDemodulatorConstants::c_video_decimation_rate),

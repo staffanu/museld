@@ -38,6 +38,7 @@
 #include "input/InputReader.h"
 #include "input/InputReaderFactory.h"
 #include "InputProbe.h"
+#include "input/ByteSource.h"
 #ifdef HAVE_OCR
 # include <map>
 # include "ocr/OcrBandCapture.h"
@@ -1135,7 +1136,11 @@ int main(int argc, char *argv[]) {
                "the options in effect where it appears.  Options therefore apply to the files that\n"
                "follow them: one placed after a filename does not affect that file, and options\n"
                "after the last filename do nothing at all.  An argument starting with ! is ignored,\n"
-               "which is practical for disabling an option in a saved command line.\n";
+               "which is practical for disabling an option in a saved command line.\n"
+               "\nAn input can also be a URL: http://host/path/capture.ldf plays a file from a web\n"
+               "server that supports range requests (seeking works), and udp://:5000 plays the\n"
+               "live ethadc capture stream sent to that port (the sample format and rate come from\n"
+               "the stream; the type is detected from its first samples unless --input-type says).\n";
         exit(status);
     };
 
@@ -1496,11 +1501,11 @@ int main(int argc, char *argv[]) {
             } else {
                 input_file_given = true;
                 trailing_options.clear(); // these applied to this file
-                if (initial_seek_seconds != 0 && filesystem::is_fifo(*it)) {
-                    cerr << "Initial seek is not compatible with reading from fifo" << endl;
+                if (initial_seek_seconds != 0 && inputIsLive(*it)) {
+                    cerr << "Initial seek is not compatible with a live input (a fifo or a udp:// stream)" << endl;
                     exit(EXIT_FAILURE);
                 }
-                if (!filesystem::exists(*it)) {
+                if (!inputIsUrl(*it) && !filesystem::exists(*it)) {
                     cerr << "File not found: " << *it << endl;
                     exit(EXIT_FAILURE);
                 }
@@ -1512,16 +1517,38 @@ int main(int argc, char *argv[]) {
                 // The type and rate used for this file; probing fills in
                 // whatever the options left open
                 InputType file_input_type = input_type_option.value_or(eMuseRf);
-                double file_sample_frequency = sample_frequency_option.value_or(0);
+                std::optional<double> known_sample_frequency = sample_frequency_option;
+
+                // An ethadc stream says in every packet what it carries, so
+                // the format and the rate come from there; only the type is
+                // left for the content probe (or --input-type)
+                if (inputIsNetworkStream(*it) && (!resolved_format || !known_sample_frequency)) {
+                    constexpr double c_stream_wait_seconds = 30;
+                    cout << std::format("Waiting for the ethadc stream on {} ...", *it) << endl;
+                    const auto stream = probeNetworkStream(*it, c_stream_wait_seconds);
+                    if (!stream) {
+                        cerr << std::format("No stream arrived on {} within {:.0f} s", *it, c_stream_wait_seconds) << endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    if (!resolved_format)
+                        resolved_format = stream->format;
+                    if (!known_sample_frequency)
+                        known_sample_frequency = stream->sample_frequency;
+                    cout << std::format("{}: the stream carries {} samples at {:.4g}e6 Hz", *it,
+                                        inputFormatName(stream->format), stream->sample_frequency / 1e6) << endl;
+                }
+                double file_sample_frequency = known_sample_frequency.value_or(0);
 
                 const bool needs_probe = probe_only || !input_type_option ||
-                        (!sample_frequency_option && *input_type_option != eMuse16MHz);
+                        (!known_sample_frequency && *input_type_option != eMuse16MHz);
                 if (needs_probe) {
                     if (filesystem::is_fifo(*it)) {
                         cerr << "Reading from a pipe cannot use content detection -- give both "
                                 "--input-type and --sample-freq explicitly" << endl;
                         exit(EXIT_FAILURE);
                     }
+                    if (inputIsNetworkStream(*it))
+                        cout << "Detecting the input type from the first samples of the stream ..." << endl;
                     StreamLogger probe_log(log_selection, std::cerr, true);
                     const InputProbeResult probe = probeInputFile(probe_log, *it, resolved_format);
                     if (probe_only) {
@@ -1554,7 +1581,7 @@ int main(int argc, char *argv[]) {
                                                  detected_type == eMuseRf ? "muse-rf" : "muse-16") << endl;
                     }
 
-                    if (!sample_frequency_option) {
+                    if (!known_sample_frequency) {
                         // The rate follows from the line period under whichever
                         // type is in effect, so an explicit --input-type gets a
                         // rate even when the classification was ambiguous

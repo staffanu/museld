@@ -15,6 +15,9 @@ add_executable(museld-tests
     ../src/subtitles/Eia608Decoder.cpp
     ../src/bch/BchDecoder.cpp
     ../src/InputProbe.cpp
+    ../src/input/ByteSource.cpp
+    ../src/input/HttpByteSource.cpp
+    ../src/input/EthadcByteSource.cpp
     ../src/input/InputReaderFactory.cpp
     ../src/input/LdsInputReader.cpp
     ../src/input/LdfInputReader.cpp
@@ -24,7 +27,8 @@ add_executable(museld-tests
     ../src/DisplayGeometry.cpp
 )
 
-target_include_directories(museld-tests PRIVATE ../src ${FLAC_INCLUDE_DIRS})
+target_include_directories(museld-tests PRIVATE ../src ${FLAC_INCLUDE_DIRS}
+    ../third_party/httplib ../third_party/ethadc)
 
 target_link_options(museld-tests PRIVATE "-L/usr/local/lib")
 target_link_libraries(museld-tests
@@ -32,6 +36,9 @@ target_link_libraries(museld-tests
     PRIVATE ac3rf
     PRIVATE ${FLAC_LINK_LIBRARIES}
 )
+if(WIN32)
+    target_link_libraries(museld-tests PRIVATE ws2_32) # cpp-httplib
+endif()
 
 include(CTest)
 include(Catch)

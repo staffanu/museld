@@ -18,7 +18,7 @@ public:
     CountingReader(uint32_t block_size, off_t total_samples,
                    std::chrono::microseconds read_delay = std::chrono::microseconds(0),
                    off_t throw_at = -1)
-        : InputReader(-1, block_size, false),
+        : InputReader(nullptr, block_size),
           m_total(total_samples),
           m_delay(read_delay),
           m_throw_at(throw_at) {}
@@ -26,13 +26,13 @@ public:
     void initialize() override { initialized = true; }
 
     void seek(off_t no_samples) override {
-        std::scoped_lock<std::mutex> lock(m_fd_mutex);
+        std::scoped_lock<std::mutex> lock(m_source_mutex);
         REQUIRE(m_position + no_samples >= 0); // the adapter clamps before forwarding
         m_position += no_samples;
     }
 
     int readFloats(float *f) override {
-        std::scoped_lock<std::mutex> lock(m_fd_mutex);
+        std::scoped_lock<std::mutex> lock(m_source_mutex);
         if (m_delay.count() > 0)
             std::this_thread::sleep_for(m_delay);
         if (m_throw_at >= 0 && m_position >= m_throw_at)

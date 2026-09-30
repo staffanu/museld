@@ -44,6 +44,7 @@ public:
     // The DC estimate must live in the inner reader, where it is applied with one block of
     // lag by the conversion loop; this reader never touches the samples.
     void setDcBlocking(bool enabled) override { m_inner->setDcBlocking(enabled); }
+    bool isLive() const override { return m_inner->isLive(); }
 
 private:
     void produce();

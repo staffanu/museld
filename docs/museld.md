@@ -33,7 +33,7 @@ single CPU thread.
 
 | Option | Description |
 |---|---|
-| `--input-format <fmt>` | Input sample type: `u8`, `s8`, `u16`, `s16`, `u16be`, `s16be`, `lds`, `flac`, `ldf`. Auto-detected from the filename extension, or failing that from the file contents. |
+| `--input-format <fmt>` | Input sample type: `u8`, `s8`, `u16`, `s16`, `u16be`, `s16be`, `lds`, `flac`, `ldf`. Auto-detected from the filename extension, or failing that from the file contents (or, for a `udp://` stream, from its packets). |
 | `--input-type <type>` | Input type: `muse-rf`, `ntsc-rf`, `muse-16`, `muse-os`, or `auto` (the default): detect the type from the file contents. |
 | `--sample-freq <Hz>` | Sets the input sample rate. Measured from the file contents when omitted. |
 | `--probe` | Print what content-based detection finds for each following input file (sample format, RF type, sample rate, and a ready-to-paste option line) instead of decoding it. |
@@ -52,6 +52,18 @@ finds ambiguous), and the sample format (when the extension is not recognized). 
 measurements are ambiguous are refused rather than guessed at; `--probe` shows the numbers behind
 the verdict. Reading from a pipe cannot use detection, so fifo input needs explicit
 `--input-type` and `--sample-freq`.
+
+### Network input
+
+The input can be a URL instead of a file:
+
+| Input | What it is |
+|---|---|
+| `http://host[:port]/path/capture.ldf` | A capture on a web server. The bytes are fetched with HTTP range requests, so seeking and content detection work as for a local file. The server has to honour `Range` (nginx, Apache and Synology's Web Station do; Python's `http.server` does not). Plain http only. |
+| `udp://[address]:port` | The live [ethadc](https://github.com/staffanu/ethadc) capture stream, received on that port (bound on all interfaces unless an address is given). The sample format and rate come from the stream's packets; the input type is detected from the first samples unless `--input-type` says. Packets that never arrive are concealed by holding the last sample; the losses are reported in the input log (`--log I3`). `ethadc-tx` from that repository replays a capture file as such a stream, for testing without the hardware. |
+
+A network stream is live like a fifo: `--seek` does not apply, and the player has to keep up.
+A file over http is not: it plays like a local file, including seeking with the arrow keys.
 
 Detection reads a few short stretches spread across the file
 and takes well under a second: the sample format is whichever interpretation of the bytes looks

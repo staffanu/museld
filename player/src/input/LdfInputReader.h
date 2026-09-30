@@ -11,7 +11,7 @@
 
 class LdfInputReader : public InputReader, private FLAC::Decoder::Stream  {
 public:
-    LdfInputReader(int fd, uint32_t block_size, bool is_fifo, InputFormat format);
+    LdfInputReader(std::unique_ptr<ByteSource> source, uint32_t block_size, InputFormat format);
 
     LdfInputReader(const LdfInputReader &) = delete;
     LdfInputReader &operator=(const LdfInputReader &) = delete;
