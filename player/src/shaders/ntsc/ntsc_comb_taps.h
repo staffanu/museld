@@ -42,14 +42,16 @@ float16_t chroma_sample_next(uint fl, uint nl, uint fc) {
     return -0.25hf * next_frame[fl - 1][fc] + 0.5hf * next_frame[fl][fc] - 0.25hf * next_frame[nl][fc];
 }
 
-// Sampling phase correction for the temporal pairs: the DPLL grid jitters a
-// few degrees of subcarrier line to line (the sync loop must stay wide to
-// track player wow, so this floor cannot be tuned away), and the pair
-// difference (f0 - fneighbour)/2 comes out as the chroma rotated by half the
-// lines' phase offset.  The offset is measured exactly by the two lines' own
-// colour bursts: e^(-j delta) = -b_n conj(b_0) / |...|, and the estimate is
-// de-rotated by delta/2 using the one-sample-shift quadrature, which is
-// exact at fsc on the 4 fsc grid.  Returns (cos, sin) of delta/2.
+// Sampling phase correction for the temporal pairs: the sampling grid follows
+// the sync pulses, whose timing against the subcarrier wanders by some tens
+// of nanoseconds over a field and differently in each frame, so a line and
+// the same line of the neighbouring frame are sampled some degrees of
+// subcarrier apart, and the pair difference (f0 - fneighbour)/2 comes out as
+// the chroma rotated by half the lines' phase offset.  The offset is measured
+// exactly by the two lines' own colour bursts: e^(-j delta) = -b_n conj(b_0)
+// / |...|, and the estimate is de-rotated by delta/2 using the
+// one-sample-shift quadrature, which is exact at fsc on the 4 fsc grid.
+// Returns (cos, sin) of delta/2.
 f16vec2 pair_rotation(f16vec2 bn, f16vec2 b0) {
     float rx = float(bn.x) * float(b0.x) + float(bn.y) * float(b0.y);
     float ry = float(bn.y) * float(b0.x) - float(bn.x) * float(b0.y);

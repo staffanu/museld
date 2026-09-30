@@ -279,15 +279,16 @@ fractional resampler → EfmDecoder → CIRC C1/C2 → concealment → pop detec
 
 **MUSE path:**
 ```
-RF (62.5 MHz) → RF demod → ResamplingInputReader DPLL (16.2 MHz) →
+RF (62.5 MHz) → RF demod → ResamplingFrameReader DPLL (16.2 MHz) →
 MUSE frame buffer → video/audio split → Vulkan GPU filters →
 HD video + miniaudio
 ```
 
 **NTSC path:**
 ```
-RF (40 MHz) → NtscRfDemodulator → NtscInputReader DPLL →
-NTSC frame buffer → Vulkan GPU color decode → video output
+RF (40 MHz) → NtscRfDemodulator → NtscFrameReader (feed-forward timebase: sync pulse
+pass → line lattice → fixed-lag Kalman smoother → per-line resample, no DPLL) →
+NTSC frame buffer (4 fsc, 910×525) → Vulkan GPU color decode → video output
 ```
 
 ### Object Lifetimes and Teardown (museld)
@@ -309,9 +310,9 @@ down via a RAII guard: reader → Vulkan → GLFW window, in that order.
 ### museld Threading
 
 - Main thread: Vulkan command recording + GLFW event loop
-- Worker thread: Resampling DPLL (CPU bottleneck)
+- Reader thread: for MUSE the resampling DPLL (the CPU bottleneck); for NTSC the sync pass, timebase fit and per-line resampling (about 2 ms per frame)
 - Demodulator thread (`museld-demod`): input read + RF demod GPU pipeline; logs per-section timing at info level (`ePerformance`), for both MUSE and NTSC
-- EFM worker thread (`museld-efm`): EFM demodulation off the demodulator thread; blocks flow vacant → demod → EFM queue → filled, order preserved by the single FIFO worker. The NTSC worker (EFM or analog demod always runs), the NTSC reader thread (DPLL vs input wait per frame) and the NTSC decoder (per-section, including the fence waits and the host reads of mapped buffers) also log `ePerformance` timing
+- EFM worker thread (`museld-efm`): EFM demodulation off the demodulator thread; blocks flow vacant → demod → EFM queue → filled, order preserved by the single FIFO worker. The NTSC worker (EFM or analog demod always runs), the NTSC reader thread (timebase and resampling vs input wait per frame) and the NTSC decoder (per-section, including the fence waits and the host reads of mapped buffers) also log `ePerformance` timing
 - GPU: Async compute via SPIR-V shaders (`player/src/shaders/*.comp`)
 
 ### Compiler Flags

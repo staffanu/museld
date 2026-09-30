@@ -336,7 +336,7 @@ void NtscRfDemodulator::demodulate() {
     // Per-section CPU timing of the demodulation loop, reported every c_timing_report_blocks
     // blocks together with the real-time budget per block.  On a fifo the read time includes
     // waiting for the capture device, so a large read share is expected there.  A large acquire
-    // share means the downstream stages (audio demod worker or the reader's DPLL) cannot keep up.
+    // share means the downstream stages (audio demod worker or the frame reader) cannot keep up.
     using timing_clock = std::chrono::steady_clock;
     constexpr int c_timing_report_blocks = 256;
     const double block_budget_ms = c_sample_block_size / (double)m_sample_frequency * 1e3;
