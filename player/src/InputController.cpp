@@ -280,7 +280,7 @@ bool InputController::poll(GLFWwindow *window,
                 state.aspect_mode = AspectMode::eZoom;
                 break;
             case AspectMode::eZoom:
-                state.aspect_mode = state.source_aspect < 1.5 ? AspectMode::eSqueeze : AspectMode::eStretch;
+                state.aspect_mode = state.picture_format.can_squeeze ? AspectMode::eSqueeze : AspectMode::eStretch;
                 break;
             case AspectMode::eSqueeze:
                 state.aspect_mode = AspectMode::eStretch;
@@ -290,6 +290,27 @@ bool InputController::poll(GLFWwindow *window,
                 break;
         }
         state.osd_text = std::format("ASPECT {}", aspectModeName(state.aspect_mode));
+    }
+    if (checkKey(window, GLFW_KEY_O)) {
+        // How much of the edges to hide: the standard picture, a TV's
+        // overscan on top of it, or nothing at all (the whole decoded image,
+        // which for NTSC includes the blanking margins at the sides)
+        const bool has_margins = state.picture_format.picture_x0 > 0
+                                 || state.picture_format.picture_x1 < state.picture_format.width;
+        if (state.full_image) {
+            state.full_image = false;
+            state.overscan = 0.0;
+        } else if (state.overscan < 0.0249) {
+            state.overscan = 0.025;
+        } else if (state.overscan < 0.0499) {
+            state.overscan = 0.05;
+        } else if (has_margins) {
+            state.full_image = true;
+        } else {
+            state.overscan = 0.0;
+        }
+        state.osd_text = state.full_image ? "OVERSCAN OFF: FULL IMAGE"
+                                          : std::format("OVERSCAN {:g}%", state.overscan * 100);
     }
     if (checkKey(window, GLFW_KEY_Z)) {
         state.zoom_factor = (state.zoom_factor * 2) % 7;

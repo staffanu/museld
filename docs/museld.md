@@ -122,6 +122,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--all-fields` | Update display at 60 Hz (default) |
 | `--full-screen` | Start full screen (at the monitor's current mode; the picture is scaled to it) |
 | `--aspect <mode>` | How the picture is fitted to the window — same as the F key. `normal` (default) keeps its shape, 16:9 for MUSE and 4:3 for NTSC, with black bars where the window is wider or taller; `zoom` fills the window and crops what overflows, which shows a letterboxed film full width on a wide screen; `squeeze` is for anamorphic NTSC discs, whose 4:3 frame holds a 16:9 picture squeezed horizontally; `stretch` fills the window ignoring the shape |
+| `--overscan <percent>` | How much of the edges to hide, as a TV does — same as the O key. `0` (default) shows the standard picture: for NTSC the part of the decoded image that is exactly 4:3, which leaves out the blanking margins at the sides (black on most discs). A percentage hides that much more in each dimension, half on either side (`5` shows the central 95 %). `full` shows the whole decoded image, margins included |
 | `--seek <seconds>` | Seek to position before starting playback |
 | `--pause` | Start paused |
 | `--export-frame <file>` | Save one decoded frame as PNG to `<file>` and quit. Combine with `--export-frame-at` to give the decoder (DPLL, adaptive equaliser, motion detection) a warm-up run from the `--seek` position. |
@@ -310,6 +311,7 @@ also given, which is the mode to use for batch rendering.
 | J | NTSC: cycle the black level: auto → NTSC-M (7.5 IRE) → NTSC-J (0 IRE), see `--black-level` |
 | C | Show cursor coordinates and input-file offsets (see below) |
 | L | Toggle non-linear de-emphasis processing |
+| O | Cycle the overscan: 0 % → 2.5 % → 5 % → full image (NTSC only) (see `--overscan`) |
 | Z | Cycle the magnifier: 1× → 2× → 4× (arrow keys pan when zoomed) |
 | S | Export the displayed frame to a timestamped PNG in the current directory (without OSD text and subtitles) |
 | [ | Cycle the primary subtitle track (bottom of the frame) through the available tracks and off |
@@ -328,16 +330,25 @@ carries no separate chroma samples.
 
 ### Picture shape
 
-The decoded image does not have square pixels (MUSE decodes to 1122×1032 for a 16:9 picture,
-NTSC to 764×480 for 4:3), so the picture is resampled to its intended shape when displayed,
-windowed or full screen, and letterboxed or pillarboxed when the window's shape differs. The
-monitor's pixel shape is taken into account too, from the physical size and video mode the
-driver reports (logged at `--log V3`); square pixels are assumed when the report is missing or
-implausible. The F key and `--aspect` select the fitting: `zoom` is for letterboxed films on a
-wide screen, `squeeze` for anamorphic ("squeeze") NTSC discs, and `stretch` disables the
-fitting altogether. The OSD text and subtitles stay inside the part of the picture on screen, so
-zooming does not cut them off. `--write` files are unaffected: they carry the decoded image at
-its native size with the display aspect ratio in the metadata.
+The decoded image does not have square pixels, so the picture is resampled to its intended shape
+when displayed, windowed or full screen, and letterboxed or pillarboxed when the window's shape
+differs. MUSE decodes to 1122×1032 for a 16:9 picture. NTSC decodes to 764×480 with pixels 6/7
+as wide as they are high, which is a little wider than 4:3: the 764 columns are the BT.601
+digital active line (the 720 columns of a DVD, at our sampling rate), made wider than the analog
+picture so that the blanking edges fall inside it. The standard 4:3 picture is the middle 747
+columns, and that is what is shown by default; the remaining columns are blanking margin, black
+on most discs, which a TV hides in its overscan. The O key and `--overscan` select how much of
+the edges to hide: the standard picture, a further 2.5 % or 5 %, or nothing (the whole decoded
+image, at its true 1.364:1 shape).
+
+The monitor's pixel shape is taken into account too, from the physical size and video mode the
+driver reports (logged at `--log V3`, as is the part of the image shown and where in the window);
+square pixels are assumed when the report is missing or implausible. The F key and `--aspect`
+select the fitting: `zoom` is for letterboxed films on a wide screen, `squeeze` for anamorphic
+("squeeze") NTSC discs, and `stretch` disables the fitting altogether. The OSD text and subtitles
+stay inside the part of the picture on screen, so zooming does not cut them off. `--write` files
+and exported frames are unaffected by all of this: they carry the whole decoded image at its
+native size, with its true shape in the metadata (6:7 pixels, 191:140, for NTSC).
 
 ### Remote control
 

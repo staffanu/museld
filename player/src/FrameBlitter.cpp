@@ -38,8 +38,8 @@ void FrameBlitter::present(musevk::CommandBuffer &command_buffer,
     command_buffer.enqueueBarrier(vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eTransferWrite,
                                   vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer);
     vk::ImageBlit region;
-    region.srcOffsets[0] = vk::Offset3D((int32_t)geometry.src_x0, (int32_t)geometry.src_y0, 0);
-    region.srcOffsets[1] = vk::Offset3D((int32_t)geometry.src_x1, (int32_t)geometry.src_y1, 1);
+    region.srcOffsets[0] = vk::Offset3D((int32_t)std::lround(geometry.src_x0), (int32_t)std::lround(geometry.src_y0), 0);
+    region.srcOffsets[1] = vk::Offset3D((int32_t)std::lround(geometry.src_x1), (int32_t)std::lround(geometry.src_y1), 1);
     region.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
     region.dstOffsets[0] = vk::Offset3D(geometry.dst_x0, geometry.dst_y0, 0);
     region.dstOffsets[1] = vk::Offset3D(geometry.dst_x1, geometry.dst_y1, 1);

@@ -16,14 +16,60 @@ const char *aspectModeName(AspectMode mode) {
     return "?";
 }
 
+PictureFormat PictureFormat::ntsc(int width, int height, int first_column) {
+    // 910 samples per line at 4 fsc, where square pixels take 780 (12 3/11 MHz)
+    const double pixel_aspect = 780.0 / 910.0;
+    const double samples_per_us = 315.0 / 88.0 * 4.0;
+    const double line_us = 910.0 / samples_per_us;
+    // The active line: after a blanking interval of 10.9 us, of which 1.5 us
+    // (the front porch) precede the sync edge (RS-170A).  Measured on three
+    // discs, the picture is centred within a fraction of a sample of this.
+    const double center_us = (10.9 - 1.5) + (line_us - 10.9) / 2;
+    // Sample s of the line is the pixel whose edges are s and s + 1
+    const double center = center_us * samples_per_us - first_column + 0.5;
+    const double picture_width = height * (4.0 / 3.0) / pixel_aspect;
+    return {width, height, pixel_aspect, center - picture_width / 2, center + picture_width / 2, true};
+}
+
+PictureFormat PictureFormat::muse(int width, int height) {
+    return {width, height, (16.0 / 9.0) / ((double)width / height), 0.0, (double)width, false};
+}
+
+namespace {
+    struct Rect {
+        double x0, y0, x1, y1;
+    };
+
+    // The part of the image shown before the magnifier and the aspect mode
+    // have their say
+    Rect baseRect(const PictureFormat &f, bool full_image, double overscan) {
+        if (full_image)
+            return {0, 0, (double)f.width, (double)f.height};
+        const double cx = (f.picture_x0 + f.picture_x1) / 2, cy = f.height / 2.0;
+        const double hw = (f.picture_x1 - f.picture_x0) / 2 * (1 - overscan);
+        const double hh = f.height / 2.0 * (1 - overscan);
+        return {cx - hw, cy - hh, cx + hw, cy + hh};
+    }
+}
+
+void defaultWindowSize(const PictureFormat &format, bool full_image, int &width, int &height) {
+    const Rect r = baseRect(format, full_image, 0);
+    const double w = r.x1 - r.x0, h = r.y1 - r.y0;
+    const double aspect = w * format.pixel_aspect / h;
+    width = std::max((int)std::ceil(w), (int)std::lround(h * aspect));
+    height = std::max((int)std::ceil(h), (int)std::lround(width / aspect));
+}
+
 DisplayGeometry computeDisplayGeometry(const DisplayGeometryInput &in) {
-    // The magnifier (Z key) picks the part of the decoded image to show
+    // The magnifier (Z key) picks a part of what is shown without it
+    const Rect base = baseRect(in.format, in.full_image, in.overscan);
     const double zoom = in.zoom_factor;
+    const double bw = base.x1 - base.x0, bh = base.y1 - base.y0;
     DisplayGeometry g;
-    g.src_x0 = (in.zoom_cx - 0.5 / zoom) * in.src_width;
-    g.src_x1 = (in.zoom_cx + 0.5 / zoom) * in.src_width;
-    g.src_y0 = (in.zoom_cy - 0.5 / zoom) * in.src_height;
-    g.src_y1 = (in.zoom_cy + 0.5 / zoom) * in.src_height;
+    g.src_x0 = base.x0 + (in.zoom_cx - 0.5 / zoom) * bw;
+    g.src_x1 = base.x0 + (in.zoom_cx + 0.5 / zoom) * bw;
+    g.src_y0 = base.y0 + (in.zoom_cy - 0.5 / zoom) * bh;
+    g.src_y1 = base.y0 + (in.zoom_cy + 0.5 / zoom) * bh;
     g.dst_x0 = 0;
     g.dst_y0 = 0;
     g.dst_x1 = in.dst_width;
@@ -31,12 +77,10 @@ DisplayGeometry computeDisplayGeometry(const DisplayGeometryInput &in) {
     if (in.mode == AspectMode::eStretch)
         return g;
 
-    // Squeeze only means something for a 4:3 frame
-    const double picture_aspect = in.mode == AspectMode::eSqueeze && in.source_aspect < 1.5
-                                  ? 16.0 / 9.0 : in.source_aspect;
-    // Shape of one decoded pixel on a square-pixel display, then the shape
-    // of the shown part in display pixels
-    const double source_pixel_aspect = picture_aspect / ((double)in.src_width / in.src_height);
+    // An anamorphic disc squeezes a 16:9 picture into the 4:3 frame
+    const double source_pixel_aspect = in.format.pixel_aspect
+            * (in.mode == AspectMode::eSqueeze && in.format.can_squeeze ? 4.0 / 3.0 : 1.0);
+    // The shape of the shown part in display pixels
     const double shown_aspect = (g.src_x1 - g.src_x0) * source_pixel_aspect / (g.src_y1 - g.src_y0)
                                 / in.display_pixel_aspect;
     const double window_aspect = (double)in.dst_width / in.dst_height;

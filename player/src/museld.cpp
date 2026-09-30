@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <cstring>
 #include <algorithm>
 #include <filesystem>
 #include <format>
@@ -336,7 +337,8 @@ static void runPlayer(Logger &log,
                       GLFWwindow *window,
                       bool full_screen,
                       AspectMode initial_aspect_mode,
-                      double source_aspect,
+                      const PictureFormat &picture_format,
+                      bool initial_full_image, double initial_overscan,
                       int window_w, int window_h,
                       bool start_paused,
                       Decoder::FieldInterpolationMode initial_field_interpolation_mode,
@@ -380,7 +382,9 @@ static void runPlayer(Logger &log,
         state.analog_cx_mode = initial_cx_mode;
         state.black_level_mode = initial_black_level_mode;
         state.aspect_mode = initial_aspect_mode;
-        state.source_aspect = source_aspect;
+        state.picture_format = picture_format;
+        state.full_image = initial_full_image;
+        state.overscan = initial_overscan;
 
         OsdOverlay osd;
         FrameBlitter blitter;
@@ -701,9 +705,16 @@ static void runPlayer(Logger &log,
             // (after the acquire: it may have recreated the swap chain at a new size)
             const vk::Extent2D swap_extent = manager.getSwapChainExtent();
             const DisplayGeometry geometry = computeDisplayGeometry({
-                    state.aspect_mode, state.source_aspect, src_dims.width, src_dims.height,
+                    state.aspect_mode, state.picture_format, state.full_image, state.overscan,
                     state.zoom_factor, state.zoom_center.first, state.zoom_center.second,
                     FrameBlitter::displayPixelAspect(window, log), (int)swap_extent.width, (int)swap_extent.height});
+            if (static DisplayGeometry logged{}; std::memcmp(&logged, &geometry, sizeof geometry) != 0) {
+                logged = geometry;
+                log.info(eVideo, std::format("Picture: image columns {:.1f}..{:.1f}, rows {:.1f}..{:.1f} shown at {},{}..{},{} of {}x{}",
+                                             geometry.src_x0, geometry.src_x1, geometry.src_y0, geometry.src_y1,
+                                             geometry.dst_x0, geometry.dst_y0, geometry.dst_x1, geometry.dst_y1,
+                                             swap_extent.width, swap_extent.height));
+            }
             state.visible_x0 = geometry.src_x0;
             state.visible_y0 = geometry.src_y0;
             state.visible_x1 = geometry.src_x1;
@@ -806,7 +817,8 @@ static void runPlayer(Logger &log,
 
 template<class InputBlock>
 void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, FrameReader<InputBlock> &reader,
-                  bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool no_sync,
+                  bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool full_image, double overscan,
+                  bool no_sync,
                   bool start_paused, Decoder::FieldInterpolationMode field_interpolation_mode,
                   bool use_3d_comb, bool film_mode, Decoder::CxMode cx_mode, Decoder::BlackLevelMode black_level_mode, bool decode_video,
                   DropoutMode dropout_mode,
@@ -825,25 +837,25 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
-    // The decoded image size (also the size of a written video file), the
-    // picture's intended shape, and a window of that shape that downscales
-    // the image in neither direction
+    // The decoded image size (also the size of a written video file), where
+    // the picture sits in it and the shape of its pixels, and a window of the
+    // picture's shape that downscales it in neither direction
     int initial_w, initial_h;
-    double source_aspect;
+    PictureFormat picture_format;
     const char *title;
     if constexpr (std::is_same<InputBlock, MuseInputBlock>::value) {
         initial_w = MUSE_Y_BUF_WIDTH * 3;
         initial_h = MUSE_BUF_HEIGHT * 2;
-        source_aspect = 16.0 / 9.0;
+        picture_format = PictureFormat::muse(initial_w, initial_h);
         title = "MUSE";
     } else {
         initial_w = NTSC_Y_BUF_WIDTH;
         initial_h = NTSC_FIELD_HEIGHT * 2;
-        source_aspect = 4.0 / 3.0;
+        picture_format = PictureFormat::ntsc(initial_w, initial_h, NTSC_FIELD_START_X);
         title = "NTSC";
     }
-    const int window_w = max(initial_w, (int)lround(initial_h * source_aspect));
-    const int window_h = max(initial_h, (int)lround(initial_w / source_aspect));
+    int window_w, window_h;
+    defaultWindowSize(picture_format, full_image, window_w, window_h);
     GLFWwindow *window;
     if (full_screen) {
         // At the monitor's current mode -- no mode switch; the blit scales
@@ -906,7 +918,11 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             fps_num = decode_all_fields ? 60 : 30; fps_den = 1;
         } else {
             color_standard = VideoColorStandard::eSmpte170m;
-            dar_num = 4; dar_den = 3;
+            // The file holds the whole 764x480 image, blanking margins
+            // included, whose pixels are 6/7 as wide as high: 191:140, a
+            // little wider than the 4:3 of the picture inside it
+            dar_num = 191; dar_den = 140;
+            static_assert(NTSC_Y_BUF_WIDTH * 6 * 140 == 191 * 7 * NTSC_FIELD_HEIGHT * 2);
             fps_num = decode_all_fields ? 60000 : 30000; fps_den = 1001;
         }
         // With the AC3 track selected, the file gets the original AC3
@@ -980,7 +996,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         const double fields_per_second = std::is_same<InputBlock, MuseInputBlock>::value ? 60.0 : 60000.0 / 1001.0;
         const double seconds_per_iteration = (decode_all_fields ? 1 : 2) / fields_per_second;
 
-        runPlayer(log, manager, *decoder, reader_controls, window, full_screen, aspect_mode, source_aspect,
+        runPlayer(log, manager, *decoder, reader_controls, window, full_screen, aspect_mode, picture_format,
+                  full_image, overscan,
                   window_w, window_h, start_paused,
                   field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, dropout_mode, audio_track,
                   benchmark_shaders,
@@ -1080,6 +1097,8 @@ int main(int argc, char *argv[]) {
     bool decode_all_fields = true;
     bool full_screen = false;
     AspectMode aspect_mode = AspectMode::eNormal;
+    bool full_image = false;
+    double overscan = 0.0;
     bool no_sync = false;
     std::optional<InputType> input_type_option;         // unset (the default) means auto-detect
     bool probe_only = false;      // --probe: print what probing finds and skip decoding
@@ -1263,6 +1282,22 @@ int main(int argc, char *argv[]) {
         else if (name == "on")     eq_mode = MuseAdaptiveEqualizer::Mode::eAdapt;
         else if (name == "frozen") eq_mode = MuseAdaptiveEqualizer::Mode::eFrozen;
         else throw std::runtime_error(std::format("Unknown --eq mode {} (expected off|on|frozen)", name));
+    });
+    options.option("--overscan", "PERCENT", "How much of the edges to hide, as a TV does (also cycled with the O key): "
+                                            "0 shows the standard picture (default; for NTSC the 4:3 part of the decoded "
+                                            "image, without the blanking margins at the sides), a percentage hides that "
+                                            "much more in each dimension, and full shows the whole decoded image",
+                   [&] () -> void {
+        const string value = *(it++);
+        if (value == "full") {
+            full_image = true;
+        } else {
+            overscan = stod(value) / 100.0;
+            if (overscan < 0.0 || overscan > 0.25) {
+                cerr << "--overscan must be full or a percentage from 0 to 25" << endl;
+                exit(1);
+            }
+        }
     });
     options.option("--black-level", "MODE", "NTSC: where the disc puts black: auto reads it off the picture "
                                             "(default), m forces NTSC-M (US discs, 7.5 IRE above blanking), j forces "
@@ -1683,7 +1718,7 @@ int main(int argc, char *argv[]) {
                                         file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
                                         efm_adaptive_filter_size, muse_output_filename);
                         process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                                     full_screen, aspect_mode, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
+                                                     full_screen, aspect_mode, full_image, overscan, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                      audio_track,
                                                      benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
@@ -1695,7 +1730,7 @@ int main(int argc, char *argv[]) {
                         auto reader = make_unique<PhaseCorrect16MHzFrameReader>(
                                 log, *it, input_format, initial_seek_seconds, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                     full_screen, aspect_mode, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
+                                     full_screen, aspect_mode, full_image, overscan, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                      audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
@@ -1709,7 +1744,7 @@ int main(int argc, char *argv[]) {
                                 file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
                                 audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
                         process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                     full_screen, aspect_mode, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
+                                     full_screen, aspect_mode, full_image, overscan, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                      audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
