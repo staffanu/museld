@@ -94,9 +94,6 @@ public:
         // Black level setting and the measured picture black, for the same
         // overlay; empty for MUSE
         std::string level_status;
-        // OSD text for the frame on which the automatic black level choice
-        // changed; empty otherwise
-        std::string black_level_event;
     };
 
     Decoder(const Decoder&) = delete;
