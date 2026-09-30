@@ -196,8 +196,9 @@ must stay within ±0.1 µs with no walks; `ntsc-burst-check.py <prefix> <dump> <
 <fs>` measures the curve's timing error against the colour burst phase, content-
 independent — expect ±40 ns and ~1 ns line-to-line jitter.
 
-**Frames**: `--seek T --export-frame-at T2 --export-frame f.png` writes the displayed
-764×480 frame (`--field-interpolation intra-field` for a single field, `--no-3d-comb`,
+**Frames**: `--seek T --export-frame-at T2 --export-frame f.png` writes the decoded
+764×480 image (all of it: the display shows only its 4:3 middle, see `PictureFormat`; `V3`
+logs the part shown and where) (`--field-interpolation intra-field` for a single field, `--no-3d-comb`,
 `--no-film-mode`, `--black-level m|j` to isolate stages). `--export-frame-at` counts
 displayed fields, so do not combine it with `--no-sync`. The GNOME session must be
 unlocked or the PNGs come out black. Test captures on the development machine:

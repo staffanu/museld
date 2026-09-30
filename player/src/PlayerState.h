@@ -32,7 +32,9 @@ struct PlayerState {
     int zoom_factor = 1;
     std::pair<double, double> zoom_center{0.5, 0.5};
     AspectMode aspect_mode = AspectMode::eNormal;
-    double source_aspect = 4.0 / 3.0; // the picture's intended width over height (16:9 MUSE, 4:3 NTSC)
+    PictureFormat picture_format{};
+    bool full_image = false;  // show the whole decoded image, blanking margins included
+    double overscan = 0.0;    // else: fraction of the standard picture hidden per dimension
     // The part of the decoded image on screen this frame (zoom and aspect
     // cropping applied), in decoded-image pixels: the overlays keep their
     // text inside it

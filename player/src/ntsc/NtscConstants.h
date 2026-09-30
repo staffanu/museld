@@ -11,6 +11,7 @@
 
 #define NTSC_FIELD_HEIGHT 240
 #define NTSC_Y_BUF_WIDTH 764
+#define NTSC_FIELD_START_X 129 // the 4 fsc sample after the sync edge in picture column 0; matches shaders/muse/muse.h
 #define NTSC_CHROMA_TAP_HALO 9 // the chroma demodulation window reaches this far past the picture columns
 #define NTSC_CHROMA_TAPS_WIDTH (NTSC_Y_BUF_WIDTH + 2 * NTSC_CHROMA_TAP_HALO)
 

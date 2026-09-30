@@ -9,20 +9,20 @@
 using Catch::Matchers::WithinAbs;
 
 namespace {
-    constexpr int NTSC_W = 764, NTSC_H = 480;
-    constexpr int MUSE_W = 1122, MUSE_H = 1032;
+    const PictureFormat c_ntsc = PictureFormat::ntsc(764, 480, 129);
+    const PictureFormat c_muse = PictureFormat::muse(1122, 1032);
 
     DisplayGeometryInput ntsc(AspectMode mode, int dst_w, int dst_h, double display_par = 1.0) {
-        return {mode, 4.0 / 3.0, NTSC_W, NTSC_H, 1, 0.5, 0.5, display_par, dst_w, dst_h};
+        return {mode, c_ntsc, false, 0.0, 1, 0.5, 0.5, display_par, dst_w, dst_h};
     }
     DisplayGeometryInput muse(AspectMode mode, int dst_w, int dst_h, double display_par = 1.0) {
-        return {mode, 16.0 / 9.0, MUSE_W, MUSE_H, 1, 0.5, 0.5, display_par, dst_w, dst_h};
+        return {mode, c_muse, false, 0.0, 1, 0.5, 0.5, display_par, dst_w, dst_h};
     }
-    void expectWholeSource(const DisplayGeometry &g, int w, int h) {
-        CHECK(g.src_x0 == 0);
+    void expectNtscPicture(const DisplayGeometry &g) {
+        CHECK_THAT(g.src_x0, WithinAbs(c_ntsc.picture_x0, 1e-9));
+        CHECK_THAT(g.src_x1, WithinAbs(c_ntsc.picture_x1, 1e-9));
         CHECK(g.src_y0 == 0);
-        CHECK(g.src_x1 == w);
-        CHECK(g.src_y1 == h);
+        CHECK(g.src_y1 == 480);
     }
     void expectWholeDest(const DisplayGeometry &g, int w, int h) {
         CHECK(g.dst_x0 == 0);
@@ -32,11 +32,49 @@ namespace {
     }
 }
 
-TEST_CASE("NTSC on a 16:9 screen: normal pillarboxes to 4:3", "[display]") {
+TEST_CASE("The NTSC picture format: 6/7 pixels, the 4:3 picture in the middle ~747 columns", "[display]") {
+    CHECK_THAT(c_ntsc.pixel_aspect, WithinAbs(6.0 / 7.0, 1e-12));
+    CHECK(c_ntsc.can_squeeze);
+    const double w = c_ntsc.picture_x1 - c_ntsc.picture_x0;
+    CHECK_THAT(w, WithinAbs(746.667, 1e-3));
+    CHECK_THAT(w * c_ntsc.pixel_aspect / c_ntsc.height, WithinAbs(4.0 / 3.0, 1e-12));
+    // centred on the standard's active line, a column right of the image centre,
+    // leaving the blanking margins (measured: 7-8 columns left, 5-6 right) outside
+    CHECK_THAT((c_ntsc.picture_x0 + c_ntsc.picture_x1) / 2, WithinAbs(383.06, 0.05));
+    CHECK(c_ntsc.picture_x0 > 9.0);
+    CHECK(c_ntsc.picture_x1 < 757.0);
+}
+
+TEST_CASE("NTSC on a 16:9 screen: the 4:3 picture, pillarboxed", "[display]") {
     const auto g = computeDisplayGeometry(ntsc(AspectMode::eNormal, 1920, 1080));
-    expectWholeSource(g, NTSC_W, NTSC_H);
+    expectNtscPicture(g);
     CHECK(g.dst_y0 == 0);
     CHECK(g.dst_y1 == 1080);
+    CHECK(g.dst_x0 == 240);
+    CHECK(g.dst_x1 == 1680);
+}
+
+TEST_CASE("NTSC full image: all 764 columns, a little wider than 4:3", "[display]") {
+    DisplayGeometryInput in = ntsc(AspectMode::eNormal, 1920, 1080);
+    in.full_image = true;
+    const auto g = computeDisplayGeometry(in);
+    CHECK(g.src_x0 == 0);
+    CHECK(g.src_x1 == 764);
+    CHECK(g.src_y0 == 0);
+    CHECK(g.src_y1 == 480);
+    CHECK(g.dst_x1 - g.dst_x0 == 1473); // 1080 * 764 * (6/7) / 480
+    CHECK(g.dst_x0 == 223);
+}
+
+TEST_CASE("Overscan hides the same fraction in both dimensions and keeps the shape", "[display]") {
+    DisplayGeometryInput in = ntsc(AspectMode::eNormal, 1920, 1080);
+    in.overscan = 0.05;
+    const auto g = computeDisplayGeometry(in);
+    const double w = c_ntsc.picture_x1 - c_ntsc.picture_x0;
+    CHECK_THAT(g.src_x1 - g.src_x0, WithinAbs(0.95 * w, 1e-9));
+    CHECK_THAT((g.src_x0 + g.src_x1) / 2, WithinAbs((c_ntsc.picture_x0 + c_ntsc.picture_x1) / 2, 1e-9));
+    CHECK_THAT(g.src_y0, WithinAbs(12.0, 1e-9));
+    CHECK_THAT(g.src_y1, WithinAbs(468.0, 1e-9));
     CHECK(g.dst_x0 == 240);
     CHECK(g.dst_x1 == 1680);
 }
@@ -44,41 +82,53 @@ TEST_CASE("NTSC on a 16:9 screen: normal pillarboxes to 4:3", "[display]") {
 TEST_CASE("NTSC on a 16:9 screen: zoom fills the width and crops 12.5% top and bottom", "[display]") {
     const auto g = computeDisplayGeometry(ntsc(AspectMode::eZoom, 1920, 1080));
     expectWholeDest(g, 1920, 1080);
-    CHECK(g.src_x0 == 0);
-    CHECK(g.src_x1 == NTSC_W);
+    CHECK_THAT(g.src_x0, WithinAbs(c_ntsc.picture_x0, 1e-9));
+    CHECK_THAT(g.src_x1, WithinAbs(c_ntsc.picture_x1, 1e-9));
     CHECK_THAT(g.src_y0, WithinAbs(60.0, 1e-9));
     CHECK_THAT(g.src_y1, WithinAbs(420.0, 1e-9));
 }
 
 TEST_CASE("NTSC on a 16:9 screen: squeeze shows the anamorphic frame as 16:9, and stretch fills", "[display]") {
     const auto s = computeDisplayGeometry(ntsc(AspectMode::eSqueeze, 1920, 1080));
-    expectWholeSource(s, NTSC_W, NTSC_H);
+    expectNtscPicture(s);
     expectWholeDest(s, 1920, 1080);
     const auto t = computeDisplayGeometry(ntsc(AspectMode::eStretch, 1000, 100));
-    expectWholeSource(t, NTSC_W, NTSC_H);
+    expectNtscPicture(t);
     expectWholeDest(t, 1000, 100);
 }
 
-TEST_CASE("NTSC in its own aspect-correct window is shown edge to edge", "[display]") {
-    const auto g = computeDisplayGeometry(ntsc(AspectMode::eNormal, 764, 573));
-    expectWholeSource(g, NTSC_W, NTSC_H);
-    CHECK(g.dst_x0 == 0);
-    CHECK(g.dst_y0 == 0);
-    CHECK(g.dst_x1 == 764);
-    CHECK(g.dst_y1 == 573);
+TEST_CASE("Default windows show the picture edge to edge without downscaling", "[display]") {
+    int w, h;
+    defaultWindowSize(c_ntsc, false, w, h);
+    CHECK(w == 747);
+    CHECK(h == 560);
+    const auto g = computeDisplayGeometry(ntsc(AspectMode::eNormal, w, h));
+    expectWholeDest(g, w, h);
+    defaultWindowSize(c_ntsc, true, w, h);
+    CHECK(w == 764);
+    CHECK(h == 560);
+    defaultWindowSize(c_muse, false, w, h);
+    CHECK(w == 1835);
+    CHECK(h == 1032);
 }
 
-TEST_CASE("MUSE on a 16:9 screen fills it; squeeze is a no-op for a 16:9 source", "[display]") {
+TEST_CASE("MUSE on a 16:9 screen fills it; squeeze is a no-op, and the full image is the picture", "[display]") {
     for (auto mode : {AspectMode::eNormal, AspectMode::eZoom, AspectMode::eSqueeze}) {
-        const auto g = computeDisplayGeometry(muse(mode, 1920, 1080));
-        expectWholeSource(g, MUSE_W, MUSE_H);
-        expectWholeDest(g, 1920, 1080);
+        for (bool full : {false, true}) {
+            DisplayGeometryInput in = muse(mode, 1920, 1080);
+            in.full_image = full;
+            const auto g = computeDisplayGeometry(in);
+            CHECK_THAT(g.src_x0, WithinAbs(0.0, 1e-9));
+            CHECK_THAT(g.src_x1, WithinAbs(1122.0, 1e-9));
+            CHECK_THAT(g.src_y0, WithinAbs(0.0, 1e-9));
+            CHECK_THAT(g.src_y1, WithinAbs(1032.0, 1e-9));
+            expectWholeDest(g, 1920, 1080);
+        }
     }
 }
 
 TEST_CASE("MUSE on a 4:3 screen: normal letterboxes, zoom crops the sides", "[display]") {
     const auto n = computeDisplayGeometry(muse(AspectMode::eNormal, 1600, 1200));
-    expectWholeSource(n, MUSE_W, MUSE_H);
     CHECK(n.dst_x0 == 0);
     CHECK(n.dst_x1 == 1600);
     CHECK(n.dst_y0 == 150);
@@ -86,9 +136,9 @@ TEST_CASE("MUSE on a 4:3 screen: normal letterboxes, zoom crops the sides", "[di
     const auto z = computeDisplayGeometry(muse(AspectMode::eZoom, 1600, 1200));
     expectWholeDest(z, 1600, 1200);
     CHECK(z.src_y0 == 0);
-    CHECK(z.src_y1 == MUSE_H);
-    CHECK_THAT(z.src_x0, WithinAbs(MUSE_W * 0.125, 1e-9));
-    CHECK_THAT(z.src_x1, WithinAbs(MUSE_W * 0.875, 1e-9));
+    CHECK(z.src_y1 == 1032);
+    CHECK_THAT(z.src_x0, WithinAbs(1122 * 0.125, 1e-9));
+    CHECK_THAT(z.src_x1, WithinAbs(1122 * 0.875, 1e-9));
 }
 
 TEST_CASE("Non-square display pixels: 1440x1080 on a 16:9 panel shows 4:3 as a 1080-wide square", "[display]") {
@@ -99,16 +149,16 @@ TEST_CASE("Non-square display pixels: 1440x1080 on a 16:9 panel shows 4:3 as a 1
     CHECK(g.dst_x1 == 1260);
 }
 
-TEST_CASE("The magnifier picks the source rectangle, the aspect fitting applies to it", "[display]") {
+TEST_CASE("The magnifier picks a part of the shown picture, the aspect fitting applies to it", "[display]") {
     DisplayGeometryInput in = ntsc(AspectMode::eNormal, 1920, 1080);
     in.zoom_factor = 2;
     in.zoom_cx = 0.25;
     in.zoom_cy = 0.5;
     const auto g = computeDisplayGeometry(in);
-    CHECK(g.src_x0 == 0);
-    CHECK(g.src_x1 == NTSC_W / 2);
-    CHECK(g.src_y0 == NTSC_H / 4);
-    CHECK(g.src_y1 == NTSC_H * 3 / 4);
+    CHECK_THAT(g.src_x0, WithinAbs(c_ntsc.picture_x0, 1e-9));
+    CHECK_THAT(g.src_x1, WithinAbs((c_ntsc.picture_x0 + c_ntsc.picture_x1) / 2, 1e-9));
+    CHECK_THAT(g.src_y0, WithinAbs(120.0, 1e-9));
+    CHECK_THAT(g.src_y1, WithinAbs(360.0, 1e-9));
     CHECK(g.dst_x0 == 240); // still 4:3 on screen
     CHECK(g.dst_x1 == 1680);
 }
