@@ -9,7 +9,7 @@
 
 class LdsInputReader : public InputReader {
 public:
-    LdsInputReader(int fd, uint32_t block_size, bool is_fifo);
+    LdsInputReader(std::unique_ptr<ByteSource> source, uint32_t block_size);
 
     LdsInputReader(const LdsInputReader &) = delete;
     LdsInputReader &operator=(const LdsInputReader &) = delete;

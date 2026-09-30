@@ -11,6 +11,7 @@
 #include "MuseConstants.h"
 #include "PhaseCorrect16MHzFrameReader.h"
 #include "input/InputReaderFactory.h"
+#include "input/ByteSource.h"
 #include "logging/Logger.h"
 
 using namespace std;
@@ -22,7 +23,7 @@ PhaseCorrect16MHzFrameReader::PhaseCorrect16MHzFrameReader(
         const std::string &filename, InputFormat input_format, double initial_seek_seconds,
         const std::optional<std::string> &output_filename)
         : FrameReader(log, filename,
-                      filesystem::is_fifo(filename),
+                      inputIsLive(filename),
                       initial_seek_seconds, output_filename),
           m_input_format(input_format),
           m_input_reader(nullptr) {
@@ -32,7 +33,7 @@ bool PhaseCorrect16MHzFrameReader::initialize(std::vector<std::unique_ptr<MuseIn
     auto [samples_to_skip, input_scale] = compute_initial_skip(m_log);
     m_input_scale = input_scale;
 
-    m_input_reader = makeInputReader(m_filename, m_input_format, c_samples_per_frame);
+    m_input_reader = makeInputReader(m_filename, m_input_format, c_samples_per_frame, &m_log);
     m_input_reader->initialize();
 
     m_log.info(eInput, std::format("Skipping {} initial samples", samples_to_skip));

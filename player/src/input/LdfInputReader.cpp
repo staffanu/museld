@@ -3,15 +3,16 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <unistd.h>
 #include <cassert>
+#include <cerrno>
+#include <chrono>
 #include <mutex>
-#include <sys/stat.h>
+#include <thread>
 #include "FLAC++/decoder.h"
 #include "LdfInputReader.h"
 
-LdfInputReader::LdfInputReader(int fd, uint32_t block_size, bool is_fifo, InputFormat format)
-  : InputReader(fd, block_size, is_fifo),
+LdfInputReader::LdfInputReader(std::unique_ptr<ByteSource> source, uint32_t block_size, InputFormat format)
+  : InputReader(std::move(source), block_size),
     FLAC::Decoder::Stream(),
     m_format(format) {
     assert(format == eFlacOgg || format == eFlac);
@@ -54,9 +55,9 @@ void LdfInputReader::initialize() {
 }
 
 void LdfInputReader::seek(int64_t no_samples) {
-    if (m_is_fifo)
+    if (isLive())
         return;
-    std::scoped_lock<std::mutex> lock(m_fd_mutex);
+    std::scoped_lock<std::mutex> lock(m_source_mutex);
     throwIfFailed();
     // Clamp at the start of the stream (see InputReaderImpl::seek)
     no_samples = std::max(no_samples, -(int64_t)m_sample_position);
@@ -68,7 +69,7 @@ void LdfInputReader::seek(int64_t no_samples) {
 }
 
 int LdfInputReader::readFloats(float *f) {
-    std::scoped_lock<std::mutex> lock(m_fd_mutex);
+    std::scoped_lock<std::mutex> lock(m_source_mutex);
     throwIfFailed();
     int filled_floats = 0;
     float dc = dcOffset();
@@ -93,9 +94,13 @@ int LdfInputReader::readFloats(float *f) {
 }
 
 FLAC__StreamDecoderReadStatus LdfInputReader::read_callback(FLAC__byte buffer[], size_t *bytes) {
-    const auto r = read(m_fd, buffer, *bytes);
+    // libFLAC has no "try again later": a live source that has nothing yet is
+    // waited for here, as the raw readers do in readFully.
+    ssize_t r;
+    while ((r = m_source->read(buffer, *bytes)) == -1 && errno == EAGAIN)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     if (r == -1) {
-        recordError(std::format("Error reading from file: {}", strerror(errno)));
+        recordError(std::format("Error reading input: {}", strerror(errno)));
         *bytes = 0;
         return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
     }
@@ -140,17 +145,18 @@ void LdfInputReader::error_callback(::FLAC__StreamDecoderErrorStatus status) {
 }
 
 FLAC__StreamDecoderTellStatus LdfInputReader::tell_callback(FLAC__uint64 *absolute_byte_offset) {
-    *absolute_byte_offset = seekFile(m_fd, 0, SEEK_CUR);
-    if (*absolute_byte_offset == -1) {
+    const int64_t position = m_source->seek(0, SEEK_CUR);
+    if (position == -1) {
         if (errno == ESPIPE)
             return FLAC__STREAM_DECODER_TELL_STATUS_UNSUPPORTED;
         return FLAC__STREAM_DECODER_TELL_STATUS_ERROR;
     }
+    *absolute_byte_offset = (FLAC__uint64)position;
     return FLAC__STREAM_DECODER_TELL_STATUS_OK;
 }
 
 FLAC__StreamDecoderSeekStatus LdfInputReader::seek_callback(FLAC__uint64 absolute_byte_offset) {
-    int64_t r = seekFile(m_fd, (int64_t)absolute_byte_offset, SEEK_SET);
+    int64_t r = m_source->seek((int64_t)absolute_byte_offset, SEEK_SET);
     if (r == -1) {
         if (errno == ESPIPE)
             return FLAC__STREAM_DECODER_SEEK_STATUS_UNSUPPORTED;
@@ -160,13 +166,11 @@ FLAC__StreamDecoderSeekStatus LdfInputReader::seek_callback(FLAC__uint64 absolut
 }
 
 FLAC__StreamDecoderLengthStatus LdfInputReader::length_callback(FLAC__uint64 *stream_length) {
-    struct stat stats{};
-    if(fstat(m_fd, &stats) != 0)
-        return FLAC__STREAM_DECODER_LENGTH_STATUS_ERROR;
-    else {
-        *stream_length = (FLAC__uint64)stats.st_size;
-        return FLAC__STREAM_DECODER_LENGTH_STATUS_OK;
-    }
+    const int64_t size = m_source->size();
+    if (size < 0)
+        return FLAC__STREAM_DECODER_LENGTH_STATUS_UNSUPPORTED;
+    *stream_length = (FLAC__uint64)size;
+    return FLAC__STREAM_DECODER_LENGTH_STATUS_OK;
 }
 
 bool LdfInputReader::eof_callback() {

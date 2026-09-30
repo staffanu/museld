@@ -57,7 +57,9 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
     museld.cpp
     ac3rf-efm-decode.cpp
   tests/           — Catch2 unit tests (ReedSolomonTest, BchDecoderTest, SrtParserTest)
-  third_party/     — Vendored single-header libs (stb_truetype.h, miniaudio.h) and the bundled subtitle font (Noto Sans JP, SIL OFL)
+  third_party/     — Vendored single-header libs (stb_truetype.h, miniaudio.h, httplib.h), the ethadc
+                     stream receiver headers (ethadc/, copied verbatim by its update.sh from ../ethadc)
+                     and the bundled subtitle font (Noto Sans JP, SIL OFL)
   cmake/           — CMake helpers (ac3rfConfig.cmake.in, modules/FindLIBAV.cmake, etc.)
 fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device
 picostream/        — Standalone: Picoscope oscilloscope capture tool (analog + MSO digital)
@@ -233,7 +235,14 @@ The `src/` directory is the include root for both binaries. The `ac3rf` CMake ta
 
 **Pluggable erasure concealment**: Abstract `ErasureConcealer` interface with four implementations (`RepeatingSample`, `LinearInterpolation`, `Ar`, `SlowAr`), selected via CLI.
 
-**Input format abstraction**: `InputReader` specializations with auto-detection by file extension.
+**Input format abstraction**: `InputReader` specializations (raw widths, lds, FLAC) with
+auto-detection by file extension, reading through a `ByteSource` (`input/ByteSource.h`) that
+hides where the bytes come from: a file or fifo (`FdByteSource`), a web server via HTTP range
+requests (`HttpByteSource`, cpp-httplib, prefetching 3×4 MiB ahead) or the live ethadc UDP
+capture stream (`EthadcByteSource`, built on the vendored `third_party/ethadc` receiver; not
+in the Windows build). Names starting with `http://` or `udp://` select them; `inputIsLive()`
+replaces the old `filesystem::is_fifo()` checks. A udp:// stream's format and rate come from its
+packet headers (`probeNetworkStream`), and the ethadc `u10p` format is the `.lds` packing.
 
 **Content-based input detection**: `src/InputProbe.{h,cpp}` (museld only, CPU-only, no GPU)
 detects sample format, MUSE/NTSC RF type and sample rate from short chunks of the file.

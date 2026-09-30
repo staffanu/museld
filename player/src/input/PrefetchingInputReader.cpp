@@ -7,8 +7,8 @@
 #include "PrefetchingInputReader.h"
 
 PrefetchingInputReader::PrefetchingInputReader(std::unique_ptr<InputReader> inner, int queue_depth)
-    // The base class fd is never used here; every file operation goes through the inner reader.
-    : InputReader(-1, inner->block_size(), inner->is_fifo()),
+    // No source of its own: every byte goes through the inner reader.
+    : InputReader(nullptr, inner->block_size()),
       m_inner(std::move(inner)),
       m_queue_depth(queue_depth) {
     assert(m_queue_depth > 0);
@@ -103,7 +103,7 @@ int PrefetchingInputReader::readFloats(float *f) {
 }
 
 void PrefetchingInputReader::seek(int64_t no_samples) {
-    if (m_is_fifo)
+    if (isLive())
         return;
     std::unique_lock<std::mutex> lock(m_mutex);
     if (!m_producer.joinable()) {

@@ -10,8 +10,8 @@
 #include <format>
 #include "LdsInputReader.h"
 
-LdsInputReader::LdsInputReader(int fd, uint32_t block_size, bool is_fifo)
-    : InputReader(fd, block_size, is_fifo) {
+LdsInputReader::LdsInputReader(std::unique_ptr<ByteSource> source, uint32_t block_size)
+    : InputReader(std::move(source), block_size) {
     assert(block_size % 4 == 0);
     m_buffer = new uint8_t[block_size * 5 / 4];
 }
@@ -24,40 +24,12 @@ void LdsInputReader::initialize() {
 }
 
 void LdsInputReader::seek(int64_t no_samples) {
-    if (m_is_fifo)
-        return;
-    std::scoped_lock<std::mutex> lock(m_fd_mutex);
-    int64_t bytes_to_seek = no_samples / 4 * 5;
-    // Clamp at the start of the file (see InputReaderImpl::seek)
-    int64_t current = seekFile(m_fd, 0, SEEK_CUR);
-    seekFile(m_fd, std::max<int64_t>(0, current + bytes_to_seek), SEEK_SET);
+    seekBytes(no_samples / 4 * 5);
 }
 
 int LdsInputReader::readFloats(float *f) {
-    size_t total_bytes = m_block_size * 5 / 4;
-    size_t filled_bytes = 0;
-    while (filled_bytes < total_bytes) {
-        ssize_t read_count;
-        {
-            std::scoped_lock<std::mutex> lock(m_fd_mutex);
-            read_count = read(m_fd, m_buffer + filled_bytes, total_bytes - filled_bytes);
-        }
-        if (read_count == -1) {
-            if (errno == EAGAIN) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                continue;
-            }
-            throw std::runtime_error(std::format("Error reading from file: {}", strerror(errno)));
-        }
-        if (read_count == 0) {
-            if (m_is_fifo) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                continue;
-            }
-            return 0;
-        }
-        filled_bytes += (size_t)read_count;
-    }
+    if (!readFully(m_buffer, m_block_size * 5 / 4))
+        return 0;
 
     // Center the unsigned 10-bit samples on zero; the container's midpoint is
     // exact for this format.  Residual hardware offsets are handled by the

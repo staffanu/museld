@@ -11,6 +11,7 @@
 #include <valarray>
 #include <vector>
 #include "InputProbe.h"
+#include "input/ByteSource.h"
 #include "input/InputReaderFactory.h"
 #include "filter/WindowedSinc.h"
 #include "filter/FFT.h"
@@ -109,9 +110,14 @@ double lag1Autocorrelation(const vector<float> &x) {
 }
 
 optional<InputFormat> detectFormatByMagic(const string &filename) {
-    ifstream f(filename, ios::binary);
-    char magic[4] = {};
-    f.read(magic, 4);
+    uint8_t magic[4] = {};
+    try {
+        auto source = openByteSource(filename);
+        if (source->isLive() || source->read(magic, 4) != 4)
+            return nullopt;
+    } catch (const std::exception &) {
+        return nullopt;
+    }
     if (memcmp(magic, "fLaC", 4) == 0)
         return eFlac;
     if (memcmp(magic, "OggS", 4) == 0)
@@ -365,9 +371,11 @@ double formatBytesPerSample(InputFormat format) {
 
 vector<int64_t> chunkOffsets(const string &filename, InputFormat format) {
     double bytes_per_sample = formatBytesPerSample(format);
-    error_code ec;
-    int64_t total = (int64_t)((double)filesystem::file_size(filename, ec) / bytes_per_sample);
-    if (ec || total < (int64_t)c_chunk_samples)
+    const int64_t size = inputSize(filename);
+    int64_t total = (int64_t)((double)size / bytes_per_sample);
+    // An input of unknown size -- a live stream -- is probed on the one
+    // stretch it can give us: the next samples to arrive
+    if (size < 0 || total < (int64_t)c_chunk_samples)
         return {0};
     vector<int64_t> offsets;
     for (double frac : {0.08, 0.45, 0.75}) {

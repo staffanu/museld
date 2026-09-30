@@ -5,16 +5,18 @@
 #define AC3RF_DECODE_INPUTREADER_H
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <string.h>
-#include <unistd.h>
 #include <chrono>
 #include <cmath>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <format>
-#include "FileSeek.h"
+#include <stdexcept>
+#include "ByteSource.h"
 
 enum InputFormat {
     eUint8,
@@ -30,18 +32,12 @@ enum InputFormat {
 
 class InputReader {
 public:
-    InputReader(int fd, uint32_t block_size, bool is_fifo)
-    : m_fd(fd), m_block_size(block_size), m_is_fifo(is_fifo) {}
+    // The reader owns its source.  PrefetchingInputReader passes none: every
+    // byte it hands out comes through the reader it wraps.
+    InputReader(std::unique_ptr<ByteSource> source, uint32_t block_size)
+    : m_source(std::move(source)), m_block_size(block_size) {}
 
-    // The factory transfers fd ownership to the reader.  Without this close,
-    // probing (which opens a short-lived reader per candidate format and
-    // chunk) leaks handles -- and on Windows an open handle blocks deleting
-    // the file.  -1 (PrefetchingInputReader) and the standard fds (stdin
-    // reader) are not ours to close.
-    virtual ~InputReader() {
-        if (m_fd > STDERR_FILENO)
-            close(m_fd);
-    }
+    virtual ~InputReader() = default;
 
     virtual void initialize() = 0;
     virtual void seek(int64_t no_samples) = 0;
@@ -67,11 +63,53 @@ public:
         m_dc_block = enabled;
     }
 
-    bool is_fifo() const {
-        return m_is_fifo;
+    // Samples arrive as they are produced (fifo, stdin, network stream):
+    // seeks are ignored and the player has to keep up.  See ByteSource::isLive.
+    virtual bool isLive() const {
+        return m_source && m_source->isLive();
     }
 
 protected:
+    // Fills `buf` with exactly `total` bytes from the source.  Returns false
+    // at the end of the stream (a partial block is reported as the end, as
+    // the readers always did).  A live source that has nothing yet is polled
+    // every millisecond: its own read already waits a while, and a fifo's
+    // O_NONBLOCK read returns at once.
+    bool readFully(uint8_t *buf, size_t total) {
+        size_t filled = 0;
+        while (filled < total) {
+            ssize_t count;
+            {
+                std::scoped_lock<std::mutex> lock(m_source_mutex);
+                count = m_source->read(buf + filled, total - filled);
+            }
+            if (count == -1) {
+                if (errno == EAGAIN) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
+                throw std::runtime_error(std::format("Error reading input: {}", strerror(errno)));
+            }
+            if (count == 0)
+                return false;
+            filled += (size_t)count;
+        }
+        return true;
+    }
+
+    // Moves the source by `bytes` relative to its position, clamped at the
+    // start (a backward seek that would land before the start otherwise fails
+    // outright and the position doesn't move).  Ignored on a live source.
+    void seekBytes(int64_t bytes) {
+        if (isLive())
+            return;
+        std::scoped_lock<std::mutex> lock(m_source_mutex);
+        int64_t current = m_source->seek(0, SEEK_CUR);
+        if (current < 0)
+            throw std::runtime_error(std::format("Error seeking input: {}", strerror(errno)));
+        m_source->seek(std::max<int64_t>(0, current + bytes), SEEK_SET);
+    }
+
     // No NaN sentinels here: the project compiles with -ffast-math, under
     // which std::isnan constant-folds to false and a NaN would poison every
     // sample that follows.
@@ -86,24 +124,22 @@ protected:
         }
     }
 
-    int m_fd;
+    std::unique_ptr<ByteSource> m_source;
     uint32_t m_block_size;
-    bool m_is_fifo;
-    std::mutex m_fd_mutex;
+    std::mutex m_source_mutex;
     bool m_dc_block = false;
     bool m_dc_valid = false;
     double m_dc = 0.0;
 };
 
-// Reads exactly m_block_size samples of type T from the file descriptor and converts to float.
-// On a fifo we block until the data arrives or the writer closes; on a regular file partial reads
-// at end of file are reported as 0 (EOF). EAGAIN is handled with a short sleep to support
-// O_NONBLOCK fds.
+// Reads exactly m_block_size samples of type T from the source and converts to float.
+// On a live source we wait until the data arrives; on a regular file a partial read at
+// the end is reported as 0 (EOF).
 template <typename T, bool ByteSwap = false>
 class InputReaderImpl : public InputReader {
 public:
-    InputReaderImpl(int fd, uint32_t block_size, bool is_fifo)
-    : InputReader(fd, block_size, is_fifo) {
+    InputReaderImpl(std::unique_ptr<ByteSource> source, uint32_t block_size)
+    : InputReader(std::move(source), block_size) {
         m_buffer = new T[block_size];
     }
 
@@ -120,41 +156,12 @@ public:
     int bitsPerSample() const override { return sizeof(T) * 8; }
 
     void seek(int64_t no_samples) override {
-        if (m_is_fifo)
-            return;
-        std::scoped_lock<std::mutex> lock(m_fd_mutex);
-        int64_t bytes_to_seek = no_samples * (int64_t)sizeof(*m_buffer);
-        // Clamp at the start of the file: without it a backward seek that would
-        // land before the start fails outright and the position doesn't move
-        int64_t current = seekFile(m_fd, 0, SEEK_CUR);
-        seekFile(m_fd, std::max<int64_t>(0, current + bytes_to_seek), SEEK_SET);
+        seekBytes(no_samples * (int64_t)sizeof(*m_buffer));
     }
 
     int readFloats(float *f) override {
-        size_t total_bytes = sizeof(*m_buffer) * m_block_size;
-        size_t filled_bytes = 0;
-        while (filled_bytes < total_bytes) {
-            ssize_t read_count;
-            {
-                std::scoped_lock<std::mutex> lock(m_fd_mutex);
-                read_count = read(m_fd, (uint8_t *)m_buffer + filled_bytes, total_bytes - filled_bytes);
-            }
-            if (read_count == -1) {
-                if (errno == EAGAIN) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    continue;
-                }
-                throw std::runtime_error(std::format("Error reading from file: {}", strerror(errno)));
-            }
-            if (read_count == 0) {
-                if (m_is_fifo) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    continue;
-                }
-                return 0; // EOF -- signal partial reads as EOF as the original implementation did
-            }
-            filled_bytes += (size_t)read_count;
-        }
+        if (!readFully((uint8_t *)m_buffer, sizeof(*m_buffer) * m_block_size))
+            return 0;
 
         float dc = dcOffset();
         double sum = 0;

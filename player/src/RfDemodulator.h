@@ -64,9 +64,9 @@ public:
     }
 
     bool initialize(int number_of_block_buffers) {
-        m_input_reader = makeInputReader(m_filename, m_input_format, m_input_block_size);
+        m_input_reader = makeInputReader(m_filename, m_input_format, m_input_block_size, &m_log);
         m_input_reader->setDcBlocking(true); // RF carries no legitimate DC
-        m_input_is_fifo = m_input_reader->is_fifo();
+        m_input_is_fifo = m_input_reader->isLive();
         m_input_reader->initialize();
 
         for (int i = 0; i < number_of_block_buffers; i++)

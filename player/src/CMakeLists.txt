@@ -128,18 +128,27 @@ if(BUILD_AC3RF_DECODE)
         CliOptions.h
         Version.h
         input/InputReader.h
+        input/ByteSource.cpp input/ByteSource.h
+        input/HttpByteSource.cpp input/HttpByteSource.h
+        input/EthadcByteSource.cpp input/EthadcByteSource.h
         input/InputReaderFactory.cpp input/InputReaderFactory.h
         input/LdsInputReader.cpp input/LdsInputReader.h
         input/LdfInputReader.cpp input/LdfInputReader.h
         input/PrefetchingInputReader.cpp input/PrefetchingInputReader.h
     )
 
-    target_include_directories(ac3rf-efm-decode PRIVATE ${FLAC_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+    target_include_directories(ac3rf-efm-decode PRIVATE ${FLAC_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/httplib
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ethadc)
     target_link_options(ac3rf-efm-decode PRIVATE "-L/usr/local/lib")
     target_link_libraries(ac3rf-efm-decode
         PRIVATE ac3rf
         PRIVATE ${FLAC_LINK_LIBRARIES}
     )
+    if(WIN32)
+        # cpp-httplib (the http:// input) uses Winsock
+        target_link_libraries(ac3rf-efm-decode PRIVATE ws2_32)
+    endif()
 endif()
 
 # ============================================================================
@@ -173,6 +182,9 @@ if(BUILD_MUSE)
         CliOptions.h
         AudioDefs.h
         input/InputReader.h
+        input/ByteSource.cpp input/ByteSource.h
+        input/HttpByteSource.cpp input/HttpByteSource.h
+        input/EthadcByteSource.cpp input/EthadcByteSource.h
         input/InputReaderFactory.cpp input/InputReaderFactory.h
         input/LdsInputReader.cpp input/LdsInputReader.h
         input/LdfInputReader.cpp input/LdfInputReader.h
@@ -254,7 +266,13 @@ if(BUILD_MUSE)
         ${FLAC_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/stb
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/miniaudio
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/httplib
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ethadc
     )
+    if(WIN32)
+        # cpp-httplib (the http:// input) uses Winsock
+        target_link_libraries(museld PRIVATE ws2_32)
+    endif()
     if(HAVE_LIBAV)
         target_include_directories(museld PRIVATE ${LIBAV_INCLUDE_DIR})
     endif()
