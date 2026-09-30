@@ -149,14 +149,22 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
 {
     m_c1.setGateRank(c1_gate_rank);
     m_frame_reliability.fill(0);
+    // The delay lines start out holding erased symbols: until they are primed
+    // (about 110 frames) the output is undefined and must be flagged, not
+    // emitted as the zeros it would otherwise contain
     for (int i = 0; i < m_initial_delay_lines.size(); i++) {
         m_initial_delay_lines[i] = new ByteWithErasureFlag[c_initial_delays[i].first + 1];
+        std::fill_n(m_initial_delay_lines[i], c_initial_delays[i].first + 1, ByteWithErasureFlag(0, true));
         m_initial_reliability_lines[i] = new float[c_initial_delays[i].first + 1]();
     }
-    for (int i = 0; i < m_c1_to_c2_delay_lines.size(); i++)
+    for (int i = 0; i < m_c1_to_c2_delay_lines.size(); i++) {
         m_c1_to_c2_delay_lines[i] = new ByteWithErasureFlag[c_c1_to_c2_delays[i] + 1];
-    for (int i = 0; i < m_output_delay_lines.size(); i++)
+        std::fill_n(m_c1_to_c2_delay_lines[i], c_c1_to_c2_delays[i] + 1, ByteWithErasureFlag(0, true));
+    }
+    for (int i = 0; i < m_output_delay_lines.size(); i++) {
         m_output_delay_lines[i] = new ByteWithErasureFlag[c_output_delays[i] + 1];
+        std::fill_n(m_output_delay_lines[i], c_output_delays[i] + 1, ByteWithErasureFlag(0, true));
+    }
 
     if (circ_debug_filename_opt.has_value()) {
         m_circ_debug_file = fopen(circ_debug_filename_opt.value().c_str(), "w");
@@ -548,17 +556,21 @@ void EfmDecoder::handleFrame(std::vector<TwoChannelSampleWithErasureFlags> &outp
             m_total_erasures_out_last_second++;
     }
 
+    if (!m_startup_done && m_locked && m_efm_frames_since_lock >= c_startup_frames)
+        m_startup_done = true;
+    const bool startup = !m_startup_done;
+
     for (int i = 0; i < 6; i++) {
         TwoChannelSampleWithErasureFlags sample{};
 
         auto [lh, ll] = c_left_output_map[i];
-        bool lErased = out[lh].isErased() || out[ll].isErased();
+        bool lErased = out[lh].isErased() || out[ll].isErased() || startup;
 
         sample.samples[0] = (int16_t) ((out[lh].byteValue() << 8) | out[ll].byteValue());
         sample.erased[0] = lErased;
 
         auto [rh, rl] = c_right_output_map[i];
-        bool rErased = out[rh].isErased() || out[rl].isErased();
+        bool rErased = out[rh].isErased() || out[rl].isErased() || startup;
 
         sample.samples[1] = (int16_t) ((out[rh].byteValue() << 8) | out[rl].byteValue());
         sample.erased[1] = rErased;

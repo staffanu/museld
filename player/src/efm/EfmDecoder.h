@@ -102,6 +102,12 @@ private:
     // frame later (bit position of the candidate, -1 when none)
     int64_t m_sync_candidate_bit;
     int64_t m_reframes_deferred = 0, m_reframes_confirmed = 0;
+    // Output is flagged erased until the first frame lock plus the delay-line
+    // priming time: before that the frames are unaligned and the pipeline
+    // holds nothing valid, and a frame that happens to pass C1 would come out
+    // as unflagged garbage
+    bool m_startup_done = false;
+    static constexpr int c_startup_frames = 110;
     int m_efm_frames_since_lock;
 
     // -3 -- 95; the symbol itself is in m_frame[0] for indices 0--95
