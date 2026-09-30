@@ -119,6 +119,18 @@ float16_t comb_luma_next(uint fl, uint nl, uint fc) {
 
 #include "ntsc/ntsc_comb_taps.h"
 
+// A neighbour frame's spatial luma: its composite less the band around fsc
+// of its own 3-line comb chroma estimate (see y_spatial in main)
+float16_t spatial_luma_prev(uint fl, uint nl, uint fc) {
+    return prev_frame[fl][fc] - (0.5hf * chroma_sample_prev(fl, nl, fc)
+                                 - 0.25hf * (chroma_sample_prev(fl, nl, fc - 2) + chroma_sample_prev(fl, nl, fc + 2)));
+}
+
+float16_t spatial_luma_next(uint fl, uint nl, uint fc) {
+    return next_frame[fl][fc] - (0.5hf * chroma_sample_next(fl, nl, fc)
+                                 - 0.25hf * (chroma_sample_next(fl, nl, fc - 2) + chroma_sample_next(fl, nl, fc + 2)));
+}
+
 // The absolute burst reference drifts across the line for the same reason
 // the pair rotations do, so interpolate it per column between this line's
 // burst and the next line's (structural 180 removed).  The magnitudes carry
@@ -314,12 +326,16 @@ void main() {
         float16_t f0 = input_frame[frame_line][frame_col];
         float16_t y_spatial = f0 - (0.5hf * cs_arr[9] - 0.25hf * (cs_arr[7] + cs_arr[11]));
 
-        // Temporal luma noise averaging: each neighbour frame's own 3-line
-        // comb luma is an independent estimate of the same still luma, so
-        // the motion-gated (0.25, 0.5, 0.25) frame average carries ~4 dB
-        // less noise where both neighbours are still (~2.5 dB with one),
-        // and the vertical chroma residue -- hanging dots -- alternates
-        // sign with the frame-to-frame subcarrier inversion and cancels.
+        // Temporal luma noise averaging: each neighbour frame's own spatial
+        // luma is an independent estimate of the same still luma, so the
+        // motion-gated (0.25, 0.5, 0.25) frame average carries ~4 dB less
+        // noise where both neighbours are still (~2.5 dB with one), and
+        // the vertical chroma residue -- hanging dots -- alternates sign
+        // with the frame-to-frame subcarrier inversion and cancels.  The
+        // frames' spatial lumas are the band-limited ones, as above: built
+        // from the plain comb lumas, this average blurred every still
+        // horizontal edge too faint to raise w_t (whose floor scales with
+        // the noise), at 2-3 times the error for 1.5 dB less noise.
         // Subtracting the temporal chroma estimate instead would not help:
         // f0 - ct trades the comb's vertical averaging for an identical
         // temporal one, same weights, same variance (measured: 0.08 dB).
@@ -333,14 +349,12 @@ void main() {
                            ? 0.hf : 1.hf - past_motion[mask_row][col];
         float16_t wf = next_dropout[frame_line][frame_col] != 0
                            ? 0.hf : 1.hf - future_motion[mask_row][col];
-        float16_t y_avg = (0.5hf * Y
-                           + 0.25hf * (wp * comb_luma_prev(frame_line, next_line, frame_col)
-                                       + wf * comb_luma_next(frame_line, next_line, frame_col)))
+        float16_t y_avg = (0.5hf * y_spatial
+                           + 0.25hf * (wp * spatial_luma_prev(frame_line, next_line, frame_col)
+                                       + wf * spatial_luma_next(frame_line, next_line, frame_col)))
                           / (0.5hf + 0.25hf * (wp + wf));
         float16_t ct_band = 0.5hf * ct_arr[9] - 0.25hf * (ct_arr[7] + ct_arr[11]);
-        // With no still neighbour the average is the lone comb luma of this
-        // frame: take the spatial luma instead
-        Y = mix(mix(y_spatial, y_avg, max(wp, wf)), f0 - ct_band, w_t);
+        Y = mix(y_avg, f0 - ct_band, w_t);
     } else if (!rescued && !own_flagged) {
         // 3D comb off: spatial separation throughout, as the moving parts
         // get it above
