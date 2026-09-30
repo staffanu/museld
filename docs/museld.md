@@ -265,8 +265,8 @@ and near 0 on an NTSC-J one (a peak, unlike a percentile, is not shifted by nois
 that peak has been is held for minutes — every fade, dark shot or letterbox matte refreshes it,
 while a bright scene cannot pull it up — and a held value below 4 IRE selects NTSC-J, staying
 there until it decays back above 5; a signal loss (a disc change on live input) starts the
-measurement over. An OSD message announces each automatic change, and the V overlay shows the
-setting in effect and the measured black, e.g. `Black: auto J 0.0 IRE, disc 2.3`. `--black-level`
+measurement over. The V overlay shows the setting in effect and the measured black, e.g.
+`Black: auto J 0.0 IRE, disc 2.3`, and `--log D3` records each automatic choice. `--black-level`
 / the J key force either standard for discs the measurement gets wrong (a US disc whose letterbox
 mattes are mastered below black, say). The measured levels are logged with the noise figures
 (`--log D3`).

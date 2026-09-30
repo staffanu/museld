@@ -530,8 +530,6 @@ static void runPlayer(Logger &log,
             state.stream_seconds = state.field_count * seconds_per_iteration
                                    + state.stream_seek_offset_seconds;
             state.redo_last_field = false;
-            if (!state.last_decoded.black_level_event.empty())
-                state.osd_text = state.last_decoded.black_level_event;
 
             // Once a minute of stream time, log the decoded field count against the
             // disc's own time code.  The offset is what to shift .srt files made from
