@@ -28,7 +28,7 @@ add_executable(museld-tests
 )
 
 target_include_directories(museld-tests PRIVATE ../src ${FLAC_INCLUDE_DIRS}
-    ../third_party/httplib ../third_party/ethadc)
+    ../third_party/httplib ../third_party)
 
 target_link_options(museld-tests PRIVATE "-L/usr/local/lib")
 target_link_libraries(museld-tests

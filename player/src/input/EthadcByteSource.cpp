@@ -14,11 +14,11 @@
 
 #ifndef _WIN32
 
-#include "ByteRing.h"
-#include "Net.h"
-#include "Protocol.h"
-#include "StreamReassembler.h"
-#include "StreamReceiver.h"
+#include "ethadc/ByteRing.h"
+#include "ethadc/Net.h"
+#include "ethadc/Protocol.h"
+#include "ethadc/StreamReassembler.h"
+#include "ethadc/StreamReceiver.h"
 
 namespace {
 

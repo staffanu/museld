@@ -139,7 +139,7 @@ if(BUILD_AC3RF_DECODE)
 
     target_include_directories(ac3rf-efm-decode PRIVATE ${FLAC_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/httplib
-        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ethadc)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party)
     target_link_options(ac3rf-efm-decode PRIVATE "-L/usr/local/lib")
     target_link_libraries(ac3rf-efm-decode
         PRIVATE ac3rf
@@ -267,7 +267,7 @@ if(BUILD_MUSE)
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/stb
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/miniaudio
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/httplib
-        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ethadc
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party
     )
     if(WIN32)
         # cpp-httplib (the http:// input) uses Winsock
