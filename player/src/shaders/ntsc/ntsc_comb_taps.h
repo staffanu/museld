@@ -10,7 +10,19 @@
 // apart in subcarrier phase.  It beat 1D notch/bandpass separation clearly in
 // an A/B comparison (both halves of the picture, three captures): both its Y
 // and C paths carry about 4 dB less noise, at the price of some vertical
-// resolution.
+// resolution.  For the luma that price is only paid in the chroma band: the
+// field decoder subtracts the band around fsc of this estimate from the
+// composite instead of using the comb's own luma sum.
+//
+// An adaptive variant was tried and measured against the temporal separation
+// on still content (2026-09): choosing between the line above, the line
+// below and a horizontal bandpass by how well the neighbours two lines out
+// (same subcarrier phase) match this one.  It did not help.  Real pictures
+// change gradually from line to line, where the symmetric comb's error is
+// the second vertical difference and a one-sided comb's the first; and at
+// the noise levels of this medium a per-pixel choice is wrong often enough
+// to cost more than the true steps gain.  The chroma error of the fixed comb
+// was already within the noise of the temporal reference.
 float16_t chroma_sample(uint frame_line, uint next_line, uint fcol) {
     return -0.25hf * input_frame[frame_line - 1][fcol]
            + 0.5hf * input_frame[frame_line][fcol]

@@ -301,6 +301,19 @@ void main() {
         for (int n = 0; n < 19; n++)
             c_src[n] = mix(cs_arr[n], ct_arr[n], w_t);
 
+        // Spatial luma, for where the picture moves: the composite less
+        // the chroma-band part of the 3-line comb's chroma estimate, so
+        // that only the band around fsc is combed.  The plain comb luma
+        // (0.25, 0.5, 0.25 over the lines) averages vertically at every
+        // horizontal frequency, which costs a horizontal edge or a thin
+        // stroke most of its sharpness for no separation benefit: there is
+        // no chroma to remove outside that band.  Measured on still
+        // content, where the temporal separation gives the true luma to
+        // compare against, its error at vertical detail is 3-5 times that
+        // of the band-limited form, for 1-2 dB less noise on flat areas.
+        float16_t f0 = input_frame[frame_line][frame_col];
+        float16_t y_spatial = f0 - (0.5hf * cs_arr[9] - 0.25hf * (cs_arr[7] + cs_arr[11]));
+
         // Temporal luma noise averaging: each neighbour frame's own 3-line
         // comb luma is an independent estimate of the same still luma, so
         // the motion-gated (0.25, 0.5, 0.25) frame average carries ~4 dB
@@ -325,9 +338,18 @@ void main() {
                                        + wf * comb_luma_next(frame_line, next_line, frame_col)))
                           / (0.5hf + 0.25hf * (wp + wf));
         float16_t ct_band = 0.5hf * ct_arr[9] - 0.25hf * (ct_arr[7] + ct_arr[11]);
-        float16_t f0 = input_frame[frame_line][frame_col];
-        Y = mix(y_avg, f0 - ct_band, w_t);
+        // With no still neighbour the average is the lone comb luma of this
+        // frame: take the spatial luma instead
+        Y = mix(mix(y_spatial, y_avg, max(wp, wf)), f0 - ct_band, w_t);
+    } else if (!rescued && !own_flagged) {
+        // 3D comb off: spatial separation throughout, as the moving parts
+        // get it above
+        for (int n = 0; n < 19; n++)
+            c_src[n] = chroma_taps[row][col + n].x;
+        Y = input_frame[frame_line][frame_col] - (0.5hf * c_src[9] - 0.25hf * (c_src[7] + c_src[11]));
     } else if (!rescued) {
+        // A flagged pixel with no usable donor: the upstream concealment
+        // stands, through the plain comb
         for (int n = 0; n < 19; n++)
             c_src[n] = chroma_taps[row][col + n].x;
     } else {

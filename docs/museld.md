@@ -226,6 +226,9 @@ revolution for about 18 frames.
 one frame behind the input (audio is delayed to match). Per-pixel directional motion masks select,
 for each side, between temporal Y/C separation against the still neighbouring frames (a 3D comb:
 full vertical resolution, no dot crawl) and the 3-line spatial comb where the picture moves. The
+spatial comb only acts on the band around the subcarrier: the luma is the composite less that
+band of the comb's chroma estimate, so horizontal edges and thin strokes keep their vertical
+sharpness, and only fine horizontal detail is averaged over the lines. The
 same masks drive motion-adaptive de-interlacing: still parts weave the previous field, moving
 parts are interpolated from the current field (keys 1/2/3 select adaptive/bob/weave).
 
