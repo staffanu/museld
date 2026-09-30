@@ -58,7 +58,9 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
     ac3rf-efm-decode.cpp
   tests/           — Catch2 unit tests (ReedSolomonTest, BchDecoderTest, SrtParserTest)
   third_party/     — Vendored single-header libs (stb_truetype.h, miniaudio.h, httplib.h), the ethadc
-                     stream receiver headers (ethadc/, copied verbatim by its update.sh from ../ethadc)
+                     stream receiver headers (ethadc/, copied verbatim by its update.sh from ../ethadc;
+                     included as "ethadc/X.h" -- never put a third_party subdirectory holding
+                     non-header files on the include path, macOS/Windows ignore case)
                      and the bundled subtitle font (Noto Sans JP, SIL OFL)
   cmake/           — CMake helpers (ac3rfConfig.cmake.in, modules/FindLIBAV.cmake, etc.)
 fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device
