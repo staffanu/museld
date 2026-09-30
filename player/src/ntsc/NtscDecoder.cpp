@@ -45,6 +45,7 @@ NtscDecoder::NtscDecoder(
   m_black_peak_v(-1),
   m_black_lowest_v(-1),
   m_black_auto_ire(7.5f),
+  m_black_decided(false),
   m_black_ire(7.5f),
   m_black_peak_min_v(-1),
   m_prev_burst_phase(std::numeric_limits<double>::quiet_NaN()),
@@ -197,6 +198,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
             m_luma_hist.fill(0);
             m_black_peak_v = m_black_lowest_v = m_black_peak_min_v = -1;
             m_black_auto_ire = 7.5f;
+            m_black_decided = false;
             m_log.info(eDecoder, "black level: signal re-acquired, measuring the disc's black afresh");
         }
 
@@ -276,8 +278,11 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // The automatic choice reads the held black with hysteresis: below
         // 4 IRE the disc is NTSC-J, and it stays so until the held value
         // decays back above 5 -- which takes minutes without a single
-        // black in the picture, so it does not flap.  M is the default
-        // while the measurement is still young.
+        // black in the picture, so it does not flap.  M is only the
+        // placeholder until the first measurement, which comes with the
+        // first picture: that first verdict on a disc is what the disc is,
+        // not a change, and is not announced on screen -- only a later
+        // change of mind is.
         std::string black_event;
         if (m_black_peak_min_v >= 0) {
             const double held_ire = m_black_peak_min_v * m_level_scale * 100.0;
@@ -286,9 +291,10 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                 m_black_auto_ire = choice;
                 m_log.info(eDecoder, std::format("black level: the disc's black measures {:.1f} IRE, automatic choice {}",
                                                  held_ire, choice > 3.75f ? "NTSC-M (7.5 IRE)" : "NTSC-J (0 IRE)"));
-                if (controls.black_level == BlackLevelMode::eAuto)
+                if (controls.black_level == BlackLevelMode::eAuto && m_black_decided)
                     black_event = choice > 3.75f ? "BLACK AUTO: NTSC-M" : "BLACK AUTO: NTSC-J";
             }
+            m_black_decided = true;
         }
         m_black_ire = controls.black_level == BlackLevelMode::eM ? 7.5f
                     : controls.black_level == BlackLevelMode::eJ ? 0.0f
