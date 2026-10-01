@@ -29,7 +29,10 @@ class Logger;
 // NTSC analog audio carrier at 2.301 MHz = 146.3 cycles per line, which MUSE
 // discs do not have.
 struct InputProbeResult {
-    enum class Type { eNtscRf, eMuseRf, eMuse16Baseband, eUnknown };
+    // ePalRf is never detected yet (the line rate is 0.7 % from NTSC's and the
+    // carrier band overlaps, see docs/pal-playback-plan.md); it exists as a
+    // caller's hypothesis for estimateSampleFrequency
+    enum class Type { eNtscRf, ePalRf, eMuseRf, eMuse16Baseband, eUnknown };
 
     std::optional<InputFormat> format; // detected, or the caller's echoed back
     Type type = Type::eUnknown;

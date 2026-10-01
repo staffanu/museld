@@ -48,8 +48,8 @@ layout(set = 0, binding = 4) buffer readonly future_motion_buffer {
 };
 
 float motion_at(int r, int c) {
-    int field = r >= 263 ? 1 : 0;
-    int fr = r - 22 - 263 * field;
+    int field = r >= NTSC_FIELD2_OFFSET ? 1 : 0;
+    int fr = r - NTSC_FIELD_START_Y - NTSC_FIELD2_OFFSET * field;
     if (fr < 0 || fr >= NTSC_FIELD_HEIGHT)
         return 1.0; // outside the picture rows: keep the old behavior
     int orow = fr * 2 + field;

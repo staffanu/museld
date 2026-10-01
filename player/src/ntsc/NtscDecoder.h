@@ -35,7 +35,8 @@ public:
             musevk::CommandPool &command_pool, std::string const &executable_dir,
             bool decode_video, bool decode_all_fields, bool decode_audio,
             float tint_degrees, float saturation,
-            musevk::TimestampQueryPool *timestamp_query_pool);
+            musevk::TimestampQueryPool *timestamp_query_pool,
+            const VideoStandard &video_standard);
     ~NtscDecoder();
     NtscDecoder(const NtscDecoder&) = delete;
     void operator=(const NtscDecoder&) = delete;
@@ -60,6 +61,7 @@ private:
     Logger &m_log;
     FrameReader<NtscInputBlock> &m_reader;
     musevk::VulkanManager &m_manager;
+    const VideoStandard &m_standard;
     NtscShaders m_shaders;
     const bool m_decode_video;
     const bool m_decode_all_fields;

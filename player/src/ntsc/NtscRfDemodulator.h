@@ -25,6 +25,7 @@
 #include "ac3/Ac3RfDemodulator.h"
 #include "efm/EfmDemodulator.h"
 #include "analog/AnalogAudioDemodulator.h"
+#include "VideoStandard.h"
 
 namespace NtscRfDemodulatorConstants {
     static constexpr int c_sample_block_size = 512 * 1024;
@@ -66,7 +67,7 @@ class NtscRfDemodulator : public RfDemodulator<NtscDemodulatedBlock> {
 public:
     NtscRfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
                       musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
-                      AudioTrack audio_track, int efm_adaptive_filter_size);
+                      AudioTrack audio_track, int efm_adaptive_filter_size, const VideoStandard &video_standard);
     NtscRfDemodulator(const NtscRfDemodulator&) = delete;
     void operator=(const NtscRfDemodulator&) = delete;
 
@@ -90,15 +91,15 @@ public:
 
     // enough buffers for two frames
     [[nodiscard]] int numberOfBlockBuffers() const {
-        return std::max(2, (int)(2 * m_sample_frequency / 30 / NtscRfDemodulatorConstants::c_sample_block_size));
+        return std::max(2, (int)(2 * m_sample_frequency / m_video_standard.framesPerSecond()
+                                 / NtscRfDemodulatorConstants::c_sample_block_size));
     }
 
 protected:
     void demodulate() override;
 
 private:
-    static constexpr float c_center_frequency = 8.5e6f;
-    static constexpr float c_frequency_deviation = 0.85e6f;
+    const VideoStandard &m_video_standard;
     EfmDemodulator m_efm_demodulator;
     AnalogAudioDemodulator m_analog_demodulator;
     Ac3RfDemodulator m_ac3_demodulator;

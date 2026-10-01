@@ -42,11 +42,21 @@ layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
 // truncated to 24 taps and renormalized to unity DC gain.  The emphasis was
 // applied to the whole composite signal, so no area gating -- and the filter
 // must run before the clamp below, while emphasis overshoots are still intact.
+// The same time constants apply to PAL discs; its taps are the same filter
+// on the 17.734375 MHz PAL grid.
+#ifdef PAL_GEOMETRY
+const float deemphasis[24] = float[](
+    0.42985168, 0.09394670, 0.07873266, 0.06598243, 0.05529702, 0.04634204,
+    0.03883725, 0.03254782, 0.02727692, 0.02285960, 0.01915764, 0.01605519,
+    0.01345516, 0.01127619, 0.00945008, 0.00791971, 0.00663716, 0.00556232,
+    0.00466154, 0.00390663, 0.00327398, 0.00274378, 0.00229944, 0.00192706);
+#else
 const float deemphasis[24] = float[](
     0.43809204, 0.11129277, 0.08939259, 0.07180192, 0.05767274, 0.04632390,
     0.03720828, 0.02988644, 0.02400539, 0.01928161, 0.01548737, 0.01243977,
     0.00999187, 0.00802567, 0.00644638, 0.00517786, 0.00415896, 0.00334056,
     0.00268321, 0.00215520, 0.00173110, 0.00139046, 0.00111684, 0.00089707);
+#endif
 
 const int TAPS = 24;
 const int PER_INVOCATION = 4;

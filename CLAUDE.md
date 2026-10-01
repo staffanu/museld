@@ -16,6 +16,14 @@ Supported formats:
 - **AC3RF**: QPSK-demodulated AC3 surround audio
 - **Analog**: NTSC analog FM stereo audio (2.3011/2.8125 MHz carriers, CX expansion, squelch)
 
+The SD pipeline (`ntsc/`) is parameterized by a `VideoStandard` (`ntsc/VideoStandard.h`:
+geometry of the line-locked frame buffer, frame rate, RF carrier, VBI lines, noise windows;
+`VideoStandard::ntsc()` and `::pal()`), and the `shaders/ntsc/*.comp` sources are compiled
+twice, as `ntsc_*.spv` and as `pal_*.spv` with `-DPAL_GEOMETRY` (the `NTSC_*` macros in
+`shaders/muse/muse.h` take the PAL values there).  `--input-type pal-rf` is work in progress:
+monochrome picture, VBI, EFM audio and `--write` work; there is no PAL colour decoder and the
+probe does not detect PAL.  `docs/pal-playback-plan.md` has the plan and the status.
+
 NTSC playback in museld selects between the analog, EFM and AC3-RF tracks (`AudioTrack`,
 A key / `--efm` / `--ac3`); a DTS bitstream on the EFM track is auto-detected. AC3 and DTS
 are decoded by `CompressedAudioDecoder` (libavcodec + libswresample), which is gated on
@@ -189,6 +197,10 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   measurements. Use together with a demod dump **from the same run**.
 - `MUSELD_DUMP_VBI_FAIL=<path>` — each VBI code line that failed to slice, as 910
   floats (the 4 fsc frame-buffer row).
+- `MUSELD_DUMP_FRAME=<path>` — one whole frame buffer (the de-emphasized, rescaled
+  composite, `total_lines × samples_per_line` float32, blanking 0, white 1) and the
+  reader's raw line-locked composite of the same frame as `<path>.raw`; the first frame
+  after `MUSELD_DUMP_FRAME_NO` (default 30).
 
 **Offline checks** (`tools/`, numpy + scipy + PIL): `ntsc-sync-delta.py <fs> <demod
 dump> <timebase prefix> <out>` plots detected minus reconstructed sync per line —

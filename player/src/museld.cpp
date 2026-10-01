@@ -7,6 +7,7 @@
 #include <format>
 #include <functional>
 #include <chrono>
+#include <thread>
 #include <utility>
 
 #ifdef _WIN32
@@ -50,7 +51,8 @@
 #include "muse/PhaseCorrect16MHzFrameReader.h"
 #include "muse/MuseDecoder.h"
 #include "muse/MuseConstants.h"
-#include "ntsc/NtscConstants.h"
+#include <numeric>
+#include "ntsc/VideoStandard.h"
 #include "ntsc/NtscFrameReader.h"
 #include "ntsc/NtscDecoder.h"
 #include "VideoWriterOptions.h"
@@ -358,6 +360,7 @@ static void runPlayer(Logger &log,
                       double export_frame_after_seconds,
                       double write_duration_seconds,
                       double seconds_per_iteration,
+                      bool pace_by_clock,
                       double initial_seek_seconds) {
     vk::Device &device = manager.getDevice();
 
@@ -507,6 +510,15 @@ static void runPlayer(Logger &log,
 
         auto t0 = chrono::high_resolution_clock::now();
         int disc_code_logged_minute = 0; // minute 0 is not logged: the decoder is still locking
+
+        // Real-time pacing where the swap chain's vsync cannot provide it:
+        // the loop presents one field per refresh, which is real time for
+        // 60 Hz material on a 60 Hz display but 20 % fast for PAL's 50
+        // fields/s.  Each decoded field then waits for its stream time
+        // against this wall clock, re-based whenever a loop iteration does
+        // not advance the stream (a pause, an input timeout).
+        auto pace_origin = chrono::steady_clock::now();
+        int64_t paced_fields = 0;
 
         auto make_controls = [&](bool redo) {
             return Decoder::DecodeControls{
@@ -736,6 +748,25 @@ static void runPlayer(Logger &log,
 
             manager.present(swap_chain_image);
 
+            if (pace_by_clock) {
+                auto stream_offset = [&](int64_t fields) {
+                    return chrono::duration_cast<chrono::steady_clock::duration>(
+                            chrono::duration<double>(fields * seconds_per_iteration));
+                };
+                const auto now = chrono::steady_clock::now();
+                if (!state.paused && state.last_decoded.decoded) {
+                    paced_fields++;
+                    const auto due = pace_origin + stream_offset(paced_fields);
+                    if (due > now)
+                        std::this_thread::sleep_until(due);
+                    else if (now - due > stream_offset(2))
+                        pace_origin = now - stream_offset(paced_fields); // fell behind (the initial lock,
+                                                                         // a stall): resume from here, no catch-up burst
+                } else {
+                    pace_origin = now - stream_offset(paced_fields);
+                }
+            }
+
             if (state.paused_countdown != 0 && --state.paused_countdown == 0) {
                 state.paused = true;
                 state.osd_text = "PAUSE";
@@ -815,8 +846,10 @@ static void runPlayer(Logger &log,
     device.destroy(render_finished_semaphore);
 }
 
+// video_standard: the composite standard of an SD (NtscInputBlock) input, unused for MUSE
 template<class InputBlock>
 void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, FrameReader<InputBlock> &reader,
+                  const VideoStandard *video_standard,
                   bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool full_image, double overscan,
                   bool no_sync,
                   bool start_paused, Decoder::FieldInterpolationMode field_interpolation_mode,
@@ -849,10 +882,12 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         picture_format = PictureFormat::muse(initial_w, initial_h);
         title = "MUSE";
     } else {
-        initial_w = NTSC_Y_BUF_WIDTH;
-        initial_h = NTSC_FIELD_HEIGHT * 2;
-        picture_format = PictureFormat::ntsc(initial_w, initial_h, NTSC_FIELD_START_X);
-        title = "NTSC";
+        initial_w = video_standard->y_buf_width;
+        initial_h = video_standard->field_lines * 2;
+        picture_format = video_standard->ntsc_chroma
+                ? PictureFormat::ntsc(initial_w, initial_h, video_standard->field_start_x)
+                : PictureFormat::pal(initial_w, initial_h, video_standard->field_start_x);
+        title = video_standard->name;
     }
     int window_w, window_h;
     defaultWindowSize(picture_format, full_image, window_w, window_h);
@@ -900,8 +935,12 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
 
     {
         std::vector<std::unique_ptr<InputBlock>> input_vulkan_buffers{};
-        for (int i = 0; i < INPUT_BUFFER_COUNT; i++)
-            input_vulkan_buffers.push_back(InputBlockFactory<InputBlock>::makeBlock(manager));
+        for (int i = 0; i < INPUT_BUFFER_COUNT; i++) {
+            if constexpr (std::is_same<InputBlock, NtscInputBlock>::value)
+                input_vulkan_buffers.push_back(InputBlockFactory<InputBlock>::makeBlock(manager, *video_standard));
+            else
+                input_vulkan_buffers.push_back(InputBlockFactory<InputBlock>::makeBlock(manager));
+        }
         if (!reader.initialize(input_vulkan_buffers))
             throw runtime_error("FrameReader initialization failed");
     }
@@ -917,13 +956,17 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             dar_num = 16; dar_den = 9;
             fps_num = decode_all_fields ? 60 : 30; fps_den = 1;
         } else {
-            color_standard = VideoColorStandard::eSmpte170m;
-            // The file holds the whole 764x480 image, blanking margins
-            // included, whose pixels are 6/7 as wide as high: 191:140, a
-            // little wider than the 4:3 of the picture inside it
-            dar_num = 191; dar_den = 140;
-            static_assert(NTSC_Y_BUF_WIDTH * 6 * 140 == 191 * 7 * NTSC_FIELD_HEIGHT * 2);
-            fps_num = decode_all_fields ? 60000 : 30000; fps_den = 1001;
+            // The file holds the whole decoded image, blanking margins
+            // included, so its display aspect is the image size times the
+            // pixel shape: for NTSC's 764x480 image of 6/7 pixels that is
+            // 191:140, a little wider than the 4:3 of the picture inside it
+            color_standard = video_standard->ntsc_chroma ? VideoColorStandard::eSmpte170m
+                                                         : VideoColorStandard::eBt470bg;
+            const int par_num = video_standard->ntsc_chroma ? 6 : 944;
+            const int par_den = video_standard->ntsc_chroma ? 7 : 1135;
+            const int g = std::gcd(initial_w * par_num, initial_h * par_den);
+            dar_num = initial_w * par_num / g; dar_den = initial_h * par_den / g;
+            fps_num = video_standard->fps_num * (decode_all_fields ? 2 : 1); fps_den = video_standard->fps_den;
         }
         // With the AC3 track selected, the file gets the original AC3
         // bitstream (all 5.1 channels, no transcode) instead of PCM
@@ -956,7 +999,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 is_muse ? "MUSE AUDIO" : "ANALOG AUDIO",
                 CompressedAudioDecoder::available() ? "AC3 AUDIO" : "AC3 AUDIO (NO FFMPEG)",
                 !is_muse, // has_analog_audio
-                !is_muse, // has_ac3_audio
+                !is_muse && video_standard->ntsc_chroma, // has_ac3_audio: AC3-RF exists on NTSC discs only
         };
         if (reader.efmAdaptiveFilterSize() >= 0) { // RF input: the reader runs an EFM demodulator
             reader_controls.efmFilterSize = [&reader]() { return reader.efmAdaptiveFilterSize(); };
@@ -987,14 +1030,24 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                                                     manager, command_pool, executable_dir,
                                                     decode_video, decode_all_fields, decode_audio,
                                                     tint_degrees, saturation,
-                                                    timestamp_query_pool.get());
+                                                    timestamp_query_pool.get(), *video_standard);
         }
 
         if (!decoder->initialize())
             throw runtime_error("Decoder initialization failed");
 
-        const double fields_per_second = std::is_same<InputBlock, MuseInputBlock>::value ? 60.0 : 60000.0 / 1001.0;
+        const double fields_per_second = std::is_same<InputBlock, MuseInputBlock>::value
+                ? 60.0 : 2 * video_standard->framesPerSecond();
         const double seconds_per_iteration = (decode_all_fields ? 1 : 2) / fields_per_second;
+        // The display's refresh paces the loop at one field per refresh, which
+        // is real time only for ~60 Hz material on a ~60 Hz display; slower
+        // material (PAL) is paced by the clock instead
+        const GLFWvidmode *video_mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+        const double refresh_hz = video_mode != nullptr && video_mode->refreshRate > 0 ? video_mode->refreshRate : 60.0;
+        const bool pace_by_clock = !no_sync && fields_per_second < 0.97 * refresh_hz;
+        if (pace_by_clock)
+            log.info(eApplication, std::format("Pacing playback by the clock: {:.2f} fields/s on a {:.0f} Hz display",
+                                               fields_per_second, refresh_hz));
 
         runPlayer(log, manager, *decoder, reader_controls, window, full_screen, aspect_mode, picture_format,
                   full_image, overscan,
@@ -1005,7 +1058,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   vfw, audio_playback.get(), executable_dir,
                   subtitle_setup,
                   export_frame_filename, export_frame_after_seconds, write_duration_seconds, seconds_per_iteration,
-                  initial_seek_seconds);
+                  pace_by_clock, initial_seek_seconds);
     }
 
 #ifdef HAVE_LIBAV
@@ -1021,6 +1074,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
 enum InputType {
     eMuseRf,
     eNtscRf,
+    ePalRf,
     eMuse16MHz,
     eMuseOversampled,
 };
@@ -1084,7 +1138,8 @@ static void printProbeResult(const std::string &filename, const InputProbeResult
                             inputFormatName(*r.format)) << endl;
         return;
     }
-    const char *type = r.type == InputProbeResult::Type::eNtscRf ? "ntsc-rf" : "muse-rf";
+    const char *type = r.type == InputProbeResult::Type::eNtscRf ? "ntsc-rf"
+                     : r.type == InputProbeResult::Type::ePalRf ? "pal-rf" : "muse-rf";
     cout << std::format("  detected: {} at {:.4g} MHz{}", type, r.sample_frequency / 1e6,
                         r.sample_frequency_snapped ? "" : " (no common capture rate matched)") << endl;
     cout << std::format("  suggested: --input-format {} --input-type {} --sample-freq {:.4g}e6",
@@ -1168,13 +1223,15 @@ int main(int argc, char *argv[]) {
         input_format_option = inputFormatFromString(*(it++));
     });
     options.option("--input-type", "TYPE",
-                   "muse-rf or ntsc-rf for RF captures, muse-16 for phase correct 16.2 MHz "
+                   "muse-rf, ntsc-rf or pal-rf for RF captures, muse-16 for phase correct 16.2 MHz "
                    "MUSE baseband, muse-os for oversampled MUSE baseband, or auto (the "
-                   "default): detect RF type, sample rate and format from the file contents", [&] () -> void {
+                   "default): detect RF type, sample rate and format from the file contents "
+                   "(PAL is not detected yet: give pal-rf explicitly)", [&] () -> void {
         const auto &name = *(it++);
         if      (name == "auto")     input_type_option = nullopt;
         else if (name == "muse-rf")  input_type_option = eMuseRf;
         else if (name == "ntsc-rf")  input_type_option = eNtscRf;
+        else if (name == "pal-rf")   input_type_option = ePalRf;
         else if (name == "muse-16")  input_type_option = eMuse16MHz;
         else if (name == "muse-os")  input_type_option = eMuseOversampled;
         else throw std::runtime_error(std::format("Unknown input type {}", name));
@@ -1596,6 +1653,7 @@ int main(int argc, char *argv[]) {
                     bool type_detected = true;
                     switch (probe.type) {
                         case InputProbeResult::Type::eNtscRf:         detected_type = eNtscRf; break;
+                        case InputProbeResult::Type::ePalRf:          detected_type = ePalRf; break;
                         case InputProbeResult::Type::eMuseRf:         detected_type = eMuseRf; break;
                         case InputProbeResult::Type::eMuse16Baseband: detected_type = eMuse16MHz; break;
                         case InputProbeResult::Type::eUnknown:        type_detected = false; break;
@@ -1611,6 +1669,7 @@ int main(int argc, char *argv[]) {
                     } else if (type_detected && detected_type != file_input_type) {
                         cerr << std::format("Warning: {} looks like --input-type {}",
                                             *it, detected_type == eNtscRf ? "ntsc-rf" :
+                                                 detected_type == ePalRf ? "pal-rf" :
                                                  detected_type == eMuseRf ? "muse-rf" : "muse-16") << endl;
                     }
 
@@ -1620,6 +1679,7 @@ int main(int argc, char *argv[]) {
                         // rate even when the classification was ambiguous
                         auto hypothesis =
                                 file_input_type == eNtscRf    ? InputProbeResult::Type::eNtscRf :
+                                file_input_type == ePalRf     ? InputProbeResult::Type::ePalRf :
                                 file_input_type == eMuse16MHz ? InputProbeResult::Type::eMuse16Baseband :
                                                                 InputProbeResult::Type::eMuseRf;
                         file_sample_frequency = estimateSampleFrequency(probe, hypothesis);
@@ -1632,6 +1692,7 @@ int main(int argc, char *argv[]) {
                     cout << std::format("{}: {} {} at {:.4g}e6 Hz",
                                         *it, inputFormatName(resolved_format.value_or(eSint16)),
                                         file_input_type == eNtscRf ? "NTSC RF" :
+                                        file_input_type == ePalRf ? "PAL RF" :
                                         file_input_type == eMuseRf ? "MUSE RF" :
                                         file_input_type == eMuse16MHz ? "MUSE baseband" : "oversampled MUSE baseband",
                                         file_sample_frequency / 1e6) << endl;
@@ -1711,13 +1772,16 @@ int main(int argc, char *argv[]) {
                             initial_seek_seconds) << endl;
 
                 switch (file_input_type) {
-                    case eNtscRf: {
-                        subtitle_setup.ntsc_cc = true;
+                    case eNtscRf:
+                    case ePalRf: {
+                        const VideoStandard &standard = file_input_type == eNtscRf ? VideoStandard::ntsc()
+                                                                                    : VideoStandard::pal();
+                        subtitle_setup.ntsc_cc = standard.has_closed_captions;
                         auto reader = make_unique<NtscFrameReader>(
                                         log, executable_dir, manager, *it, input_format,
                                         file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
-                                        efm_adaptive_filter_size, muse_output_filename);
-                        process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
+                                        efm_adaptive_filter_size, muse_output_filename, standard);
+                        process_file<NtscInputBlock>(log, executable_dir, manager, *reader, &standard, decode_all_fields,
                                                      full_screen, aspect_mode, full_image, overscan, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                      audio_track,
                                                      benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
@@ -1729,7 +1793,7 @@ int main(int argc, char *argv[]) {
                     case eMuse16MHz: {
                         auto reader = make_unique<PhaseCorrect16MHzFrameReader>(
                                 log, *it, input_format, initial_seek_seconds, muse_output_filename);
-                        process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
+                        process_file<MuseInputBlock>(log, executable_dir, manager, *reader, nullptr, decode_all_fields,
                                      full_screen, aspect_mode, full_image, overscan, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                      audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
@@ -1743,7 +1807,7 @@ int main(int argc, char *argv[]) {
                                 log, executable_dir, manager, *it, input_format,
                                 file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
                                 audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
-                        process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
+                        process_file<MuseInputBlock>(log, executable_dir, manager, *reader, nullptr, decode_all_fields,
                                      full_screen, aspect_mode, full_image, overscan, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                      audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,

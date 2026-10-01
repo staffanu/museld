@@ -53,7 +53,7 @@ void main() {
     if (row >= NTSC_TOTAL_HEIGHT || col >= NTSC_TOTAL_WIDTH)
         return;
 
-    if (row % 263 < 21) {
+    if (row % NTSC_FIELD2_OFFSET < NTSC_FIELD_START_Y - 1) {
         dropout_out[row][col] = uint8_t(0);
         return;
     }

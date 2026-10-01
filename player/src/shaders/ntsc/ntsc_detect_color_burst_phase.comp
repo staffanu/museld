@@ -30,13 +30,13 @@ float16_t color_sine(uint col) {
 void main() {
     uint line = gl_GlobalInvocationID.x;
 
-    if (line < 21 || line > 263 + NTSC_FIELD_START_Y + NTSC_FIELD_HEIGHT)
+    if (line < NTSC_FIELD_START_Y - 1 || line > NTSC_FIELD2_OFFSET + NTSC_FIELD_START_Y + NTSC_FIELD_HEIGHT)
         return;
 
     float16_t b_re = 0.hf;
     float16_t b_im = 0.hf;
     for (uint i = 0; i < 32; i++) {
-        uint burst_col = 78 + i;
+        uint burst_col = NTSC_BURST_START + i;
         b_re += input_frame[line][burst_col] * color_cosine(burst_col);
         b_im += input_frame[line][burst_col] * color_sine(burst_col);
     }

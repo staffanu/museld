@@ -34,8 +34,14 @@
  */
 class AnalogAudioDemodulator {
 public:
+    // The carriers default to the NTSC pair; PAL discs put them at 683.59
+    // and 1066.41 kHz (382.8 kHz apart, still outside the channel-select
+    // filter's stop band).  The deviation is taken as the same 100 kHz --
+    // not verified on a PAL analog-audio capture yet.
     AnalogAudioDemodulator(Logger &log, double input_sample_frequency, int input_block_size,
-                           double output_sample_frequency, bool use_simd);
+                           double output_sample_frequency, bool use_simd,
+                           double left_carrier_frequency = c_left_carrier_frequency,
+                           double right_carrier_frequency = c_right_carrier_frequency);
     ~AnalogAudioDemodulator();
 
     AnalogAudioDemodulator(const AnalogAudioDemodulator &) = delete;

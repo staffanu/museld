@@ -77,7 +77,7 @@ void main() {
     if (processing_phase == 1) {
         // Even output rows hold the first field, odd rows the second; same
         // mapping as the single-field decode.
-        uint line = 22 + row / 2 + ((row & 1u) != 0u ? 263u : 0u);
+        uint line = NTSC_FIELD_START_Y + row / 2 + ((row & 1u) != 0u ? uint(NTSC_FIELD2_OFFSET) : 0u);
         uint x = col + NTSC_FIELD_START_X;
 
         float past_aligned = abs(float(frame0[line][x]) - float(frame2[line][x]));

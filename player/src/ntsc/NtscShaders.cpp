@@ -13,86 +13,92 @@ using namespace std;
 using namespace musevk;
 
 NtscShaders::NtscShaders(Logger &log, const std::string &executable_dir, musevk::VulkanManager &manager,
-                         musevk::CommandPool &command_pool)
+                         musevk::CommandPool &command_pool, const VideoStandard &standard)
 : m_log(log),
   m_vulkan_manager(manager),
-  m_field_Y_buffers({createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH),
-                     createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH)}),
-  m_field_U_buffers({createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH),
-                     createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH)}),
-  m_field_V_buffers({createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH),
-                     createVulkanBuffer(NTSC_FIELD_HEIGHT, NTSC_Y_BUF_WIDTH)}),
-  m_raw_past_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH)),
-  m_raw_future_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH)),
-  m_future_movement_buffer(createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH)),
+  m_standard(standard),
+  m_field_Y_buffers({createVulkanBuffer(standard.field_lines, standard.y_buf_width),
+                     createVulkanBuffer(standard.field_lines, standard.y_buf_width)}),
+  m_field_U_buffers({createVulkanBuffer(standard.field_lines, standard.y_buf_width),
+                     createVulkanBuffer(standard.field_lines, standard.y_buf_width)}),
+  m_field_V_buffers({createVulkanBuffer(standard.field_lines, standard.y_buf_width),
+                     createVulkanBuffer(standard.field_lines, standard.y_buf_width)}),
+  m_raw_past_buffer(createVulkanBuffer(standard.field_lines * 2, standard.y_buf_width)),
+  m_raw_future_buffer(createVulkanBuffer(standard.field_lines * 2, standard.y_buf_width)),
+  m_future_movement_buffer(createVulkanBuffer(standard.field_lines * 2, standard.y_buf_width)),
   m_current_movement_buffer_index(0),
-  m_movement_buffers({ createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH),
-                     createVulkanBuffer(NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH) }),
+  m_movement_buffers({ createVulkanBuffer(standard.field_lines * 2, standard.y_buf_width),
+                     createVulkanBuffer(standard.field_lines * 2, standard.y_buf_width) }),
 
   m_image_out(make_unique<VulkanImage>(m_vulkan_manager,
-                                       NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2,
+                                       standard.y_buf_width, standard.field_lines * 2,
                                        vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc
                                        | vk::ImageUsageFlagBits::eTransferDst,
                                        eHostNone)),
   // eStorage only because VulkanImage always creates an image view, which
   // transfer-only usage would not permit
   m_image_held(make_unique<VulkanImage>(m_vulkan_manager,
-                                        NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2,
+                                        standard.y_buf_width, standard.field_lines * 2,
                                         vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc
                                         | vk::ImageUsageFlagBits::eTransferDst,
                                         eHostNone)),
-  m_image_Y_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2), 2,
+  m_image_Y_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.y_buf_width, standard.field_lines * 2), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
-  m_image_U_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_Y_BUF_WIDTH / 2, NTSC_FIELD_HEIGHT), 2,
+  m_image_U_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.y_buf_width / 2, standard.field_lines), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
-  m_image_V_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_Y_BUF_WIDTH / 2, NTSC_FIELD_HEIGHT), 2,
+  m_image_V_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.y_buf_width / 2, standard.field_lines), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
-  m_dropout_bits(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_DROPOUT_BIT_WORDS, NTSC_TOTAL_HEIGHT), sizeof(uint32_t),
+  m_dropout_bits(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.dropout_bit_words, standard.total_lines), sizeof(uint32_t),
                                            vk::BufferUsageFlagBits::eStorageBuffer, eHostNone)),
-  m_concealed_composite(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT), sizeof(float),
+  m_concealed_composite(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.samples_per_line, standard.total_lines), sizeof(float),
                                                   vk::BufferUsageFlagBits::eStorageBuffer, eHostNone)),
-  m_chroma_taps(make_unique<VulkanBuffer>(m_vulkan_manager, Size(NTSC_CHROMA_TAPS_WIDTH, NTSC_FIELD_HEIGHT), 4 * 2 /* f16vec4 */,
+  m_chroma_taps(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.y_buf_width + 2 * NTSC_CHROMA_TAP_HALO, standard.field_lines), 4 * 2 /* f16vec4 */,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostNone))
 {
+  // The standard's build of each shader: ntsc_X.comp.spv or pal_X.comp.spv
+  auto spirv = [&](const char *name) {
+    return VulkanUtil::loadSpirv(executable_dir, std::string(standard.shader_prefix) + "_" + name + ".comp");
+  };
+  const int chroma_taps_width = standard.y_buf_width + 2 * NTSC_CHROMA_TAP_HALO;
   m_pack_dropout_bits_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "ntsc_pack_dropout_bits",
           {eBuffer, eBuffer}, sizeof(uint32_t) * 0,
-          VulkanUtil::loadSpirv(executable_dir, "ntsc_pack_dropout_bits.comp"), Size(NTSC_DROPOUT_BIT_WORDS, NTSC_TOTAL_HEIGHT)));
+          spirv("pack_dropout_bits"), Size(standard.dropout_bit_words, standard.total_lines)));
   m_extend_dropouts_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "ntsc_extend_dropouts",
           {eBuffer, eBuffer}, sizeof(uint32_t) * 0,
-          VulkanUtil::loadSpirv(executable_dir, "ntsc_extend_dropouts.comp"), Size(NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT)));
+          spirv("extend_dropouts"), Size(standard.samples_per_line, standard.total_lines)));
   m_conceal_composite_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "ntsc_conceal_composite",
           {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 2,
-          VulkanUtil::loadSpirv(executable_dir, "ntsc_conceal_composite.comp"), Size(NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT)));
+          spirv("conceal_composite"), Size(standard.samples_per_line, standard.total_lines)));
   // one-dimensional over the flattened frame: the causal filter runs on in
   // scan order across row ends
   m_deemphasis_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "ntsc_deemphasis",
           {eBuffer, eBuffer}, sizeof(uint32_t) * 2,
-          VulkanUtil::loadSpirv(executable_dir, "ntsc_deemphasis.comp"), Size((NTSC_TOTAL_WIDTH * NTSC_TOTAL_HEIGHT + 3) / 4 /* PER_INVOCATION */)));
+          spirv("deemphasis"), Size((standard.samples_per_line * standard.total_lines + 3) / 4 /* PER_INVOCATION */)));
   m_chroma_taps_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "ntsc_chroma_taps",
           {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 1,
-          VulkanUtil::loadSpirv(executable_dir, "ntsc_chroma_taps.comp"), Size(NTSC_CHROMA_TAPS_WIDTH, NTSC_FIELD_HEIGHT)));
+          spirv("chroma_taps"), Size(chroma_taps_width, standard.field_lines)));
   m_detect_color_burst_phase_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
         "ntsc_detect_color_burst_phase",
         {eBuffer, eBuffer}, sizeof(uint32_t) * 0,
-        VulkanUtil::loadSpirv(executable_dir, "ntsc_detect_color_burst_phase.comp"), Size(NTSC_TOTAL_HEIGHT)));
+        spirv("detect_color_burst_phase"), Size(standard.total_lines)));
   m_decode_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "ntsc_decode_single_field",
           {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 8,
-          VulkanUtil::loadSpirv(executable_dir, "ntsc_decode_single_field.comp"), Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT)));
+          spirv("decode_single_field"), Size(standard.y_buf_width, standard.field_lines)));
   m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "ntsc_detect_motion",
           {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 4,
-          VulkanUtil::loadSpirv(executable_dir, "ntsc_detect_motion.comp"), Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2)));
+          spirv("detect_motion"), Size(standard.y_buf_width, standard.field_lines * 2)));
   m_combine_still_and_moving_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "ntsc_combine_still_and_moving",
           {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eImage, eBuffer, eBuffer, eBuffer},
           sizeof(uint32_t) * 4,
-          VulkanUtil::loadSpirv(executable_dir, "ntsc_combine_still_and_moving.comp"), Size(NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2)));
+          spirv("combine_still_and_moving"), Size(standard.y_buf_width, standard.field_lines * 2)));
 }
 
 std::shared_ptr<musevk::VulkanBuffer> NtscShaders::createVulkanBuffer(unsigned int height, unsigned int width, HostAccess host_access) {
@@ -199,12 +205,12 @@ void NtscShaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field
 }
 
 namespace {
-    vk::ImageBlit fullImageBlit() {
+    vk::ImageBlit fullImageBlit(const VideoStandard &standard) {
         vk::ImageBlit region;
         region.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
         region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
-        region.srcOffsets[1] = vk::Offset3D{NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2, 1};
-        region.dstOffsets[1] = vk::Offset3D{NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2, 1};
+        region.srcOffsets[1] = vk::Offset3D{standard.y_buf_width, standard.field_lines * 2, 1};
+        region.dstOffsets[1] = vk::Offset3D{standard.y_buf_width, standard.field_lines * 2, 1};
         return region;
     }
 }
@@ -219,7 +225,7 @@ void NtscShaders::saveCombinedOutput(CommandBuffer &sq) {
                                         vk::PipelineStageFlagBits::eTransfer,
                                         vk::AccessFlagBits::eTransferRead, vk::AccessFlagBits::eTransferWrite);
   sq.enqueueBlitImage(m_image_out->image(), vk::ImageLayout::eTransferSrcOptimal,
-                      m_image_held->image(), vk::ImageLayout::eTransferDstOptimal, fullImageBlit());
+                      m_image_held->image(), vk::ImageLayout::eTransferDstOptimal, fullImageBlit(m_standard));
 }
 
 void NtscShaders::restoreHeldOutput(CommandBuffer &sq) {
@@ -232,7 +238,7 @@ void NtscShaders::restoreHeldOutput(CommandBuffer &sq) {
                                        vk::PipelineStageFlagBits::eTransfer,
                                        vk::AccessFlagBits::eTransferRead, vk::AccessFlagBits::eTransferWrite);
   sq.enqueueBlitImage(m_image_held->image(), vk::ImageLayout::eTransferSrcOptimal,
-                      m_image_out->image(), vk::ImageLayout::eTransferDstOptimal, fullImageBlit());
+                      m_image_out->image(), vk::ImageLayout::eTransferDstOptimal, fullImageBlit(m_standard));
 }
 
 ResultImages NtscShaders::getResultImages() {

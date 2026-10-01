@@ -15,7 +15,8 @@ public:
     std::optional<int> chapter, std::optional<int> clv_time_seconds,
     std::optional<int> clv_picture_number,
     std::optional<int> cav_picture_number,
-    std::optional<bool> cx_enabled);
+    std::optional<bool> cx_enabled,
+    double frames_per_second);
 
     std::vector<std::string> asStrings() const override;
     std::optional<double> playbackTimeSeconds() const override;
@@ -43,6 +44,7 @@ private:
     std::optional<int> m_cav_picture_number;
     std::optional<bool> m_cx_enabled;
     std::optional<bool> m_cx_override;
+    double m_frames_per_second; // for picture number to time
 };
 
 #endif //MUSECPP_VBIDATA_H

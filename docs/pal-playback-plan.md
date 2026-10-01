@@ -1,7 +1,45 @@
 # PAL Laserdisc Playback — Assessment and Plan
 
-Status: assessment only, nothing implemented. Written 2026-09-02 from a survey of the NTSC
-path; to be revisited before any work starts. Line references are to the tree at that date.
+Written 2026-09-02 from a survey of the NTSC path; line references are to the tree at that
+date.  Reviewed 2026-09-30 (corrections folded in below) and work started 2026-10-01 on the
+`pal-playback` branch.
+
+## Status (2026-10-01)
+
+Done, in one step rather than the phasing below (the probe is left for later):
+
+- `ntsc/VideoStandard.{h,cpp}`: the runtime descriptor the SD pipeline reads its geometry,
+  frame rate, RF carrier, VBI lines and noise windows from (`VideoStandard::ntsc()` /
+  `pal()`); `NtscInputBlock`, `NtscRfDemodulator`, `NtscFrameReader`, `NtscFrame`,
+  `NtscShaders`, `NtscDecoder` and `VbiData` take it.  The SD shaders are compiled twice,
+  `ntsc_*.spv` and `pal_*.spv` (`-DPAL_GEOMETRY`, `shaders/muse/muse.h`); the literal
+  NTSC geometry in their bodies became macros.
+- `--input-type pal-rf`: 1135 × 625 line-locked frame buffer at 17.734375 MHz, 944 × 576
+  image, sync and vertical anchoring (PAL's five broad pulses put both ends of the group on
+  the same half-line phase, unlike NTSC's six), Philips code on lines 16-18 / 329-331,
+  EFM audio, `--write` with BT.470BG tags, real-time pacing by the clock (the display loop
+  otherwise runs at the 60 Hz refresh).  NTSC output is bit-identical to before.
+- Monochrome only: the PAL shader build takes the luma through a [1 2 2 2 1]/8
+  subcarrier-nulling filter (`ntsc_decode_single_field.comp` under `PAL_GEOMETRY`); the comb,
+  burst phase and motion shaders run but their colour output is discarded.
+- Verified on the NYCSTM captures (D515 and LD-V4400 players, CLV, EFM): sync supported on
+  610 of 625 lines (the 15 vertical-interval lines), VBI chapter/time/picture decode, both
+  fields placed right.  The LD-V4400 captures run 0.7 % fast and lock anyway.
+- Debug aid: `MUSELD_DUMP_FRAME=<path>` writes one frame buffer (and `<path>.raw`, the
+  reader's line-locked composite) as float32.
+
+Open after this step:
+
+- **Probe** (phase 2 below) -- `pal-rf` has to be given explicitly.
+- **RF band.** The PAL band stays at NTSC's 3.5-13.5 MHz for now: the lower chroma sideband
+  (carrier - 4.43 MHz = 2.3-3.5 MHz, which ld-decode admits with a 2.3 MHz edge) is where the
+  NYCSTM captures carry a strong component that moves with the carrier (fc - 3.8 MHz at sync
+  tip, with a mirror at fc + 3.8 MHz; not EFM) and raises the blanking noise from 4.2 to 6-7
+  IRE when admitted.  Understand it before the colour work.
+- Analog audio: the PAL carriers are wired in (683.6 / 1066.4 kHz, deviation assumed
+  100 kHz) but untested -- no analog-audio PAL capture yet.  No CAV capture either.
+- Colour (phase 4), black level (PAL has none: fixed at blanking), the Rec. 567 weighting
+  and the combine shader's colorimetry (still SMPTE C / 2.2) for PAL.
 
 ## Summary
 
@@ -20,7 +58,7 @@ PAL laserdisc parameters that matter here (IEC 60857):
 | Lines / fields per second | 525 / 59.94 | 625 / 50 |
 | Line rate | 15734.27 Hz | 15625 Hz (0.7 % lower) |
 | Video FM carrier, sync tip → white | 7.6 → 9.3 MHz | 6.76 → 7.9 MHz |
-| Colour subcarrier | 3.579545 MHz | 4.433619 MHz (+25 Hz offset, 1135.0069 cycles/line) |
+| Colour subcarrier | 3.579545 MHz | 4.433619 MHz (+25 Hz offset, 283.7516 cycles/line) |
 | 4 fsc sampling grid | 910 samples/line, integer | 1135 + 4/625 samples/line, non-integer |
 | Analog audio carriers | 2.3011 / 2.8125 MHz, ±100 kHz | 0.6836 / 1.0664 MHz, ±50 kHz |
 | Digital audio | EFM (and AC3-RF at 2.88 MHz) | EFM **instead of** analog audio; no AC3 |
@@ -107,7 +145,7 @@ Every stage of the chroma chain assumes NTSC subcarrier topology on a line-locke
 - Chroma rotation `185.8° + tint` in `NtscDecoder.cpp:72-74` is calibrated for I/Q.
 
 PAL breaks all of this: V-axis switching per line, the ±45° swinging burst, the 4-field
-(8-field with the 25 Hz offset) sequence, and the non-integer 1135.0069 samples per line
+(8-field with the 25 Hz offset) sequence, and the non-integer 1135.0064 samples per line
 mean a line-locked grid gives no clean `% 4` phase LUT. The one piece that ports is the
 burst-referenced U/V demodulation at `ntsc_decode_single_field.comp:415-421`.
 
@@ -121,8 +159,16 @@ keeps the DPLL on hsync and the frame buffer rectangular; the subcarrier then wa
 The burst phase is already measured per line for NTSC and applied as a rotation, so
 making that the phase reference, with the LUT only as a basis, absorbs the drift; the
 V switch and swinging burst require per-line phase handling anyway. Same choice as
-ld-decode's PAL path. Adjacent same-field lines are then 2270.0128 samples apart
-(180° + 1.15°), handled by the same per-line correction.
+ld-decode's PAL path.
+
+Comb structure (corrected 2026-09-30): adjacent lines of a field are one line period
+apart, 283.75 cycles = 270.6° of subcarrier, so NTSC's 3-line comb (adjacent lines 180°
+apart) does not carry over. Lines n ± 2 of a field are 2270.0128 samples apart (180° +
+1.15°) and share the V-switch sign, which is the 2H comb; the simpler first step is the
+classic 1H delay-line U/V separation. Temporally the subcarrier advances 270° per frame and
+the V switch flips (625 is odd), so frames N ± 1 do not cancel: a PAL 3D comb needs frames
+N ± 2, i.e. more frame history than the current three-frame window -- a separate, later
+phase.
 
 Expect: a new burst-phase shader, a new PAL field decoder (roughly 500 lines of GLSL),
 EBU primaries and BT.470 gamma in the combine shader, and a re-derived motion detector.

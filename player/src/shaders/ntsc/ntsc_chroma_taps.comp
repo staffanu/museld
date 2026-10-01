@@ -65,7 +65,7 @@ void main() {
     if (row >= NTSC_FIELD_HEIGHT || x >= NTSC_CHROMA_TAPS_WIDTH)
         return;
 
-    uint frame_line = 22 + row + 263 * field_parity;
+    uint frame_line = NTSC_FIELD_START_Y + row + NTSC_FIELD2_OFFSET * field_parity;
     uint fc = x + NTSC_FIELD_START_X - NTSC_CHROMA_TAP_HALO;
     uint mask_row = row * 2 + field_parity;
 
@@ -80,7 +80,7 @@ void main() {
     f16vec2 rot_p1 = pair_rotation(prev_phase_data[nl], phase_data[nl]);
     f16vec2 rot_n1 = pair_rotation(next_phase_data[nl], phase_data[nl]);
 
-    float t = clamp((float(fc) - 94.0) / 910.0, 0.0, 1.0); // burst sits at ~column 94
+    float t = clamp((float(fc) - float(NTSC_BURST_START + 16)) / float(NTSC_TOTAL_WIDTH), 0.0, 1.0); // from the middle of the burst
     float16_t rp = rotated_prev_pair(frame_line, fc, lerp_rotation(rot_p0, rot_p1, t));
     float16_t rn = rotated_next_pair(frame_line, fc, lerp_rotation(rot_n0, rot_n1, t));
     float16_t pure = 0.5hf * (rp + rn);

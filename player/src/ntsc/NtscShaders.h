@@ -14,11 +14,15 @@
 #include "NtscFrame.h"
 #include "logging/Logger.h"
 #include "ResultImages.h"
+#include "VideoStandard.h"
 
+// The SD GPU pipeline.  The buffers are sized and the dispatches issued for
+// the given standard's geometry, and the shaders loaded are that standard's
+// build of the ntsc_*.comp sources (ntsc_*.spv or pal_*.spv).
 class NtscShaders {
 public:
   NtscShaders(Logger &log, std::string const &executable_dir, musevk::VulkanManager &manager,
-              musevk::CommandPool &command_pool);
+              musevk::CommandPool &command_pool, const VideoStandard &standard);
 
   NtscShaders(NtscShaders &other) = delete;
 
@@ -75,6 +79,7 @@ private:
 
   Logger &m_log;
   musevk::VulkanManager &m_vulkan_manager;
+  const VideoStandard &m_standard;
 
   std::shared_ptr<musevk::ComputeShader> m_pack_dropout_bits_algo;
   std::shared_ptr<musevk::ComputeShader> m_extend_dropouts_algo;
@@ -87,30 +92,30 @@ private:
   std::shared_ptr<musevk::ComputeShader> m_combine_still_and_moving_algo;
 
   // one bit per column of raw dropout flags, the intermediate between the
-  // pack and the extend shader (NTSC_TOTAL_HEIGHT rows of NTSC_DROPOUT_BIT_WORDS)
+  // pack and the extend shader (total_lines rows of dropout_bit_words)
   std::shared_ptr<musevk::VulkanBuffer> m_dropout_bits;
 
   // the dropout-concealed raw composite, between the conceal and the
-  // de-emphasis shader (NTSC_TOTAL_HEIGHT rows of NTSC_TOTAL_WIDTH floats)
+  // de-emphasis shader (total_lines rows of samples_per_line floats)
   std::shared_ptr<musevk::VulkanBuffer> m_concealed_composite;
 
   // per-column chroma estimates for the field being decoded, between the
-  // chroma taps and the single field shader (NTSC_FIELD_HEIGHT rows of
-  // NTSC_CHROMA_TAPS_WIDTH f16vec4)
+  // chroma taps and the single field shader (field_lines rows of
+  // y_buf_width + 2 * NTSC_CHROMA_TAP_HALO f16vec4)
   std::shared_ptr<musevk::VulkanBuffer> m_chroma_taps;
 
   // output from the single field decoder, one set per field parity so that
   // the previous field is still available for weaving in the combine
-  std::array<std::shared_ptr<musevk::VulkanBuffer>, 2> m_field_Y_buffers; // NTSC_FIELD_HEIGHT * NTSC_Y_BUF_WIDTH
+  std::array<std::shared_ptr<musevk::VulkanBuffer>, 2> m_field_Y_buffers; // field_lines * y_buf_width
   std::array<std::shared_ptr<musevk::VulkanBuffer>, 2> m_field_U_buffers;
   std::array<std::shared_ptr<musevk::VulkanBuffer>, 2> m_field_V_buffers;
 
-  std::shared_ptr<musevk::VulkanBuffer> m_raw_past_buffer;   // NTSC_FIELD_HEIGHT * 2 * NTSC_Y_BUF_WIDTH
+  std::shared_ptr<musevk::VulkanBuffer> m_raw_past_buffer;   // field_lines * 2 * y_buf_width
   std::shared_ptr<musevk::VulkanBuffer> m_raw_future_buffer;
   std::shared_ptr<musevk::VulkanBuffer> m_future_movement_buffer;
 
   int m_current_movement_buffer_index;
-  std::vector<std::shared_ptr<musevk::VulkanBuffer>> m_movement_buffers; // NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH
+  std::vector<std::shared_ptr<musevk::VulkanBuffer>> m_movement_buffers; // field_lines * 2, y_buf_width
 
   // used for final result
   std::shared_ptr<musevk::VulkanImage> m_image_out;

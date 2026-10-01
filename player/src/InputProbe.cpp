@@ -32,6 +32,7 @@ constexpr int c_analytic_taps = 129;
 constexpr double c_highpass_fraction = 0.06;
 
 constexpr double c_ntsc_line_hz = 15734.2657;
+constexpr double c_pal_line_hz = 15625.0;
 constexpr double c_muse_line_hz = 33750.0;
 // The NTSC left analog audio carrier, in carrier cycles per video line
 // (2.301 MHz / line rate).  Present on virtually every NTSC laserdisc (AC3
@@ -597,7 +598,8 @@ double estimateSampleFrequency(const InputProbeResult &result, InputProbeResult:
     if (result.line_period == 0 || type == InputProbeResult::Type::eUnknown)
         return 0;
     double fs = result.line_period *
-            (type == InputProbeResult::Type::eNtscRf ? c_ntsc_line_hz : c_muse_line_hz);
+            (type == InputProbeResult::Type::eNtscRf ? c_ntsc_line_hz :
+             type == InputProbeResult::Type::ePalRf ? c_pal_line_hz : c_muse_line_hz);
     for (double rate : c_known_rates)
         if (abs(fs - rate) / rate < 0.012)
             return rate;
