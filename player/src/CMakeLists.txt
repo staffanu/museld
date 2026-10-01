@@ -235,6 +235,7 @@ if(BUILD_MUSE)
         ntsc/NtscFrameReader.cpp ntsc/NtscFrameReader.h
         ntsc/NtscInputBlock.h
         ntsc/NtscConstants.h
+        ntsc/VideoStandard.cpp ntsc/VideoStandard.h
         ntsc/NtscCadenceTracker.cpp ntsc/NtscCadenceTracker.h
         ntsc/NtscDecoder.cpp ntsc/NtscDecoder.h
         ntsc/NtscShaders.cpp ntsc/NtscShaders.h
@@ -305,6 +306,23 @@ if(BUILD_MUSE)
             DEPENDS ${GLSL}
         )
         list(APPEND SPIRV_BINARY_FILES ${SPIRV})
+
+        # The SD shaders (shaders/ntsc/ntsc_*.comp) are built a second time
+        # with the PAL frame geometry (-DPAL_GEOMETRY, see shaders/muse/muse.h)
+        # as pal_*.comp.spv; NtscShaders picks the set by VideoStandard::shader_prefix
+        if(FILE_NAME MATCHES "^ntsc_(.*)$")
+            set(PAL_SPIRV "${CMAKE_CURRENT_BINARY_DIR}/shaders/pal_${CMAKE_MATCH_1}.spv")
+            add_custom_command(
+                OUTPUT ${PAL_SPIRV}
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/shaders/"
+                COMMAND ${GLSLC} -Werror -O -DPAL_GEOMETRY ${GLSL}
+                        -I ${CMAKE_CURRENT_SOURCE_DIR}/shaders
+                        -I ${CMAKE_CURRENT_SOURCE_DIR}/shaders/muse
+                        -o ${PAL_SPIRV}
+                DEPENDS ${GLSL}
+            )
+            list(APPEND SPIRV_BINARY_FILES ${PAL_SPIRV})
+        endif()
     endforeach()
     add_custom_target(Shaders DEPENDS ${SPIRV_BINARY_FILES})
     add_dependencies(museld Shaders)

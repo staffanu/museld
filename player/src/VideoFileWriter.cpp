@@ -340,6 +340,14 @@ void VideoFileWriter::initVideo(const PresetSpec &spec) {
             c->color_primaries = AVCOL_PRI_SMPTE170M;
             c->color_trc = AVCOL_TRC_SMPTE170M;
             break;
+        case VideoColorStandard::eBt470bg:
+            // EBU primaries and matrix; the transfer is tagged BT.709 (the
+            // same curve as SMPTE 170M) rather than BT.470's nominal gamma
+            // 2.8, which no PAL material was ever actually encoded with
+            c->colorspace = AVCOL_SPC_BT470BG;
+            c->color_primaries = AVCOL_PRI_BT470BG;
+            c->color_trc = AVCOL_TRC_BT709;
+            break;
     }
     c->color_range = AVCOL_RANGE_JPEG; // the shaders output full swing 0..255 (<<8), not studio 16..235
     c->chroma_sample_location = AVCHROMA_LOC_TOPLEFT; // the shaders subsample by taking the even row/col sample

@@ -15,6 +15,7 @@
 #include "NtscInputBlock.h"
 #include "NtscShaders.h"
 #include "util/RobustNoise.h"
+#include "musevk/HalfFloatUtil.h"
 
 using namespace std;
 
@@ -23,12 +24,14 @@ NtscDecoder::NtscDecoder(
         musevk::CommandPool &command_pool, std::string const &executable_dir,
         bool decode_video, bool decode_all_fields, bool decode_audio,
         float tint_degrees, float saturation,
-        musevk::TimestampQueryPool *timestamp_query_pool)
+        musevk::TimestampQueryPool *timestamp_query_pool,
+        const VideoStandard &video_standard)
 : Decoder(),
   m_log(log),
   m_reader(reader),
   m_manager(manager),
-  m_shaders(NtscShaders(log, executable_dir, manager, command_pool)),
+  m_standard(video_standard),
+  m_shaders(NtscShaders(log, executable_dir, manager, command_pool, video_standard)),
   m_decode_video(decode_video),
   m_decode_all_fields(decode_all_fields),
   m_decode_audio(decode_audio),
@@ -93,7 +96,7 @@ bool NtscDecoder::initialize() {
     // index 1, and its two-frame history behind it -- pretend they all exist
     // already so the first reads decode blank frames instead of special cases
     for (int i = 0; i < 4; i++)
-        m_frames.push_back(new NtscFrame(m_log, -i, m_manager));
+        m_frames.push_back(new NtscFrame(m_log, -i, m_manager, m_standard));
 
     m_frame_no = 0;
     m_field_index = 0;
@@ -200,7 +203,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
             m_log.info(eDecoder, "black level: signal re-acquired, measuring the disc's black afresh");
         }
 
-        auto noise_estimate = NtscFrame::EstimateNoise(input_block->video_data->data<float>());
+        auto noise_estimate = NtscFrame::EstimateNoise(input_block->video_data->data<float>(), m_standard);
         if (m_noise.sigma_blanking < 0) {
             m_noise = noise_estimate;
             m_blanking_avg = noise_estimate.blanking_level;
@@ -214,7 +217,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // Frame-to-frame burst phase coherence: the subcarrier inverts once
         // per frame, so the mean burst phase should advance by exactly pi.
         // The deviation is the sampling phase error the 3D comb sees.
-        if (!std::isnan(m_prev_burst_phase)) {
+        if (!std::isnan(m_prev_burst_phase) && m_standard.ntsc_chroma) {
             double err = std::abs(std::remainder(noise_estimate.burst_phase - m_prev_burst_phase - M_PI, 2 * M_PI));
             m_burst_coherence_avg = m_burst_coherence_avg < 0 ? err : m_burst_coherence_avg * 0.9 + err * 0.1;
         }
@@ -289,7 +292,9 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                                                  held_ire, choice > 3.75f ? "NTSC-M (7.5 IRE)" : "NTSC-J (0 IRE)"));
             }
         }
-        m_black_ire = controls.black_level == BlackLevelMode::eM ? 7.5f
+        // PAL has no setup: black is at blanking whatever the mode says
+        m_black_ire = !m_standard.has_black_setup ? 0.0f
+                    : controls.black_level == BlackLevelMode::eM ? 7.5f
                     : controls.black_level == BlackLevelMode::eJ ? 0.0f
                     : m_black_auto_ire;
 
@@ -303,7 +308,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         if (m_white_flag_frames >= 30)
             m_level_scale = std::clamp(1.0f / ((float)m_white_avg - m_level_offset_v), 1.1f, 1.9f);
         m_noise_psd_windows += NtscFrame::AccumulateNoisePsd(input_block->video_data->data<float>(),
-                                                             m_noise_psd.data(), 3.0f * m_noise.sigma_blanking);
+                                                             m_noise_psd.data(), 3.0f * m_noise.sigma_blanking, m_standard);
         if (m_frame_no % 30 == 0 && m_noise.sigma_blanking > 0) {
             // 100 IRE = the blanking-to-white span of 0.7 voltage units.  These
             // sigmas are measured on the raw demodulated baseband, before the
@@ -317,10 +322,11 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                     m_noise.sigma_blanking * ire,
                     m_noise.sigma_sync * ire,
                     sqrt(max(0.0, wander_var)) * ire));
-            m_log.info(eDecoder, std::format(
-                    "burst: line phase sigma {:.1f} deg, frame-to-frame coherence error {:.1f} deg (EWMA)",
-                    noise_estimate.burst_phase_sigma * 180.0 / M_PI,
-                    m_burst_coherence_avg * 180.0 / M_PI));
+            if (m_standard.ntsc_chroma)
+                m_log.info(eDecoder, std::format(
+                        "burst: line phase sigma {:.1f} deg, frame-to-frame coherence error {:.1f} deg (EWMA)",
+                        noise_estimate.burst_phase_sigma * 180.0 / M_PI,
+                        m_burst_coherence_avg * 180.0 / M_PI));
             m_log.info(eDecoder, std::format(
                     "levels: blanking {:.3f} V, white flag {}, rescale gain {:.3f} (nominal {:.3f})",
                     m_blanking_avg,
@@ -346,21 +352,25 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                         m_black_ire));
             }
             if (m_noise_psd_windows > 0) {
-                // Band-limit to the 4.2 MHz System M video bandwidth, apply the
-                // frame-domain de-emphasis response (|D|² of the bilinear
-                // transform in ntsc_deemphasis.comp), and weight with the
-                // Rec. 567 unified network (BT.1439 Annex 2 §3: τ = 245 ns,
-                // a = 4.5).  IEC 60857 12.2.2 requires ≥ 30 dB unweighted at
-                // the video output, i.e. the after-de-emphasis figure.
-                constexpr double b0 = 0.436493739, b1 = -0.239713775, a1 = -0.803220036;
+                // Band-limit to the video bandwidth (4.2 MHz for System M,
+                // 5 MHz for PAL), apply the frame-domain de-emphasis response
+                // (|D|² of the bilinear transform of D(s) = (1 + s 120 ns) /
+                // (1 + s 320 ns) at the frame buffer's sampling rate, as in
+                // ntsc_deemphasis.comp), and weight with the Rec. 567 unified
+                // network (BT.1439 Annex 2 §3: τ = 245 ns, a = 4.5).  IEC
+                // 60857 12.2.2 requires ≥ 30 dB unweighted at the video
+                // output, i.e. the after-de-emphasis figure.
+                const double fs = m_standard.sampling_frequency;
+                const double kb = 2 * fs, t1 = 120e-9, t2 = 320e-9;
+                const double b0 = (1 + kb * t1) / (1 + kb * t2), b1 = (1 - kb * t1) / (1 + kb * t2),
+                             a1 = (1 - kb * t2) / (1 + kb * t2);
                 constexpr double tau = 245e-9, aw = 4.5;
-                constexpr double fs = 910.0 * 525.0 * 30.0 / 1.001; // 4 × fsc
                 double total = 0, band = 0, deemphasized = 0, weighted = 0;
                 for (int k = 0; k < 256; k++) {
                     double f = std::min(k, 256 - k) / 256.0 * fs;
                     double p = m_noise_psd[k] / m_noise_psd_windows;
                     total += p;
-                    if (f <= 4.2e6) {
+                    if (f <= m_standard.luma_bandwidth_hz) {
                         band += p;
                         double cosw = cos(2 * M_PI * f / fs);
                         double d2 = (b0 * b0 + b1 * b1 + 2 * b0 * b1 * cosw) / (1 + a1 * a1 + 2 * a1 * cosw);
@@ -374,9 +384,9 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                 deemphasized /= 256;
                 weighted /= 256;
                 m_log.info(eDecoder, std::format(
-                        "noise spectrum: SNR {:.1f} dB unweighted in 4.2 MHz, {:.1f} dB after de-emphasis, "
+                        "noise spectrum: SNR {:.1f} dB unweighted in {:.1f} MHz, {:.1f} dB after de-emphasis, "
                         "{:.1f} dB Rec. 567-weighted (spectrum total σ = {:.2f} IRE)",
-                        20.0 * log10(0.7 / sqrt(band)),
+                        20.0 * log10(0.7 / sqrt(band)), m_standard.luma_bandwidth_hz / 1e6,
                         20.0 * log10(0.7 / sqrt(deemphasized)),
                         20.0 * log10(0.7 / sqrt(weighted)),
                         sqrt(total) * ire));
@@ -433,8 +443,9 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // (whose other half is not decoded yet), show the previous film
         // frame once more -- that is what its 3:2 timing asks for anyway,
         // at the cost of one field of latency.
+        const bool film_mode = controls.film_mode && m_standard.has_film_cadence;
         auto action = NtscCadenceTracker::FieldAction::eAdaptive;
-        if (controls.film_mode && m_decode_all_fields
+        if (film_mode && m_decode_all_fields
             && field_interpolation_mode == FieldInterpolationMode::eNormal) {
             int displayed = m_frame_no - 1;
             action = m_cadence.actionForField(displayed, decoded_field_index);
@@ -455,9 +466,9 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // film frame within the (A1A2)(A3B1)(B2C1)(C2C3)(D1D2) cycle the
         // output shows -- its runs of 3, 2, 3, 2 fields make the pulldown
         // rhythm visible; a hold re-shows the previous film frame.
-        if (!controls.film_mode || !m_decode_all_fields
+        if (!film_mode || !m_decode_all_fields
             || field_interpolation_mode != FieldInterpolationMode::eNormal) {
-            out.film_status = "Telecine: off";
+            out.film_status = m_standard.has_film_cadence ? "Telecine: off" : "Telecine: n/a";
             out.film_status_detail.clear();
         } else if (int phase = m_cadence.phaseForFrame(m_frame_no - 1); phase < 0) {
             out.film_status = "Telecine: searching";
@@ -477,12 +488,17 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
         // The setting (and the automatic choice under it) and the disc's
         // measured black; short, the overlay line has room for ~35 characters
-        out.level_status = std::format("Black: {}{} {:.1f} IRE, disc {}",
-                                       controls.black_level == BlackLevelMode::eAuto ? "auto " : "",
-                                       m_black_ire > 3.75f ? "M" : "J", m_black_ire,
-                                       m_black_peak_min_v >= 0
-                                           ? std::format("{:.1f}", m_black_peak_min_v * m_level_scale * 100.0)
-                                           : std::string("?"));
+        out.level_status = !m_standard.has_black_setup
+                ? std::format("Black: at blanking, disc {}",
+                              m_black_peak_min_v >= 0
+                                  ? std::format("{:.1f}", m_black_peak_min_v * m_level_scale * 100.0)
+                                  : std::string("?"))
+                : std::format("Black: {}{} {:.1f} IRE, disc {}",
+                              controls.black_level == BlackLevelMode::eAuto ? "auto " : "",
+                              m_black_ire > 3.75f ? "M" : "J", m_black_ire,
+                              m_black_peak_min_v >= 0
+                                  ? std::format("{:.1f}", m_black_peak_min_v * m_level_scale * 100.0)
+                                  : std::string("?"));
 
         // Selector noise floor: |cs - ct| accumulated over the 19-sample
         // window is ~sigma per sample for plain noise; 15 sigma keeps noise
@@ -522,6 +538,34 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     section_ms(m_sec_gpu1_wait_ms);
 
     if (input_block != nullptr) {
+        // Debug aid: MUSELD_DUMP_FRAME=<path> writes one frame buffer (the
+        // de-emphasized, rescaled composite: total_lines rows of
+        // samples_per_line float32, blanking 0, white 1) for offline
+        // analysis -- the first frame after MUSELD_DUMP_FRAME_NO (default
+        // 30) -- and the reader's raw line-locked composite of the same frame
+        // (sync tip 0, blanking ~0.3, white ~1, no de-emphasis) to <path>.raw
+        if (static const char *dump = getenv("MUSELD_DUMP_FRAME"); dump != nullptr) {
+            static const char *no = getenv("MUSELD_DUMP_FRAME_NO");
+            static int dump_frame = no != nullptr ? atoi(no) : 30;
+            if (dump_frame >= 0 && m_frame_no >= dump_frame) {
+                dump_frame = -1;
+                if (FILE *f = fopen((std::string(dump) + ".raw").c_str(), "wb")) {
+                    fwrite(input_block->video_data->data<float>(), sizeof(float),
+                           (size_t)m_standard.samples_per_line * m_standard.total_lines, f);
+                    fclose(f);
+                }
+                if (FILE *f = fopen(dump, "wb")) {
+                    const int16_t *p = m_frames[0]->data()->data<int16_t>();
+                    const size_t n = (size_t)m_standard.samples_per_line * m_standard.total_lines;
+                    std::vector<float> row(n);
+                    for (size_t i = 0; i < n; i++)
+                        row[i] = HalfFloatUtil::half_to_float(p[i]);
+                    fwrite(row.data(), sizeof(float), n, f);
+                    fclose(f);
+                    m_log.info(eDecoder, std::format("Frame {} dumped to {}", m_frame_no, dump));
+                }
+            }
+        }
         m_frames[0]->processVbi();
         if (auto vbi = m_frames[0]->getVbiData()) {
             if (m_prev_vbi && !input_block->timebase_restarted)
@@ -556,7 +600,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // the VBI processing needs).  The decision this feeds is always about
         // the DISPLAYED frame m_frames[1], so running one frame behind the
         // read costs nothing.
-        if (m_decode_video && m_decode_all_fields && m_frame_no > 1) {
+        if (m_decode_video && m_decode_all_fields && m_frame_no > 1 && m_standard.has_film_cadence) {
             auto diffs = NtscCadenceTracker::MeasureFieldDiffs(
                     m_frames[0]->data()->data<int16_t>(), m_frames[1]->data()->data<int16_t>());
             // Predicted per-sample sigma of the frame buffer data: the raw
@@ -580,8 +624,8 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // the nominal per-video-frame rate keeps about one compressed frame
         // queued as a jitter buffer, and the small surplus drains any larger
         // backlog instead of letting it become permanent latency.
-        const int cap = m_pending_audio_mode == MODE_AC3 ? 48000 * 1001 / 30000 + 16
-                      : m_pending_audio_mode == MODE_DTS ? 44100 * 1001 / 30000 + 16
+        const int cap = m_pending_audio_mode == MODE_AC3 ? 48000 * m_standard.fps_den / m_standard.fps_num + 16
+                      : m_pending_audio_mode == MODE_DTS ? 44100 * m_standard.fps_den / m_standard.fps_num + 16
                       : MAX_AUDIO_OUTPUT_SAMPLES;
         const int delivered = std::min((int)m_pending_audio.size(), cap);
         for (int i = 0; i < delivered; i++)
@@ -660,8 +704,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                                          m_frame_no != 0 ? m_total_elapsed_time_us / 1000 / m_frame_no : -1));
 
     if (m_field_index == 0 && ++m_timed_frames == c_timing_report_frames) {
-        const double frame_budget_ms = NtscInputBlock::c_samples_per_video_line
-                * NtscInputBlock::c_total_video_lines / NtscInputBlock::c_video_sampling_frequency * 1e3;
+        const double frame_budget_ms = m_standard.frameDurationMs();
         const int n = c_timing_report_frames;
         m_log.info(ePerformance, std::format(
                 "decoder avg/frame (budget {:.2f} ms): input {:.2f} ms, noise {:.2f} ms, record {:.2f} ms, "
@@ -694,23 +737,24 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
 }
 
 Decoder::SourceDimensions NtscDecoder::getSourceDimensions() const {
-    return {NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2, NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT};
+    return {m_standard.y_buf_width, m_standard.field_lines * 2, m_standard.y_buf_width, m_standard.field_lines};
 }
 
 std::optional<Decoder::PixelFileOffsets> NtscDecoder::computePixelFileOffsets(
         int field_x, int field_y, int field_parity,
         int64_t buffer_file_offset, double input_samples_per_muse_sample) const {
-    // Composite frame buffer coordinates: field rows start at line 22 (line
-    // 285 for the second field), picture columns at NTSC_FIELD_START_X on
-    // the 910-sample 4 fsc grid.  The composite carries no separate chroma
-    // samples, so cr/cb are left unset and only the Y offset is reported.
-    constexpr int c_field_start_x = 129; // NTSC_FIELD_START_X in the shaders
-    int64_t line = 22 + field_y + 263 * (int64_t)field_parity;
+    // Composite frame buffer coordinates: field rows start at line
+    // field_start_y (field2_offset later for the second field), picture
+    // columns at field_start_x on the line-locked grid.  The composite
+    // carries no separate chroma samples, so cr/cb are left unset and only
+    // the Y offset is reported.
+    const int64_t field_first = m_standard.field_start_y + (int64_t)m_standard.field2_offset * field_parity;
+    const int64_t line = field_first + field_y;
+    const int64_t width = m_standard.samples_per_line;
     PixelFileOffsets r;
-    r.field_start = buffer_file_offset
-            + (int64_t)((22 + 263 * (int64_t)field_parity) * NTSC_TOTAL_WIDTH * input_samples_per_muse_sample);
+    r.field_start = buffer_file_offset + (int64_t)(field_first * width * input_samples_per_muse_sample);
     r.y = buffer_file_offset
-            + (int64_t)((line * NTSC_TOTAL_WIDTH + c_field_start_x + field_x) * input_samples_per_muse_sample);
+            + (int64_t)((line * width + m_standard.field_start_x + field_x) * input_samples_per_muse_sample);
     return r;
 }
 

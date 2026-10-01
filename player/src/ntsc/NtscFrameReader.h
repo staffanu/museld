@@ -31,7 +31,8 @@ public:
                              const std::string &filename, InputFormat input_format,
                              double sample_rate, double initial_seek_seconds,
                              bool benchmark_shaders, AudioTrack audio_track, int efm_adaptive_filter_size,
-                             const std::optional<std::string> &output_filename);
+                             const std::optional<std::string> &output_filename,
+                             const VideoStandard &video_standard);
     NtscFrameReader(const NtscFrameReader&) = delete;
     void operator=(const NtscFrameReader&) = delete;
     // Join the reader thread while threadFunc() and the demodulator still
@@ -69,6 +70,7 @@ private:
 
     int64_t inputOffsetOfStreamPos(double stream_pos) const;
 
+    const VideoStandard &m_video_standard;
     NtscRfDemodulator *m_demodulator;
     double m_sample_rate;               // demodulated (video-decimated) rate
     int m_input_samples_decimation_rate;
@@ -111,7 +113,7 @@ private:
     // (wow included), so round(dt / period) is unambiguous for gaps of
     // hundreds of lines and needs no lock-in phase.  The period is tracked
     // from clean consecutive intervals only, never from the filter (see
-    // handlePulse for the runaway that causes).  NTSC line numbers are
+    // handlePulse for the runaway that causes).  Line numbers are
     // attached separately by the vertical anchor below.
     bool m_lattice_valid;
     double m_lat_t;                     // last accepted pulse
@@ -157,12 +159,13 @@ private:
     std::deque<double> m_curve;         // finalized T(k), k from m_curve_base
     int64_t m_curve_base;
 
-    // --- vertical anchor: NTSC line numbers on the lattice ---
+    // --- vertical anchor: the standard's line numbers on the lattice ---
     // A group of broad pulses starting on a lattice line boundary is field 1
-    // (the group spans lines 4-6); starting half a line in, field 2.
+    // (the group spans lines 4-6 on NTSC, 1-3 on PAL); starting half a line
+    // in, field 2.
     bool m_anchored;
     bool m_timebase_restarted;          // report the next frame as the first after a signal loss
-    int64_t m_line1_k;                  // lattice line of the current frame's NTSC line 1
+    int64_t m_line1_k;                  // lattice line of the current frame's line 1
     int64_t m_pending_drift;            // re-anchor hysteresis: last unconfirmed drift
     int64_t m_frame_start_offset;
     double m_frame_period;              // demod samples per line, at frame start

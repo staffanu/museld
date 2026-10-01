@@ -26,16 +26,19 @@ using namespace NtscRfDemodulatorConstants;
 
 NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string executable_dir, std::string filename,  float sample_frequency,
                                      musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
-                                     AudioTrack audio_track, int efm_adaptive_filter_size)
+                                     AudioTrack audio_track, int efm_adaptive_filter_size,
+                                     const VideoStandard &video_standard)
 : RfDemodulator<NtscDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency,
                                       vulkan_manager, input_format,
                                       NtscRfDemodulatorConstants::c_sample_block_size,
                                       benchmark_shaders),
+  m_video_standard(video_standard),
   m_efm_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
                     FirFilterStage::simdSupported(), true,
                     EfmDemodulator::defaultLog2Decimation(sample_frequency), efm_adaptive_filter_size, std::nullopt),
   m_analog_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
-                       48000.0, FirFilterStage::simdSupported()),
+                       48000.0, FirFilterStage::simdSupported(),
+                       video_standard.audio_left_hz, video_standard.audio_right_hz),
   m_ac3_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
                     FirFilterStage::simdSupported()),
   m_ac3_decoder(log),
@@ -65,11 +68,12 @@ void NtscRfDemodulator::demodulate() {
 
     // Create all the filters
 
-    // FIR band-pass filter that also creates an analytic signal.  The passband is 3.5 to 13.5 MHz.
-    // Reverse because the FIR shader correlates rather than convolves.
+    // FIR band-pass filter that also creates an analytic signal.  The passband is the standard's
+    // (3.5 to 13.5 MHz for NTSC).  Reverse because the FIR shader correlates rather than convolves.
     std::vector<std::complex<float>> bandpass_filter_def =
-            WindowedSinc::complex_band_pass<float>(WindowedSinc::rectangular_ntaps(m_sample_frequency, 1.5e6),
-                                                   m_sample_frequency, 3.5e6, 13.5e6);
+            WindowedSinc::complex_band_pass<float>(
+                    WindowedSinc::rectangular_ntaps(m_sample_frequency, (float)m_video_standard.rf_bandpass_transition_hz),
+                    m_sample_frequency, (float)m_video_standard.rf_bandpass_low_hz, (float)m_video_standard.rf_bandpass_high_hz);
     std::reverse(bandpass_filter_def.begin(), bandpass_filter_def.end());
 
     std::vector<float> bandpass_filter_re_coeffs;
@@ -85,8 +89,9 @@ void NtscRfDemodulator::demodulate() {
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(bandpass_filter_def.size()), bandpass_filter_im_coeffs);
 
     // FIR lowpass filter for the demodulated signal
+    const float video_lowpass = (float)m_video_standard.video_lowpass_hz;
     std::vector<float> lowpass_filter_def =
-            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(m_sample_frequency, 2e6), m_sample_frequency, 5e6);
+            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(m_sample_frequency, 2e6), m_sample_frequency, video_lowpass);
     std::reverse(lowpass_filter_def.begin(), lowpass_filter_def.end()); // symmetric, but the shader correlates
 
     shared_ptr<VulkanBuffer> lowpass_filter =
@@ -98,7 +103,7 @@ void NtscRfDemodulator::demodulate() {
     // the capture sample rate.
     const float decimated_frequency = m_sample_frequency / c_video_decimation_rate;
     std::vector<float> decimated_lowpass_filter_def =
-            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(decimated_frequency, 5e6), decimated_frequency, 5e6);
+            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(decimated_frequency, 5e6), decimated_frequency, video_lowpass);
     std::reverse(decimated_lowpass_filter_def.begin(), decimated_lowpass_filter_def.end()); // symmetric, but the shader correlates
 
     shared_ptr<VulkanBuffer> decimated_lowpass_filter =
@@ -405,7 +410,8 @@ void NtscRfDemodulator::demodulate() {
         // Demodulate the analytic signal, and scale to [0, 1].
         command_buffer->enqueueComputeShader<float>(fm_quadrature_shader,
                                                     {c_sample_block_size, (float)lowpass_filter_def.size() - 1,
-                                                     m_sample_frequency, c_frequency_deviation, c_center_frequency, /* scale */ 0.5f, /* add */ 0.5f});
+                                                     m_sample_frequency, (float)m_video_standard.rf_deviation_hz,
+                                                     (float)m_video_standard.rf_center_hz, /* scale */ 0.5f, /* add */ 0.5f});
 
         // Lowpass filter the demodulated signal, and down-sample (decimate by factor 2)
         command_buffer->enqueueComputeShader<uint32_t>(lowpass_fir_shader, {c_video_block_size, /* out offset */ 0});
@@ -437,7 +443,7 @@ void NtscRfDemodulator::demodulate() {
         // flagged on every pass).  The analytic signal, and so the envelope
         // buffers, are written with offset 1, and the flags are delayed like
         // the video to compensate the decimating lowpass.
-        const uint32_t line_period = (uint32_t)lround(m_sample_frequency / (30000.0 / 1001.0 * 525.0));
+        const uint32_t line_period = (uint32_t)lround(m_sample_frequency / m_video_standard.line_hz);
         const float slew_threshold = 1.0f * 40e6f / m_sample_frequency; // legal slew scales with the sample interval
         // carrier reference over ~205 us of whole envelope blocks, so a
         // maximum-length dropout cannot drag it down (32 blocks at 40 MHz)

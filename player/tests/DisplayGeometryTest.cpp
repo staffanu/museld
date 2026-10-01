@@ -45,6 +45,20 @@ TEST_CASE("The NTSC picture format: 6/7 pixels, the 4:3 picture in the middle ~7
     CHECK(c_ntsc.picture_x1 < 757.0);
 }
 
+TEST_CASE("The PAL picture format: 944/1135 pixels, the 4:3 picture in the middle ~923 columns", "[display]") {
+    const PictureFormat pal = PictureFormat::pal(944, 576, 180);
+    CHECK_THAT(pal.pixel_aspect, WithinAbs(944.0 / 1135.0, 1e-12));
+    CHECK(pal.can_squeeze);
+    const double w = pal.picture_x1 - pal.picture_x0;
+    CHECK_THAT(w, WithinAbs(923.39, 1e-2));
+    CHECK_THAT(w * pal.pixel_aspect / pal.height, WithinAbs(4.0 / 3.0, 1e-12));
+    // the 52 us active line starts 10.5 us after the sync edge: column 186.2
+    // of the 1135-sample line, 6.2 columns into the image
+    CHECK_THAT(pal.picture_x0, WithinAbs(6.1, 0.1));
+    CHECK(pal.picture_x1 < 944.0);
+    CHECK_THAT((pal.picture_x0 + pal.picture_x1) / 2, WithinAbs(467.8, 0.1));
+}
+
 TEST_CASE("NTSC on a 16:9 screen: the 4:3 picture, pillarboxed", "[display]") {
     const auto g = computeDisplayGeometry(ntsc(AspectMode::eNormal, 1920, 1080));
     expectNtscPicture(g);

@@ -13,10 +13,11 @@
 #include "musevk/VulkanManager.h"
 #include "NtscFieldView.h"
 #include "VbiData.h"
+#include "VideoStandard.h"
 
 class NtscFrame {
 public:
-    NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager);
+    NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager, const VideoStandard &standard);
 
     // Robust noise sigmas measured on the flat reference regions of the raw
     // input frame, in the reader's voltage units (0.0 = sync tip, 0.3 =
@@ -45,14 +46,14 @@ public:
         float burst_phase;       // radians
         float burst_phase_sigma; // radians
     };
-    static NoiseEstimate EstimateNoise(float const *data);
+    static NoiseEstimate EstimateNoise(float const *data, const VideoStandard &standard);
 
     // Accumulates the power spectrum of blanking-level windows on blank VBI
     // lines into psd[256] (bin k = k/256 × 14.318 MHz; for white noise of
     // variance σ² every bin converges to σ²).  Windows are only used when flat
     // and near the blanking level; max_sigma gates out VBI lines carrying
     // signal.  Returns the number of windows added.
-    static int AccumulateNoisePsd(float const *data, double *psd, float max_sigma);
+    static int AccumulateNoisePsd(float const *data, double *psd, float max_sigma, const VideoStandard &standard);
 
     void set_frame_no(int frame_no, int64_t input_offset, double input_samples_per_sample);
     [[nodiscard]] int64_t getInputOffset() const;
@@ -73,6 +74,7 @@ private:
     std::optional<std::pair<uint8_t, uint8_t>> processCcLine(int line);
 
     Logger &m_log;
+    const VideoStandard &m_standard;
     int m_frame_no;
     int64_t m_input_offset;
     double m_input_samples_per_sample;
