@@ -16,11 +16,13 @@ Supported formats:
 - **AC3RF**: QPSK-demodulated AC3 surround audio
 - **Analog**: NTSC analog FM stereo audio (2.3011/2.8125 MHz carriers, CX expansion, squelch)
 
-The SD pipeline (`ntsc/`) is parameterized by a `VideoStandard` (`ntsc/VideoStandard.h`:
+The SD pipeline (`sdtv/`) is parameterized by a `VideoStandard` (`sdtv/VideoStandard.h`:
 geometry of the line-locked frame buffer, frame rate, RF carrier, VBI lines, noise windows;
-`VideoStandard::ntsc()` and `::pal()`), and the `shaders/ntsc/*.comp` sources are compiled
-twice, as `ntsc_*.spv` and as `pal_*.spv` with `-DPAL_GEOMETRY` (the `NTSC_*` macros in
-`shaders/muse/muse.h` take the PAL values there).  `--input-type pal-rf` is work in progress:
+`VideoStandard::ntsc()` and `::pal()`), and the `shaders/sdtv/sdtv_*.comp` sources are compiled
+once per standard, as `ntsc_*.spv` and as `pal_*.spv` with `-DSDTV_PAL` (the `SDTV_*` macros in
+`shaders/muse/muse.h` take the PAL values there).  Names: `Sdtv…` is what both standards share
+(`SdtvFrameReader`, `SdtvDecoder`, ...), `Ntsc…`/`Pal…` only what belongs to one of them
+(`NtscCadenceTracker`).  `--input-type pal-rf` is work in progress:
 monochrome picture, VBI, EFM audio and `--write` work; there is no PAL colour decoder and the
 probe does not detect PAL.  `docs/pal-playback-plan.md` has the plan and the status.
 
@@ -48,11 +50,12 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
     logging/       — Abstract Logger, StreamLogger (shared by both binaries)
     bch/           — BCH decoder (MUSE control data)
     muse/          — MUSE frame buffers, audio/video decoders, GPU shaders interface
-    ntsc/          — NTSC frame buffers, sync detection, field decoder
+    sdtv/          — Standard definition (NTSC and PAL) frame buffers, sync detection, field
+                     decoder, the video standard descriptor
     musevk/        — Vulkan abstraction layer (buffers, images, command pools, compute)
     subtitles/     — SRT parser, stb_truetype-based glyph atlas, GPU subtitle overlay,
                      EIA-608 closed caption decoder (live "CC" track on NTSC discs,
-                     line 21 sliced in ntsc/NtscFrame; --cc-write saves <input>.CC.srt)
+                     line 21 sliced in sdtv/SdtvFrame; --cc-write saves <input>.CC.srt)
     ocr/           — Live subtitle OCR + translation (PP-OCR on ONNX Runtime, no OpenCV):
                      OcrEngine, OcrWorker thread, Vulkan band readback, TranslationWorker
                      (OpenAI-compatible HTTP, cpp-httplib + nlohmann/json).  Built with
@@ -240,7 +243,7 @@ split, what museld loads at runtime, and how Vulkan is wired up on macOS.
 
 ### src/ Internal Structure
 
-The `src/` directory is the include root for both binaries. The `ac3rf` CMake target covers the reusable library (`ac3/`, `analog/`, `efm/`, `filter/`, `rs/`, `logging/`). The `museld` target adds everything else (`muse/`, `ntsc/`, `musevk/`, `bch/`, `util/`, `shaders/`).
+The `src/` directory is the include root for both binaries. The `ac3rf` CMake target covers the reusable library (`ac3/`, `analog/`, `efm/`, `filter/`, `rs/`, `logging/`). The `museld` target adds everything else (`muse/`, `sdtv/`, `musevk/`, `bch/`, `util/`, `shaders/`).
 
 ### Key Design Patterns
 
@@ -298,7 +301,7 @@ HD video + miniaudio
 
 **NTSC path:**
 ```
-RF (40 MHz) → NtscRfDemodulator → NtscFrameReader (feed-forward timebase: sync pulse
+RF (40 MHz) → SdtvRfDemodulator → SdtvFrameReader (feed-forward timebase: sync pulse
 pass → line lattice → fixed-lag Kalman smoother → per-line resample, no DPLL) →
 NTSC frame buffer (4 fsc, 910×525) → Vulkan GPU color decode → video output
 ```

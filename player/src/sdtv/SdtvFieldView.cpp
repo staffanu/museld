@@ -1,9 +1,9 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
-#include "NtscFieldView.h"
+#include "SdtvFieldView.h"
 
-NtscFieldView::NtscFieldView(Logger &log, int frame_no, const std::shared_ptr<musevk::VulkanBuffer> &data,
+SdtvFieldView::SdtvFieldView(Logger &log, int frame_no, const std::shared_ptr<musevk::VulkanBuffer> &data,
     const std::shared_ptr<musevk::VulkanBuffer> &burst_phase_data,
     const std::shared_ptr<musevk::VulkanBuffer> &dropout_data,
     int field_parity)

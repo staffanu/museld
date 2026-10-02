@@ -22,7 +22,7 @@ add_executable(museld-tests
     ../src/input/LdsInputReader.cpp
     ../src/input/LdfInputReader.cpp
     ../src/input/PrefetchingInputReader.cpp
-    ../src/ntsc/NtscCadenceTracker.cpp
+    ../src/sdtv/NtscCadenceTracker.cpp
     ../src/subtitles/SrtParser.cpp
     ../src/DisplayGeometry.cpp
 )

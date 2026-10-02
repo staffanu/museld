@@ -6,15 +6,14 @@
 #include <cmath>
 #include <format>
 #include <vector>
-#include "NtscFrame.h"
-#include "NtscConstants.h"
-#include "NtscFieldView.h"
+#include "SdtvFrame.h"
+#include "SdtvFieldView.h"
 #include "musevk/VulkanBuffer.h"
 #include "musevk/VulkanManager.h"
 #include "musevk/HalfFloatUtil.h"
 #include "util/RobustNoise.h"
 
-NtscFrame::NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager, const VideoStandard &standard)
+SdtvFrame::SdtvFrame(Logger &log, int frame_no, musevk::VulkanManager &manager, const VideoStandard &standard)
 : m_log(log),
         m_standard(standard),
         m_frame_no(frame_no),
@@ -29,11 +28,11 @@ NtscFrame::NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager, 
         m_dropout_data(std::make_unique<musevk::VulkanBuffer>(
                 manager, musevk::Size(standard.samples_per_line, standard.total_lines), sizeof(uint8_t),
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostNone)),
-        m_fields({NtscFieldView(log, frame_no, m_data, m_burst_phase_data, m_dropout_data, 0),
-                  NtscFieldView(log, frame_no, m_data, m_burst_phase_data, m_dropout_data, 1) }) {
+        m_fields({SdtvFieldView(log, frame_no, m_data, m_burst_phase_data, m_dropout_data, 0),
+                  SdtvFieldView(log, frame_no, m_data, m_burst_phase_data, m_dropout_data, 1) }) {
 }
 
-NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data, const VideoStandard &standard) {
+SdtvFrame::NoiseEstimate SdtvFrame::EstimateNoise(float const *data, const VideoStandard &standard) {
     // Back porch windows sit after the colour burst and before active video
     // (NTSC: the burst reaches ~column 112, the picture starts at 129); sync
     // tip windows inside the horizontal sync pulse (67 samples on NTSC, 83 on
@@ -147,7 +146,7 @@ NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data, const Video
     return est;
 }
 
-int NtscFrame::AccumulateNoisePsd(float const *data, double *psd, float max_sigma, const VideoStandard &standard) {
+int SdtvFrame::AccumulateNoisePsd(float const *data, double *psd, float max_sigma, const VideoStandard &standard) {
     // Candidate blank VBI rows.  Discs differ in which lines carry the white
     // flag, picture numbers, and captions, so every window must qualify
     // instead: level close to blanking (rejects the white flag and active
@@ -167,7 +166,7 @@ int NtscFrame::AccumulateNoisePsd(float const *data, double *psd, float max_sigm
     return windows;
 }
 
-void NtscFrame::set_frame_no(int frame_no, int64_t input_offset, double input_samples_per_sample) {
+void SdtvFrame::set_frame_no(int frame_no, int64_t input_offset, double input_samples_per_sample) {
     m_frame_no = frame_no;
     m_input_offset = input_offset;
     m_input_samples_per_sample = input_samples_per_sample;
@@ -175,40 +174,40 @@ void NtscFrame::set_frame_no(int frame_no, int64_t input_offset, double input_sa
     m_fields[1].set_frame_no(frame_no);
 }
 
-int64_t NtscFrame::getInputOffset() const {
+int64_t SdtvFrame::getInputOffset() const {
     return m_input_offset;
 }
 
-double NtscFrame::getInputSamplesPerNtscSample() const {
+double SdtvFrame::getInputSamplesPerSdtvSample() const {
     return m_input_samples_per_sample;
 }
 
-std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::data() {
+std::shared_ptr<musevk::VulkanBuffer> &SdtvFrame::data() {
     return m_data;
 }
 
-std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::dropout_data() {
+std::shared_ptr<musevk::VulkanBuffer> &SdtvFrame::dropout_data() {
     return m_dropout_data;
 }
 
-std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::burst_phase_data() {
+std::shared_ptr<musevk::VulkanBuffer> &SdtvFrame::burst_phase_data() {
     return m_burst_phase_data;
 }
 
 
-NtscFieldView &NtscFrame::get_field(int parity) {
+SdtvFieldView &SdtvFrame::get_field(int parity) {
     return m_fields[parity];
 }
 
-std::shared_ptr<VbiData> NtscFrame::getVbiData() const {
+std::shared_ptr<VbiData> SdtvFrame::getVbiData() const {
     return m_vbi_data;
 }
 
-std::optional<std::pair<uint8_t, uint8_t>> NtscFrame::getClosedCaptionBytes() const {
+std::optional<std::pair<uint8_t, uint8_t>> SdtvFrame::getClosedCaptionBytes() const {
     return m_cc_bytes;
 }
 
-void NtscFrame::processVbi() {
+void SdtvFrame::processVbi() {
     m_vbi_data = nullptr;
 
     // EIA-608 closed captions ride on line 21 of field 1 (the caption
@@ -221,7 +220,7 @@ void NtscFrame::processVbi() {
     // field 2 from line 264 (314 on PAL), so field 2's code lines are
     // 279/280/281 (329-331).
     //
-    // That layout holds only because NtscFrameReader identifies the field from
+    // That layout holds only because SdtvFrameReader identifies the field from
     // the phase of the vertical sync pattern and always starts a frame on field
     // 1; a frame started on field 2 would put the second field's codes one line
     // earlier.  Rather than depend on that, we probe every candidate line and
@@ -380,7 +379,7 @@ void NtscFrame::processVbi() {
 }
 
 // Notice line starts at 1
-int NtscFrame::processVbiLine(int line) {
+int SdtvFrame::processVbiLine(int line) {
     // The code starts at ~0.172 H (spec: 0.172 H or 0.188 H).  Sample 0 is at
     // 0H within a sample or two (measured from the colour burst, which starts
     // ~0.083 H; the sync tip itself is clamped out of this buffer), so the code's
@@ -482,7 +481,7 @@ int NtscFrame::processVbiLine(int line) {
 // 16 NRZ data bits, LSB first, at the same rate.  0 is the blanking level, 1 is
 // 50 IRE.  Returns the two bytes with their (odd) parity bits intact, or
 // nullopt when no caption waveform is found on the line.
-std::optional<std::pair<uint8_t, uint8_t>> NtscFrame::processCcLine(int line) {
+std::optional<std::pair<uint8_t, uint8_t>> SdtvFrame::processCcLine(int line) {
     const int width = m_standard.samples_per_line;
     const double T = width / 32.0; // one 608 clock period in samples
     const int16_t *row = m_data->data<int16_t>() + (line - 1) * width;

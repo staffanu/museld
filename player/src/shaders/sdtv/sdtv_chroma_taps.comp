@@ -1,17 +1,17 @@
 #version 450
 
-// Per-column chroma estimates for ntsc_decode_single_field.comp: the
+// Per-column chroma estimates for sdtv_decode_single_field.comp: the
 // spatial 3-line comb sample, the pure temporal (3D comb) estimate from the
 // rotated frame-pair differences, and the motion-gated blend of the two.
 // The field decoder demodulates chroma over a 19-column window, and each of
 // these is a property of the column alone, so evaluating them here once per
 // column instead of 19 times per pixel removes most of that shader's loads
 // and all of its per-tap square roots.  The window reaches
-// NTSC_CHROMA_TAP_HALO columns past the picture on both sides, hence the
+// SDTV_CHROMA_TAP_HALO columns past the picture on both sides, hence the
 // wider row.
 //
 // This shader should be invoked with global invocation ids
-// from (0, 0) until (NTSC_CHROMA_TAPS_WIDTH, NTSC_FIELD_HEIGHT).
+// from (0, 0) until (SDTV_CHROMA_TAPS_WIDTH, SDTV_FIELD_HEIGHT).
 
 #include "muse.h"
 
@@ -20,7 +20,7 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(set = 0, binding = 0) buffer readonly input_frame_buffer {
-    float16_t input_frame[][NTSC_TOTAL_WIDTH];
+    float16_t input_frame[][SDTV_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 1) buffer readonly color_burst_phase_data_buffer {
@@ -28,20 +28,20 @@ layout(set = 0, binding = 1) buffer readonly color_burst_phase_data_buffer {
 };
 
 layout(set = 0, binding = 2) buffer readonly prev_frame_buffer {
-    float16_t prev_frame[][NTSC_TOTAL_WIDTH]; // composite of frame N-1
+    float16_t prev_frame[][SDTV_TOTAL_WIDTH]; // composite of frame N-1
 };
 
 layout(set = 0, binding = 3) buffer readonly next_frame_buffer {
-    float16_t next_frame[][NTSC_TOTAL_WIDTH]; // composite of frame N+1 (lookahead)
+    float16_t next_frame[][SDTV_TOTAL_WIDTH]; // composite of frame N+1 (lookahead)
 };
 
-// Directional motion masks from ntsc_detect_motion.comp, frame-row indexed
+// Directional motion masks from sdtv_detect_motion.comp, frame-row indexed
 layout(set = 0, binding = 4) buffer readonly past_motion_buffer {
-    float16_t past_motion[][NTSC_Y_BUF_WIDTH];
+    float16_t past_motion[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 5) buffer readonly future_motion_buffer {
-    float16_t future_motion[][NTSC_Y_BUF_WIDTH];
+    float16_t future_motion[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 6) buffer readonly prev_burst_phase_buffer {
@@ -53,41 +53,41 @@ layout(set = 0, binding = 7) buffer readonly next_burst_phase_buffer {
 };
 
 layout(set = 0, binding = 8) buffer writeonly chroma_taps_buffer {
-    f16vec4 chroma_taps[][NTSC_CHROMA_TAPS_WIDTH]; // (spatial, pure temporal, gated temporal, 0)
+    f16vec4 chroma_taps[][SDTV_CHROMA_TAPS_WIDTH]; // (spatial, pure temporal, gated temporal, 0)
 };
 
-#include "ntsc/ntsc_comb_taps.h"
+#include "sdtv/sdtv_comb_taps.h"
 
 void main() {
     uint row = gl_GlobalInvocationID.y;
     uint x = gl_GlobalInvocationID.x;
 
-    if (row >= NTSC_FIELD_HEIGHT || x >= NTSC_CHROMA_TAPS_WIDTH)
+    if (row >= SDTV_FIELD_HEIGHT || x >= SDTV_CHROMA_TAPS_WIDTH)
         return;
 
-    uint frame_line = NTSC_FIELD_START_Y + row + NTSC_FIELD2_OFFSET * field_parity;
-    uint fc = x + NTSC_FIELD_START_X - NTSC_CHROMA_TAP_HALO;
+    uint frame_line = SDTV_FIELD_START_Y + row + SDTV_FIELD2_OFFSET * field_parity;
+    uint fc = x + SDTV_FIELD_START_X - SDTV_CHROMA_TAP_HALO;
     uint mask_row = row * 2 + field_parity;
 
     // the comb degrades to two lines on the frame's last line
-    uint next_line = min(frame_line + 1, NTSC_TOTAL_HEIGHT - 1);
+    uint next_line = min(frame_line + 1, SDTV_TOTAL_HEIGHT - 1);
 
     float16_t cs = chroma_sample(frame_line, next_line, fc);
 
     f16vec2 rot_p0 = pair_rotation(prev_phase_data[frame_line], phase_data[frame_line]);
     f16vec2 rot_n0 = pair_rotation(next_phase_data[frame_line], phase_data[frame_line]);
-    uint nl = row + 1 < NTSC_FIELD_HEIGHT ? frame_line + 1 : frame_line;
+    uint nl = row + 1 < SDTV_FIELD_HEIGHT ? frame_line + 1 : frame_line;
     f16vec2 rot_p1 = pair_rotation(prev_phase_data[nl], phase_data[nl]);
     f16vec2 rot_n1 = pair_rotation(next_phase_data[nl], phase_data[nl]);
 
-    float t = clamp((float(fc) - float(NTSC_BURST_START + 16)) / float(NTSC_TOTAL_WIDTH), 0.0, 1.0); // from the middle of the burst
+    float t = clamp((float(fc) - float(SDTV_BURST_START + 16)) / float(SDTV_TOTAL_WIDTH), 0.0, 1.0); // from the middle of the burst
     float16_t rp = rotated_prev_pair(frame_line, fc, lerp_rotation(rot_p0, rot_p1, t));
     float16_t rn = rotated_next_pair(frame_line, fc, lerp_rotation(rot_n0, rot_n1, t));
     float16_t pure = 0.5hf * (rp + rn);
 
     // motion gating: each still side contributes its frame pair, a moving
     // column degenerates to the spatial comb
-    uint mc = uint(clamp(int(fc) - NTSC_FIELD_START_X, 0, NTSC_Y_BUF_WIDTH - 1));
+    uint mc = uint(clamp(int(fc) - SDTV_FIELD_START_X, 0, SDTV_Y_BUF_WIDTH - 1));
     float16_t wp = 1.hf - past_motion[mask_row][mc];
     float16_t wf = 1.hf - future_motion[mask_row][mc];
     float16_t sm = max(wp, wf);

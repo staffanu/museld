@@ -1,8 +1,8 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
-#ifndef MUSECPP_NTSCFRAME_H
-#define MUSECPP_NTSCFRAME_H
+#ifndef MUSECPP_SDTVFRAME_H
+#define MUSECPP_SDTVFRAME_H
 
 
 #include <array>
@@ -11,18 +11,18 @@
 
 #include "logging/Logger.h"
 #include "musevk/VulkanManager.h"
-#include "NtscFieldView.h"
+#include "SdtvFieldView.h"
 #include "VbiData.h"
 #include "VideoStandard.h"
 
-class NtscFrame {
+class SdtvFrame {
 public:
-    NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager, const VideoStandard &standard);
+    SdtvFrame(Logger &log, int frame_no, musevk::VulkanManager &manager, const VideoStandard &standard);
 
     // Robust noise sigmas measured on the flat reference regions of the raw
     // input frame, in the reader's voltage units (0.0 = sync tip, 0.3 =
     // blanking, 1.0 = white).  Measured before the frame-domain de-emphasis
-    // (ntsc_deemphasis.comp), i.e. on the raw demodulated baseband.
+    // (sdtv_deemphasis.comp), i.e. on the raw demodulated baseband.
     struct NoiseEstimate {
         float sigma_blanking; // back porch windows of the picture lines
         float sigma_sync;     // sync tip windows
@@ -57,11 +57,11 @@ public:
 
     void set_frame_no(int frame_no, int64_t input_offset, double input_samples_per_sample);
     [[nodiscard]] int64_t getInputOffset() const;
-    [[nodiscard]] double getInputSamplesPerNtscSample() const;
+    [[nodiscard]] double getInputSamplesPerSdtvSample() const;
     std::shared_ptr<musevk::VulkanBuffer> &data();
     std::shared_ptr<musevk::VulkanBuffer> &burst_phase_data();
     std::shared_ptr<musevk::VulkanBuffer> &dropout_data();
-    NtscFieldView &get_field(int parity);
+    SdtvFieldView &get_field(int parity);
     [[nodiscard]] std::shared_ptr<VbiData> getVbiData() const;
     // Field 1's EIA-608 closed caption byte pair (parity bits intact), sliced
     // from line 21 by processVbi(); nullopt when the line carries no caption
@@ -81,10 +81,10 @@ private:
     std::shared_ptr<musevk::VulkanBuffer> m_data;
     std::shared_ptr<musevk::VulkanBuffer> m_burst_phase_data;
     std::shared_ptr<musevk::VulkanBuffer> m_dropout_data; // extended flags, written by the copy shader
-    std::vector<NtscFieldView> m_fields;
+    std::vector<SdtvFieldView> m_fields;
     std::shared_ptr<VbiData> m_vbi_data;
     std::optional<std::pair<uint8_t, uint8_t>> m_cc_bytes;
 };
 
 
-#endif //MUSECPP_NTSCFRAME_H
+#endif //MUSECPP_SDTVFRAME_H

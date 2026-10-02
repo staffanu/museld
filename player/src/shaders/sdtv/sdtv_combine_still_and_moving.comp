@@ -3,7 +3,7 @@
 #include "muse.h"
 
 // This shader should be invoked with global invocation ids
-// from (0, 0) until (NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT * 2)
+// from (0, 0) until (SDTV_Y_BUF_WIDTH, SDTV_FIELD_HEIGHT * 2)
 
 layout(push_constant) uniform PushConstants {
     // both set to 1 makes no sense
@@ -18,51 +18,51 @@ layout(push_constant) uniform PushConstants {
 // field's parity was just decoded; the other set still holds the previous
 // (opposite-parity) field, which is what the still parts weave in.
 layout(set = 0, binding = 0) buffer readonly restrict field0_Y_buffer {
-    float16_t field0_Y[][NTSC_Y_BUF_WIDTH];
+    float16_t field0_Y[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 1) buffer readonly restrict field0_U_buffer {
-    float16_t field0_U[][NTSC_Y_BUF_WIDTH];
+    float16_t field0_U[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 2) buffer readonly restrict field0_V_buffer {
-    float16_t field0_V[][NTSC_Y_BUF_WIDTH];
+    float16_t field0_V[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 3) buffer readonly restrict field1_Y_buffer {
-    float16_t field1_Y[][NTSC_Y_BUF_WIDTH];
+    float16_t field1_Y[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 4) buffer readonly restrict field1_U_buffer {
-    float16_t field1_U[][NTSC_Y_BUF_WIDTH];
+    float16_t field1_U[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 5) buffer readonly restrict field1_V_buffer {
-    float16_t field1_V[][NTSC_Y_BUF_WIDTH];
+    float16_t field1_V[][SDTV_Y_BUF_WIDTH];
 };
 
 // Directional motion masks: past covers motion before the displayed frame's
 // fields were captured, future motion after (from the lookahead frame)
 layout(set = 0, binding = 6) buffer readonly restrict past_movement_buffer {
-    float16_t past_movement[][NTSC_Y_BUF_WIDTH];
+    float16_t past_movement[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 7) buffer readonly restrict future_movement_buffer {
-    float16_t future_movement[][NTSC_Y_BUF_WIDTH];
+    float16_t future_movement[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D frame_out_image;
 
 layout(set = 0, binding = 9) buffer writeonly frame_out_y_buffer {
-    uint16_t frame_out_Y[][NTSC_Y_BUF_WIDTH];
+    uint16_t frame_out_Y[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 10) buffer writeonly frame_out_u_buffer {
-    uint16_t frame_out_U[][NTSC_Y_BUF_WIDTH / 2];
+    uint16_t frame_out_U[][SDTV_Y_BUF_WIDTH / 2];
 };
 
 layout(set = 0, binding = 11) buffer writeonly frame_out_v_buffer {
-    uint16_t frame_out_V[][NTSC_Y_BUF_WIDTH / 2];
+    uint16_t frame_out_V[][SDTV_Y_BUF_WIDTH / 2];
 };
 
 f16vec3 currentField(uint i, uint col) {
@@ -79,7 +79,7 @@ void main() {
     uint row = gl_GlobalInvocationID.y;
     uint col = gl_GlobalInvocationID.x;
 
-    if (row >= NTSC_FIELD_HEIGHT * 2 || col >= NTSC_Y_BUF_WIDTH)
+    if (row >= SDTV_FIELD_HEIGHT * 2 || col >= SDTV_Y_BUF_WIDTH)
         return;
 
     f16vec3 yuv;
@@ -92,7 +92,7 @@ void main() {
         // real thing; where it moves, that row is 1/60 s stale and would
         // comb, so interpolate the current field's neighbours instead.
         uint n0 = row / 2;
-        uint n1 = uint(clamp(int(row / 2) + (field_parity == 0 ? 1 : -1), 0, NTSC_FIELD_HEIGHT - 1));
+        uint n1 = uint(clamp(int(row / 2) + (field_parity == 0 ? 1 : -1), 0, SDTV_FIELD_HEIGHT - 1));
         f16vec3 bob = 0.5hf * (currentField(n0, col) + currentField(n1, col));
         f16vec3 weave = previousField(row / 2, col);
         // Each field consults the evidence window that brackets its weave:

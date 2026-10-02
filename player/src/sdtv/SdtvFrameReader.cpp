@@ -11,9 +11,9 @@
 #include <cassert>
 #include <filesystem>
 #include "musevk/VulkanBuffer.h"
-#include "NtscFrameReader.h"
+#include "SdtvFrameReader.h"
 
-#include "NtscRfDemodulator.h"
+#include "SdtvRfDemodulator.h"
 #include "filter/WindowedSinc.h"
 #include "logging/Logger.h"
 #include "util/Interpolate.h"
@@ -50,7 +50,7 @@ namespace {
     constexpr double c_corroborate_s = 0.5e-6;
 }
 
-NtscFrameReader::NtscFrameReader(
+SdtvFrameReader::SdtvFrameReader(
         Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
         const std::string &filename, InputFormat input_format, double sample_rate,
         double initial_seek_seconds, bool benchmark_shaders, AudioTrack audio_track,
@@ -61,8 +61,8 @@ NtscFrameReader::NtscFrameReader(
                       initial_seek_seconds, output_filename),
           m_video_standard(video_standard),
           m_demodulator(nullptr),
-          m_sample_rate(sample_rate / NtscRfDemodulatorConstants::c_video_decimation_rate),
-          m_input_samples_decimation_rate(NtscRfDemodulatorConstants::c_video_decimation_rate),
+          m_sample_rate(sample_rate / SdtvRfDemodulatorConstants::c_video_decimation_rate),
+          m_input_samples_decimation_rate(SdtvRfDemodulatorConstants::c_video_decimation_rate),
           m_p_nominal(0),
           m_input_buffer(nullptr),
           m_input_dropout_buffer(nullptr),
@@ -108,12 +108,12 @@ NtscFrameReader::NtscFrameReader(
           m_process_elapsed_ms(0),
           m_read_input_elapsed_ms(0),
           m_timed_frames(0) {
-    m_demodulator = new NtscRfDemodulator(log, executable_dir, m_filename, sample_rate, vulkan_manager,
+    m_demodulator = new SdtvRfDemodulator(log, executable_dir, m_filename, sample_rate, vulkan_manager,
                                           input_format, benchmark_shaders, audio_track, efm_adaptive_filter_size,
                                           video_standard);
 }
 
-bool NtscFrameReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) {
+bool SdtvFrameReader::initialize(std::vector<std::unique_ptr<SdtvInputBlock>> &buffers) {
     m_demodulator->initialize(m_demodulator->numberOfBlockBuffers());
 
     m_p_nominal = m_sample_rate / m_video_standard.line_hz;
@@ -135,7 +135,7 @@ bool NtscFrameReader::initialize(std::vector<std::unique_ptr<NtscInputBlock>> &b
 }
 
 // Idempotent: runs both from the explicit teardown path and from the destructor.
-void NtscFrameReader::cleanup() {
+void SdtvFrameReader::cleanup() {
     // Stop the demodulator before FrameReader::cleanup() joins the reader
     // thread: that thread may be waiting inside getNextDemodulatedBlock(),
     // whose predicate tests the demodulator's stop flag, not ours.
@@ -156,34 +156,34 @@ void NtscFrameReader::cleanup() {
     }
 }
 
-void NtscFrameReader::seek(double seconds) {
+void SdtvFrameReader::seek(double seconds) {
     if (!m_input_is_realtime) {
         m_demodulator->seek(seconds);
         resetTimebase("seek");
     }
 }
 
-void NtscFrameReader::setAudioTrack(AudioTrack track) {
+void SdtvFrameReader::setAudioTrack(AudioTrack track) {
     // The audio tracks are alternatives: only the selected one is demodulated
     if (m_demodulator != nullptr)
         m_demodulator->setAudioTrack(track);
 }
 
-void NtscFrameReader::setEfmAdaptiveFilterSize(int size) {
+void SdtvFrameReader::setEfmAdaptiveFilterSize(int size) {
     if (m_demodulator != nullptr)
         m_demodulator->setEfmAdaptiveFilterSize(size);
 }
 
-int NtscFrameReader::efmAdaptiveFilterSize() const {
+int SdtvFrameReader::efmAdaptiveFilterSize() const {
     return m_demodulator != nullptr ? m_demodulator->efmAdaptiveFilterSize() : -1;
 }
 
-void NtscFrameReader::setAnalogCx(bool enabled) {
+void SdtvFrameReader::setAnalogCx(bool enabled) {
     if (m_demodulator != nullptr)
         m_demodulator->setAnalogCx(enabled);
 }
 
-void NtscFrameReader::resetTimebase(const char *why) {
+void SdtvFrameReader::resetTimebase(const char *why) {
     m_lattice_valid = false;
     m_kal_valid = false;
     m_kal_head_k = 0;
@@ -204,11 +204,11 @@ void NtscFrameReader::resetTimebase(const char *why) {
     m_frame_resid_bad = 0;
     m_frame_meas = 0;
     m_frame_log_k = 0;
-    m_log.info(eInput, std::format("NtscFrameReader: timebase reset ({})", why));
+    m_log.info(eInput, std::format("SdtvFrameReader: timebase reset ({})", why));
 }
 
-void NtscFrameReader::threadFunc() {
-    unique_ptr<NtscInputBlock> output_block = nullptr;
+void SdtvFrameReader::threadFunc() {
+    unique_ptr<SdtvInputBlock> output_block = nullptr;
 
     for (;;) {
         if (output_block == nullptr) {
@@ -222,7 +222,7 @@ void NtscFrameReader::threadFunc() {
             }
             m_cv_vacant.wait(lock, [this]{return m_stop_request || !m_vacant_input_buffers.empty();});
             if (m_stop_request) {
-                m_log.info(eInput, "NtscFrameReader: stop requested");
+                m_log.info(eInput, "SdtvFrameReader: stop requested");
                 break;
             }
             output_block = std::move(m_vacant_input_buffers.front());
@@ -233,8 +233,8 @@ void NtscFrameReader::threadFunc() {
         }
 
         if (!process(output_block)) {
-            m_log.info(eInput, m_stop_request ? "NtscFrameReader: stop requested"
-                                              : "NtscFrameReader: end of file");
+            m_log.info(eInput, m_stop_request ? "SdtvFrameReader: stop requested"
+                                              : "SdtvFrameReader: end of file");
             break;
         }
 
@@ -254,7 +254,7 @@ void NtscFrameReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
-bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_block) {
+bool SdtvFrameReader::process(std::unique_ptr<SdtvInputBlock> const &output_block) {
     auto t_start = std::chrono::steady_clock::now();
     for (;;) {
         if (m_stop_request)
@@ -287,14 +287,14 @@ bool NtscFrameReader::process(std::unique_ptr<NtscInputBlock> const &output_bloc
     }
 }
 
-bool NtscFrameReader::readInputBlock(std::unique_ptr<NtscInputBlock> const &output_block) {
+bool SdtvFrameReader::readInputBlock(std::unique_ptr<SdtvInputBlock> const &output_block) {
     // See ResamplingFrameReader::readInput: a stop has to be noticed here.
     if (m_stop_request)
         return false;
 
     auto block = m_demodulator->getNextDemodulatedBlock();
     if (block == nullptr) {
-        m_log.info(eInput, "NtscFrameReader: no more demodulated blocks");
+        m_log.info(eInput, "SdtvFrameReader: no more demodulated blocks");
         return false;
     }
 
@@ -303,7 +303,7 @@ bool NtscFrameReader::readInputBlock(std::unique_ptr<NtscInputBlock> const &outp
     // that still point there have waited too long (cannot happen in normal
     // flow, where lines are resampled one to two blocks after they arrive)
     while (!m_curve.empty() && m_curve.front() < (double)((m_blocks_fetched - 3) * B)) {
-        m_log.warn(eInput, std::format("NtscFrameReader: dropping stale line {} (resampling fell behind)",
+        m_log.warn(eInput, std::format("SdtvFrameReader: dropping stale line {} (resampling fell behind)",
                                        m_curve_base));
         m_curve.pop_front();
         m_curve_base++;
@@ -357,7 +357,7 @@ bool NtscFrameReader::readInputBlock(std::unique_ptr<NtscInputBlock> const &outp
     return true;
 }
 
-void NtscFrameReader::syncPass(const float *data, int64_t stream_base, int count) {
+void SdtvFrameReader::syncPass(const float *data, int64_t stream_base, int count) {
     const int ntaps = (int)m_sync_fir.size();
     const size_t in_mask = m_sync_fir_in.size() - 1;
     for (int i = 0; i < count; i++) {
@@ -427,7 +427,7 @@ void NtscFrameReader::syncPass(const float *data, int64_t stream_base, int count
     }
 }
 
-void NtscFrameReader::handlePulse(double t, double width_us) {
+void SdtvFrameReader::handlePulse(double t, double width_us) {
     if (width_us > c_broad_width_min) {
         m_broad_falls.push_back(t);
         if (m_broad_falls.size() > 64)
@@ -482,7 +482,7 @@ void NtscFrameReader::handlePulse(double t, double width_us) {
             m_slip_first_k = k;
             m_slip_count = 1;
         } else if (++m_slip_count >= 16) {
-            m_log.warn(eInput, std::format("NtscFrameReader: lattice slipped {} line(s) at line {}, re-labeling",
+            m_log.warn(eInput, std::format("SdtvFrameReader: lattice slipped {} line(s) at line {}, re-labeling",
                                            shift, m_slip_first_k));
             for (auto &m : m_meas)
                 if (m.first >= m_slip_first_k)
@@ -522,11 +522,11 @@ void NtscFrameReader::handlePulse(double t, double width_us) {
     }
 }
 
-bool NtscFrameReader::canFinalize() const {
+bool SdtvFrameReader::canFinalize() const {
     return m_kal_valid && m_last_meas_k >= m_k_final + c_kal_batch + c_kal_lag;
 }
 
-void NtscFrameReader::finalizeBatch() {
+void SdtvFrameReader::finalizeBatch() {
     constexpr int W = c_kal_batch + c_kal_lag;
     double meas[W];
     bool has_meas[W] = {};
@@ -702,7 +702,7 @@ void NtscFrameReader::finalizeBatch() {
     evaluateAnchors();
 }
 
-void NtscFrameReader::evaluateAnchors() {
+void SdtvFrameReader::evaluateAnchors() {
     if (m_curve.size() < 2)
         return;
     const double t_lo = m_curve.front();
@@ -792,7 +792,7 @@ void NtscFrameReader::evaluateAnchors() {
                 m_line1_k += m_video_standard.total_lines;
             m_anchored = true;
             m_pending_drift = 0;
-            m_log.info(eInput, std::format("NtscFrameReader: anchored, frame starts at lattice line {}", m_line1_k));
+            m_log.info(eInput, std::format("SdtvFrameReader: anchored, frame starts at lattice line {}", m_line1_k));
         } else {
             int64_t drift = (cand - m_line1_k) % m_video_standard.total_lines;
             if (drift > m_video_standard.total_lines / 2)
@@ -806,7 +806,7 @@ void NtscFrameReader::evaluateAnchors() {
                 // a single odd group is noise, a real slip confirms next field
                 m_pending_drift = drift;
             } else {
-                m_log.warn(eInput, std::format("NtscFrameReader: vertical drift {} lines, re-anchoring", drift));
+                m_log.warn(eInput, std::format("SdtvFrameReader: vertical drift {} lines, re-anchoring", drift));
                 m_line1_k = cand;
                 while (m_line1_k < m_curve_base)
                     m_line1_k += m_video_standard.total_lines;
@@ -816,14 +816,14 @@ void NtscFrameReader::evaluateAnchors() {
     }
 }
 
-int64_t NtscFrameReader::inputOffsetOfStreamPos(double stream_pos) const {
+int64_t SdtvFrameReader::inputOffsetOfStreamPos(double stream_pos) const {
     const int64_t B = (int64_t)c_input_sub_buffer_size;
     const int64_t p = (int64_t)stream_pos;
     const int slot = (int)((p / B) % c_number_of_input_sub_buffers);
     return m_sub_buffer_input_offsets[slot] + (p % B) * m_input_samples_decimation_rate;
 }
 
-bool NtscFrameReader::consumeFinalized(std::unique_ptr<NtscInputBlock> const &output_block) {
+bool SdtvFrameReader::consumeFinalized(std::unique_ptr<SdtvInputBlock> const &output_block) {
     const int64_t B = (int64_t)c_input_sub_buffer_size;
     while (m_curve.size() >= 2) {
         const double t0 = m_curve[0], t1 = m_curve[1];
@@ -852,7 +852,7 @@ bool NtscFrameReader::consumeFinalized(std::unique_ptr<NtscInputBlock> const &ou
     return false;
 }
 
-void NtscFrameReader::resampleLine(std::unique_ptr<NtscInputBlock> const &output_block,
+void SdtvFrameReader::resampleLine(std::unique_ptr<SdtvInputBlock> const &output_block,
                                    int row, double t0, double t1) {
     const int width = m_video_standard.samples_per_line;
     float *out = output_block->video_data->data<float>() + (size_t)width * (row - 1);

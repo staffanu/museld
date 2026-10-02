@@ -13,7 +13,7 @@
 #include <iostream>
 #include <filesystem>
 #include <algorithm>
-#include "NtscRfDemodulator.h"
+#include "SdtvRfDemodulator.h"
 #include "filter/FirFilterStage.h"
 #include "filter/WindowedSinc.h"
 #include "musevk/VulkanUtil.h"
@@ -22,24 +22,24 @@
 
 using namespace std;
 using namespace musevk;
-using namespace NtscRfDemodulatorConstants;
+using namespace SdtvRfDemodulatorConstants;
 
-NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string executable_dir, std::string filename,  float sample_frequency,
+SdtvRfDemodulator::SdtvRfDemodulator(Logger &log, std::string executable_dir, std::string filename,  float sample_frequency,
                                      musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
                                      AudioTrack audio_track, int efm_adaptive_filter_size,
                                      const VideoStandard &video_standard)
-: RfDemodulator<NtscDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency,
+: RfDemodulator<SdtvDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency,
                                       vulkan_manager, input_format,
-                                      NtscRfDemodulatorConstants::c_sample_block_size,
+                                      SdtvRfDemodulatorConstants::c_sample_block_size,
                                       benchmark_shaders),
   m_video_standard(video_standard),
-  m_efm_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
+  m_efm_demodulator(log, sample_frequency, SdtvRfDemodulatorConstants::c_sample_block_size,
                     FirFilterStage::simdSupported(), true,
                     EfmDemodulator::defaultLog2Decimation(sample_frequency), efm_adaptive_filter_size, std::nullopt),
-  m_analog_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
+  m_analog_demodulator(log, sample_frequency, SdtvRfDemodulatorConstants::c_sample_block_size,
                        48000.0, FirFilterStage::simdSupported(),
                        video_standard.audio_left_hz, video_standard.audio_right_hz),
-  m_ac3_demodulator(log, sample_frequency, NtscRfDemodulatorConstants::c_sample_block_size,
+  m_ac3_demodulator(log, sample_frequency, SdtvRfDemodulatorConstants::c_sample_block_size,
                     FirFilterStage::simdSupported()),
   m_ac3_decoder(log),
   m_efm_enabled(audio_track == AudioTrack::eEfm),
@@ -50,7 +50,7 @@ NtscRfDemodulator::NtscRfDemodulator(Logger &log, std::string executable_dir, st
     assert(c_sample_block_size % m_ac3_demodulator.inputSampleAlignment() == 0);
 }
 
-void NtscRfDemodulator::demodulate() {
+void SdtvRfDemodulator::demodulate() {
     assert(c_sample_block_size % c_video_decimation_rate == 0);
 
     CommandPool command_pool(m_vulkan_manager);
@@ -98,7 +98,7 @@ void NtscRfDemodulator::demodulate() {
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(lowpass_filter_def.size()), lowpass_filter_def);
 
     // FIR cleanup lowpass at the decimated rate.  The video de-emphasis is NOT
-    // applied here: it lives in the frame domain (ntsc_deemphasis.comp),
+    // applied here: it lives in the frame domain (sdtv_deemphasis.comp),
     // where the line-locked 4 fsc grid makes its coefficients independent of
     // the capture sample rate.
     const float decimated_frequency = m_sample_frequency / c_video_decimation_rate;
@@ -230,7 +230,7 @@ void NtscRfDemodulator::demodulate() {
             new ComputeShader(m_vulkan_manager,
                               "detect_dropouts_envelope",
                               {local_envelope_buffer, envelope_prefix, dropout_buffer, lowpass_in_buffer}, 12 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts_envelope.comp"), Size(NtscRfDemodulatorConstants::c_video_block_size)));
+                              VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts_envelope.comp"), Size(SdtvRfDemodulatorConstants::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
     // will have undefined output otherwise.
@@ -262,7 +262,7 @@ void NtscRfDemodulator::demodulate() {
     struct EfmWorker {
         std::mutex mutex;
         std::condition_variable cv;
-        std::deque<unique_ptr<NtscDemodulatedBlock>> queue;
+        std::deque<unique_ptr<SdtvDemodulatedBlock>> queue;
         bool stop = false;
         std::thread thread; // last member: joined before the state above goes away
 
@@ -295,7 +295,7 @@ void NtscRfDemodulator::demodulate() {
             return std::chrono::duration<double, std::milli>(b - a).count();
         };
         while (true) {
-            unique_ptr<NtscDemodulatedBlock> block;
+            unique_ptr<SdtvDemodulatedBlock> block;
             {
                 std::unique_lock<std::mutex> lock(efm.mutex);
                 efm.cv.wait(lock, [&] { return efm.stop || !efm.queue.empty(); });
@@ -372,7 +372,7 @@ void NtscRfDemodulator::demodulate() {
         auto t_after_read = timing_clock::now();
 
         // First get a free output block to write to
-        unique_ptr<NtscDemodulatedBlock> block = nullptr;
+        unique_ptr<SdtvDemodulatedBlock> block = nullptr;
         {
             std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
             if (m_input_is_fifo && m_vacant_blocks.empty() && !m_filled_blocks.empty()) {
@@ -384,7 +384,7 @@ void NtscRfDemodulator::demodulate() {
             }
             m_cv_vacant.wait(lock, [this] { return m_stop_request || !m_vacant_blocks.empty(); });
             if (m_stop_request) {
-                m_log.info(eInput, "NtscRfDemodulator: stop requested");
+                m_log.info(eInput, "SdtvRfDemodulator: stop requested");
                 break;
             }
             block = std::move(m_vacant_blocks.front());
@@ -449,7 +449,7 @@ void NtscRfDemodulator::demodulate() {
         // maximum-length dropout cannot drag it down (32 blocks at 40 MHz)
         const uint32_t window_blocks = (uint32_t)lround(205e-6 * m_sample_frequency / c_envelope_block);
         command_buffer->enqueueComputeShader<uint32_t>(
-                detect_dropouts_shader, {NtscRfDemodulatorConstants::c_video_block_size, 1u, (uint32_t)dropout_delay, c_video_decimation_rate,
+                detect_dropouts_shader, {SdtvRfDemodulatorConstants::c_video_block_size, 1u, (uint32_t)dropout_delay, c_video_decimation_rate,
                                          line_period,
                                          std::bit_cast<uint32_t>(0.49f), std::bit_cast<uint32_t>(0.25f),
                                          (uint32_t)lowpass_filter_def.size() - 1, std::bit_cast<uint32_t>(slew_threshold),
@@ -462,7 +462,7 @@ void NtscRfDemodulator::demodulate() {
                                        vk::PipelineStageFlagBits::eTransfer);
 
         // Copy data from dropout detection to the output buffer before writing over the first part of the buffer below
-        command_buffer->enqueueCopyBuffer(*dropout_buffer, *block->dropouts, 0, 0, NtscRfDemodulatorConstants::c_video_block_size * sizeof(uint8_t));
+        command_buffer->enqueueCopyBuffer(*dropout_buffer, *block->dropouts, 0, 0, SdtvRfDemodulatorConstants::c_video_block_size * sizeof(uint8_t));
 
         // Ensure data can be read from the host later
         block->video_data->synchronizeForHostRead(*command_buffer);

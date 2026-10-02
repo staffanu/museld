@@ -1,8 +1,8 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
-#ifndef MUSECPP_NTSCINPUTBLOCK_H
-#define MUSECPP_NTSCINPUTBLOCK_H
+#ifndef MUSECPP_SDTVINPUTBLOCK_H
+#define MUSECPP_SDTVINPUTBLOCK_H
 
 #include <cstdint>
 #include <array>
@@ -13,9 +13,9 @@
 // A block contains a full frame of composite video, line locked on the
 // standard's sampling grid (4 fsc = 14.3182 MHz for NTSC, 1135 samples per
 // line = 17.734 MHz for PAL): total_lines rows of samples_per_line
-class NtscInputBlock : public InputBlockBase {
+class SdtvInputBlock : public InputBlockBase {
 public:
-    NtscInputBlock(const VideoStandard &standard, std::shared_ptr<musevk::VulkanBuffer> v,
+    SdtvInputBlock(const VideoStandard &standard, std::shared_ptr<musevk::VulkanBuffer> v,
                    std::shared_ptr<musevk::VulkanBuffer> d)
             : InputBlockBase(),
               video_standard(standard),
@@ -44,9 +44,9 @@ public:
 };
 
 template<>
-class InputBlockFactory<NtscInputBlock> {
+class InputBlockFactory<SdtvInputBlock> {
 public:
-    static std::unique_ptr<NtscInputBlock> makeBlock(musevk::VulkanManager &manager, const VideoStandard &standard) {
+    static std::unique_ptr<SdtvInputBlock> makeBlock(musevk::VulkanManager &manager, const VideoStandard &standard) {
         // video_data is written by the reader thread but also READ back by the
         // decoder's noise/level estimation, so it must not end up in uncached
         // (write-combined) memory: on discrete GPUs eHostWrite's first choice
@@ -56,7 +56,7 @@ public:
         // copy that synchronizeHostWrites already maintains.  dropout_data is
         // only ever read by the GPU, so plain eHostWrite stays right for it.
         const size_t samples = (size_t)standard.samples_per_line * standard.total_lines;
-        return std::make_unique<NtscInputBlock>(
+        return std::make_unique<SdtvInputBlock>(
                 standard,
                 std::make_unique<musevk::VulkanBuffer>(manager, samples, sizeof(float),
                                                        vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostReadWrite),
@@ -66,4 +66,4 @@ public:
     }
 };
 
-#endif //MUSECPP_NTSCINPUTBLOCK_H
+#endif //MUSECPP_SDTVINPUTBLOCK_H

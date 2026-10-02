@@ -1,7 +1,7 @@
 #version 450
 
 // Video de-emphasis of the concealed composite, the second half of what was
-// ntsc_copy_to_frame.comp.  The filter is causal and reads backwards in
+// sdtv_copy_to_frame.comp.  The filter is causal and reads backwards in
 // time; rows are contiguous in time, so before column 0 it continues on the
 // tail of the previous row, which makes it a plain 1D FIR over the frame
 // flattened row-major (before the first sample it repeats the first
@@ -17,7 +17,7 @@
 // stays bit-identical to it.
 //
 // This shader should be invoked with global invocation ids from 0 to
-// NTSC_TOTAL_WIDTH * NTSC_TOTAL_HEIGHT / PER_INVOCATION - 1, in
+// SDTV_TOTAL_WIDTH * SDTV_TOTAL_HEIGHT / PER_INVOCATION - 1, in
 // one-dimensional workgroups.
 
 #include "muse.h"
@@ -28,7 +28,7 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(set = 0, binding = 0) buffer readonly concealed_in_buffer {
-    float concealed_in[]; // NTSC_TOTAL_HEIGHT rows of NTSC_TOTAL_WIDTH, flattened
+    float concealed_in[]; // SDTV_TOTAL_HEIGHT rows of SDTV_TOTAL_WIDTH, flattened
 };
 
 layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
@@ -44,7 +44,7 @@ layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
 // must run before the clamp below, while emphasis overshoots are still intact.
 // The same time constants apply to PAL discs; its taps are the same filter
 // on the 17.734375 MHz PAL grid.
-#ifdef PAL_GEOMETRY
+#ifdef SDTV_PAL
 const float deemphasis[24] = float[](
     0.42985168, 0.09394670, 0.07873266, 0.06598243, 0.05529702, 0.04634204,
     0.03883725, 0.03254782, 0.02727692, 0.02285960, 0.01915764, 0.01605519,
@@ -62,7 +62,7 @@ const int TAPS = 24;
 const int PER_INVOCATION = 4;
 
 void main() {
-    const int total = NTSC_TOTAL_WIDTH * NTSC_TOTAL_HEIGHT;
+    const int total = SDTV_TOTAL_WIDTH * SDTV_TOTAL_HEIGHT;
     int first_out = int(gl_GlobalInvocationID.x) * PER_INVOCATION;
 
     if (first_out >= total)

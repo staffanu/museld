@@ -7,7 +7,7 @@
 #include <vector>
 
 // The composite video standard a laserdisc capture follows, as the SD
-// (ntsc/) pipeline needs it: the line-locked sampling grid of the frame
+// (sdtv/) pipeline needs it: the line-locked sampling grid of the frame
 // buffer, where the picture sits in it, the frame rate, the RF carrier, and
 // the lines the Philips code rides on.  NTSC is the standard the pipeline
 // was written for, and its constants are also the shaders' NTSC_* macros
@@ -76,6 +76,10 @@ struct VideoStandard {
     bool has_white_flag;          // the 100 IRE film frame flag on a VBI line
     bool has_film_cadence;        // 3:2 pulldown
     double luma_bandwidth_hz;     // for the SNR report
+
+    // The chroma demodulation window reaches this far past the picture
+    // columns (SDTV_CHROMA_TAP_HALO in the shaders)
+    static constexpr int c_chroma_tap_halo = 9;
 
     [[nodiscard]] double framesPerSecond() const { return (double)fps_num / fps_den; }
     [[nodiscard]] double frameDurationMs() const { return 1e3 * fps_den / fps_num; }

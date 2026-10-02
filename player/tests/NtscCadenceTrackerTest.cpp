@@ -3,8 +3,7 @@
 
 #include <catch2/catch_all.hpp>
 #include <vector>
-#include "ntsc/NtscCadenceTracker.h"
-#include "ntsc/NtscConstants.h"
+#include "sdtv/NtscCadenceTracker.h"
 #include "musevk/HalfFloatUtil.h"
 
 using FA = NtscCadenceTracker::FieldAction;
@@ -251,16 +250,16 @@ TEST_CASE("the noise hint blocks false repeats from weak periodic motion") {
 }
 
 TEST_CASE("MeasureFieldDiffs measures per field and nulls the subcarrier") {
-    std::vector<int16_t> cur(NTSC_TOTAL_WIDTH * NTSC_TOTAL_HEIGHT);
-    std::vector<int16_t> prev(NTSC_TOTAL_WIDTH * NTSC_TOTAL_HEIGHT);
+    std::vector<int16_t> cur(NtscCadenceTracker::c_frame_width * NtscCadenceTracker::c_frame_height);
+    std::vector<int16_t> prev(NtscCadenceTracker::c_frame_width * NtscCadenceTracker::c_frame_height);
     auto h = [](float v) { return (int16_t)HalfFloatUtil::float_to_half(v); };
 
     SECTION("luma step in the second field only") {
         std::fill(cur.begin(), cur.end(), h(0.3f));
         std::fill(prev.begin(), prev.end(), h(0.3f));
         for (int row = 300; row < 400; row++)
-            for (int x = 0; x < NTSC_TOTAL_WIDTH; x++)
-                cur[row * NTSC_TOTAL_WIDTH + x] = h(0.4f);
+            for (int x = 0; x < NtscCadenceTracker::c_frame_width; x++)
+                cur[row * NtscCadenceTracker::c_frame_width + x] = h(0.4f);
         auto d = NtscCadenceTracker::MeasureFieldDiffs(cur.data(), prev.data());
         REQUIRE(d.d0 < 0.001f);
         REQUIRE(d.d1 > 0.02f);
@@ -268,10 +267,10 @@ TEST_CASE("MeasureFieldDiffs measures per field and nulls the subcarrier") {
 
     SECTION("chroma that inverts between frames cancels in the box") {
         static constexpr float pat[4] = {0.2f, 0.0f, -0.2f, 0.0f};
-        for (int row = 0; row < NTSC_TOTAL_HEIGHT; row++)
-            for (int x = 0; x < NTSC_TOTAL_WIDTH; x++) {
-                cur[row * NTSC_TOTAL_WIDTH + x] = h(0.3f + pat[x % 4]);
-                prev[row * NTSC_TOTAL_WIDTH + x] = h(0.3f - pat[x % 4]);
+        for (int row = 0; row < NtscCadenceTracker::c_frame_height; row++)
+            for (int x = 0; x < NtscCadenceTracker::c_frame_width; x++) {
+                cur[row * NtscCadenceTracker::c_frame_width + x] = h(0.3f + pat[x % 4]);
+                prev[row * NtscCadenceTracker::c_frame_width + x] = h(0.3f - pat[x % 4]);
             }
         auto d = NtscCadenceTracker::MeasureFieldDiffs(cur.data(), prev.data());
         REQUIRE(d.d0 < 0.002f);

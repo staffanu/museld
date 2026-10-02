@@ -9,18 +9,17 @@
 #include <format>
 #include "musevk/VulkanManager.h"
 #include "musevk/TimestampQueryPool.h"
-#include "NtscDecoder.h"
-#include "NtscConstants.h"
+#include "SdtvDecoder.h"
 #include "FrameReader.h"
-#include "NtscInputBlock.h"
-#include "NtscShaders.h"
+#include "SdtvInputBlock.h"
+#include "SdtvShaders.h"
 #include "util/RobustNoise.h"
 #include "musevk/HalfFloatUtil.h"
 
 using namespace std;
 
-NtscDecoder::NtscDecoder(
-        Logger &log, FrameReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
+SdtvDecoder::SdtvDecoder(
+        Logger &log, FrameReader<SdtvInputBlock> &reader, musevk::VulkanManager &manager,
         musevk::CommandPool &command_pool, std::string const &executable_dir,
         bool decode_video, bool decode_all_fields, bool decode_audio,
         float tint_degrees, float saturation,
@@ -31,7 +30,7 @@ NtscDecoder::NtscDecoder(
   m_reader(reader),
   m_manager(manager),
   m_standard(video_standard),
-  m_shaders(NtscShaders(log, executable_dir, manager, command_pool, video_standard)),
+  m_shaders(SdtvShaders(log, executable_dir, manager, command_pool, video_standard)),
   m_decode_video(decode_video),
   m_decode_all_fields(decode_all_fields),
   m_decode_audio(decode_audio),
@@ -73,7 +72,7 @@ NtscDecoder::NtscDecoder(
   m_pending_audio(),
   m_pending_audio_mode(MODE_UNKNOWN),
   m_frames() {
-    // 185.8 degrees is the structural 180 (see ntsc_decode_single_field.comp)
+    // 185.8 degrees is the structural 180 (see sdtv_decode_single_field.comp)
     // plus the offset calibrated against the Video Essentials colorbars
     // (sRGB-linearized bar measurements null the mean hue error); the residual
     // is source-dependent (differential phase of the player and disc), which
@@ -83,7 +82,7 @@ NtscDecoder::NtscDecoder(
     m_rot_im = saturation * cosf(a);
 }
 
-NtscDecoder::~NtscDecoder() {
+SdtvDecoder::~SdtvDecoder() {
     while (!m_frames.empty()) {
         delete m_frames.back();
         m_frames.pop_back();
@@ -91,12 +90,12 @@ NtscDecoder::~NtscDecoder() {
     m_manager.getDevice().destroy(m_first_stage_complete_semaphore);
 }
 
-bool NtscDecoder::initialize() {
+bool SdtvDecoder::initialize() {
     // Newest read frame (the lookahead) at index 0, the displayed frame at
     // index 1, and its two-frame history behind it -- pretend they all exist
     // already so the first reads decode blank frames instead of special cases
     for (int i = 0; i < 4; i++)
-        m_frames.push_back(new NtscFrame(m_log, -i, m_manager, m_standard));
+        m_frames.push_back(new SdtvFrame(m_log, -i, m_manager, m_standard));
 
     m_frame_no = 0;
     m_field_index = 0;
@@ -113,7 +112,7 @@ bool NtscDecoder::initialize() {
 // two are required before latching so a chance pattern in PCM cannot flip a
 // frame into bitstream mode; once latched, it takes ~4 s without any sync word
 // (a video frame holds at most a few DTS frames) to fall back to PCM.
-bool NtscDecoder::detectDtsBitstream(const std::vector<TwoChannelSampleWithErasureFlags> &raw_samples) {
+bool SdtvDecoder::detectDtsBitstream(const std::vector<TwoChannelSampleWithErasureFlags> &raw_samples) {
     int syncs = 0;
     uint16_t prev = 0;
     for (const auto &s : raw_samples)
@@ -137,7 +136,7 @@ bool NtscDecoder::detectDtsBitstream(const std::vector<TwoChannelSampleWithErasu
 }
 
 // For NTSC, enable_non_linear is not implemented
-bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
+bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
     const AudioTrack audio_track = controls.audio_track;
     const bool use_3d_comb = controls.use_3d_comb;
     const FieldInterpolationMode field_interpolation_mode = controls.field_interpolation_mode;
@@ -165,7 +164,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         t_prev = now;
     };
 
-    std::unique_ptr<NtscInputBlock> input_block = nullptr;
+    std::unique_ptr<SdtvInputBlock> input_block = nullptr;
     InputStatus input_status = InputStatus::eNormal;
     if (m_field_index == 0 && !redo_last_field) {
         tie(input_block, input_status) = m_reader.getNextInputBuffer();
@@ -203,7 +202,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
             m_log.info(eDecoder, "black level: signal re-acquired, measuring the disc's black afresh");
         }
 
-        auto noise_estimate = NtscFrame::EstimateNoise(input_block->video_data->data<float>(), m_standard);
+        auto noise_estimate = SdtvFrame::EstimateNoise(input_block->video_data->data<float>(), m_standard);
         if (m_noise.sigma_blanking < 0) {
             m_noise = noise_estimate;
             m_blanking_avg = noise_estimate.blanking_level;
@@ -238,7 +237,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // decay is only so a spurious low (a dropout burst) washes out; a
         // disc change resets the whole thing above.
         {
-            using NE = NtscFrame::NoiseEstimate;
+            using NE = SdtvFrame::NoiseEstimate;
             double total = 0;
             for (int i = 0; i < NE::c_luma_hist_bins; i++) {
                 m_luma_hist[i] = 0.98 * m_luma_hist[i] + noise_estimate.luma_hist[i];
@@ -307,7 +306,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
             m_level_offset_v = (float)m_blanking_avg;
         if (m_white_flag_frames >= 30)
             m_level_scale = std::clamp(1.0f / ((float)m_white_avg - m_level_offset_v), 1.1f, 1.9f);
-        m_noise_psd_windows += NtscFrame::AccumulateNoisePsd(input_block->video_data->data<float>(),
+        m_noise_psd_windows += SdtvFrame::AccumulateNoisePsd(input_block->video_data->data<float>(),
                                                              m_noise_psd.data(), 3.0f * m_noise.sigma_blanking, m_standard);
         if (m_frame_no % 30 == 0 && m_noise.sigma_blanking > 0) {
             // 100 IRE = the blanking-to-white span of 0.7 voltage units.  These
@@ -334,7 +333,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                                     : std::format("{:.3f} V ({} frames)", m_white_avg, m_white_flag_frames),
                     m_level_scale, 1.0f / 0.7f));
             {
-                using NE = NtscFrame::NoiseEstimate;
+                using NE = SdtvFrame::NoiseEstimate;
                 double total = 0, dark = 0;
                 for (int i = 0; i < NE::c_luma_hist_bins; i++) {
                     total += m_luma_hist[i];
@@ -356,7 +355,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
                 // 5 MHz for PAL), apply the frame-domain de-emphasis response
                 // (|D|² of the bilinear transform of D(s) = (1 + s 120 ns) /
                 // (1 + s 320 ns) at the frame buffer's sampling rate, as in
-                // ntsc_deemphasis.comp), and weight with the Rec. 567 unified
+                // sdtv_deemphasis.comp), and weight with the Rec. 567 unified
                 // network (BT.1439 Annex 2 §3: τ = 245 ns, a = 4.5).  IEC
                 // 60857 12.2.2 requires ≥ 30 dB unweighted at the video
                 // output, i.e. the after-de-emphasis figure.
@@ -426,7 +425,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
         out.last_frame_buffer_input_offset = m_frames[1]->getInputOffset();
-        out.input_samples_per_muse_sample = m_frames[1]->getInputSamplesPerNtscSample();
+        out.input_samples_per_muse_sample = m_frames[1]->getInputSamplesPerSdtvSample();
         out.field_parity = decoded_field_index;
 
         // The illegal-level bounds in the decode shader are scaled from the
@@ -736,11 +735,11 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     return true;
 }
 
-Decoder::SourceDimensions NtscDecoder::getSourceDimensions() const {
+Decoder::SourceDimensions SdtvDecoder::getSourceDimensions() const {
     return {m_standard.y_buf_width, m_standard.field_lines * 2, m_standard.y_buf_width, m_standard.field_lines};
 }
 
-std::optional<Decoder::PixelFileOffsets> NtscDecoder::computePixelFileOffsets(
+std::optional<Decoder::PixelFileOffsets> SdtvDecoder::computePixelFileOffsets(
         int field_x, int field_y, int field_parity,
         int64_t buffer_file_offset, double input_samples_per_muse_sample) const {
     // Composite frame buffer coordinates: field rows start at line
@@ -758,10 +757,10 @@ std::optional<Decoder::PixelFileOffsets> NtscDecoder::computePixelFileOffsets(
     return r;
 }
 
-void NtscDecoder::outputBenchmarkResults() {
+void SdtvDecoder::outputBenchmarkResults() {
     m_timestamp_statistics.print_stats(3);
 }
 
-ResultImages NtscDecoder::getResultImages() {
+ResultImages SdtvDecoder::getResultImages() {
     return m_shaders.getResultImages();
 }
