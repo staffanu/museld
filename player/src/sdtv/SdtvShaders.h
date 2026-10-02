@@ -1,8 +1,8 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
-#ifndef MUSECPP_NTSCSHADERS_H
-#define MUSECPP_NTSCSHADERS_H
+#ifndef MUSECPP_SDTVSHADERS_H
+#define MUSECPP_SDTVSHADERS_H
 
 #include <array>
 #include <string>
@@ -10,23 +10,23 @@
 #include "musevk/VulkanManager.h"
 #include "musevk/CommandPool.h"
 #include "DropoutMode.h"
-#include "NtscFieldView.h"
-#include "NtscFrame.h"
+#include "SdtvFieldView.h"
+#include "SdtvFrame.h"
 #include "logging/Logger.h"
 #include "ResultImages.h"
 #include "VideoStandard.h"
 
 // The SD GPU pipeline.  The buffers are sized and the dispatches issued for
 // the given standard's geometry, and the shaders loaded are that standard's
-// build of the ntsc_*.comp sources (ntsc_*.spv or pal_*.spv).
-class NtscShaders {
+// build of the sdtv_*.comp sources (ntsc_*.spv or pal_*.spv).
+class SdtvShaders {
 public:
-  NtscShaders(Logger &log, std::string const &executable_dir, musevk::VulkanManager &manager,
+  SdtvShaders(Logger &log, std::string const &executable_dir, musevk::VulkanManager &manager,
               musevk::CommandPool &command_pool, const VideoStandard &standard);
 
-  NtscShaders(NtscShaders &other) = delete;
+  SdtvShaders(SdtvShaders &other) = delete;
 
-  void operator=(const NtscShaders &) = delete;
+  void operator=(const SdtvShaders &) = delete;
 
   void extendDropouts(musevk::CommandBuffer &sq,
                       std::shared_ptr<musevk::VulkanBuffer> const &dropout_input,
@@ -40,9 +40,9 @@ public:
 
   // Filter the raw frame data for luma and color using notch and bandpass filters respectively
   // Also fills in the color burst phase information
-  void detectColorBurstPhase(musevk::CommandBuffer &sq, NtscFrame *frame);
+  void detectColorBurstPhase(musevk::CommandBuffer &sq, SdtvFrame *frame);
 
-  void decodeSingleField(musevk::CommandBuffer &sq, NtscFieldView &field,
+  void decodeSingleField(musevk::CommandBuffer &sq, SdtvFieldView &field,
                          std::shared_ptr<musevk::VulkanBuffer> const &prev_frame,
                          std::shared_ptr<musevk::VulkanBuffer> const &next_frame,
                          std::shared_ptr<musevk::VulkanBuffer> const &prev_burst,
@@ -101,7 +101,7 @@ private:
 
   // per-column chroma estimates for the field being decoded, between the
   // chroma taps and the single field shader (field_lines rows of
-  // y_buf_width + 2 * NTSC_CHROMA_TAP_HALO f16vec4)
+  // y_buf_width + 2 * c_chroma_tap_halo f16vec4)
   std::shared_ptr<musevk::VulkanBuffer> m_chroma_taps;
 
   // output from the single field decoder, one set per field parity so that
@@ -128,4 +128,4 @@ private:
 };
 
 
-#endif //MUSECPP_NTSCSHADERS_H
+#endif //MUSECPP_SDTVSHADERS_H

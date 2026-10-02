@@ -7,27 +7,27 @@
 // interval is never flagged: concealment there would corrupt the white flag
 // and the picture number codes.
 //
-// The flags arrive packed one bit per column by ntsc_pack_dropout_bits.comp
+// The flags arrive packed one bit per column by sdtv_pack_dropout_bits.comp
 // (which also masks out the columns outside the active picture), so each
 // pixel's 47-column neighbourhood is at most four words, and the run
 // statistics are bit counts and bit scans rather than one byte load per
 // neighbour -- the byte version cost ~70 loads on every clean pixel.
 //
 // This shader should be invoked with global invocation ids ranging from
-// (0, 0) to (NTSC_TOTAL_WIDTH, NTSC_TOTAL_HEIGHT).
+// (0, 0) to (SDTV_TOTAL_WIDTH, SDTV_TOTAL_HEIGHT).
 
 #include "muse.h"
 
 layout(set = 0, binding = 0) buffer readonly dropout_bits_buffer {
-    uint dropout_bits[][NTSC_DROPOUT_BIT_WORDS];
+    uint dropout_bits[][SDTV_DROPOUT_BIT_WORDS];
 };
 
 layout(set = 0, binding = 1) buffer writeonly dropout_out_buffer {
-    uint8_t dropout_out[][NTSC_TOTAL_WIDTH];
+    uint8_t dropout_out[][SDTV_TOTAL_WIDTH];
 };
 
 uint word(uint row, int w) {
-    return (w < 0 || w >= NTSC_DROPOUT_BIT_WORDS) ? 0u : dropout_bits[row][w];
+    return (w < 0 || w >= SDTV_DROPOUT_BIT_WORDS) ? 0u : dropout_bits[row][w];
 }
 
 uint pick(uvec4 words, int k) {
@@ -50,10 +50,10 @@ void main() {
     uint row = gl_GlobalInvocationID.y;
     int col = int(gl_GlobalInvocationID.x);
 
-    if (row >= NTSC_TOTAL_HEIGHT || col >= NTSC_TOTAL_WIDTH)
+    if (row >= SDTV_TOTAL_HEIGHT || col >= SDTV_TOTAL_WIDTH)
         return;
 
-    if (row % NTSC_FIELD2_OFFSET < NTSC_FIELD_START_Y - 1) {
+    if (row % SDTV_FIELD2_OFFSET < SDTV_FIELD_START_Y - 1) {
         dropout_out[row][col] = uint8_t(0);
         return;
     }

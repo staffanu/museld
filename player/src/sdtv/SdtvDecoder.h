@@ -1,8 +1,8 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
-#ifndef MUSECPP_NTSCDECODER_H
-#define MUSECPP_NTSCDECODER_H
+#ifndef MUSECPP_SDTVDECODER_H
+#define MUSECPP_SDTVDECODER_H
 
 #include <array>
 #include <deque>
@@ -11,35 +11,35 @@
 #include "efm/EfmDecoder.h"
 #include "efm/EfmPcmProcessor.h"
 #include "musevk/CommandPool.h"
-#include "NtscInputBlock.h"
+#include "SdtvInputBlock.h"
 #include "VbiData.h"
 #include "Decoder.h"
 #include "NtscCadenceTracker.h"
-#include "NtscFrame.h"
-#include "NtscShaders.h"
+#include "SdtvFrame.h"
+#include "SdtvShaders.h"
 
 namespace musevk {
     class TimestampQueryPool;
 }
 template<class InputBlock> class FrameReader;
 class Logger;
-class NtscShaders;
+class SdtvShaders;
 
-class NtscDecoder : public Decoder {
+class SdtvDecoder : public Decoder {
 public:
     /// \param decode_all_fields If false, skips decoding of the first field of each
     /// frame individually, so next should be called 30 times per second instead of 60;
     /// useful for slow hardware.
-    NtscDecoder(
-            Logger &log, FrameReader<NtscInputBlock> &reader, musevk::VulkanManager &manager,
+    SdtvDecoder(
+            Logger &log, FrameReader<SdtvInputBlock> &reader, musevk::VulkanManager &manager,
             musevk::CommandPool &command_pool, std::string const &executable_dir,
             bool decode_video, bool decode_all_fields, bool decode_audio,
             float tint_degrees, float saturation,
             musevk::TimestampQueryPool *timestamp_query_pool,
             const VideoStandard &video_standard);
-    ~NtscDecoder();
-    NtscDecoder(const NtscDecoder&) = delete;
-    void operator=(const NtscDecoder&) = delete;
+    ~SdtvDecoder();
+    SdtvDecoder(const SdtvDecoder&) = delete;
+    void operator=(const SdtvDecoder&) = delete;
 
     [[nodiscard]] bool initialize() override;
 
@@ -59,10 +59,10 @@ private:
     bool detectDtsBitstream(const std::vector<TwoChannelSampleWithErasureFlags> &raw_samples);
 
     Logger &m_log;
-    FrameReader<NtscInputBlock> &m_reader;
+    FrameReader<SdtvInputBlock> &m_reader;
     musevk::VulkanManager &m_manager;
     const VideoStandard &m_standard;
-    NtscShaders m_shaders;
+    SdtvShaders m_shaders;
     const bool m_decode_video;
     const bool m_decode_all_fields;
     const bool m_decode_audio;
@@ -71,14 +71,14 @@ private:
     std::pair<float, float> m_eq;
     float m_rot_re; // chroma rotation/gain for the decode shader; set in the constructor
     float m_rot_im;
-    NtscFrame::NoiseEstimate m_noise; // EWMA-smoothed, reader voltage units
+    SdtvFrame::NoiseEstimate m_noise; // EWMA-smoothed, reader voltage units
     double m_blanking_avg;            // EWMA of the per-frame blanking level ...
     double m_blanking_sq_avg;         // ... and of its square, for the wander σ
     double m_white_avg;               // EWMA of the white flag level, -1 until first seen
     long m_white_flag_frames;         // frames whose white flag qualified
     float m_level_offset_v;           // rescale applied by the copy shader:
     float m_level_scale;              // out = (v - offset) * scale
-    std::array<double, NtscFrame::NoiseEstimate::c_luma_hist_bins> m_luma_hist; // decaying sum of the per-frame histograms
+    std::array<double, SdtvFrame::NoiseEstimate::c_luma_hist_bins> m_luma_hist; // decaying sum of the per-frame histograms
     double m_black_peak_v;            // its dark peak, volts above blanking (the disc's black setup); -1 until seeded
     double m_black_lowest_v;          // the lowest significant dark peak (letterbox mattes, fades); -1 until seeded
     double m_black_peak_min_v;        // its minimum, decaying over minutes: the disc's black, held through bright scenes
@@ -107,7 +107,7 @@ private:
            m_sec_vbi_ms = 0, m_sec_cadence_ms = 0, m_sec_audio_ms = 0, m_sec_gpu2_wait_ms = 0;
     int m_timed_frames = 0;
     NtscCadenceTracker m_cadence;
-    // Which displayed frame each per-parity field buffer set in NtscShaders
+    // Which displayed frame each per-parity field buffer set in SdtvShaders
     // currently holds: input starvation can skip a field decode, and a
     // cadence weave/hold must not touch a buffer one frame older than the
     // cadence assumes
@@ -134,8 +134,8 @@ private:
     std::vector<std::array<uint8_t, 1536>> m_pending_ac3_frames;
     // The front (index 0) is the newest received frame N+1 (the lookahead);
     // index 1 is the frame being decoded, 2 and 3 its history.
-    std::deque<NtscFrame *> m_frames;
+    std::deque<SdtvFrame *> m_frames;
 };
 
 
-#endif //MUSECPP_NTSCDECODER_H
+#endif //MUSECPP_SDTVDECODER_H

@@ -1,8 +1,8 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
-// Chroma comb taps shared by ntsc_chroma_taps.comp (which evaluates them once
-// per column) and ntsc_decode_single_field.comp (which still needs them on
+// Chroma comb taps shared by sdtv_chroma_taps.comp (which evaluates them once
+// per column) and sdtv_decode_single_field.comp (which still needs them on
 // the rescue and donor paths).  The including shader declares input_frame,
 // prev_frame and next_frame before including this.
 

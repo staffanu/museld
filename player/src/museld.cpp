@@ -52,9 +52,9 @@
 #include "muse/MuseDecoder.h"
 #include "muse/MuseConstants.h"
 #include <numeric>
-#include "ntsc/VideoStandard.h"
-#include "ntsc/NtscFrameReader.h"
-#include "ntsc/NtscDecoder.h"
+#include "sdtv/VideoStandard.h"
+#include "sdtv/SdtvFrameReader.h"
+#include "sdtv/SdtvDecoder.h"
 #include "VideoWriterOptions.h"
 #include "CliOptions.h"
 
@@ -846,7 +846,7 @@ static void runPlayer(Logger &log,
     device.destroy(render_finished_semaphore);
 }
 
-// video_standard: the composite standard of an SD (NtscInputBlock) input, unused for MUSE
+// video_standard: the composite standard of an SD (SdtvInputBlock) input, unused for MUSE
 template<class InputBlock>
 void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, FrameReader<InputBlock> &reader,
                   const VideoStandard *video_standard,
@@ -936,7 +936,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     {
         std::vector<std::unique_ptr<InputBlock>> input_vulkan_buffers{};
         for (int i = 0; i < INPUT_BUFFER_COUNT; i++) {
-            if constexpr (std::is_same<InputBlock, NtscInputBlock>::value)
+            if constexpr (std::is_same<InputBlock, SdtvInputBlock>::value)
                 input_vulkan_buffers.push_back(InputBlockFactory<InputBlock>::makeBlock(manager, *video_standard));
             else
                 input_vulkan_buffers.push_back(InputBlockFactory<InputBlock>::makeBlock(manager));
@@ -1026,7 +1026,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             reader_controls.resetEqTaps = [muse_decoder]() { muse_decoder->resetEqTaps(); };
             decoder = std::move(mp);
         } else {
-            decoder = std::make_unique<NtscDecoder>(log, (FrameReader<NtscInputBlock> &)reader,
+            decoder = std::make_unique<SdtvDecoder>(log, (FrameReader<SdtvInputBlock> &)reader,
                                                     manager, command_pool, executable_dir,
                                                     decode_video, decode_all_fields, decode_audio,
                                                     tint_degrees, saturation,
@@ -1777,11 +1777,11 @@ int main(int argc, char *argv[]) {
                         const VideoStandard &standard = file_input_type == eNtscRf ? VideoStandard::ntsc()
                                                                                     : VideoStandard::pal();
                         subtitle_setup.ntsc_cc = standard.has_closed_captions;
-                        auto reader = make_unique<NtscFrameReader>(
+                        auto reader = make_unique<SdtvFrameReader>(
                                         log, executable_dir, manager, *it, input_format,
                                         file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
                                         efm_adaptive_filter_size, muse_output_filename, standard);
-                        process_file<NtscInputBlock>(log, executable_dir, manager, *reader, &standard, decode_all_fields,
+                        process_file<SdtvInputBlock>(log, executable_dir, manager, *reader, &standard, decode_all_fields,
                                                      full_screen, aspect_mode, full_image, overscan, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                      audio_track,
                                                      benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,

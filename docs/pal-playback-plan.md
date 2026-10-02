@@ -1,17 +1,19 @@
 # PAL Laserdisc Playback — Assessment and Plan
 
 Written 2026-09-02 from a survey of the NTSC path; line references are to the tree at that
-date.  Reviewed 2026-09-30 (corrections folded in below) and work started 2026-10-01 on the
+date (the class and file names were changed to their post-rename forms on 2026-10-02 --
+`Ntsc…` became `Sdtv…` for everything both standards share -- so a reference like
+`SdtvFrameReader.cpp:504` means the NTSC-only file of that date).  Reviewed 2026-09-30 (corrections folded in below) and work started 2026-10-01 on the
 `pal-playback` branch.
 
 ## Status (2026-10-01)
 
 Done, in one step rather than the phasing below (the probe is left for later):
 
-- `ntsc/VideoStandard.{h,cpp}`: the runtime descriptor the SD pipeline reads its geometry,
+- `sdtv/VideoStandard.{h,cpp}`: the runtime descriptor the SD pipeline reads its geometry,
   frame rate, RF carrier, VBI lines and noise windows from (`VideoStandard::ntsc()` /
-  `pal()`); `NtscInputBlock`, `NtscRfDemodulator`, `NtscFrameReader`, `NtscFrame`,
-  `NtscShaders`, `NtscDecoder` and `VbiData` take it.  The SD shaders are compiled twice,
+  `pal()`); `SdtvInputBlock`, `SdtvRfDemodulator`, `SdtvFrameReader`, `SdtvFrame`,
+  `SdtvShaders`, `SdtvDecoder` and `VbiData` take it.  The SD shaders are compiled twice,
   `ntsc_*.spv` and `pal_*.spv` (`-DPAL_GEOMETRY`, `shaders/muse/muse.h`); the literal
   NTSC geometry in their bodies became macros.
 - `--input-type pal-rf`: 1135 × 625 line-locked frame buffer at 17.734375 MHz, 944 × 576
@@ -20,7 +22,7 @@ Done, in one step rather than the phasing below (the probe is left for later):
   EFM audio, `--write` with BT.470BG tags, real-time pacing by the clock (the display loop
   otherwise runs at the 60 Hz refresh).  NTSC output is bit-identical to before.
 - Monochrome only: the PAL shader build takes the luma through a [1 2 2 2 1]/8
-  subcarrier-nulling filter (`ntsc_decode_single_field.comp` under `PAL_GEOMETRY`); the comb,
+  subcarrier-nulling filter (`sdtv_decode_single_field.comp` under `SDTV_PAL`); the comb,
   burst phase and motion shaders run but their colour output is discarded.
 - Verified on the NYCSTM captures (D515 and LD-V4400 players, CLV, EFM): sync supported on
   610 of 625 lines (the 15 vertical-interval lines), VBI chapter/time/picture decode, both
@@ -94,37 +96,37 @@ an audio carrier cannot serve as a PAL detector.
   de-emphasis is the same. CX is standard-agnostic; the CX enable comes from the Philips
   code and stays so. Output level `c_output_level` (`.h:113`) was calibrated on NTSC and
   should be re-measured.
-- **`ntsc/NtscRfDemodulator`**: `c_center_frequency` 8.5 → ~7.33 MHz, deviation 0.85 →
+- **`sdtv/SdtvRfDemodulator`**: `c_center_frequency` 8.5 → ~7.33 MHz, deviation 0.85 →
   0.57 MHz (`.h:97-98`); bandpass/lowpass edges (`.cpp:72, 89, 101`); dropout detector
   literals `30000/1001 * 525` and the 40 MHz slew reference (`.cpp:397-398`);
   `numberOfBlockBuffers()` divides by 30 (`.h:88`).
-- **`museld.cpp`** (about six sites): window size from `NTSC_Y_BUF_WIDTH × 2·FIELD_HEIGHT`
+- **`museld.cpp`** (about six sites): window size from `SDTV_Y_BUF_WIDTH × 2·FIELD_HEIGHT`
   (:805-816); colour standard / DAR / fps (:858-869); `fields_per_second` pacing (:934);
   `InputType` enum, `--input-type` parsing, probe mapping and reader construction
   (:956-1103, :1418-1564).
 - **Geometry constants** are duplicated: `ntsc/NtscConstants.h` (4 defines) and
-  `shaders/muse/muse.h:22-27` (same 4 plus `NTSC_FIELD_START_X/Y`), with 129 hardcoded
-  again in `NtscDecoder.cpp:594`. Consolidate before adding a second standard.
+  `shaders/muse/muse.h:22-27` (same 4 plus `SDTV_FIELD_START_X/Y`), with 129 hardcoded
+  again in `SdtvDecoder.cpp:594`. Consolidate before adding a second standard.
 - **`InputProbe`**: see the dedicated section below.
 
 ## What needs new code (mechanical)
 
-- **Sync detection** (`NtscFrameReader.cpp:504-533`, lock logic at :326, :377, :385):
+- **Sync detection** (`SdtvFrameReader.cpp:504-533`, lock logic at :326, :377, :385):
   the vertical-sync half-line table hardcodes NTSC line numbers 1–9 / 263–272. PAL needs
   625/312.5 with its 2.5-line broad-pulse sequence and 2.5-line equalizing runs.
-- **VBI** (`NtscFrame.cpp`): white-flag / blank rows (:69, :130), Philips code lines
+- **VBI** (`SdtvFrame.cpp`): white-flag / blank rows (:69, :130), Philips code lines
   `{16,17,18,278,279,280,281}` (:206) → second field at +312/313; CC line 21 (:190)
   becomes a no-op (`cc_bytes` stays `nullopt`); burst columns 78..110 and porch windows
   (:50-52, :98) move to the 1135 grid. The IEC 60857 code patterns themselves (:237-300)
   are identical on PAL.
 - **`VbiData.cpp:57`**: `ntsc_fps` for CLV picture → time becomes 25.
-- **Frame buffer**: `NtscInputBlock.h:26-28` (910 × 525 @ 14.318 MHz) → 1135 × 625 @
+- **Frame buffer**: `SdtvInputBlock.h:26-28` (910 × 525 @ 14.318 MHz) → 1135 × 625 @
   17.734 MHz. Decide how to handle the +4 samples per frame from the 25 Hz offset (see
   colour, below).
 - **`NtscCadenceTracker`**: 3:2 pulldown only; inert on PAL, or grows 2:2 detection.
   Its 8-sample fsc-nulling box (`.cpp:75`) assumes the 4 fsc grid, as does
-  `ntsc_detect_motion.comp:22-23`.
-- **SNR reporting** in `NtscDecoder.cpp:230-264` hardcodes the System M sample rate,
+  `sdtv_detect_motion.comp:22-23`.
+- **SNR reporting** in `SdtvDecoder.cpp:230-264` hardcodes the System M sample rate,
   4.2 MHz bandwidth and Rec.567 weighting; PAL is 5.0/5.5 MHz.
 
 ## The hard part: colour
@@ -132,22 +134,22 @@ an audio carrier cannot serve as a PAL detector.
 Every stage of the chroma chain assumes NTSC subcarrier topology on a line-locked
 4 fsc grid:
 
-- `ntsc_detect_color_burst_phase.comp:19-27`: `col % 4` sine/cosine LUT demodulator,
+- `sdtv_detect_color_burst_phase.comp:19-27`: `col % 4` sine/cosine LUT demodulator,
   burst window at fixed columns, 20 IRE burst amplitude calibration.
-- `ntsc_decode_single_field.comp:99-113`: 3-line spatial comb assuming adjacent lines
+- `sdtv_decode_single_field.comp:99-113`: 3-line spatial comb assuming adjacent lines
   are 180° apart in subcarrier phase.
-- `ntsc_decode_single_field.comp:118-120, 350-353` and `NtscDecoder.cpp:580-583`:
+- `sdtv_decode_single_field.comp:118-120, 350-353` and `SdtvDecoder.cpp:580-583`:
   temporal (3D) comb assuming the subcarrier inverts frame to frame.
-- `ntsc_combine_still_and_moving.comp:117-140`: SMPTE C primaries → sRGB and the
+- `sdtv_combine_still_and_moving.comp:117-140`: SMPTE C primaries → sRGB and the
   NTSC CRT EOTF.
-- `ntsc_deemphasis.comp`: LaserVision de-emphasis FIR precomputed for the
+- `sdtv_deemphasis.comp`: LaserVision de-emphasis FIR precomputed for the
   4 × 3.58 MHz grid (same time constants on PAL, taps must be regenerated at 4 × 4.43 MHz).
-- Chroma rotation `185.8° + tint` in `NtscDecoder.cpp:72-74` is calibrated for I/Q.
+- Chroma rotation `185.8° + tint` in `SdtvDecoder.cpp:72-74` is calibrated for I/Q.
 
 PAL breaks all of this: V-axis switching per line, the ±45° swinging burst, the 4-field
 (8-field with the 25 Hz offset) sequence, and the non-integer 1135.0064 samples per line
 mean a line-locked grid gives no clean `% 4` phase LUT. The one piece that ports is the
-burst-referenced U/V demodulation at `ntsc_decode_single_field.comp:415-421`.
+burst-referenced U/V demodulation at `sdtv_decode_single_field.comp:415-421`.
 
 Sampling grid: **line-locked 1135 samples per line, with per-line burst phase.**
 Exact 4 fsc is 1135.0064 samples per line (integer only per frame: 709379), so no grid
@@ -228,8 +230,8 @@ Estimated size: ~100 lines plus the variable-length read.
 1. **Refactor, no behaviour change.** Consolidate geometry constants into one header
    shared with the shaders; introduce a video-standard descriptor (lines, field lines,
    samples per line, sampling frequency, line rate, fps, carrier centre/deviation, VBI
-   line numbers) and thread it through `NtscInputBlock`, `NtscFrameReader`, `NtscFrame`,
-   `NtscDecoder`, `NtscRfDemodulator`. Decide between runtime struct and template
+   line numbers) and thread it through `SdtvInputBlock`, `SdtvFrameReader`, `SdtvFrame`,
+   `SdtvDecoder`, `SdtvRfDemodulator`. Decide between runtime struct and template
    parameter; the existing `if constexpr` dispatch on block type in `museld.cpp` suggests
    a `PalInputBlock` alias over a templated block is the path of least resistance.
 2. **Probe.** Field-lag detection and `ePalRf`, testable on captures before anything

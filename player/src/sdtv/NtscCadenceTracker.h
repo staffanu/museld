@@ -35,11 +35,15 @@ public:
         float d1;
     };
 
+    // The NTSC frame buffer this tracker measures: 910 x 525 at 4 fsc
+    static constexpr int c_frame_width = 910;
+    static constexpr int c_frame_height = 525;
+
     // Mean absolute difference per field between two 910x525 half-float
     // frame buffers, through an 8-sample box whose nulls sit at fsc and its
     // harmonics on the 4 fsc grid: the subcarrier inverts between adjacent
     // frames, so a plain difference of still colored content would be twice
-    // the chroma (same trick as ntsc_detect_motion.comp).
+    // the chroma (same trick as sdtv_detect_motion.comp).
     static FieldDiffs MeasureFieldDiffs(int16_t const *cur, int16_t const *prev);
 
     explicit NtscCadenceTracker(Logger &log);

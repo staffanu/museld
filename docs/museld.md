@@ -387,8 +387,8 @@ run on the main thread. The GPU pipeline has two stages separated by a semaphore
 ### Data flow — NTSC
 
 ```
-RF capture (40 MHz) → NtscRfDemodulator → NtscFrameReader (timebase, resampling to 4 fsc)
-  → NtscFrame → Vulkan GPU shaders (sync burst detection, color filtering, field decode)
+RF capture (40 MHz) → SdtvRfDemodulator → SdtvFrameReader (timebase, resampling to 4 fsc)
+  → SdtvFrame → Vulkan GPU shaders (sync burst detection, color filtering, field decode)
   → GLFW window
 ```
 
