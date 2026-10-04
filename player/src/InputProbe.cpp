@@ -42,6 +42,20 @@ constexpr double c_ntsc_audio_cycles_per_line = 2.301e6 / c_ntsc_line_hz;
 // Common capture rates to snap the line-rate estimate to (DdD, cxadc, FX3).
 constexpr double c_known_rates[] = {28.63636e6, 35.79545e6, 40e6, 46.08e6, 50e6, 62.5e6, 64e6, 80e6, 100e6};
 
+// The field period test: the lines between consecutive vertical sync
+// groups, 262.5 on NTSC and 312.5 on PAL.  A vertical sync group is a run of
+// lines that spend most of their time at sync tip (the broad pulses: 2.5-3
+// lines; a normal line spends 7 % there), found by slicing the averaged
+// instantaneous frequency between its lowest percentile (inside the tip) and
+// the blanking level above it, and walking the chunk in line periods.  The
+// count is content-independent and immune to wow (an autocorrelation at the
+// field lag is not: wow moves the pulses by more than their width over a
+// field, so nothing lines up at any one lag).  The chunk this runs on is
+// read separately, sized from the measured line period: the line-period
+// chunks hold less than two PAL fields at 100 MHz.
+constexpr double c_field_chunk_fields = 3.5;      // PAL fields per chunk
+constexpr uint32_t c_field_chunk_max = 12u << 20; // at most 12M samples (48 MB)
+
 struct ChunkStats {
     double line_period;         // samples
     double line_strength;       // normalized autocorrelation at the peak
@@ -334,6 +348,67 @@ double foldSignificance(const vector<float> &x, int period) {
     return noise_var > 0 ? sqrt(profile_var / noise_var) : 0;
 }
 
+// Lines per field from one chunk, for a line period in input samples; 0 when
+// fewer than two vertical sync groups were found or they disagree
+double measureFieldLines(Logger &log, const string &filename, InputFormat format,
+                         int64_t offset, double line_period) {
+    const double want = c_field_chunk_fields * 312.5 * line_period + c_analytic_taps + 1;
+    // a multiple of 4: the lds reader unpacks four samples at a time
+    const auto chunk_samples = (uint32_t)min<double>(want, c_field_chunk_max) / 4 * 4;
+    auto samples = readChunkNear(log, filename, format, offset, chunk_samples);
+    if (samples.empty())
+        return 0;
+    auto analytic = analyticSignal(samples);
+    auto freq = instantaneousFrequency(analytic).first;
+    auto d = blockAverage(freq, c_block_average);
+    const double period = line_period / c_block_average;
+    if (d.size() < 2 * 313 * period)
+        return 0;
+
+    // Sync tip slicing level: the tip holds the lowest ~7 % of the samples,
+    // so the 5th percentile is inside it, and the 25th sits at or above
+    // blanking, 40 IRE up; slice half way between them
+    vector<float> sorted(d);
+    nth_element(sorted.begin(), sorted.begin() + sorted.size() / 20, sorted.end());
+    const float p5 = sorted[sorted.size() / 20];
+    nth_element(sorted.begin(), sorted.begin() + sorted.size() / 4, sorted.end());
+    const float p25 = sorted[sorted.size() / 4];
+    const float threshold = p5 + 0.5f * (p25 - p5);
+
+    // Per line period, the fraction of samples at sync tip; a run of lines
+    // above one half is a vertical sync group
+    vector<double> group_starts; // in lines
+    bool in_group = false;
+    int lines = 0;
+    for (double pos = 0; pos + period <= (double)d.size(); pos += period, lines++) {
+        int low = 0, n = 0;
+        for (size_t i = (size_t)pos; i < (size_t)(pos + period); i++, n++)
+            low += d[i] < threshold;
+        const bool vertical = n > 0 && low > n / 2;
+        if (vertical && !in_group)
+            group_starts.push_back(lines);
+        in_group = vertical;
+    }
+    if (group_starts.size() < 2)
+        return 0;
+    // The groups alternate between starting on a line boundary and half way
+    // through one, so consecutive spacings alternate 262/263 (312/313); the
+    // mean of a pair is the field length.  Disagreement among the spacings
+    // (dropouts, a lead-in) leaves the test undecided.
+    vector<double> spacings;
+    for (size_t i = 1; i < group_starts.size(); i++)
+        spacings.push_back(group_starts[i] - group_starts[i - 1]);
+    double field_lines = 0;
+    for (double s : spacings) field_lines += s;
+    field_lines /= (double)spacings.size();
+    for (double s : spacings)
+        if (abs(s - field_lines) > 1.0)
+            field_lines = 0;
+    log.debug(eInput, std::format("Probe: vertical sync groups at sample {}: {} found, {:.1f} lines apart",
+                                  offset, group_starts.size(), field_lines));
+    return field_lines;
+}
+
 ChunkStats analyzeChunk(Logger &log, const vector<float> &samples, int64_t offset) {
     auto analytic = analyticSignal(samples);
     auto [freq, mean_carrier] = instantaneousFrequency(analytic);
@@ -397,6 +472,7 @@ struct FileAnalysis {
     double audio_carrier_ratio = 0;
     double muse16_significance = 0;
     double muse16_ratio = 0;
+    int64_t reference_offset = 0;   // where the field period test should read
 
     // The fold-480 test carries muse-16 on its own; the line-period consensus
     // carries everything else
@@ -406,6 +482,7 @@ struct FileAnalysis {
 FileAnalysis analyzeFile(Logger &log, const string &filename, InputFormat format) {
     FileAnalysis analysis;
     vector<ChunkStats> chunks;
+    vector<int64_t> chunk_offsets;
     vector<double> fold_significances, fold_ratios;
     for (int64_t offset : chunkOffsets(filename, format)) {
         auto samples = readChunkNear(log, filename, format, offset, c_chunk_samples);
@@ -414,8 +491,10 @@ FileAnalysis analyzeFile(Logger &log, const string &filename, InputFormat format
         ChunkStats stats = analyzeChunk(log, samples, offset);
         fold_significances.push_back(stats.muse16_significance);
         fold_ratios.push_back(stats.muse16_ratio);
-        if (stats.line_strength >= 0.25) // convincing line structure only
+        if (stats.line_strength >= 0.25) { // convincing line structure only
             chunks.push_back(stats);
+            chunk_offsets.push_back(offset);
+        }
     }
     if (!fold_significances.empty()) {
         analysis.muse16_significance = median(fold_significances);
@@ -464,6 +543,7 @@ FileAnalysis analyzeFile(Logger &log, const string &filename, InputFormat format
     analysis.line_period = median(periods);
     analysis.line_strength = median(strengths);
     analysis.cycles_per_line = median(cycles);
+    analysis.reference_offset = chunk_offsets[best_ref];
     return analysis;
 }
 
@@ -551,35 +631,53 @@ InputProbeResult probeInputFile(Logger &log, const string &filename,
     }
 
     // Otherwise classify on the carrier frequency: NTSC deviates between 7.6
-    // and 9.3 MHz, so 483..591 cycles per line, and MUSE sits near 340.  Both
-    // bands are bounded and the space between and outside them is left
-    // unclassified rather than guessed, since content brightness moves the
-    // mean.  A count above every band means the autocorrelation locked two or
-    // three lines apart -- which happens on MUSE, where neighbouring lines can
-    // be too unlike each other to correlate -- and that scales the period and
-    // the carrier count by the same factor, so divide both back down until the
+    // and 9.3 MHz, so 483..591 cycles per line, PAL between 6.76 and 7.9 MHz,
+    // 433..506, and MUSE sits near 340.  The SD band and the MUSE band are
+    // bounded and the space between and outside them is left unclassified
+    // rather than guessed, since content brightness moves the mean.  A count
+    // above every band means the autocorrelation locked two or three lines
+    // apart -- which happens on MUSE, where neighbouring lines can be too
+    // unlike each other to correlate -- and that scales the period and the
+    // carrier count by the same factor, so divide both back down until the
     // carrier lands in a band.  The bands are the only way to tell: the
     // single-line peak of such a lock is no stronger than the half-line peak
     // of a perfectly good NTSC lock.
-    auto classifyByCarrier = [](double cycles_per_line) {
-        if (cycles_per_line >= 470 && cycles_per_line <= 640)
-            return Type::eNtscRf;
+    //
+    // NTSC against PAL is decided by the field period: their line rates are
+    // 0.7 % apart (inside the line peak's resolution) and their carrier bands
+    // overlap, but the field lag is 262.5 or 312.5 lines, and the wrong one
+    // puts every sync pulse half a line off.  The audio carrier breaks ties
+    // (PAL discs with analog sound have their carriers elsewhere; those with
+    // digital sound have none).
+    enum class Band { eSd, eMuse, eNone };
+    auto bandOfCarrier = [](double cycles_per_line) {
+        if (cycles_per_line >= 420 && cycles_per_line <= 640)
+            return Band::eSd;
         if (cycles_per_line >= 260 && cycles_per_line <= 430)
-            return Type::eMuseRf;
-        return Type::eUnknown;
+            return Band::eMuse;
+        return Band::eNone;
     };
     for (int harmonic = 1; harmonic <= 3; harmonic++) {
         // The audio carrier is decisive where it is measurable -- the ratio is
         // ~10^4 on real NTSC RF and ~1.5 elsewhere -- but it was measured at
         // the undivided period, so it only speaks for the unscaled hypothesis
-        Type type = classifyByCarrier(result.cycles_per_line / harmonic);
-        if (harmonic == 1 && result.audio_carrier_ratio > 50)
-            type = Type::eNtscRf;
-        if (type == Type::eUnknown)
+        Band band = bandOfCarrier(result.cycles_per_line / harmonic);
+        const bool ntsc_audio = harmonic == 1 && result.audio_carrier_ratio > 50;
+        if (band == Band::eNone && !ntsc_audio)
             continue;
-        result.type = type;
         result.line_period /= harmonic;
         result.cycles_per_line /= harmonic;
+        if (band == Band::eMuse) {
+            result.type = Type::eMuseRf;
+            break;
+        }
+        result.field_lines = measureFieldLines(log, filename, *result.format, best.reference_offset, result.line_period);
+        if (abs(result.field_lines - 262.5) <= 1.5)
+            result.type = Type::eNtscRf;
+        else if (abs(result.field_lines - 312.5) <= 1.5)
+            result.type = Type::ePalRf;
+        else if (ntsc_audio)
+            result.type = Type::eNtscRf;
         break;
     }
     if (result.type == Type::eUnknown)

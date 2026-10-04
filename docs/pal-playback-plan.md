@@ -8,7 +8,7 @@ date (the class and file names were changed to their post-rename forms on 2026-1
 
 ## Status (2026-10-01)
 
-Done, in one step rather than the phasing below (the probe is left for later):
+Done, in one step rather than the phasing below:
 
 - `sdtv/VideoStandard.{h,cpp}`: the runtime descriptor the SD pipeline reads its geometry,
   frame rate, RF carrier, VBI lines and noise windows from (`VideoStandard::ntsc()` /
@@ -29,10 +29,15 @@ Done, in one step rather than the phasing below (the probe is left for later):
   fields placed right.  The LD-V4400 captures run 0.7 % fast and lock anyway.
 - Debug aid: `MUSELD_DUMP_FRAME=<path>` writes one frame buffer (and `<path>.raw`, the
   reader's line-locked composite) as float32.
+- **Probe** (2026-10-04): PAL is detected.  Not by the field-lag autocorrelation proposed
+  below -- wow moves the sync pulses by more than their width over a field, so nothing
+  lines up at any one lag and the scores came out within ±0.05 of zero on real captures --
+  but by the fallback: count the lines between vertical sync groups (runs of line periods
+  spent mostly at sync tip) on a separate chunk of 3.5 PAL fields.  Content-independent and
+  wow-immune; 312.3-312.5 on the four PAL captures, 261.3-262.7 on four NTSC ones, the
+  audio carrier breaks ties when no group is found.  `--probe` prints the count.
 
 Open after this step:
-
-- **Probe** (phase 2 below) -- `pal-rf` has to be given explicitly.
 - **RF band.** The PAL band stays at NTSC's 3.5-13.5 MHz for now: the lower chroma sideband
   (carrier - 4.43 MHz = 2.3-3.5 MHz, which ld-decode admits with a 2.3 MHz edge) is where the
   NYCSTM captures carry a strong component that moves with the carrier (fc - 3.8 MHz at sync

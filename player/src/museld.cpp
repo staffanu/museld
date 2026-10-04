@@ -1128,6 +1128,8 @@ static void printProbeResult(const std::string &filename, const InputProbeResult
                         "carrier {:.0f} cycles/line, audio carrier {:.0f}x background",
                         r.line_period, r.line_strength, r.cycles_per_line,
                         r.audio_carrier_ratio) << endl;
+    if (r.field_lines != 0)
+        cout << std::format("  vertical sync groups {:.1f} lines apart (NTSC 262.5, PAL 312.5)", r.field_lines) << endl;
     if (r.type == InputProbeResult::Type::eUnknown) {
         cout << "  RF type: ambiguous -- give --input-type explicitly" << endl;
         return;
@@ -1225,8 +1227,7 @@ int main(int argc, char *argv[]) {
     options.option("--input-type", "TYPE",
                    "muse-rf, ntsc-rf or pal-rf for RF captures, muse-16 for phase correct 16.2 MHz "
                    "MUSE baseband, muse-os for oversampled MUSE baseband, or auto (the "
-                   "default): detect RF type, sample rate and format from the file contents "
-                   "(PAL is not detected yet: give pal-rf explicitly)", [&] () -> void {
+                   "default): detect RF type, sample rate and format from the file contents", [&] () -> void {
         const auto &name = *(it++);
         if      (name == "auto")     input_type_option = nullopt;
         else if (name == "muse-rf")  input_type_option = eMuseRf;

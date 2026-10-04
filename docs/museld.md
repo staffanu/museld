@@ -34,7 +34,7 @@ single CPU thread.
 | Option | Description |
 |---|---|
 | `--input-format <fmt>` | Input sample type: `u8`, `s8`, `u16`, `s16`, `u16be`, `s16be`, `lds`, `flac`, `ldf`. Auto-detected from the filename extension, or failing that from the file contents (or, for a `udp://` stream, from its packets). |
-| `--input-type <type>` | Input type: `muse-rf`, `ntsc-rf`, `pal-rf`, `muse-16`, `muse-os`, or `auto` (the default): detect the type from the file contents (PAL is not detected yet and must be given). |
+| `--input-type <type>` | Input type: `muse-rf`, `ntsc-rf`, `pal-rf`, `muse-16`, `muse-os`, or `auto` (the default): detect the type from the file contents. |
 | `--sample-freq <Hz>` | Sets the input sample rate. Measured from the file contents when omitted. |
 | `--probe` | Print what content-based detection finds for each following input file (sample format, RF type, sample rate, and a ready-to-paste option line) instead of decoding it. |
 
@@ -46,8 +46,7 @@ The input types:
   (there is no PAL colour decoder yet), with the Philips code (chapter, CLV time, picture
   number), the EFM track (`--efm`; PAL discs carry either EFM or analog audio) and `--write`
   (colour metadata tagged BT.470BG; 50 frames/s, one per field, or 25 with `--full-frames-only`,
-  as 59.94/29.97 for NTSC). Content detection does not recognize PAL, so the type
-  must be given; the sample rate is still measured. See `docs/pal-playback-plan.md`.
+  as 59.94/29.97 for NTSC). See `docs/pal-playback-plan.md`.
 - `muse-16` — MUSE baseband resampled to exactly one sample per pixel at 16.2 MHz, phase locked to the line structure (480 samples per line). This is museld's own intermediate format, produced with `--write-muse16` (see below); `--sample-freq` does not apply.
 - `muse-os` — MUSE baseband (a player's output, before any resampling) captured at an arbitrary rate, e.g. an oscilloscope capture at 50 MHz. The resampling DPLL locks to it like to RF, but skips the FM demodulation.
 
@@ -74,9 +73,10 @@ A file over http is not: it plays like a local file, including seeking with the 
 Detection reads a few short stretches spread across the file
 and takes well under a second: the sample format is whichever interpretation of the bytes looks
 like a band-limited signal, the line period in samples comes from the periodicity of the FM
-carrier's instantaneous frequency, and NTSC against MUSE is decided by the carrier's mean
-cycles-per-line and the 2.3 MHz NTSC analog audio carrier. The line period then fixes the sample
-rate (NTSC lines at 15.734 kHz, MUSE at 33.75 kHz), snapped to a common capture rate when one is
+carrier's instantaneous frequency; standard definition against MUSE is decided by the carrier's
+mean cycles-per-line, and NTSC against PAL by the lines between vertical sync groups (262.5 or
+312.5), with the 2.3 MHz NTSC analog audio carrier as the tie breaker. The line period then fixes
+the sample rate (NTSC lines at 15.734 kHz, PAL at 15.625, MUSE at 33.75), snapped to a common capture rate when one is
 within about a percent.
 
 ```console
