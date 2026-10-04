@@ -23,8 +23,8 @@ once per standard, as `ntsc_*.spv` and as `pal_*.spv` with `-DSDTV_PAL` (the `SD
 `shaders/muse/muse.h` take the PAL values there).  Names: `Sdtv…` is what both standards share
 (`SdtvFrameReader`, `SdtvDecoder`, ...), `Ntsc…`/`Pal…` only what belongs to one of them
 (`NtscCadenceTracker`).  `--input-type pal-rf` is work in progress:
-monochrome picture, VBI, EFM audio and `--write` work; there is no PAL colour decoder and the
-probe does not detect PAL.  `docs/pal-playback-plan.md` has the plan and the status.
+monochrome picture, VBI, EFM audio, `--write` and content detection work; there is no PAL
+colour decoder yet.  `docs/pal-playback-plan.md` has the plan and the status.
 
 NTSC playback in museld selects between the analog, EFM and AC3-RF tracks (`AudioTrack`,
 A key / `--efm` / `--ac3`); a DTS bitstream on the EFM track is auto-detected. AC3 and DTS
