@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **museld** is a real-time MUSE/NTSC laserdisc player and audio decoder suite. Primary components:
 
-- **museld** — Real-time MUSE (Hi-Vision HD) and NTSC laserdisc decoder with Vulkan GPU compute, GLFW display, and miniaudio audio output
+- **museld** — Real-time MUSE (Hi-Vision HD) and NTSC laserdisc decoder with Vulkan GPU compute, SDL3 window and input, and miniaudio audio output
 - **ac3rf-efm-decode** — CLI tool (and reusable library) for AC3-RF QPSK surround audio and EFM CD audio decoding from laserdisc RF captures
 
 Supported formats:
@@ -80,7 +80,7 @@ docs/              — Reference documentation (player, CLI, AC3-RF decoding, pa
 
 CMake generates `compile_commands.json` in the build directory, which clangd uses for accurate diagnostics. The user maintains a symlink `compile_commands.json` → `player/cmake-build-relwithdebinfo/compile_commands.json` at the repo root, so clangd reads from the CLion-managed RelWithDebInfo build.
 
-Diagnostic errors about missing headers (Vulkan, GLFW, etc.) indicate the build directory hasn't been set up yet — they are not real code errors.
+Diagnostic errors about missing headers (Vulkan, SDL3, etc.) indicate the build directory hasn't been set up yet — they are not real code errors.
 
 ## Build Commands
 
@@ -305,11 +305,11 @@ they use is destroyed); worker-thread exceptions are marshalled via
 ultimately rethrows on the main thread — never `std::exit` from a worker);
 frame readers call `RfDemodulator::requestStop()` before joining their reader
 thread (deadlock otherwise); destructors never throw. `process_file` tears
-down via a RAII guard: reader → Vulkan → GLFW window, in that order.
+down via a RAII guard: reader → Vulkan → SDL window, in that order.
 
 ### museld Threading
 
-- Main thread: Vulkan command recording + GLFW event loop
+- Main thread: Vulkan command recording + SDL event loop (`InputController::poll`, which must stay on the main thread)
 - Reader thread: for MUSE the resampling DPLL (the CPU bottleneck); for NTSC the sync pass, timebase fit and per-line resampling (about 2 ms per frame)
 - Demodulator thread (`museld-demod`): input read + RF demod GPU pipeline; logs per-section timing at info level (`ePerformance`), for both MUSE and NTSC
 - EFM worker thread (`museld-efm`): EFM demodulation off the demodulator thread; blocks flow vacant → demod → EFM queue → filled, order preserved by the single FIFO worker. The NTSC worker (EFM or analog demod always runs), the NTSC reader thread (timebase and resampling vs input wait per frame) and the NTSC decoder (per-section, including the fence waits and the host reads of mapped buffers) also log `ePerformance` timing

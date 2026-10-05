@@ -23,7 +23,7 @@ installed first. Only the graphics driver comes from the system.
 The minimal/full split exists because FFmpeg and ONNX Runtime dominate the size — FFmpeg
 alone is 92 of the 100 DLLs the Windows museld would otherwise need, all to encode H.264
 and AAC. The minimal build turns both off (`-DUSE_LIBAV=OFF -DUSE_OCR=OFF`);
-`ac3rf-efm-decode` links neither of them nor Vulkan/GLFW, so it also gets a package of
+`ac3rf-efm-decode` links neither of them nor Vulkan/SDL3, so it also gets a package of
 its own, which is what most people who only want the audio decoded need. Using `--write`
 in a minimal build fails with "FFMPEG is not available", and `--ocr` with "requires a
 build with -DUSE_OCR=ON".

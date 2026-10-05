@@ -152,11 +152,30 @@ if(BUILD_AC3RF_DECODE)
 endif()
 
 # ============================================================================
-# museld — real-time MUSE/NTSC laserdisc player (Vulkan + GLFW + miniaudio)
+# museld — real-time MUSE/NTSC laserdisc player (Vulkan + SDL3 + miniaudio)
 # ============================================================================
 
 if(BUILD_MUSE)
-    find_package(glfw3 3.3 REQUIRED)
+    # SDL3 for the window, the Vulkan surface and the keyboard (GLFW has no
+    # tvOS, which is where museld is headed).  Distributions older than 2025
+    # have no package for it, so fall back to building it into museld from a
+    # release tarball; that needs the X11/Wayland development headers.
+    find_package(SDL3 CONFIG QUIET)
+    if(SDL3_FOUND)
+        message(STATUS "Using the installed SDL3 ${SDL3_VERSION}")
+    else()
+        message(STATUS "No SDL3 package found; building SDL3 from source into museld")
+        include(FetchContent)
+        set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+        set(SDL_STATIC ON CACHE BOOL "" FORCE)
+        set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+        set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+        set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(SDL3
+            URL https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.2.24.tar.gz
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+        FetchContent_MakeAvailable(SDL3)
+    endif()
     find_package(Vulkan REQUIRED)
 
     set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules" ${CMAKE_MODULE_PATH})
@@ -280,7 +299,7 @@ if(BUILD_MUSE)
     target_link_options(museld PRIVATE "-L/usr/local/lib")
     target_link_libraries(museld
         PRIVATE ac3rf
-        PRIVATE glfw
+        PRIVATE SDL3::SDL3
         PRIVATE Vulkan::Vulkan
         PRIVATE ${CMAKE_DL_LIBS}
         PRIVATE ${FLAC_LINK_LIBRARIES}

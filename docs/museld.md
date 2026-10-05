@@ -372,10 +372,10 @@ of components.
 ```
 RF capture (62.5 MHz) → MuseRfDemodulator → ResamplingFrameReader (DPLL, 16.2 MHz)
   → FrameBuffer → Vulkan GPU shaders (de-emphasis, gamma, color decode, motion detection)
-  → GLFW window + miniaudio
+  → SDL3 window + miniaudio
 ```
 
-The resampling DPLL runs in a dedicated CPU thread. Vulkan command recording and GLFW event handling
+The resampling DPLL runs in a dedicated CPU thread. Vulkan command recording and SDL event handling
 run on the main thread. The GPU pipeline has two stages separated by a semaphore.
 
 ### Data flow — NTSC
@@ -383,7 +383,7 @@ run on the main thread. The GPU pipeline has two stages separated by a semaphore
 ```
 RF capture (40 MHz) → NtscRfDemodulator → NtscFrameReader (timebase, resampling to 4 fsc)
   → NtscFrame → Vulkan GPU shaders (sync burst detection, color filtering, field decode)
-  → GLFW window
+  → SDL3 window
 ```
 
 The NTSC reader has no phase-locked loop. It finds the sync pulses in a cheap lowpassed pass,

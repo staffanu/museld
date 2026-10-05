@@ -6,7 +6,7 @@
 #include <format>
 #include "FrameBlitter.h"
 
-#include <GLFW/glfw3.h>
+#include <SDL3/SDL.h>
 
 #include "ResultImages.h"
 #include "logging/Logger.h"
@@ -59,36 +59,24 @@ void FrameBlitter::present(musevk::CommandBuffer &command_buffer,
     command_buffer.wait();
 }
 
-double FrameBlitter::displayPixelAspect(GLFWwindow *window, Logger &log) {
-    // Full screen: the monitor shown on.  Windowed: the primary monitor --
-    // finding the one the window is actually on needs the window position,
-    // which Wayland does not give out, and the answer is 1.0 on any monitor
-    // in practice; the physical size matters for TVs and odd video modes
-    GLFWmonitor *monitor = glfwGetWindowMonitor(window);
-    if (monitor == nullptr)
-        monitor = glfwGetPrimaryMonitor();
-    if (monitor == nullptr)
+double FrameBlitter::displayPixelAspect(SDL_Window *window, Logger &log) {
+    // The display the window is on (full screen or not).  SDL does not report
+    // a display's physical size, so the pixel aspect cannot be measured as it
+    // was from the EDID through GLFW; it was 1.0 on every display tried
+    const SDL_DisplayID display = SDL_GetDisplayForWindow(window);
+    if (display == 0)
         return 1.0;
-    const GLFWvidmode *mode = glfwGetVideoMode(monitor);
-    int mm_w = 0, mm_h = 0;
-    glfwGetMonitorPhysicalSize(monitor, &mm_w, &mm_h);
-    double aspect = 1.0;
-    if (mode != nullptr && mode->width > 0 && mode->height > 0 && mm_w > 0 && mm_h > 0) {
-        aspect = ((double)mm_w / mode->width) / ((double)mm_h / mode->height);
-        // EDID physical sizes are often rough (or fictional on TVs):
-        // treat near-square as square, and the absurd as unknown
-        if (std::abs(aspect - 1.0) < 0.02 || aspect < 0.5 || aspect > 2.0)
-            aspect = 1.0;
-    }
-    static GLFWmonitor *logged_monitor = nullptr;
-    static double logged_aspect = 0;
-    if (monitor != logged_monitor || aspect != logged_aspect) {
-        logged_monitor = monitor;
-        logged_aspect = aspect;
+    const SDL_DisplayMode *mode = SDL_GetDesktopDisplayMode(display);
+    const double aspect = 1.0;
+    static SDL_DisplayID logged_display = 0;
+    if (display != logged_display) {
+        logged_display = display;
+        const char *name = SDL_GetDisplayName(display);
+        const char *driver = SDL_GetCurrentVideoDriver();
         log.info(eApplication | eVideo,
-                 std::format("Display: {} {}x{} px, {}x{} mm, pixel aspect {:.3f}", glfwGetMonitorName(monitor),
-                             mode != nullptr ? mode->width : 0, mode != nullptr ? mode->height : 0,
-                             mm_w, mm_h, aspect));
+                 std::format("Display: {} {}x{} px at {:.4g} Hz, pixel aspect {:.3f} ({})", name != nullptr ? name : "?",
+                             mode != nullptr ? mode->w : 0, mode != nullptr ? mode->h : 0,
+                             mode != nullptr ? mode->refresh_rate : 0.0, aspect, driver != nullptr ? driver : "no video driver"));
     }
     return aspect;
 }
