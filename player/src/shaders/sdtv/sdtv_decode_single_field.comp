@@ -208,7 +208,11 @@ uint pal_pair_line(uint fl, uint field_last) {
 // its two field neighbours, whose chroma is at -90 and +90 degrees and
 // cancels (the field's first line borrows the blank line above it)
 float16_t pal_chroma(int src, uint fl, uint field_last, uint fc) {
-    return pal_f(src, fl, fc) - 0.5hf * (pal_f(src, fl - 1, fc) + pal_f(src, pal_pair_line(fl, field_last), fc));
+    // on the field's last line the line two above (181 degrees, the same V
+    // switch) stands in as a two-line comb
+    return fl < field_last
+        ? pal_f(src, fl, fc) - 0.5hf * (pal_f(src, fl - 1, fc) + pal_f(src, fl + 1, fc))
+        : 0.5hf * (pal_f(src, fl, fc) - pal_f(src, fl - 2, fc));
 }
 
 // The line's luma at a column: the composite less the chroma band of the
@@ -218,43 +222,57 @@ float16_t pal_luma(int src, uint fl, uint field_last, uint fc) {
                                  - 0.25hf * (pal_chroma(src, fl, field_last, fc - 2) + pal_chroma(src, fl, field_last, fc + 2)));
 }
 
-// One PAL line's U and V at a column, decoded against the -U axis from the
-// line pair (see main)
-vec2 pal_line_uv(int src, uint fl, uint field_last, uint frame_col) {
+// The -U axis reference of a PAL line from the line pair, with the
+// burst-referenced gain in its magnitude, and the line's V switch (see
+// main); false where there is no usable burst
+bool pal_reference(int src, uint fl, uint field_last, out vec2 bref, out float vs) {
     const uint nxt = pal_pair_line(fl, field_last);
-    float16_t c_src[19];
-    for (int n = 0; n < 19; n++)
-        c_src[n] = pal_chroma(src, fl, field_last, uint(int(frame_col) + n - 9));
-    f16vec2 c_demod = demodulated_chroma(c_src, frame_col);
-
-    // -U axis from this line's burst and its field neighbour's.  The
-    // measured phasor is the conjugate of the subcarrier phase (see the sine
-    // LUT), so the physical advance of +270.576 degrees per line is undone
-    // by rotating the next line's phasor by +270.576 (the previous line's
-    // by -270.576).
+    // The measured phasor is the conjugate of the subcarrier phase (see the
+    // sine LUT), so the physical advance of +270.576 degrees per line is
+    // undone by rotating the next line's phasor by +270.576 (the previous
+    // line's by -270.576).
     vec2 m0 = vec2(pal_burst(src, fl));
     vec2 m1 = vec2(pal_burst(src, nxt));
     const float delta = radians(270.576) * (nxt > fl ? 1.0 : -1.0);
     vec2 m1r = vec2(m1.x * cos(delta) - m1.y * sin(delta), m1.x * sin(delta) + m1.y * cos(delta));
     vec2 r = m0 + m1r;
     float rl = length(r);
+    bref = vec2(0.0);
+    vs = 1.0;
     if (dot(m0, m0) <= 0.04 || dot(m1, m1) <= 0.04 || rl <= 0.5)
-        return vec2(0.0); // no usable burst: achromatic
+        return false;
     // Burst-referenced AGC: a nominal 0.214-unit burst measures 3.43 per
     // line, 4.85 for the pair sum along -U; 3.75 is the value calibrated
     // against the GGV1011 test disc's colour bars (the decoded saturation
     // was 1.3 times what the bars' own luma implied; the burst window reads
     // low against steady chroma, as NTSC's 2.92 against 3.2 covers there)
     float gain = clamp(3.75 / rl, 0.25, 8.0);
-    vec2 bref = r / rl * gain;
+    bref = r / rl * gain;
     // this line's V switch: which side of -U its burst swung to
-    float vs = (m0.y * r.x - m0.x * r.y) >= 0.0 ? 1.0 : -1.0;
+    vs = (m0.y * r.x - m0.x * r.y) >= 0.0 ? 1.0 : -1.0;
     if (pal_v_flip != 0u)
         vs = -vs;
+    return true;
+}
+
+// U and V from a chroma window, against the reference
+vec2 pal_demod(const float16_t c_src[19], uint frame_col, vec2 bref, float vs) {
+    f16vec2 c_demod = demodulated_chroma(c_src, frame_col);
     float I = float(c_demod.x) * bref.x + float(c_demod.y) * bref.y;
     float Q = float(c_demod.y) * bref.x - float(c_demod.x) * bref.y;
     // as for NTSC: U + jV = e^(ja) conj(I + jQ), a = 180 + tint
     return vec2(Q * rot_re + I * rot_im, (I * rot_re - Q * rot_im) * vs);
+}
+
+// One PAL line's U and V at a column from its own spatial comb
+vec2 pal_line_uv(int src, uint fl, uint field_last, uint frame_col) {
+    vec2 bref; float vs;
+    if (!pal_reference(src, fl, field_last, bref, vs))
+        return vec2(0.0);
+    float16_t c_src[19];
+    for (int n = 0; n < 19; n++)
+        c_src[n] = pal_chroma(src, fl, field_last, uint(int(frame_col) + n - 9));
+    return pal_demod(c_src, frame_col, bref, vs);
 }
 #endif
 
@@ -346,8 +364,50 @@ void main() {
                 Yp = pal_luma(pal_src, frame_line, field_last, frame_col);
         }
 
-        vec2 uv = pal_line_uv(pal_src, src_line, field_last, frame_col);
+        vec2 uv;
+        const bool pal_temporal = use_3d_comb != 0u && !pal_rescued && pal_src == 0
+                                  && dropout_data[frame_line][frame_col] == 0;
+        if (pal_temporal) {
+            // 3D comb, as NTSC's below with the frames two apart: the
+            // subcarrier advances 270 degrees per frame and the V switch
+            // flips, so it is frames N +- 2 whose chroma is inverted and
+            // whose V switch matches -- the decoder feeds this shader (and
+            // the motion detector) frames at that spacing.  The per-column
+            // estimates come from sdtv_chroma_taps.comp: the PAL spatial
+            // comb, and the temporal pairs through the burst pair rotation,
+            // motion gated.
+            float16_t cs_arr[19], ct_arr[19], pure_arr[19], c_src[19];
+            for (int n = 0; n < 19; n++) {
+                f16vec4 taps = chroma_taps[row][col + n];
+                cs_arr[n] = taps.x;
+                pure_arr[n] = taps.y;
+                ct_arr[n] = taps.z;
+            }
+            float16_t w_t = temporal_weight(cs_arr, pure_arr);
+            for (int n = 0; n < 19; n++)
+                c_src[n] = mix(cs_arr[n], ct_arr[n], w_t);
+            // luma as below: the composite less the chroma band of the
+            // spatial estimate, averaged with the still neighbour frames'
+            // own spatial lumas, or less the temporal estimate's band where
+            // the spatial comb leaks
+            float16_t f0 = input_frame[frame_line][frame_col];
+            float16_t y_spatial = f0 - (0.5hf * cs_arr[9] - 0.25hf * (cs_arr[7] + cs_arr[11]));
+            float16_t wp = prev_dropout[frame_line][frame_col] != 0 ? 0.hf : 1.hf - past_motion[mask_row][col];
+            float16_t wf = next_dropout[frame_line][frame_col] != 0 ? 0.hf : 1.hf - future_motion[mask_row][col];
+            float16_t y_avg = (0.5hf * y_spatial
+                               + 0.25hf * (wp * pal_luma(-1, frame_line, field_last, frame_col)
+                                           + wf * pal_luma(1, frame_line, field_last, frame_col)))
+                              / (0.5hf + 0.25hf * (wp + wf));
+            float16_t ct_band = 0.5hf * ct_arr[9] - 0.25hf * (ct_arr[7] + ct_arr[11]);
+            Yp = mix(y_avg, f0 - ct_band, w_t);
+            vec2 bref; float vs;
+            uv = pal_reference(0, frame_line, field_last, bref, vs) ? pal_demod(c_src, frame_col, bref, vs) : vec2(0.0);
+        } else {
+            uv = pal_line_uv(pal_src, src_line, field_last, frame_col);
+        }
         if (use_3d_comb != 0u && !pal_rescued && pal_src == 0) {
+            // the delay-line U/V average with the line above (its own
+            // spatial comb; the temporal estimate is per pixel here)
             const uint other = frame_line > field_first ? frame_line - 1 : frame_line + 1;
             uv = 0.5 * (uv + pal_line_uv(0, other, field_last, frame_col));
         }

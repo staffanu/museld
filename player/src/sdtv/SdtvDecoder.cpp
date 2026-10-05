@@ -74,6 +74,7 @@ SdtvDecoder::SdtvDecoder(
   m_dts_sync_age_frames(0),
   m_pending_audio(),
   m_pending_audio_mode(MODE_UNKNOWN),
+  m_temporal_distance(video_standard.ntsc_chroma ? 1 : 2),
   m_frames() {
     // 185.8 degrees is the structural 180 (see sdtv_decode_single_field.comp)
     // plus the offset calibrated against the Video Essentials colorbars
@@ -95,9 +96,9 @@ SdtvDecoder::~SdtvDecoder() {
 
 bool SdtvDecoder::initialize() {
     // Newest read frame (the lookahead) at index 0, the displayed frame at
-    // index 1, and its two-frame history behind it -- pretend they all exist
-    // already so the first reads decode blank frames instead of special cases
-    for (int i = 0; i < 4; i++)
+    // index d, and its history behind it -- pretend they all exist already
+    // so the first reads decode blank frames instead of special cases
+    for (int i = 0; i < 3 * m_temporal_distance + 1; i++)
         m_frames.push_back(new SdtvFrame(m_log, -i, m_manager, m_standard));
 
     m_frame_no = 0;
@@ -410,12 +411,14 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         m_shaders.detectColorBurstPhase(*m_first_stage_command_buffer, frame);
 
         // Directional motion masks for the frame about to be displayed
-        // (m_frames[1]), with the just-read frame as lookahead.  Thresholds
-        // scale with the measured noise; 0.55 approximates how much the
-        // frame-domain de-emphasis attenuates the raw blanking sigma.
+        // (m_frames[d]), with the just-read frame as lookahead and the
+        // history at the comb's frame spacing.  Thresholds scale with the
+        // measured noise; 0.55 approximates how much the frame-domain
+        // de-emphasis attenuates the raw blanking sigma.
+        const int d = m_temporal_distance;
         float sigma_c = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.55f : 0.01f;
-        m_shaders.detectMotion(*m_first_stage_command_buffer, frame->data(), m_frames[1]->data(),
-                               m_frames[2]->data(), m_frames[3]->data(),
+        m_shaders.detectMotion(*m_first_stage_command_buffer, frame->data(), m_frames[d]->data(),
+                               m_frames[2 * d]->data(), m_frames[3 * d]->data(),
                                m_frame_no > 1, max(0.012f, 4.0f * sigma_c), max(0.04f, 10.0f * sigma_c));
     }
     m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
@@ -428,8 +431,9 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
     if (m_decode_video && (m_decode_all_fields || m_field_index == 0)) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
-        out.last_frame_buffer_input_offset = m_frames[1]->getInputOffset();
-        out.input_samples_per_muse_sample = m_frames[1]->getInputSamplesPerSdtvSample();
+        const int d = m_temporal_distance;
+        out.last_frame_buffer_input_offset = m_frames[d]->getInputOffset();
+        out.input_samples_per_muse_sample = m_frames[d]->getInputSamplesPerSdtvSample();
         out.field_parity = decoded_field_index;
 
         // The illegal-level bounds in the decode shader are scaled from the
@@ -450,7 +454,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         auto action = NtscCadenceTracker::FieldAction::eAdaptive;
         if (film_mode && m_decode_all_fields
             && field_interpolation_mode == FieldInterpolationMode::eNormal) {
-            int displayed = m_frame_no - 1;
+            int displayed = m_frame_no - d;
             action = m_cadence.actionForField(displayed, decoded_field_index);
             // A weave reads the partner field from the other parity's buffer
             // set; a starvation-skipped field decode leaves that buffer older
@@ -473,7 +477,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
             || field_interpolation_mode != FieldInterpolationMode::eNormal) {
             out.film_status = m_standard.has_film_cadence ? "Telecine: off" : "Telecine: n/a";
             out.film_status_detail.clear();
-        } else if (int phase = m_cadence.phaseForFrame(m_frame_no - 1); phase < 0) {
+        } else if (int phase = m_cadence.phaseForFrame(m_frame_no - d); phase < 0) {
             out.film_status = "Telecine: searching";
             out.film_status_detail.clear();
         } else {
@@ -506,13 +510,13 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // Selector noise floor: |cs - ct| accumulated over the 19-sample
         // window is ~sigma per sample for plain noise; 15 sigma keeps noise
         // from flipping the comb choice on flat areas.
-        m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[1]->get_field(decoded_field_index),
-                                    m_frames[2]->data(), m_frames[0]->data(),
-                                    m_frames[2]->burst_phase_data(), m_frames[0]->burst_phase_data(),
-                                    m_frames[2]->dropout_data(), m_frames[0]->dropout_data(),
+        m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[d]->get_field(decoded_field_index),
+                                    m_frames[2 * d]->data(), m_frames[0]->data(),
+                                    m_frames[2 * d]->burst_phase_data(), m_frames[0]->burst_phase_data(),
+                                    m_frames[2 * d]->dropout_data(), m_frames[0]->dropout_data(),
                                     dropout_mode, use_3d_comb, m_rot_re, m_rot_im, level_floor, level_ceiling,
                                     15.0f * sigma_out, m_pal_v_flip);
-        m_field_buffer_frame_no[decoded_field_index] = m_frame_no - 1;
+        m_field_buffer_frame_no[decoded_field_index] = m_frame_no - d;
         if (action == NtscCadenceTracker::FieldAction::eHold) {
             // Re-show the previous film frame from the held copy of the last
             // combine output.  The YUV buffers are left as they are, so
@@ -617,7 +621,9 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     if (m_decode_audio && m_field_index == 0) {
         // Deliver the audio held from the previous read (it belongs to the
-        // frame being displayed), then decode and hold this block's audio.
+        // frame being displayed), then decode and hold this block's audio --
+        // one read further back where the display lags the read by two
+        // frames (PAL), see m_audio_hold below.
         // AC3/DTS decode in whole compressed frames, so a delivery can exceed
         // the per-field cap now and then; the remainder carries over.
         out.audio_mode = m_pending_audio_mode;
@@ -641,16 +647,19 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // switch, DTS detection flipping) must not deliver them under the new
         // mode's label and sample rate
         auto beginMode = [this](AudioMode mode) {
-            if (mode != m_pending_audio_mode)
+            if (mode != m_pending_audio_mode) {
                 m_pending_audio.clear();
+                m_audio_hold.clear();
+            }
             m_pending_audio_mode = mode;
         };
-        auto pendStereo = [this](const auto &samples) {
+        std::vector<AudioFrame> batch; // this read's audio
+        auto pendStereo = [&batch](const auto &samples) {
             for (const auto &s : samples) {
                 AudioFrame f{};
                 f.samples[0] = s.samples[0];
                 f.samples[1] = s.samples[1];
-                m_pending_audio.push_back(f);
+                batch.push_back(f);
             }
         };
         if (audio_track == AudioTrack::eEfm && input_block != nullptr) {
@@ -668,7 +677,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
                         m_dts_bitstream.push_back((uint8_t)((uint16_t)s.samples[ch] >> 8));
                     }
                 const auto pcm = m_dts_pcm_decoder.decode(m_dts_bitstream.data(), m_dts_bitstream.size());
-                m_pending_audio.insert(m_pending_audio.end(), pcm.begin(), pcm.end());
+                batch.insert(batch.end(), pcm.begin(), pcm.end());
             } else {
                 beginMode(MODE_EFM);
                 pendStereo(m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis()));
@@ -677,7 +686,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
             beginMode(MODE_AC3);
             for (const auto &frame : input_block->ac3_frames) {
                 const auto pcm = m_ac3_pcm_decoder.decode(frame.data(), frame.size());
-                m_pending_audio.insert(m_pending_audio.end(), pcm.begin(), pcm.end());
+                batch.insert(batch.end(), pcm.begin(), pcm.end());
             }
             m_pending_ac3_frames = input_block->ac3_frames; // originals for the file writer
         } else if (input_block != nullptr && !input_block->analog_data.empty()) {
@@ -685,6 +694,13 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
             pendStereo(input_block->analog_data);
         } else {
             beginMode(MODE_UNKNOWN);
+        }
+        // The batch joins the delivery FIFO after d - 1 further reads, so
+        // that it reaches the output together with its own frame
+        m_audio_hold.push_back(std::move(batch));
+        while ((int)m_audio_hold.size() > m_temporal_distance - 1) {
+            m_pending_audio.insert(m_pending_audio.end(), m_audio_hold.front().begin(), m_audio_hold.front().end());
+            m_audio_hold.pop_front();
         }
     }
     section_ms(m_sec_audio_ms);
@@ -728,10 +744,10 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
     else
         m_field_index = (m_field_index + 1) % 2;
 
-    out.disc_info = m_frames[1]->getVbiData();
+    out.disc_info = m_frames[m_temporal_distance]->getVbiData();
     // Let the disc info overlay show what the CX expander actually does when
     // the user forces it away from the VBI flag
-    if (auto vbi = m_frames[1]->getVbiData())
+    if (auto vbi = m_frames[m_temporal_distance]->getVbiData())
         vbi->setCxOverride(controls.analog_cx == CxMode::eAuto
             ? std::nullopt
             : std::make_optional(controls.analog_cx == CxMode::eOn));

@@ -69,8 +69,13 @@ void main() {
     uint fc = x + SDTV_FIELD_START_X - SDTV_CHROMA_TAP_HALO;
     uint mask_row = row * 2 + field_parity;
 
-    // the comb degrades to two lines on the frame's last line
+    // the comb degrades to two lines on the frame's last line (on PAL on
+    // the field's last line, whose comb neighbour below would be blanking)
+#ifdef SDTV_PAL
+    uint next_line = row + 1 < SDTV_FIELD_HEIGHT ? frame_line + 1 : frame_line;
+#else
     uint next_line = min(frame_line + 1, SDTV_TOTAL_HEIGHT - 1);
+#endif
 
     float16_t cs = chroma_sample(frame_line, next_line, fc);
 

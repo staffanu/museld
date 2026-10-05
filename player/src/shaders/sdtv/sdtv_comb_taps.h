@@ -23,11 +23,23 @@
 // the noise levels of this medium a per-pixel choice is wrong often enough
 // to cost more than the true steps gain.  The chroma error of the fixed comb
 // was already within the noise of the temporal reference.
+#ifdef SDTV_PAL
+// PAL: the field neighbours' chroma sits at -90 and +90 degrees and cancels
+// in their sum (sdtv_decode_single_field.comp); on the field's last line,
+// where next_line is the line itself, the line two above (181 degrees, the
+// same V switch) stands in as a two-line comb
+float16_t chroma_sample(uint frame_line, uint next_line, uint fcol) {
+    return next_line > frame_line
+        ? input_frame[frame_line][fcol] - 0.5hf * (input_frame[frame_line - 1][fcol] + input_frame[next_line][fcol])
+        : 0.5hf * (input_frame[frame_line][fcol] - input_frame[frame_line - 2][fcol]);
+}
+#else
 float16_t chroma_sample(uint frame_line, uint next_line, uint fcol) {
     return -0.25hf * input_frame[frame_line - 1][fcol]
            + 0.5hf * input_frame[frame_line][fcol]
            - 0.25hf * input_frame[next_line][fcol];
 }
+#endif
 
 // Comb and chroma taps on the neighbour frames, for temporal dropout
 // concealment: a still neighbour's same pixel is a far better donor than
