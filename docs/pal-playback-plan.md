@@ -92,6 +92,17 @@ Open after this step:
   on TBC'd baseband).  `tools/pal-pilot-check.py` checks the timebase against the pilot
   (2026-10-06: ±15-30 ns, 1.6-2.2 ns line-to-line jitter on the GGV1011 test disc and the
   NYCSTM captures -- the same figures as NTSC's burst check).
+- **GGV1011 checks (2026-10-07, side 1 to ~600 s)**: full colour fields decode with no
+  Hanover bars (even/odd row chroma difference 0.0000) and 1-2 % uniformity over the frame;
+  the crosshatch cells are square to 0.2 % after the 944/1135 pixel aspect, with 0.006 of
+  cross-colour; black field Y = 0.012, window 0.996 over 0.06 with no overshoot past the
+  edges and no false dropout rescues (1 pixel); the zone plate is animated (frame-to-frame
+  luma difference 0.06 of a 0.27 pattern), so its residual centre chroma (0.30 with the
+  temporal comb, 0.44 without) is moving-content cross-colour, not a comb fault.  The red and
+  green full fields read 4-6° off the bar hues with V matching and U off in opposite
+  directions, identically on the spatial and temporal paths -- the fields are not the bar
+  primaries (the blue field's chroma is 0.43 against a 75 % blue's 0.34); the bars remain the
+  reference.
 - **Test material**: the NYCSTM programme mixes colour with black-and-white archive film;
   the GGV1011 PAL CAV test disc (DdD capture, FLAC in Ogg) has the colour bars (at ~190-210 s
   on side 1), a modulated staircase, multiburst, line patterns, full white and black fields.
