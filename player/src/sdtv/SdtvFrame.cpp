@@ -35,26 +35,29 @@ SdtvFrame::SdtvFrame(Logger &log, int frame_no, musevk::VulkanManager &manager, 
 SdtvFrame::NoiseEstimate SdtvFrame::EstimateNoise(float const *data, const VideoStandard &standard) {
     // Back porch windows sit after the colour burst and before active video
     // (NTSC: the burst reaches ~column 112, the picture starts at 129); sync
-    // tip windows inside the horizontal sync pulse (67 samples on NTSC, 83 on
-    // PAL).  211 rows per field from noise_rows_start (NTSC: 40-250 and
-    // 303-513) keep clear of vertical sync and the VBI code lines (white
-    // flag, picture numbers).
+    // tip windows inside the horizontal sync pulse (67 samples on NTSC; on
+    // PAL only the last 0.5 us of the 83, after the 3.75 MHz pilot burst
+    // that rides on the tip).  211 rows per field from noise_rows_start
+    // (NTSC: 40-250 and 303-513) keep clear of vertical sync and the VBI
+    // code lines (white flag, picture numbers).
     const int width = standard.samples_per_line;
     NoiseEstimate est{};
     std::vector<float> porch_residuals, sync_residuals, centers;
     porch_residuals.reserve(422 * 16);
-    sync_residuals.reserve(422 * 48);
+    sync_residuals.reserve(422 * standard.noise_sync_len);
     centers.reserve(422);
     for (int field_start : standard.noise_rows_start) {
         for (int row = field_start; row <= field_start + 210; row++) {
             float center;
             RobustNoise::appendDetrendedResiduals(data + row * width + standard.noise_porch_col, 16, porch_residuals, &center);
             centers.push_back(center);
-            RobustNoise::appendDetrendedResiduals(data + row * width + 8, 48, sync_residuals);
+            if (standard.noise_sync_len > 0)
+                RobustNoise::appendDetrendedResiduals(data + row * width + standard.noise_sync_col,
+                                                      standard.noise_sync_len, sync_residuals);
         }
     }
     est.sigma_blanking = RobustNoise::robustSigma(porch_residuals);
-    est.sigma_sync = RobustNoise::robustSigma(sync_residuals);
+    est.sigma_sync = sync_residuals.empty() ? -1.0f : RobustNoise::robustSigma(sync_residuals);
     est.blanking_level = RobustNoise::median(centers);
 
     // White flag: a full flat line at 100 IRE in the vertical interval (IEC

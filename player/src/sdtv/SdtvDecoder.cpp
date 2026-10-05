@@ -209,7 +209,8 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
             m_blanking_sq_avg = (double)noise_estimate.blanking_level * noise_estimate.blanking_level;
         } else {
             m_noise.sigma_blanking = m_noise.sigma_blanking * 0.9f + noise_estimate.sigma_blanking * 0.1f;
-            m_noise.sigma_sync = m_noise.sigma_sync * 0.9f + noise_estimate.sigma_sync * 0.1f;
+            if (noise_estimate.sigma_sync >= 0)
+                m_noise.sigma_sync = m_noise.sigma_sync * 0.9f + noise_estimate.sigma_sync * 0.1f;
             m_blanking_avg = m_blanking_avg * 0.9 + noise_estimate.blanking_level * 0.1;
             m_blanking_sq_avg = m_blanking_sq_avg * 0.9 + (double)noise_estimate.blanking_level * noise_estimate.blanking_level * 0.1;
         }
@@ -316,10 +317,10 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
             double wander_var = m_blanking_sq_avg - m_blanking_avg * m_blanking_avg;
             m_log.info(eDecoder, std::format(
                     "noise: SNR {:.1f} dB over the 100 IRE range "
-                    "(σ = {:.2f} IRE at blanking, {:.2f} at sync tip; blanking wander σ = {:.2f} IRE)",
+                    "(σ = {:.2f} IRE at blanking, {} at sync tip; blanking wander σ = {:.2f} IRE)",
                     20.0f * log10(0.7f / m_noise.sigma_blanking),
                     m_noise.sigma_blanking * ire,
-                    m_noise.sigma_sync * ire,
+                    m_noise.sigma_sync >= 0 ? std::format("{:.2f}", m_noise.sigma_sync * ire) : "n/a (pilot)",
                     sqrt(max(0.0, wander_var)) * ire));
             if (m_standard.ntsc_chroma)
                 m_log.info(eDecoder, std::format(

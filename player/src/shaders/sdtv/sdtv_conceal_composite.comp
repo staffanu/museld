@@ -120,7 +120,10 @@ void main() {
     // burst through the causal de-emphasis filter.  (Measured effect on the
     // Video Essentials capture: none -- the full-cycle burst correlation
     // already rejects the smooth transient -- but this makes the burst
-    // reference immune to worse sync edges.)  Only columns before the burst
-    // can see the pulse, so the picture is unaffected.
-    concealed_out[row][col] = col < 74 ? level_offset : composite_sample(int(row), int(col));
+    // reference immune to worse sync edges.)  On PAL discs the pulse also
+    // carries the 3.75 MHz pilot burst (IEC 60856 9.1.2, 60 IRE
+    // peak-to-peak), which must not ring into the colour burst either.
+    // Only columns before the burst can see the pulse, so the picture is
+    // unaffected.
+    concealed_out[row][col] = col < SDTV_SYNC_END ? level_offset : composite_sample(int(row), int(col));
 }
