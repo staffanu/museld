@@ -186,6 +186,51 @@ f16vec2 demodulated_chroma(const float16_t c_src[19], uint frame_col) {
     return f16vec2(c_re, c_im);
 }
 
+#ifdef SDTV_PAL
+// One PAL line's U and V at a column (and its luma), decoded against the -U
+// axis from the line pair (see main).  field_first/field_last bound the
+// field's picture lines: the first line's upper comb neighbour is the blank
+// line above it, the last line pairs with the line above for its burst.
+vec2 pal_line_uv(uint fl, uint field_first, uint field_last, uint frame_col, out float16_t Y) {
+    const uint pl = fl - 1;
+    const uint nxt = fl < field_last ? fl + 1 : fl - 1;
+    float16_t c_src[19];
+    for (int n = 0; n < 19; n++) {
+        uint fc = uint(int(frame_col) + n - 9);
+        c_src[n] = input_frame[fl][fc] - 0.5hf * (input_frame[pl][fc] + input_frame[nxt][fc]);
+    }
+    f16vec2 c_demod = demodulated_chroma(c_src, frame_col);
+    // luma: the composite less the chroma band of the comb estimate
+    Y = input_frame[fl][frame_col] - (0.5hf * c_src[9] - 0.25hf * (c_src[7] + c_src[11]));
+
+    // -U axis from this line's burst and its field neighbour's.  The
+    // measured phasor is the conjugate of the subcarrier phase (see the sine
+    // LUT), so the physical advance of +270.576 degrees per line is undone
+    // by rotating the next line's phasor by +270.576 (the previous line's
+    // by -270.576).
+    vec2 m0 = vec2(phase_data[fl]);
+    vec2 m1 = vec2(phase_data[nxt]);
+    const float delta = radians(270.576) * (nxt > fl ? 1.0 : -1.0);
+    vec2 m1r = vec2(m1.x * cos(delta) - m1.y * sin(delta), m1.x * sin(delta) + m1.y * cos(delta));
+    vec2 r = m0 + m1r;
+    float rl = length(r);
+    if (dot(m0, m0) <= 0.04 || dot(m1, m1) <= 0.04 || rl <= 0.5)
+        return vec2(0.0); // no usable burst: achromatic
+    // Burst-referenced AGC: a nominal 0.214-unit burst measures 3.43 per
+    // line, 4.85 for the pair sum along -U
+    float gain = clamp(4.85 / rl, 0.25, 8.0);
+    vec2 bref = r / rl * gain;
+    // this line's V switch: which side of -U its burst swung to
+    float vs = (m0.y * r.x - m0.x * r.y) >= 0.0 ? 1.0 : -1.0;
+    if (pal_v_flip != 0u)
+        vs = -vs;
+    float I = float(c_demod.x) * bref.x + float(c_demod.y) * bref.y;
+    float Q = float(c_demod.y) * bref.x - float(c_demod.x) * bref.y;
+    // as for NTSC: U + jV = e^(ja) conj(I + jQ), a = 180 + tint
+    return vec2(Q * rot_re + I * rot_im, (I * rot_re - Q * rot_im) * vs);
+}
+#endif
+
 void main() {
     uint row = gl_GlobalInvocationID.y;
     uint col = gl_GlobalInvocationID.x;
@@ -214,48 +259,24 @@ void main() {
     // de-rotated by the structural 270.576 degrees into this line's frame,
     // added to this line's, is 2 cos 45 times the burst amplitude along -U
     // (the V parts cancel), and the side of that axis this line's burst
-    // lies on is the line's V switch.  No temporal comb, no dropout rescue
-    // yet: the composite was concealed upstream.
+    // lies on is the line's V switch.  With use_3d_comb set (key 4, its
+    // only meaning on PAL) the line's U and V are averaged with the
+    // previous line's, the classic PAL delay-line step: 3 dB less chroma
+    // noise, and a differential phase error, which lands on V with opposite
+    // signs on consecutive lines, cancels instead of showing as Hanover
+    // bars.  No temporal comb, no dropout rescue yet: the composite was
+    // concealed upstream.
     {
-        const uint pl = frame_line - 1; // the picture's first line borrows the blank line above
-        const uint nxt = row + 1 < SDTV_FIELD_HEIGHT ? frame_line + 1 : frame_line - 1;
-        float16_t c_src[19];
-        for (int n = 0; n < 19; n++) {
-            uint fc = uint(int(frame_col) + n - 9);
-            c_src[n] = input_frame[frame_line][fc] - 0.5hf * (input_frame[pl][fc] + input_frame[nxt][fc]);
+        const uint field_first = SDTV_FIELD_START_Y + SDTV_FIELD2_OFFSET * field_parity;
+        const uint field_last = field_first + SDTV_FIELD_HEIGHT - 1;
+        float16_t Yp;
+        vec2 uv = pal_line_uv(frame_line, field_first, field_last, frame_col, Yp);
+        if (use_3d_comb != 0u) {
+            const uint other = frame_line > field_first ? frame_line - 1 : frame_line + 1;
+            float16_t y_unused;
+            uv = 0.5 * (uv + pal_line_uv(other, field_first, field_last, frame_col, y_unused));
         }
-        f16vec2 c_demod = demodulated_chroma(c_src, frame_col);
-        // luma: the composite less the chroma band of the comb estimate
-        float16_t Yp = input_frame[frame_line][frame_col] - (0.5hf * c_src[9] - 0.25hf * (c_src[7] + c_src[11]));
-
-        // -U axis from this line's burst and its field neighbour's (the last
-        // line of the field pairs with the one above, de-rotated the other
-        // way).  The measured phasor is the conjugate of the subcarrier
-        // phase (see the sine LUT), so the physical advance of +270.576
-        // degrees per line is undone by rotating the next line's phasor by
-        // +270.576 (the previous line's by -270.576).
-        vec2 m0 = vec2(phase_data[frame_line]);
-        vec2 m1 = vec2(phase_data[nxt]);
-        const float delta = radians(270.576) * (nxt > frame_line ? 1.0 : -1.0);
-        vec2 m1r = vec2(m1.x * cos(delta) - m1.y * sin(delta), m1.x * sin(delta) + m1.y * cos(delta));
-        vec2 r = m0 + m1r;
-        float rl = length(r);
-        float16_t Up = 0.hf, Vp = 0.hf;
-        if (dot(m0, m0) > 0.04 && dot(m1, m1) > 0.04 && rl > 0.5) {
-            // Burst-referenced AGC: a nominal 0.214-unit burst measures 3.43
-            // per line, 4.85 for the pair sum along -U
-            float gain = clamp(4.85 / rl, 0.25, 8.0);
-            vec2 bref = r / rl * gain;
-            // this line's V switch: which side of -U its burst swung to
-            float vs = (m0.y * r.x - m0.x * r.y) >= 0.0 ? 1.0 : -1.0;
-            if (pal_v_flip != 0u)
-                vs = -vs;
-            float I = float(c_demod.x) * bref.x + float(c_demod.y) * bref.y;
-            float Q = float(c_demod.y) * bref.x - float(c_demod.x) * bref.y;
-            // as for NTSC below: U + jV = e^(ja) conj(I + jQ), a = 180 + tint
-            Vp = float16_t((I * rot_re - Q * rot_im) * vs);
-            Up = float16_t(Q * rot_re + I * rot_im);
-        }
+        float16_t Up = float16_t(uv.x), Vp = float16_t(uv.y);
         float16_t motion_m = max(past_motion[mask_row][col], future_motion[mask_row][col]);
         if (dropout_mode == 2 && dropout_data[frame_line][frame_col] != 0 && motion_m > 0.1hf) {
             Yp = 0.299hf;  // paint detected dropouts red, as below
