@@ -42,9 +42,16 @@ Done, in one step rather than the phasing below:
   demodulation angle stays the structural 180°), saturation within ±10 % of what each bar's
   own luma implies after the AGC constant went from the nominal 4.85 to 3.75 (bright bars
   read slightly high, dark ones low -- differential gain, not a constant), full-white field
-  Y = 0.996, black bar 0.012.  Not yet: the temporal (3D) comb (needs frames N ± 2, see
-  below), dropout rescue/donor paths, and the chroma taps / motion shaders still run their
-  NTSC work for nothing on PAL.
+  Y = 0.996, black bar 0.012.  The dropout paths are NTSC's (2026-10-06): the illegal-level
+  rescue substitutes the nearest healthy line of the field (any line does: each decodes
+  against its own burst, so the NTSC "same subcarrier phase" constraint is moot), and a
+  flagged pixel takes the same pixel of the stiller neighbour frame decoded in place, with
+  the frame source selected per access since GLSL has no buffer references.  On the NYCSTM
+  (27 dB) they remove the specks and touch 200-400 pixels a frame; on the rotted disc (13 dB)
+  the motion masks are noise and the donor misplaces content, as NTSC's would -- there
+  `--no-dropout` is the right setting.  Not yet: the temporal (3D) comb (needs frames N ± 2,
+  see below), and the chroma taps / motion shaders still run their NTSC work for nothing on
+  PAL.
 - Verified on the NYCSTM captures (D515 and LD-V4400 players, CLV, EFM): sync supported on
   610 of 625 lines (the 15 vertical-interval lines), VBI chapter/time/picture decode, both
   fields placed right.  The LD-V4400 captures run 0.7 % fast and lock anyway.
