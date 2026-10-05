@@ -130,11 +130,20 @@ private:
     // whole-frame quanta, so a delivery can leave a remainder for the next.
     std::vector<AudioFrame> m_pending_audio;
     AudioMode m_pending_audio_mode;
+    // Per-read audio batches held back beyond the one frame m_pending_audio
+    // gives, for a display latency of more than one frame (PAL: two)
+    std::deque<std::vector<AudioFrame>> m_audio_hold;
     // The raw sync frames behind the pending MODE_AC3 audio, held back the
     // same one frame, so the file writer can mux the original bitstream
     std::vector<std::array<uint8_t, 1536>> m_pending_ac3_frames;
-    // The front (index 0) is the newest received frame N+1 (the lookahead);
-    // index 1 is the frame being decoded, 2 and 3 its history.
+    // The temporal comb's frame distance d: 1 on NTSC, where the subcarrier
+    // inverts from one frame to the next, 2 on PAL, where it takes two
+    // frames to invert (270 degrees per frame, and the V switch flips).
+    // m_frames holds 3d + 1 frames, the front (index 0) the newest received
+    // frame N + d (the lookahead), index d the frame being decoded, 2d and
+    // 3d its temporal history; the motion detector and the comb see frames
+    // at spacing d throughout, so their phase assumptions hold on both.
+    int m_temporal_distance;
     std::deque<SdtvFrame *> m_frames;
 };
 
