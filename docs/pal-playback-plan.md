@@ -37,9 +37,14 @@ Done, in one step rather than the phasing below:
   `MUSELD_PAL_VFLIP=1` inverts the V switch for calibration.  The 1H U/V averaging (the
   PAL delay-line step) is on key 4 / `--no-3d-comb`, on by default (2026-10-06: R−G noise
   on the GGV1011 modulated staircase 10.3 → 6.9, line alternation on the NYCSTM 1.05 →
-  0.41).  Not yet: the temporal (3D) comb (needs frames N ± 2, see below), dropout
-  rescue/donor paths, saturation/hue calibration against the colour bars, and the chroma
-  taps / motion shaders still run their NTSC work for nothing on PAL.
+  0.41).  Calibrated against the GGV1011 test disc's colour bars (2026-10-06, measured on
+  the lossless `--write` output): hue errors −0.6…+0.3° (no tint offset needed: the
+  demodulation angle stays the structural 180°), saturation within ±10 % of what each bar's
+  own luma implies after the AGC constant went from the nominal 4.85 to 3.75 (bright bars
+  read slightly high, dark ones low -- differential gain, not a constant), full-white field
+  Y = 0.996, black bar 0.012.  Not yet: the temporal (3D) comb (needs frames N ± 2, see
+  below), dropout rescue/donor paths, and the chroma taps / motion shaders still run their
+  NTSC work for nothing on PAL.
 - Verified on the NYCSTM captures (D515 and LD-V4400 players, CLV, EFM): sync supported on
   610 of 625 lines (the 15 vertical-interval lines), VBI chapter/time/picture decode, both
   fields placed right.  The LD-V4400 captures run 0.7 % fast and lock anyway.
@@ -73,9 +78,9 @@ Open after this step:
   on TBC'd baseband).  `tools/pal-pilot-check.py` checks the timebase against the pilot
   (2026-10-06: ±15-30 ns, 1.6-2.2 ns line-to-line jitter on the GGV1011 test disc and the
   NYCSTM captures -- the same figures as NTSC's burst check).
-- **Test material for colour**: the NYCSTM programme mixes colour (interviews, the drag
-  racing) with black-and-white archive film; a colour-bar capture is still wanted for
-  saturation/hue calibration.
+- **Test material**: the NYCSTM programme mixes colour with black-and-white archive film;
+  the GGV1011 PAL CAV test disc (DdD capture, FLAC in Ogg) has the colour bars (at ~190-210 s
+  on side 1), a modulated staircase, multiburst, line patterns, full white and black fields.
 - Analog audio: the PAL carriers are wired in (683.6 / 1066.4 kHz, deviation assumed
   100 kHz) but untested -- no analog-audio PAL capture yet.  No CAV capture either.
 - Colour (phase 4), black level (PAL has none: fixed at blanking), the Rec. 567 weighting
