@@ -13,11 +13,14 @@
 
 AnalogAudioDemodulator::AnalogAudioDemodulator(Logger &log, double input_sample_frequency, int input_block_size,
                                                double output_sample_frequency, bool use_simd,
-                                               double left_carrier_frequency, double right_carrier_frequency)
+                                               double left_carrier_frequency, double right_carrier_frequency,
+                                               double channel_pass_hz, double channel_stop_hz)
 : m_log(log),
   m_input_sample_frequency(input_sample_frequency),
   m_input_block_size(input_block_size),
   m_output_sample_frequency(output_sample_frequency),
+  m_channel_pass_hz(channel_pass_hz),
+  m_channel_stop_hz(channel_stop_hz),
   m_cx_expander(output_sample_frequency)
 {
     if (input_sample_frequency < 6.5e6)
@@ -121,13 +124,14 @@ void AnalogAudioDemodulator::buildChannel(ChannelState &channel, const std::stri
     channel.audio_buffer.resize(pre_mix_block_size / m_post_mix_decimation_factor / m_audio_decimation_factor);
 
     // Channel-select lowpass at the discriminator rate: pass the FM signal
-    // (+-150 kHz), stop by +-480 kHz where the neighboring carrier sits after
-    // mixing (the carriers are 511 kHz apart).
+    // (+-150 kHz), stop before the neighbouring carrier's inner sideband
+    // (NTSC's carriers are 511 kHz apart, PAL's 383; see the constructor)
     channel.post_mix_filter_stages.resize(post_mix_log2_decimation + 1);
     {
-        std::vector<float> filter = KaiserLowPass::design<float>(discriminator_frequency, 315e3, 330e3, 80);
+        std::vector<float> filter = KaiserLowPass::design<float>(discriminator_frequency,
+                                                                 (float)m_channel_pass_hz, (float)m_channel_stop_hz, 80);
         std::string description = std::format(
-            "Kaiser low-pass Fs={}, cutoff=315 kHz, ntaps={}", discriminator_frequency, filter.size());
+            "Kaiser low-pass Fs={}, cutoff={} kHz, ntaps={}", discriminator_frequency, m_channel_pass_hz / 1e3, filter.size());
         channel.post_mix_filter_stages[post_mix_log2_decimation] = new ComplexFirFilterStage(
             std::format("{} channel select filter", name),
             description,
