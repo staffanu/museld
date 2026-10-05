@@ -33,6 +33,7 @@ const VideoStandard &VideoStandard::ntsc() {
         .rf_bandpass_low_hz = 3.5e6, .rf_bandpass_high_hz = 13.5e6, .rf_bandpass_transition_hz = 1.5e6,
         .video_lowpass_hz = 5e6,
         .audio_left_hz = 2.3011e6, .audio_right_hz = 2.8125e6,
+        .audio_channel_pass_hz = 315e3, .audio_channel_stop_hz = 330e3,
         // field 2 starts at line 264 in the frame buffer, so its code lines
         // are 279-281; 278 covers a frame started on the wrong field
         .vbi_code_lines = {16, 17, 18, 278, 279, 280, 281},
@@ -99,7 +100,11 @@ const VideoStandard &VideoStandard::pal() {
         // what leaks demodulates above 5.3 MHz, into the video lowpass.
         .rf_bandpass_low_hz = 2.3e6, .rf_bandpass_high_hz = 14e6, .rf_bandpass_transition_hz = 2.5e6,
         .video_lowpass_hz = 5.8e6,
+        // IEC 60856 clause 8: channel I (left) 43.75 fH, channel II (right)
+        // 68.25 fH, +-100 kHz for 100 % modulation -- 382.8 kHz apart, so the
+        // channel filter stops before the neighbour's inner sideband
         .audio_left_hz = 43.75 * 15625.0, .audio_right_hz = 68.25 * 15625.0,
+        .audio_channel_pass_hz = 150e3, .audio_channel_stop_hz = 240e3,
         // field 2's lines 16-18 are frame lines 329-331 (its first line, 313,
         // is a half line); 328 covers a frame started on the wrong field
         .vbi_code_lines = {16, 17, 18, 328, 329, 330, 331},

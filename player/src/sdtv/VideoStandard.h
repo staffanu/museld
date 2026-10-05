@@ -52,8 +52,10 @@ struct VideoStandard {
     double rf_bandpass_low_hz, rf_bandpass_high_hz, rf_bandpass_transition_hz;
     double video_lowpass_hz;      // the demodulated video lowpass cutoff
 
-    // The analog FM audio carriers
+    // The analog FM audio carriers, and the channel-select filter edges that
+    // keep each one's demodulator clear of the other
     double audio_left_hz, audio_right_hz;
+    double audio_channel_pass_hz, audio_channel_stop_hz;
 
     // Frame lines carrying the Philips code: 16-18 of each field (IEC
     // 60857), probed with a margin of one line for a frame that starts on

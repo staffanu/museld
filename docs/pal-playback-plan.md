@@ -95,9 +95,15 @@ Open after this step:
 - **Test material**: the NYCSTM programme mixes colour with black-and-white archive film;
   the GGV1011 PAL CAV test disc (DdD capture, FLAC in Ogg) has the colour bars (at ~190-210 s
   on side 1), a modulated staircase, multiburst, line patterns, full white and black fields.
-- Analog audio: the PAL carriers are wired in (683.6 / 1066.4 kHz, deviation assumed
-  100 kHz) but untested -- no analog-audio PAL capture yet.  (The GGV1011 is the CAV
-  capture; its CAV behaviour is still to be checked.)
+- Analog audio (verified 2026-10-06 on the GGV1011, an analog-sound disc): IEC 60856 clause 8
+  has channel I (left) at 43.75 fH = 683.6 kHz, channel II (right) at 68.25 fH = 1066.4 kHz,
+  ±100 kHz for 100 % modulation -- the test disc's 1 kHz tone on the right channel spreads
+  exactly ±100 kHz in the RF and decodes at −12.9 dBFS, where ±100 kHz through the 75 µs
+  de-emphasis predicts −12.6.  The carriers are only 383 kHz apart, so the channel-select
+  filter (NTSC: pass 315 / stop 330 kHz for 511 kHz spacing) had to become per standard
+  (PAL: 150 / 240 kHz); with the NTSC edges the right carrier's inner sideband beat the
+  left channel's discriminator into permanent squelch.  (The GGV1011's CAV behaviour is
+  still to be checked.)
 - Nothing in the SNR report: the Rec. 567 weighting is the unified network (BT.1439 Annex 2,
   the same for 525 and 625), and the bandwidth and de-emphasis terms already follow the
   standard.  PAL has no black setup (black is at blanking), and the combine shader has the
