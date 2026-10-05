@@ -249,7 +249,16 @@ vector<double> autocorrelation(const vector<float> &d) {
 // can be a harmonic (two or three lines), so prefer a near-as-strong peak at
 // an integer fraction of its lag, then refine with a parabolic fit.
 pair<double, double> findLinePeriod(const vector<double> &ac) {
-    int best = (int)(max_element(ac.begin(), ac.end()) - ac.begin());
+    // The strongest interior local maximum: a value at the edge of the search
+    // range is the autocorrelation still rising towards a lag outside it, not
+    // a period (the GGV1011 test disc's line patterns put such a rise at the
+    // short end, and the peak there would have read as a 480-sample line)
+    int best = -1;
+    for (int i = 1; i + 1 < (int)ac.size(); i++)
+        if (ac[i] >= ac[i - 1] && ac[i] >= ac[i + 1] && (best < 0 || ac[i] > ac[best]))
+            best = i;
+    if (best < 0)
+        return {0.0, 0.0};
     for (int divisor : {3, 2}) {
         double target = (double)(best + c_min_lag) / divisor - c_min_lag;
         int j = (int)lround(target);

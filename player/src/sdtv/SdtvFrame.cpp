@@ -296,10 +296,12 @@ void SdtvFrame::processVbi() {
     }
 
 
+    // Chapter number "8 X1 X2 D D D" (§10.1.8): the top bit of X1 is a flag,
+    // set over the first 400 frames of a chapter, not part of the number
     std::optional<int> chapter = std::nullopt;
     if (chapter_data != -1) {
         chapter = (chapter_data & 0xf00fff) == 0x800ddd ?
-        std::make_optional(((chapter_data & 0xf0000) >> 16) * 10 + ((chapter_data & 0xf000) >> 12)) : std::nullopt;
+        std::make_optional((((chapter_data & 0xf0000) >> 16) & 7) * 10 + ((chapter_data & 0xf000) >> 12)) : std::nullopt;
     }
 
     std::optional<int> clv_time_seconds = std::nullopt;
