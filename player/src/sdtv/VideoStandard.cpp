@@ -82,20 +82,19 @@ const VideoStandard &VideoStandard::pal() {
         // sync tip 6.76 MHz, blanking 7.1, white 7.9
         .rf_center_hz = 7.33e6,
         .rf_deviation_hz = 0.57e6,
-        // The same band as NTSC.  ld-decode uses 2.3-14 MHz for PAL, which
-        // admits the lower chroma sideband (carrier - 4.43 MHz = 2.3-3.5 MHz)
-        // -- and the lower sideband of the 3.75 MHz pilot burst on the sync
-        // tip (IEC 60856 9.1.2: 60 IRE peak-to-peak, 0.5-4.1 us into the
-        // pulse), at 3.0 MHz when the carrier sits at sync tip.  Admitted
-        // through a sharp FIR (1 MHz transition, 160 taps = 4 us at 40 MHz)
-        // the pilot's energy rings into the back porch and read as 6-7 IRE
-        // of blanking noise instead of 4.2; ld-decode admits the sideband
-        // with a gentle 2nd-order edge, which does not.  Cutting the lower
-        // chroma sideband costs the chroma 3 dB of SNR and half its
-        // amplitude, which the burst-referenced gain restores; the phase
-        // survives.  To be revisited with a wide-transition edge once the
-        // colour decoder can judge it (docs/pal-playback-plan.md).
-        .rf_bandpass_low_hz = 3.5e6, .rf_bandpass_high_hz = 13.5e6, .rf_bandpass_transition_hz = 1.5e6,
+        // The band ld-decode uses for PAL, with a gentle edge: it must admit
+        // the lower chroma sideband (carrier - 4.43 MHz = 2.3-3.5 MHz),
+        // because that is where PAL laserdisc chroma is -- the upper sideband
+        // at 11.5 MHz is lost to the disc's MTF.  With NTSC's 3.5 MHz edge the
+        // NYCSTM captures demodulated a burst of 0.03 (noise); with this band
+        // 0.25, the nominal amplitude.  The edge also admits the lower
+        // sideband of the 3.75 MHz pilot burst on the sync tip (IEC 60856
+        // 9.1.2), which is fine as long as the filter is short (a 1 MHz
+        // transition's 160 taps rang the pilot into the back porch), and the
+        // demodulated noise above 3.5 MHz rises with the band, as it must.
+        // The EFM (below 1.75 MHz, -27 dB) is in the stop band's skirt and
+        // what leaks demodulates above 5.3 MHz, into the video lowpass.
+        .rf_bandpass_low_hz = 2.3e6, .rf_bandpass_high_hz = 14e6, .rf_bandpass_transition_hz = 2.5e6,
         .video_lowpass_hz = 5.8e6,
         .audio_left_hz = 43.75 * 15625.0, .audio_right_hz = 68.25 * 15625.0,
         // field 2's lines 16-18 are frame lines 329-331 (its first line, 313,
@@ -104,7 +103,7 @@ const VideoStandard &VideoStandard::pal() {
         .blank_vbi_lines = {7, 8, 9, 10, 11, 12, 320, 321, 322, 323, 324, 325},
         .noise_psd_cols = {190, 600},
         .noise_rows_start = {40, 353},
-        .noise_porch_col = 142,     // after the burst (ends ~139), before the picture at 180
+        .noise_porch_col = 152,     // after the burst (ends ~139, filtered tail to ~148), before the picture at 180
         // the 3.75 MHz pilot burst occupies the sync tip from 0.5 to 4.1 us
         // (IEC 60856 9.1.2) -- up to the rising edge once filtered -- so the
         // tip noise is not measurable

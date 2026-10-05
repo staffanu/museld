@@ -46,18 +46,19 @@ Open after this step:
   weak mirror at 10.5.  NTSC has none (its §9.1.2 is the colour burst).  ld-decode uses it for
   fine hsync timing (`pilot_mhz`).  What followed: the conceal shader's sync clamp now covers
   the PAL pulse (`SDTV_SYNC_END`), the sync-tip noise figure is "n/a" on PAL (the pilot fills
-  the tip up to the rising edge once filtered), and the band stays 3.5-13.5 MHz for now.  The
-  experiment that argued against the lower chroma sideband used sharp FIRs (0.6-1.0 MHz
-  transitions, 160-270 taps = 4-7 µs at 40 MHz), whose ringing carried the pilot from the tip
-  into the back porch (the "6-7 IRE of blanking noise"); ld-decode keeps the sideband on
-  purpose with a *gentle* 2nd-order edge at 2.3 MHz (`FilterParams_PAL`, "to protect the lower
-  chroma sideband and its group delay"), which rings for well under a microsecond.  So for the
-  colour work: try a gentle low edge (2.3 MHz, ~2.5 MHz transition, ~65 taps) and judge it on
-  decoded chroma noise against today's single-sideband band (half chroma amplitude, restored by
-  the burst-referenced gain, -3 dB chroma SNR, phase intact).  decode-orc does not demodulate
-  video RF (its PAL sinks are the ld-decode-tools ports on TBC'd baseband), so the choice is
-  ld-decode's alone.  The pilot is a usable timebase reference for the PAL version of
+  the tip up to the rising edge once filtered).  The band is 2.3-14 MHz with a gentle 2.5 MHz
+  transition (2026-10-05): **the lower chroma sideband is not optional on PAL laserdisc** -- the
+  upper one at 11.5 MHz is lost to the disc MTF, and with NTSC's 3.5 MHz edge the burst
+  demodulated at 0.03 (the noise floor) against 0.25 with the sideband admitted.  The earlier
+  experiment that argued against it used sharp FIRs (0.6-1.0 MHz transitions, 160-270 taps),
+  whose ringing carried the pilot into the back porch; ld-decode's 2nd-order edge at 2.3 MHz
+  (`FilterParams_PAL`, "to protect the lower chroma sideband and its group delay") is the same
+  idea.  decode-orc does not demodulate video RF (its PAL sinks are the ld-decode-tools ports
+  on TBC'd baseband).  The pilot is a usable timebase reference for the PAL version of
   `tools/ntsc-burst-check.py`.
+- **Test material for colour**: the NYCSTM programme is vintage black-and-white film with a
+  burst (colour black), so the burst phase machinery can be verified on it but the hue
+  conventions cannot; a colour PAL capture is still needed for that.
 - Analog audio: the PAL carriers are wired in (683.6 / 1066.4 kHz, deviation assumed
   100 kHz) but untested -- no analog-audio PAL capture yet.  No CAV capture either.
 - Colour (phase 4), black level (PAL has none: fixed at blanking), the Rec. 567 weighting
