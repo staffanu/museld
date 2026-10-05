@@ -210,7 +210,9 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
 dump> <timebase prefix> <out>` plots detected minus reconstructed sync per line —
 must stay within ±0.1 µs with no walks; `ntsc-burst-check.py <prefix> <dump> <out>
 <fs>` measures the curve's timing error against the colour burst phase, content-
-independent — expect ±40 ns and ~1 ns line-to-line jitter.
+independent — expect ±40 ns and ~1 ns line-to-line jitter; `pal-pilot-check.py <prefix>
+<dump> <out> <fs>` is the PAL counterpart, against the 3.75 MHz pilot burst on the sync tip
+(measured ±30 ns, 2 ns jitter on the GGV1011 test disc and the NYCSTM captures).
 
 **Frames**: `--seek T --export-frame-at T2 --export-frame f.png` writes the decoded
 764×480 image (all of it: the display shows only its 4:3 middle, see `PictureFormat`; `V3`

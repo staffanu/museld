@@ -69,8 +69,9 @@ Open after this step:
   whose ringing carried the pilot into the back porch; ld-decode's 2nd-order edge at 2.3 MHz
   (`FilterParams_PAL`, "to protect the lower chroma sideband and its group delay") is the same
   idea.  decode-orc does not demodulate video RF (its PAL sinks are the ld-decode-tools ports
-  on TBC'd baseband).  The pilot is a usable timebase reference for the PAL version of
-  `tools/ntsc-burst-check.py`.
+  on TBC'd baseband).  `tools/pal-pilot-check.py` checks the timebase against the pilot
+  (2026-10-06: ±15-30 ns, 1.6-2.2 ns line-to-line jitter on the GGV1011 test disc and the
+  NYCSTM captures -- the same figures as NTSC's burst check).
 - **Test material for colour**: the NYCSTM programme mixes colour (interviews, the drag
   racing) with black-and-white archive film; a colour-bar capture is still wanted for
   saturation/hue calibration.
