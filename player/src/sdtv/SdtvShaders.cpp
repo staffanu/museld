@@ -87,7 +87,7 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
         spirv("detect_color_burst_phase"), Size(standard.total_lines)));
   m_decode_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_decode_single_field",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 8,
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 9,
           spirv("decode_single_field"), Size(standard.y_buf_width, standard.field_lines)));
   m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_detect_motion",
@@ -140,7 +140,7 @@ void SdtvShaders::decodeSingleField(CommandBuffer &sq, SdtvFieldView &field,
                                     std::shared_ptr<musevk::VulkanBuffer> const &next_dropout,
                                     DropoutMode dropout_mode, bool use_3d_comb,
                                     float rot_re, float rot_im, float level_floor, float level_ceiling,
-                                    float chroma_sel_floor) {
+                                    float chroma_sel_floor, bool pal_v_flip) {
   int field_parity = field.m_field_parity;
 
   m_chroma_taps_algo->updateBufferDescriptorsInSet(0, {field.m_data, field.m_burst_phase_data, prev_frame, next_frame,
@@ -159,7 +159,7 @@ void SdtvShaders::decodeSingleField(CommandBuffer &sq, SdtvFieldView &field,
         use_3d_comb ? 1u : 0u,
         std::bit_cast<uint32_t>(rot_re), std::bit_cast<uint32_t>(rot_im),
         std::bit_cast<uint32_t>(level_floor), std::bit_cast<uint32_t>(level_ceiling),
-        std::bit_cast<uint32_t>(chroma_sel_floor) });
+        std::bit_cast<uint32_t>(chroma_sel_floor), pal_v_flip ? 1u : 0u });
 }
 
 void SdtvShaders::detectMotion(CommandBuffer &sq,

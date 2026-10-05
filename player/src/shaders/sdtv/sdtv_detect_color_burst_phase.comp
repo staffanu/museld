@@ -42,6 +42,15 @@ void main() {
     }
     float16_t b_abs = sqrt(b_re * b_re + b_im * b_im);
 
+#ifdef SDTV_PAL
+    // PAL's burst swings +-45 degrees about the -U axis from line to line,
+    // so the reference is derived from line pairs in the field decoder;
+    // this shader just hands over the raw phasor (a nominal burst of 0.214
+    // units measures |b| = 3.4), zero where there is no usable burst.
+    phase_data[line] = b_abs < 0.2hf ? f16vec2(0.hf, 0.hf) : f16vec2(b_re, b_im);
+    return;
+#endif
+
     // Burst-referenced chroma AGC.  The burst amplitude is 20 IRE = 0.2 units
     // by definition, and the 32-sample correlation sums 16 unit LUT samples,
     // so a nominal burst measures |b| = 3.2.  The disc and RF chain attenuate
