@@ -42,8 +42,8 @@ The input types:
 
 - `muse-rf` — RF from the disc surface (or a player's RF tap) of a MUSE Hi-Vision laserdisc, typically captured at 62.5 MHz.
 - `ntsc-rf` — RF of a standard NTSC laserdisc, typically a DomesDay Duplicator capture at 40 MHz.
-- `pal-rf` — RF of a PAL laserdisc. Work in progress: the picture is decoded in colour with
-  a 2D (spatial) comb only, with the Philips code (chapter, CLV time, picture number), the
+- `pal-rf` — RF of a PAL laserdisc, decoded in colour (spatial and temporal combs, as NTSC),
+  with the Philips code (chapter, CLV time, picture number), the
   EFM track (`--efm`; PAL discs carry either EFM or analog audio) and `--write`
   (colour metadata tagged BT.470BG; 50 frames/s, one per field, or 25 with `--full-frames-only`,
   as 59.94/29.97 for NTSC). See `docs/pal-playback-plan.md`.
@@ -142,7 +142,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--benchmark-shaders` | Print GPU shader timing statistics |
 | `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |
 | `--field-interpolation <mode>` | Initial de-interlacing mode: `normal` (motion-adaptive), `intra-field`, or `inter-frame` — same as keys 1/2/3 |
-| `--no-3d-comb` | NTSC: start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4. PAL: start with the U/V line averaging (the PAL delay-line step: 3 dB less chroma noise, differential phase cancelled) off |
+| `--no-3d-comb` | Start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4. On PAL the key also switches the U/V line averaging (the PAL delay-line step) |
 | `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
 | `--black-level <mode>` | NTSC: where the disc puts black — `auto` (default) reads it off the picture, `m` forces NTSC-M (US discs: 7.5 IRE above blanking), `j` forces NTSC-J (Japanese discs: black at blanking). Same as the J key. Wrong in the M direction, a Japanese disc loses its darkest 7.5 IRE; wrong in the J direction, a US disc shows black as dark grey and slightly desaturated |
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |

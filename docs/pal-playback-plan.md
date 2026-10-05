@@ -49,9 +49,15 @@ Done, in one step rather than the phasing below:
   the frame source selected per access since GLSL has no buffer references.  On the NYCSTM
   (27 dB) they remove the specks and touch 200-400 pixels a frame; on the rotted disc (13 dB)
   the motion masks are noise and the donor misplaces content, as NTSC's would -- there
-  `--no-dropout` is the right setting.  Not yet: the temporal (3D) comb (needs frames N ± 2,
-  see below), and the chroma taps / motion shaders still run their NTSC work for nothing on
-  PAL.
+  `--no-dropout` is the right setting.  **Temporal (3D) comb (2026-10-06)**: the decoder
+  keeps 3d + 1 frames with d = 2 on PAL (1 on NTSC) and shows frame N two reads behind, so
+  the comb and the motion detector see frames N ± 2 (chroma inverted, V switch matching) and
+  N ± 4 -- NTSC's phase assumptions hold at that spacing, so `sdtv_chroma_taps.comp` and the
+  motion detector are reused with only the spatial comb swapped (PAL's f − ½(f₋₁ + f₊₁); a
+  two-line comb on the field's last line).  The audio is held one read longer to match.
+  On the GGV1011 bars and staircase: luma and chroma noise −3 dB on top of the line
+  averaging; no ghosting on moving content; 7.5 ms of the 40 ms budget per frame.  Left:
+  the N ± 1 frames are kept but unused by the comb.
 - Verified on the NYCSTM captures (D515 and LD-V4400 players, CLV, EFM): sync supported on
   610 of 625 lines (the 15 vertical-interval lines), VBI chapter/time/picture decode, both
   fields placed right.  The LD-V4400 captures run 0.7 % fast and lock anyway.
@@ -90,7 +96,7 @@ Open after this step:
   on side 1), a modulated staircase, multiburst, line patterns, full white and black fields.
 - Analog audio: the PAL carriers are wired in (683.6 / 1066.4 kHz, deviation assumed
   100 kHz) but untested -- no analog-audio PAL capture yet.  No CAV capture either.
-- Colour (phase 4), black level (PAL has none: fixed at blanking), the Rec. 567 weighting
+- Black level (PAL has none: fixed at blanking), the Rec. 567 weighting
   and the combine shader's colorimetry (still SMPTE C / 2.2) for PAL.
 
 ## Summary
