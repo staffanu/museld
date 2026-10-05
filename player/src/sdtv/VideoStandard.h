@@ -72,6 +72,7 @@ struct VideoStandard {
     int luma_hist_col0, luma_hist_col1;
 
     bool ntsc_chroma;             // NTSC colour: the subcarrier inverts line to line and frame to frame
+    double chroma_rotation_deg;   // the demodulation angle: the structural 180 plus any calibrated offset
     bool has_black_setup;         // NTSC-M's 7.5 IRE pedestal (and the automatic M/J choice)
     bool has_closed_captions;     // EIA-608 on line 21
     bool has_white_flag;          // the 100 IRE film frame flag on a VBI line

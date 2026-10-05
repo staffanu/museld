@@ -114,6 +114,7 @@ private:
     std::array<int, 2> m_field_buffer_frame_no;
     EfmDecoder m_efm_decoder;
     EfmPcmProcessor m_efm_pcm_processor;
+    bool m_pal_v_flip;
     // AC3 (from the AC3-RF track) and DTS (a bitstream in place of the EFM
     // track's PCM) decoded to stereo; silent stubs in builds without FFmpeg
     CompressedAudioDecoder m_ac3_pcm_decoder;

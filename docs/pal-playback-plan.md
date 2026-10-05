@@ -21,9 +21,24 @@ Done, in one step rather than the phasing below:
   the same half-line phase, unlike NTSC's six), Philips code on lines 16-18 / 329-331,
   EFM audio, `--write` with BT.470BG tags, real-time pacing by the clock (the display loop
   otherwise runs at the 60 Hz refresh).  NTSC output is bit-identical to before.
-- Monochrome only: the PAL shader build takes the luma through a [1 2 2 2 1]/8
-  subcarrier-nulling filter (`sdtv_decode_single_field.comp` under `SDTV_PAL`); the comb,
-  burst phase and motion shaders run but their colour output is discarded.
+- **Colour, 2D (2026-10-05)**: `sdtv_decode_single_field.comp` under `SDTV_PAL`.  Chroma
+  = f − ½(f₋₁ + f₊₁) over the field's adjacent lines, whose chroma sits at ∓90° (270.576°
+  on the grid) and cancels in the sum regardless of the V switch; the NTSC 19-tap
+  demodulation; luma = composite less the chroma band of that estimate.  The −U axis
+  comes from a line pair: the neighbour's burst de-rotated by the structural 270.576° added
+  to the line's own (the ±45° swing cancels, 2 cos 45° of the amplitude is the AGC
+  reference, nominal 4.85 in 16-sample correlation units), and the side of that axis the
+  line's burst swung to is its V switch.  Verified on the NYCSTM programme, which turned
+  out to be in colour (natural skin tones, no Hanover bars: even/odd row chroma alternation
+  under 1/255 against saturations of 30-50).  In the grid frame the burst sequence is b, b,
+  −b, −b (steps 0°/180°: the 270.6° structural advance and the ±90° swing are degenerate on
+  a 4 fsc grid), which is what the pair derivation untangles.  EBU primaries in the combine
+  shader; the demodulation angle is the structural 180° (NTSC's is calibrated at 185.8°);
+  `MUSELD_PAL_VFLIP=1` inverts the V switch for calibration.  Not yet: the temporal (3D)
+  comb (needs frames N ± 2, see below), dropout rescue/donor paths, the classic 1H U/V
+  averaging (−3 dB chroma noise, cancels differential phase), saturation/hue calibration
+  against a known colour-bar source, and the chroma taps / motion shaders still run their
+  NTSC work for nothing on PAL.
 - Verified on the NYCSTM captures (D515 and LD-V4400 players, CLV, EFM): sync supported on
   610 of 625 lines (the 15 vertical-interval lines), VBI chapter/time/picture decode, both
   fields placed right.  The LD-V4400 captures run 0.7 % fast and lock anyway.
@@ -56,9 +71,9 @@ Open after this step:
   idea.  decode-orc does not demodulate video RF (its PAL sinks are the ld-decode-tools ports
   on TBC'd baseband).  The pilot is a usable timebase reference for the PAL version of
   `tools/ntsc-burst-check.py`.
-- **Test material for colour**: the NYCSTM programme is vintage black-and-white film with a
-  burst (colour black), so the burst phase machinery can be verified on it but the hue
-  conventions cannot; a colour PAL capture is still needed for that.
+- **Test material for colour**: the NYCSTM programme mixes colour (interviews, the drag
+  racing) with black-and-white archive film; a colour-bar capture is still wanted for
+  saturation/hue calibration.
 - Analog audio: the PAL carriers are wired in (683.6 / 1066.4 kHz, deviation assumed
   100 kHz) but untested -- no analog-audio PAL capture yet.  No CAV capture either.
 - Colour (phase 4), black level (PAL has none: fixed at blanking), the Rec. 567 weighting

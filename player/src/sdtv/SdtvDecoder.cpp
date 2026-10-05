@@ -65,6 +65,9 @@ SdtvDecoder::SdtvDecoder(
   m_field_buffer_frame_no{-100, -100},
   m_efm_decoder(log, std::nullopt, std::nullopt),
   m_efm_pcm_processor(log),
+  // Calibration aid until a colour PAL capture settles the V-switch
+  // convention: MUSELD_PAL_VFLIP=1 inverts the derived switch
+  m_pal_v_flip(getenv("MUSELD_PAL_VFLIP") != nullptr && atoi(getenv("MUSELD_PAL_VFLIP")) != 0),
   m_ac3_pcm_decoder(log, CompressedAudioDecoder::Codec::eAc3),
   m_dts_pcm_decoder(log, CompressedAudioDecoder::Codec::eDts),
   m_dts_sync_count(0),
@@ -77,7 +80,7 @@ SdtvDecoder::SdtvDecoder(
     // (sRGB-linearized bar measurements null the mean hue error); the residual
     // is source-dependent (differential phase of the player and disc), which
     // is what --tint adjusts.
-    float a = (185.8f + tint_degrees) * (float)M_PI / 180.0f;
+    float a = ((float)video_standard.chroma_rotation_deg + tint_degrees) * (float)M_PI / 180.0f;
     m_rot_re = saturation * sinf(a);
     m_rot_im = saturation * cosf(a);
 }
@@ -508,7 +511,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
                                     m_frames[2]->burst_phase_data(), m_frames[0]->burst_phase_data(),
                                     m_frames[2]->dropout_data(), m_frames[0]->dropout_data(),
                                     dropout_mode, use_3d_comb, m_rot_re, m_rot_im, level_floor, level_ceiling,
-                                    15.0f * sigma_out);
+                                    15.0f * sigma_out, m_pal_v_flip);
         m_field_buffer_frame_no[decoded_field_index] = m_frame_no - 1;
         if (action == NtscCadenceTracker::FieldAction::eHold) {
             // Re-show the previous film frame from the held copy of the last

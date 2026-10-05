@@ -51,7 +51,7 @@ public:
                          std::shared_ptr<musevk::VulkanBuffer> const &next_dropout,
                          DropoutMode dropout_mode, bool use_3d_comb,
                          float rot_re, float rot_im, float level_floor, float level_ceiling,
-                         float chroma_sel_floor);
+                         float chroma_sel_floor, bool pal_v_flip);
 
   // Computes the per-pixel motion mask from the composite frame history into
   // the current movement buffer (flipping the ping-pong index)

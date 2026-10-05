@@ -133,9 +133,17 @@ void main() {
     g = pow(clamp(g, 0.hf, 1.hf), 2.2hf);
     b = pow(clamp(b, 0.hf, 1.hf), 2.2hf);
 
+#ifdef SDTV_PAL
+    // EBU (BT.470 B/G) primaries to sRGB: only the green primary differs,
+    // and barely
+    float16_t r2 = 1.04404hf * r - 0.04404hf * g;
+    float16_t g2 = g;
+    float16_t b2 = 0.01179hf * g + 0.98821hf * b;
+#else
     float16_t r2 =  9.3892e-01hf * r +  5.0196e-02hf * g + 1.0270e-02hf * b;
     float16_t g2 =  1.7760e-02hf * r +  9.6607e-01hf * g + 1.6424e-02hf * b;
     float16_t b2 = -1.6205e-03hf * r + -4.3710e-03hf * g + 1.0053e+00hf * b;
+#endif
 
     imageStore(frame_out_image, ivec2(col, row), vec4(float(r2), float(g2), float(b2), 1.f));
 

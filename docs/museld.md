@@ -42,9 +42,9 @@ The input types:
 
 - `muse-rf` — RF from the disc surface (or a player's RF tap) of a MUSE Hi-Vision laserdisc, typically captured at 62.5 MHz.
 - `ntsc-rf` — RF of a standard NTSC laserdisc, typically a DomesDay Duplicator capture at 40 MHz.
-- `pal-rf` — RF of a PAL laserdisc. Work in progress: the picture is decoded in monochrome
-  (there is no PAL colour decoder yet), with the Philips code (chapter, CLV time, picture
-  number), the EFM track (`--efm`; PAL discs carry either EFM or analog audio) and `--write`
+- `pal-rf` — RF of a PAL laserdisc. Work in progress: the picture is decoded in colour with
+  a 2D (spatial) comb only, with the Philips code (chapter, CLV time, picture number), the
+  EFM track (`--efm`; PAL discs carry either EFM or analog audio) and `--write`
   (colour metadata tagged BT.470BG; 50 frames/s, one per field, or 25 with `--full-frames-only`,
   as 59.94/29.97 for NTSC). See `docs/pal-playback-plan.md`.
 - `muse-16` — MUSE baseband resampled to exactly one sample per pixel at 16.2 MHz, phase locked to the line structure (480 samples per line). This is museld's own intermediate format, produced with `--write-muse16` (see below); `--sample-freq` does not apply.

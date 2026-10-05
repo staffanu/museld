@@ -43,6 +43,9 @@ const VideoStandard &VideoStandard::ntsc() {
         .noise_sync_col = 8, .noise_sync_len = 48,
         .luma_hist_col0 = 152, .luma_hist_col1 = 872,
         .ntsc_chroma = true,
+        // the structural 180 plus the offset calibrated against the Video
+        // Essentials colour bars (see SdtvDecoder)
+        .chroma_rotation_deg = 185.8,
         .has_black_setup = true,
         .has_closed_captions = true,
         .has_white_flag = true,
@@ -110,6 +113,7 @@ const VideoStandard &VideoStandard::pal() {
         .noise_sync_col = 0, .noise_sync_len = 0,
         .luma_hist_col0 = 196, .luma_hist_col1 = 1100,
         .ntsc_chroma = false,
+        .chroma_rotation_deg = 180.0, // uncalibrated: no colour PAL capture yet
         .has_black_setup = false,
         .has_closed_captions = false,
         .has_white_flag = false,
