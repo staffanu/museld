@@ -89,9 +89,12 @@ const VideoStandard &VideoStandard::pal() {
         // pulse), at 3.0 MHz when the carrier sits at sync tip.  Admitted
         // through a sharp FIR (1 MHz transition, 160 taps = 4 us at 40 MHz)
         // the pilot's energy rings into the back porch and read as 6-7 IRE
-        // of blanking noise instead of 4.2.  Cutting the lower chroma
-        // sideband costs the chroma 3 dB of SNR and half its amplitude,
-        // which the burst-referenced gain restores; the phase survives.
+        // of blanking noise instead of 4.2; ld-decode admits the sideband
+        // with a gentle 2nd-order edge, which does not.  Cutting the lower
+        // chroma sideband costs the chroma 3 dB of SNR and half its
+        // amplitude, which the burst-referenced gain restores; the phase
+        // survives.  To be revisited with a wide-transition edge once the
+        // colour decoder can judge it (docs/pal-playback-plan.md).
         .rf_bandpass_low_hz = 3.5e6, .rf_bandpass_high_hz = 13.5e6, .rf_bandpass_transition_hz = 1.5e6,
         .video_lowpass_hz = 5.8e6,
         .audio_left_hz = 43.75 * 15625.0, .audio_right_hz = 68.25 * 15625.0,
