@@ -56,8 +56,9 @@ Done, in one step rather than the phasing below:
   motion detector are reused with only the spatial comb swapped (PAL's f − ½(f₋₁ + f₊₁); a
   two-line comb on the field's last line).  The audio is held one read longer to match.
   On the GGV1011 bars and staircase: luma and chroma noise −3 dB on top of the line
-  averaging; no ghosting on moving content; 7.5 ms of the 40 ms budget per frame.  Left:
-  the N ± 1 frames are kept but unused by the comb.
+  averaging; no ghosting on moving content; 7.5 ms of the 40 ms budget per frame.  All seven
+  slots are live: the frames the comb skips on one read (N ± 1, N − 3) are the ones it uses
+  on the next, when N + 1 is displayed -- two interleaved chains.
 - Verified on the NYCSTM captures (D515 and LD-V4400 players, CLV, EFM): sync supported on
   610 of 625 lines (the 15 vertical-interval lines), VBI chapter/time/picture decode, both
   fields placed right.  The LD-V4400 captures run 0.7 % fast and lock anyway.
