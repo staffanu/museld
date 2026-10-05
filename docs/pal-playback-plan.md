@@ -96,9 +96,12 @@ Open after this step:
   the GGV1011 PAL CAV test disc (DdD capture, FLAC in Ogg) has the colour bars (at ~190-210 s
   on side 1), a modulated staircase, multiburst, line patterns, full white and black fields.
 - Analog audio: the PAL carriers are wired in (683.6 / 1066.4 kHz, deviation assumed
-  100 kHz) but untested -- no analog-audio PAL capture yet.  No CAV capture either.
-- Black level (PAL has none: fixed at blanking), the Rec. 567 weighting
-  and the combine shader's colorimetry (still SMPTE C / 2.2) for PAL.
+  100 kHz) but untested -- no analog-audio PAL capture yet.  (The GGV1011 is the CAV
+  capture; its CAV behaviour is still to be checked.)
+- Nothing in the SNR report: the Rec. 567 weighting is the unified network (BT.1439 Annex 2,
+  the same for 525 and 625), and the bandwidth and de-emphasis terms already follow the
+  standard.  PAL has no black setup (black is at blanking), and the combine shader has the
+  EBU primaries.
 
 ## Summary
 
