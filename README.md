@@ -105,14 +105,14 @@ All components require CMake 3.22+ and a C++20 compiler.
 
 ### museld + ac3rf-efm-decode (default)
 
-Both are built by default. Dependencies: Vulkan (a recent SDK, see below), GLFW, FLAC++,
+Both are built by default. Dependencies: Vulkan (a recent SDK, see below), SDL3, FLAC++,
 pkg-config. Audio output (miniaudio), font rendering (stb_truetype), and the
 subtitle font are bundled and need no packages. FFmpeg ≥ 7.1 is optional and enables video
 file output (`--write`); with older or no FFmpeg, museld builds without it.
 
 Ubuntu packages:
 ```bash
-sudo apt install cmake pkg-config libvulkan-dev glslc libglfw3-dev libflac++-dev \
+sudo apt install cmake pkg-config libvulkan-dev glslc libsdl3-dev libflac++-dev \
     libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
     catch2
 ```
@@ -127,23 +127,28 @@ sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan.list \
 sudo apt update && sudo apt install vulkan-sdk
 ```
 
+Ubuntu 24.04 has no `libsdl3-dev` either; when CMake finds no SDL3 it builds one from a
+release tarball into museld, which needs the X11 and Wayland development headers
+(`libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxfixes-dev
+libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev`).
+
 macOS (Homebrew):
 
 ```bash
-brew install glfw vulkan-headers vulkan-loader molten-vk shaderc flac catch2 ffmpeg
+brew install sdl3 vulkan-headers vulkan-loader molten-vk shaderc flac catch2 ffmpeg
 ```
 
 Windows (MSYS2, UCRT64 environment — museld builds, but runtime is not yet well tested):
 
 ```bash
-pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,flac,catch,vulkan-headers,vulkan-loader,glfw,shaderc}
+pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,flac,catch,vulkan-headers,vulkan-loader,sdl3,shaderc}
 ```
 
 FreeBSD (pkg — a secondary platform, built and tested by CI but without prebuilt
 downloads; `ffmpeg` and `catch2` are only needed for `--write` and the tests):
 
 ```bash
-sudo pkg install cmake pkgconf vulkan-headers vulkan-loader glfw shaderc flac ffmpeg catch2
+sudo pkg install cmake pkgconf vulkan-headers vulkan-loader sdl3 shaderc flac ffmpeg catch2
 ```
 
 Then build with:

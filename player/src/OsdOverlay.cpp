@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <format>
 #include <vector>
-#include <GLFW/glfw3.h>
+#include <SDL3/SDL.h>
 
 #include "Decoder.h"
 #include "PlayerState.h"
@@ -20,7 +20,7 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
                                ResultImages &images,
                                PlayerState &state,
                                const Decoder &decoder,
-                               GLFWwindow *window,
+                               SDL_Window *window,
                                TextRenderer &text_renderer) {
     std::string cursor_string;
     const int zoom = state.zoom_factor;
@@ -59,9 +59,9 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         // the input stream offset for the start of the frame and for pixels under the
         // pointer (Y, Cr, Cb).
         int xsize, ysize;
-        glfwGetWindowSize(window, &xsize, &ysize);
-        double xpos, ypos;
-        glfwGetCursorPos(window, &xpos, &ypos);
+        SDL_GetWindowSize(window, &xsize, &ysize);
+        float xpos, ypos; // in the window's coordinates, like its size
+        SDL_GetMouseState(&xpos, &ypos);
         // Through the part of the window the picture occupies, into the
         // part of the decoded image shown there
         const double fx = (xpos / xsize - state.shown_x0) / (state.shown_x1 - state.shown_x0);

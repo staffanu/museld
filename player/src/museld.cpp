@@ -17,6 +17,8 @@
 #  include <mach-o/dyld.h>
 #endif
 
+#include <SDL3/SDL.h>
+
 #include "musevk/TimestampQueryPool.h"
 #include "musevk/VulkanManager.h"
 #include "musevk/CommandPool.h"
@@ -65,10 +67,6 @@ class VideoFileWriter {}; // stub for non-libav builds; never instantiated
 #define INPUT_BUFFER_COUNT 6
 
 using namespace std;
-
-void glfw_error_callback(int error, const char* description) {
-    fprintf(stderr, "Error %d: %s\n", error, description); // FIXME: use logging framework
-}
 
 // The subtitle files available for one input file; the [ and ] keys cycle the
 // primary (bottom) and secondary (top) display slots through these.
@@ -334,12 +332,11 @@ static void runPlayer(Logger &log,
                       musevk::VulkanManager &manager,
                       Decoder &decoder,
                       ReaderControls &reader_controls,
-                      GLFWwindow *window,
+                      SDL_Window *window,
                       bool full_screen,
                       AspectMode initial_aspect_mode,
                       const PictureFormat &picture_format,
                       bool initial_full_image, double initial_overscan,
-                      int window_w, int window_h,
                       bool start_paused,
                       Decoder::FieldInterpolationMode initial_field_interpolation_mode,
                       bool initial_use_3d_comb,
@@ -740,10 +737,7 @@ static void runPlayer(Logger &log,
                 state.paused = true;
                 state.osd_text = "PAUSE";
             }
-            if (glfwWindowShouldClose(window))
-                break;
-            if (!input.poll(window, state, reader_controls, dropout_mode, audio_track,
-                            full_screen, window_w, window_h))
+            if (!input.poll(window, state, reader_controls, dropout_mode, audio_track, full_screen))
                 break;
         }
 
@@ -832,10 +826,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   double export_frame_after_seconds,
                   double write_duration_seconds,
                   double initial_seek_seconds) {
-    glfwSetErrorCallback(glfw_error_callback);
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    if (!SDL_Init(SDL_INIT_VIDEO))
+        throw runtime_error(std::format("SDL_Init: {}", SDL_GetError()));
 
     // The decoded image size (also the size of a written video file), where
     // the picture sits in it and the shape of its pixels, and a window of the
@@ -856,21 +848,19 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     }
     int window_w, window_h;
     defaultWindowSize(picture_format, full_image, window_w, window_h);
-    GLFWwindow *window;
-    if (full_screen) {
-        // At the monitor's current mode -- no mode switch; the blit scales
-        GLFWmonitor *monitor = glfwGetPrimaryMonitor();
-        const GLFWvidmode *mode = glfwGetVideoMode(monitor);
-        glfwWindowHint(GLFW_RED_BITS, mode->redBits);
-        glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
-        glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
-        glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
-        window = glfwCreateWindow(mode->width, mode->height, title, monitor, nullptr);
-    } else {
-        window = glfwCreateWindow(window_w, window_h, title, nullptr, nullptr);
+    // Full screen is the desktop's mode, borderless -- no mode switch; the
+    // blit scales.  The window keeps its windowed size underneath, which is
+    // what Tab returns to.
+    SDL_WindowFlags window_flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    if (full_screen)
+        window_flags |= SDL_WINDOW_FULLSCREEN;
+    SDL_Window *window = SDL_CreateWindow(title, window_w, window_h, window_flags);
+    if (window == nullptr) {
+        const string what = SDL_GetError();
+        SDL_Quit();
+        throw runtime_error(std::format("SDL_CreateWindow: {}", what));
     }
-    glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+    SDL_HideCursor();
 
     // Teardown must run in this order on every exit path, including stack
     // unwinding: first stop the reader, which joins the reader/demodulator/EFM
@@ -883,7 +873,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         Logger &log;
         FrameReader<InputBlock> &reader;
         musevk::VulkanManager &manager;
-        GLFWwindow *window;
+        SDL_Window *window;
         ~Teardown() {
             try {
                 reader.cleanup();
@@ -891,8 +881,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             } catch (const std::exception &x) {
                 log.error(eApplication, x.what());
             }
-            glfwDestroyWindow(window);
-            glfwTerminate();
+            SDL_DestroyWindow(window);
+            SDL_Quit();
         }
     } teardown{log, reader, manager, window};
 
@@ -998,7 +988,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
 
         runPlayer(log, manager, *decoder, reader_controls, window, full_screen, aspect_mode, picture_format,
                   full_image, overscan,
-                  window_w, window_h, start_paused,
+                  start_paused,
                   field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, dropout_mode, audio_track,
                   benchmark_shaders,
                   output_filename.has_value(),

@@ -5,8 +5,8 @@
 #include <algorithm>
 #include <limits>
 #include <set>
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.hpp>
 #include <format>
 #include "VulkanManager.h"
@@ -31,7 +31,7 @@ namespace musevk {
         }
     }
 
-    void VulkanManager::initVulkan(GLFWwindow *window, bool no_sync) {
+    void VulkanManager::initVulkan(SDL_Window *window, bool no_sync) {
         m_window = window;
         m_no_sync = no_sync;
         createInstance();
@@ -142,10 +142,14 @@ namespace musevk {
         vk::ApplicationInfo appInfo("Muse Decoder", VK_MAKE_VERSION(1, 0, 0), "No Engine", VK_MAKE_VERSION(1, 0, 0), VK_API_VERSION_1_2);
         vk::InstanceCreateInfo createInfo(c_instance_create_flags, &appInfo);
 
-        uint32_t glfwExtensionCount = 0;
-        const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+        // The surface extensions for this window system (VK_KHR_surface plus
+        // the platform's: xcb/wayland, win32, or EXT_metal_surface through MoltenVK)
+        Uint32 sdl_extension_count = 0;
+        const char *const *sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&sdl_extension_count);
+        if (sdl_extensions == nullptr)
+            throw runtime_error(std::format("SDL_Vulkan_GetInstanceExtensions: {}", SDL_GetError()));
 
-        vector<const char *> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+        vector<const char *> extensions(sdl_extensions, sdl_extensions + sdl_extension_count);
         extensions.insert(extensions.cend(), c_instance_extensions.cbegin(), c_instance_extensions.cend());
 
         auto debugUtilsMessengerCreateInfo = createDebugMessengerCreateInfo();
@@ -206,10 +210,8 @@ namespace musevk {
 
     void VulkanManager::createSurface() {
         VkSurfaceKHR surface;
-        auto result = glfwCreateWindowSurface(m_instance, m_window, nullptr, &surface);
-        if (result != VK_SUCCESS) {
-            throw runtime_error("failed to create window surface!");
-        }
+        if (!SDL_Vulkan_CreateSurface(m_window, static_cast<VkInstance>(m_instance), nullptr, &surface))
+            throw runtime_error(std::format("failed to create window surface: {}", SDL_GetError()));
         m_surface = vk::SurfaceKHR(surface);
     }
 
@@ -398,7 +400,7 @@ namespace musevk {
             return capabilities.currentExtent;
         } else {
             int width, height;
-            glfwGetFramebufferSize(m_window, &width, &height);
+            SDL_GetWindowSizeInPixels(m_window, &width, &height);
 
             vk::Extent2D actualExtent = {
                     static_cast<uint32_t>(width),

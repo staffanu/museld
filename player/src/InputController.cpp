@@ -6,65 +6,62 @@
 #include <algorithm>
 #include <format>
 
-#include <GLFW/glfw3.h>
+#include <SDL3/SDL.h>
 
 #include "PlayerState.h"
 #include "logging/Logger.h"
 
-bool InputController::checkKey(GLFWwindow *window, int key) {
-    if (glfwGetKey(window, key) == GLFW_PRESS) {
-        if (m_keys_down.find(key) == m_keys_down.end()) {
-            m_keys_down.insert(key);
-            return true;
-        }
-        return false;
-    }
-    m_keys_down.erase(key);
-    return false;
+bool InputController::checkKey(int scancode) const {
+    return m_pressed.contains(scancode);
 }
 
-bool InputController::poll(GLFWwindow *window,
+bool InputController::poll(SDL_Window *window,
                            PlayerState &state,
                            ReaderControls &reader,
                            DropoutMode &dropout_mode,
                            AudioTrack &audio_track,
-                           bool &full_screen,
-                           int window_width,
-                           int window_height) {
-    glfwPollEvents();
-
-    if (checkKey(window, GLFW_KEY_ESCAPE) || checkKey(window, GLFW_KEY_Q))
-        return false;
-    if (checkKey(window, GLFW_KEY_TAB)) {
-        if (full_screen) {
-            // Back to the size the window had, or the caller's default when
-            // playback started full screen
-            const int w = m_windowed_width > 0 ? m_windowed_width : window_width;
-            const int h = m_windowed_height > 0 ? m_windowed_height : window_height;
-            glfwSetWindowMonitor(window, nullptr, 0, 0, w, h, GLFW_DONT_CARE);
-            full_screen = false;
-        } else {
-            // The monitor's current mode: no mode switch, the picture is
-            // scaled to the screen by the blit
-            glfwGetWindowSize(window, &m_windowed_width, &m_windowed_height);
-            GLFWmonitor *monitor = glfwGetPrimaryMonitor();
-            const GLFWvidmode *mode = glfwGetVideoMode(monitor);
-            glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
-            full_screen = true;
+                           bool &full_screen) {
+    // Drain the event queue: the keys pressed since the last poll, and whether
+    // the window was closed.  Scancodes name the physical key, so the
+    // bindings sit where they do on a US keyboard whatever the layout.
+    m_pressed.clear();
+    bool quit = false;
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        switch (event.type) {
+            case SDL_EVENT_QUIT:
+            case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+                quit = true;
+                break;
+            case SDL_EVENT_KEY_DOWN:
+                if (!event.key.repeat)
+                    m_pressed.insert(event.key.scancode);
+                break;
+            default:
+                break;
         }
     }
-    if (checkKey(window, GLFW_KEY_SPACE)) {
+    if (quit || checkKey(SDL_SCANCODE_ESCAPE) || checkKey(SDL_SCANCODE_Q))
+        return false;
+    if (checkKey(SDL_SCANCODE_TAB)) {
+        // Full screen at the desktop's mode -- no mode switch, the picture is
+        // scaled to the screen by the blit; SDL restores the windowed size
+        full_screen = !full_screen;
+        if (!SDL_SetWindowFullscreen(window, full_screen))
+            m_log.warn(eApplication, std::format("SDL_SetWindowFullscreen: {}", SDL_GetError()));
+    }
+    if (checkKey(SDL_SCANCODE_SPACE)) {
         state.paused = !state.paused;
         state.osd_text = state.paused ? "PAUSE" : "PLAY";
     }
-    if (checkKey(window, GLFW_KEY_N)) {
+    if (checkKey(SDL_SCANCODE_N)) {
         state.paused = false;
         state.redo_last_field = false;
         state.paused_countdown = 1;
     }
 
     const double zoom_step = 0.2;
-    if (checkKey(window, GLFW_KEY_LEFT)) {
+    if (checkKey(SDL_SCANCODE_LEFT)) {
         if (state.zoom_factor != 1) {
             state.zoom_center.first = std::max(0.5 / state.zoom_factor,
                                                state.zoom_center.first - zoom_step / state.zoom_factor);
@@ -82,7 +79,7 @@ bool InputController::poll(GLFWwindow *window,
             }
         }
     }
-    if (checkKey(window, GLFW_KEY_RIGHT)) {
+    if (checkKey(SDL_SCANCODE_RIGHT)) {
         if (state.zoom_factor != 1) {
             state.zoom_center.first = std::min(1.0 - 0.5 / state.zoom_factor,
                                                state.zoom_center.first + zoom_step / state.zoom_factor);
@@ -95,46 +92,46 @@ bool InputController::poll(GLFWwindow *window,
             }
         }
     }
-    if (checkKey(window, GLFW_KEY_UP)) {
+    if (checkKey(SDL_SCANCODE_UP)) {
         state.zoom_center.second = std::max(0.5 / state.zoom_factor,
                                             state.zoom_center.second - zoom_step / state.zoom_factor);
     }
-    if (checkKey(window, GLFW_KEY_DOWN)) {
+    if (checkKey(SDL_SCANCODE_DOWN)) {
         state.zoom_center.second = std::min(1.0 - 0.5 / state.zoom_factor,
                                             state.zoom_center.second + zoom_step / state.zoom_factor);
     }
 
-    if (checkKey(window, GLFW_KEY_1)) {
+    if (checkKey(SDL_SCANCODE_1)) {
         state.field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
         if (state.paused) state.redo_last_field = true;
         m_log.info(eApplication | eVideo, "Field interpolation determined by motion detection");
         state.osd_text = "MOTION NORMAL";
     }
-    if (checkKey(window, GLFW_KEY_2)) {
+    if (checkKey(SDL_SCANCODE_2)) {
         state.field_interpolation_mode = Decoder::FieldInterpolationMode::eForceIntraField;
         if (state.paused) state.redo_last_field = true;
         m_log.info(eApplication | eVideo, "Field interpolation forced to intra field only");
         state.osd_text = "MOTION ALL";
     }
-    if (checkKey(window, GLFW_KEY_3)) {
+    if (checkKey(SDL_SCANCODE_3)) {
         state.field_interpolation_mode = Decoder::FieldInterpolationMode::eForceInterFrame;
         if (state.paused) state.redo_last_field = true;
         m_log.info(eApplication | eVideo, "Inter-frame interpolation forced");
         state.osd_text = "MOTION NONE";
     }
-    if (checkKey(window, GLFW_KEY_4)) {
+    if (checkKey(SDL_SCANCODE_4)) {
         state.use_3d_comb = !state.use_3d_comb;
         if (state.paused) state.redo_last_field = true;
         m_log.info(eApplication | eVideo, state.use_3d_comb ? "3D comb enabled" : "3D comb disabled");
         state.osd_text = state.use_3d_comb ? "3D COMB ON" : "3D COMB OFF";
     }
-    if (checkKey(window, GLFW_KEY_5)) {
+    if (checkKey(SDL_SCANCODE_5)) {
         state.film_mode = !state.film_mode;
         if (state.paused) state.redo_last_field = true;
         m_log.info(eApplication | eVideo, state.film_mode ? "Film mode auto" : "Film mode off");
         state.osd_text = state.film_mode ? "FILM MODE AUTO" : "FILM MODE OFF";
     }
-    if (checkKey(window, GLFW_KEY_A)) {
+    if (checkKey(SDL_SCANCODE_A)) {
         // Cycle through the disc's audio tracks: default -> EFM -> (AC3 on
         // NTSC) -> default
         audio_track = audio_track == AudioTrack::eDefault ? AudioTrack::eEfm
@@ -145,7 +142,7 @@ bool InputController::poll(GLFWwindow *window,
                        : audio_track == AudioTrack::eAc3 ? reader.ac3_audio_label
                        : reader.default_audio_label;
     }
-    if (checkKey(window, GLFW_KEY_B)) {
+    if (checkKey(SDL_SCANCODE_B)) {
         switch (state.audio_channel_mode) {
             case AudioChannelMode::eStereo:
                 state.audio_channel_mode = AudioChannelMode::eLeft;
@@ -161,7 +158,7 @@ bool InputController::poll(GLFWwindow *window,
                 break;
         }
     }
-    if (checkKey(window, GLFW_KEY_X)) {
+    if (checkKey(SDL_SCANCODE_X)) {
         switch (state.analog_cx_mode) {
             case Decoder::CxMode::eAuto:
                 state.analog_cx_mode = Decoder::CxMode::eOff;
@@ -181,7 +178,7 @@ bool InputController::poll(GLFWwindow *window,
         if (!reader.has_analog_audio || audio_track != AudioTrack::eDefault)
             state.osd_text = "(" + state.osd_text + ")";
     }
-    if (checkKey(window, GLFW_KEY_J)) {
+    if (checkKey(SDL_SCANCODE_J)) {
         // NTSC-M (US) and NTSC-J discs put black 7.5 and 0 IRE above blanking
         switch (state.black_level_mode) {
             case Decoder::BlackLevelMode::eAuto:
@@ -199,7 +196,7 @@ bool InputController::poll(GLFWwindow *window,
         }
         if (state.paused) state.redo_last_field = true;
     }
-    if (checkKey(window, GLFW_KEY_D)) {
+    if (checkKey(SDL_SCANCODE_D)) {
         switch (dropout_mode) {
             case DropoutMode::eNormal:
                 dropout_mode = DropoutMode::eDisabled;
@@ -215,36 +212,39 @@ bool InputController::poll(GLFWwindow *window,
                 break;
         }
     }
-    if (checkKey(window, GLFW_KEY_L)) {
+    if (checkKey(SDL_SCANCODE_L)) {
         state.enable_non_linear = !state.enable_non_linear;
         state.osd_text = state.enable_non_linear ? "NON-LINEAR DE-EMPH ON" : "NON-LINEAR DE-EMPH OFF";
     }
-    if (checkKey(window, GLFW_KEY_C)) {
+    if (checkKey(SDL_SCANCODE_C)) {
         state.enable_cursor = !state.enable_cursor;
-        glfwSetInputMode(window, GLFW_CURSOR, state.enable_cursor ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
+        if (state.enable_cursor)
+            SDL_ShowCursor();
+        else
+            SDL_HideCursor();
     }
-    if (checkKey(window, GLFW_KEY_V)) {
+    if (checkKey(SDL_SCANCODE_V)) {
         state.show_disc_code = !state.show_disc_code;
     }
-    if (checkKey(window, GLFW_KEY_PRINT_SCREEN)) {
-        glfwSetClipboardString(window, state.last_cursor_string.c_str());
+    if (checkKey(SDL_SCANCODE_PRINTSCREEN)) {
+        SDL_SetClipboardText(state.last_cursor_string.c_str());
     }
-    if (checkKey(window, GLFW_KEY_S)) {
+    if (checkKey(SDL_SCANCODE_S)) {
         state.export_frame = true;
         if (state.paused)
             state.redo_last_field = true; // re-decode so baked-in OSD text is not exported
     }
-    if (checkKey(window, GLFW_KEY_7) && reader.cycleEqMode) {
+    if (checkKey(SDL_SCANCODE_7) && reader.cycleEqMode) {
         std::string mode = reader.cycleEqMode();
         state.osd_text = std::format("EQ {}", mode);
         m_log.info(eApplication | eVideo, std::format("Adaptive equaliser mode: {}", mode));
     }
-    if (checkKey(window, GLFW_KEY_8) && reader.resetEqTaps) {
+    if (checkKey(SDL_SCANCODE_8) && reader.resetEqTaps) {
         reader.resetEqTaps();
         state.osd_text = "EQ RESET";
         m_log.info(eApplication | eVideo, "Adaptive equaliser taps reset to identity");
     }
-    if (checkKey(window, GLFW_KEY_E) && reader.efmFilterSize && reader.setEfmFilterSize) {
+    if (checkKey(SDL_SCANCODE_E) && reader.efmFilterSize && reader.setEfmFilterSize) {
         // Cycle the EFM adaptive filter through roughly doubling sizes -- some
         // discs need a very long filter -- and then off.  A size set on the
         // command line that is not in the list steps to the next larger one;
@@ -269,11 +269,11 @@ bool InputController::poll(GLFWwindow *window,
         state.osd_text = slot < 0 ? std::format("{} OFF", osd_prefix)
                                   : std::format("{} {}", osd_prefix, state.subtitle_track_names[slot]);
     };
-    if (checkKey(window, GLFW_KEY_LEFT_BRACKET))
+    if (checkKey(SDL_SCANCODE_LEFTBRACKET))
         cycleSubtitleSlot(state.subtitle_primary, "SUBTITLES");
-    if (checkKey(window, GLFW_KEY_RIGHT_BRACKET))
+    if (checkKey(SDL_SCANCODE_RIGHTBRACKET))
         cycleSubtitleSlot(state.subtitle_secondary, "SUBTITLES 2");
-    if (checkKey(window, GLFW_KEY_F)) {
+    if (checkKey(SDL_SCANCODE_F)) {
         // Cycle the picture format; SQUEEZE only applies to a 4:3 frame
         switch (state.aspect_mode) {
             case AspectMode::eNormal:
@@ -291,7 +291,7 @@ bool InputController::poll(GLFWwindow *window,
         }
         state.osd_text = std::format("ASPECT {}", aspectModeName(state.aspect_mode));
     }
-    if (checkKey(window, GLFW_KEY_O)) {
+    if (checkKey(SDL_SCANCODE_O)) {
         // How much of the edges to hide: the standard picture, a TV's
         // overscan on top of it, or nothing at all (the whole decoded image,
         // which for NTSC includes the blanking margins at the sides)
@@ -312,7 +312,7 @@ bool InputController::poll(GLFWwindow *window,
         state.osd_text = state.full_image ? "OVERSCAN OFF: FULL IMAGE"
                                           : std::format("OVERSCAN {:g}%", state.overscan * 100);
     }
-    if (checkKey(window, GLFW_KEY_Z)) {
+    if (checkKey(SDL_SCANCODE_Z)) {
         state.zoom_factor = (state.zoom_factor * 2) % 7;
         state.zoom_center.first = std::max(0.5 / state.zoom_factor,
                                            std::min(1.0 - 0.5 / state.zoom_factor, state.zoom_center.first));

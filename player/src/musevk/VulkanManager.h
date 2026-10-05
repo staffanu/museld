@@ -4,11 +4,12 @@
 #ifndef MUSECPP_VULKANMANAGER_H
 #define MUSECPP_VULKANMANAGER_H
 
-#define GLFW_INCLUDE_VULKAN
 #include <cstdint>
 #include <string>
 #include <optional>
-#include <GLFW/glfw3.h>
+#include <vulkan/vulkan.hpp>
+struct SDL_Window;
+
 #include "Size.h"
 #include "VulkanBuffer.h"
 #include "CommandBuffer.h"
@@ -25,7 +26,7 @@ namespace musevk {
         VulkanManager(VulkanManager &other) = delete;
         void operator=(const musevk::VulkanManager &) = delete;
 
-        void initVulkan(GLFWwindow *window, bool no_sync);
+        void initVulkan(SDL_Window *window, bool no_sync);
         // Idempotent, and safe after a partial initVulkan().  Everything created
         // on this manager's device must already be gone: the explicit teardown
         // path calls this once that holds, and the destructor is the backstop.
@@ -124,7 +125,7 @@ namespace musevk {
         const bool enableValidationLayers = true;
 #endif
         Logger &m_log;
-        GLFWwindow *m_window;
+        SDL_Window *m_window;
         bool m_no_sync;
         std::unique_ptr<MemoryAllocator> m_memory_allocator;
 

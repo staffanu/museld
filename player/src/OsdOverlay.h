@@ -6,7 +6,7 @@
 
 #include <string>
 
-struct GLFWwindow;
+struct SDL_Window;
 class TextRenderer;
 class Decoder;
 struct PlayerState;
@@ -20,7 +20,7 @@ public:
                        ResultImages &images,
                        PlayerState &state,
                        const Decoder &decoder,
-                       GLFWwindow *window,
+                       SDL_Window *window,
                        TextRenderer &text_renderer);
 };
 

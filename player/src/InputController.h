@@ -11,7 +11,7 @@
 #include "AudioDefs.h"
 #include "DropoutMode.h"
 
-struct GLFWwindow;
+struct SDL_Window;
 struct PlayerState;
 class Logger;
 
@@ -44,23 +44,23 @@ class InputController {
 public:
     explicit InputController(Logger &log) : m_log(log) {}
 
-    // Returns false if the user requested quit.
-    bool poll(GLFWwindow *window,
+    // Pumps the window system's events and acts on the keys pressed.  Must
+    // run on the main thread.  Returns false if the user requested quit (a
+    // key, or the window being closed).
+    bool poll(SDL_Window *window,
               PlayerState &state,
               ReaderControls &reader,
               DropoutMode &dropout_mode,
               AudioTrack &audio_track,
-              bool &full_screen,
-              int window_width,
-              int window_height);
+              bool &full_screen);
 
 private:
-    bool checkKey(GLFWwindow *window, int key);
+    // Whether the key (an SDL_Scancode: the physical key, whatever the
+    // layout) was pressed since the last poll; key repeat does not count
+    bool checkKey(int scancode) const;
 
     Logger &m_log;
-    std::set<int> m_keys_down;
-    // Window size to return to from full screen (0: not yet seen windowed)
-    int m_windowed_width = 0, m_windowed_height = 0;
+    std::set<int> m_pressed; // scancodes pressed since the last poll
 };
 
 #endif //MUSECPP_INPUTCONTROLLER_H
