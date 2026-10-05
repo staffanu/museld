@@ -68,6 +68,7 @@ struct VideoStandard {
     // columns of the luma histogram
     int noise_rows_start[2];
     int noise_porch_col;
+    int noise_sync_col, noise_sync_len; // the sync tip window; length 0 when the tip carries a pilot (PAL)
     int luma_hist_col0, luma_hist_col1;
 
     bool ntsc_chroma;             // NTSC colour: the subcarrier inverts line to line and frame to frame

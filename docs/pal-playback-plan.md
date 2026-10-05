@@ -38,11 +38,20 @@ Done, in one step rather than the phasing below:
   audio carrier breaks ties when no group is found.  `--probe` prints the count.
 
 Open after this step:
-- **RF band.** The PAL band stays at NTSC's 3.5-13.5 MHz for now: the lower chroma sideband
-  (carrier - 4.43 MHz = 2.3-3.5 MHz, which ld-decode admits with a 2.3 MHz edge) is where the
-  NYCSTM captures carry a strong component that moves with the carrier (fc - 3.8 MHz at sync
-  tip, with a mirror at fc + 3.8 MHz; not EFM) and raises the blanking noise from 4.2 to 6-7
-  IRE when admitted.  Understand it before the colour work.
+- **RF band** (resolved 2026-10-05): the "fc - 3.8 MHz component" is the **PAL pilot burst**,
+  IEC 60856 §9.1.2 (`../analogue-video-specifications/docs/laserdisc/`): 240 × fH =
+  3.75 MHz superimposed on the sync tip, 6/7 of blanking-to-white peak-to-peak (≈60 IRE),
+  13.5 cycles from 0.5 to 4.1 µs after the sync edge (optionally in the equalizing and field
+  pulses too); it modulates the tip carrier, hence the sideband at 6.76 − 3.75 = 3.0 MHz with a
+  weak mirror at 10.5.  NTSC has none (its §9.1.2 is the colour burst).  ld-decode uses it for
+  fine hsync timing (`pilot_mhz`).  What followed: the conceal shader's sync clamp now covers
+  the PAL pulse (`SDTV_SYNC_END`), the sync-tip noise figure is "n/a" on PAL (the pilot fills
+  the tip up to the rising edge once filtered), and the band stays 3.5-13.5 MHz: a sharp
+  filter admitting the lower chroma sideband also admits the pilot's lower sideband and rings
+  it into the back porch (measured as 6-7 IRE of "blanking noise").  Cutting the lower chroma
+  sideband halves the chroma amplitude, which the burst-referenced gain restores, and costs
+  3 dB of chroma SNR; the phase is intact.  The pilot is a usable timebase reference for the
+  PAL version of `tools/ntsc-burst-check.py`.
 - Analog audio: the PAL carriers are wired in (683.6 / 1066.4 kHz, deviation assumed
   100 kHz) but untested -- no analog-audio PAL capture yet.  No CAV capture either.
 - Colour (phase 4), black level (PAL has none: fixed at blanking), the Rec. 567 weighting

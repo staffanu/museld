@@ -25,7 +25,7 @@ public:
     // (sdtv_deemphasis.comp), i.e. on the raw demodulated baseband.
     struct NoiseEstimate {
         float sigma_blanking; // back porch windows of the picture lines
-        float sigma_sync;     // sync tip windows
+        float sigma_sync;     // sync tip windows; -1 when not measurable (PAL's pilot burst fills the tip)
         float blanking_level; // robust blanking level, for tracking wander
         float white_flag_level; // 100 IRE white flag level, -1 when no VBI line qualified
         // Histogram of the active picture's luma (one-subcarrier-cycle
