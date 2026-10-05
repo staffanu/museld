@@ -46,12 +46,18 @@ Open after this step:
   weak mirror at 10.5.  NTSC has none (its §9.1.2 is the colour burst).  ld-decode uses it for
   fine hsync timing (`pilot_mhz`).  What followed: the conceal shader's sync clamp now covers
   the PAL pulse (`SDTV_SYNC_END`), the sync-tip noise figure is "n/a" on PAL (the pilot fills
-  the tip up to the rising edge once filtered), and the band stays 3.5-13.5 MHz: a sharp
-  filter admitting the lower chroma sideband also admits the pilot's lower sideband and rings
-  it into the back porch (measured as 6-7 IRE of "blanking noise").  Cutting the lower chroma
-  sideband halves the chroma amplitude, which the burst-referenced gain restores, and costs
-  3 dB of chroma SNR; the phase is intact.  The pilot is a usable timebase reference for the
-  PAL version of `tools/ntsc-burst-check.py`.
+  the tip up to the rising edge once filtered), and the band stays 3.5-13.5 MHz for now.  The
+  experiment that argued against the lower chroma sideband used sharp FIRs (0.6-1.0 MHz
+  transitions, 160-270 taps = 4-7 µs at 40 MHz), whose ringing carried the pilot from the tip
+  into the back porch (the "6-7 IRE of blanking noise"); ld-decode keeps the sideband on
+  purpose with a *gentle* 2nd-order edge at 2.3 MHz (`FilterParams_PAL`, "to protect the lower
+  chroma sideband and its group delay"), which rings for well under a microsecond.  So for the
+  colour work: try a gentle low edge (2.3 MHz, ~2.5 MHz transition, ~65 taps) and judge it on
+  decoded chroma noise against today's single-sideband band (half chroma amplitude, restored by
+  the burst-referenced gain, -3 dB chroma SNR, phase intact).  decode-orc does not demodulate
+  video RF (its PAL sinks are the ld-decode-tools ports on TBC'd baseband), so the choice is
+  ld-decode's alone.  The pilot is a usable timebase reference for the PAL version of
+  `tools/ntsc-burst-check.py`.
 - Analog audio: the PAL carriers are wired in (683.6 / 1066.4 kHz, deviation assumed
   100 kHz) but untested -- no analog-audio PAL capture yet.  No CAV capture either.
 - Colour (phase 4), black level (PAL has none: fixed at blanking), the Rec. 567 weighting
