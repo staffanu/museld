@@ -73,7 +73,8 @@ tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parse
                      frames to .srt and translate them via the Claude API or a local
                      OpenAI-compatible model server)
 packaging/         — Scripts and per-package READMEs for the Windows/macOS downloads
-docs/              — Reference documentation (player, CLI, AC3-RF decoding, packaging)
+docs/              — Reference documentation (player, CLI, AC3-RF decoding, packaging,
+                     tvos-port.md: the Apple TV plan and its state)
 ```
 
 ## Clangd / LSP Diagnostics
