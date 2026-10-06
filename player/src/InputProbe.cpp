@@ -369,20 +369,38 @@ double measureFieldLines(Logger &log, const string &filename, InputFormat format
         return 0;
     auto analytic = analyticSignal(samples);
     auto freq = instantaneousFrequency(analytic).first;
-    auto d = blockAverage(freq, c_block_average);
+    auto d_raw = blockAverage(freq, c_block_average);
     const double period = line_period / c_block_average;
-    if (d.size() < 2 * 313 * period)
+    if (d_raw.size() < 2 * 313 * period)
         return 0;
+    // PAL discs carry a 60 IRE pilot burst on the sync tip (3.75 MHz, IEC
+    // 60856 9.1.2), which straddles any slicing level set between tip and
+    // blanking and would break the vertical sync groups into fragments; a
+    // 2 us running mean removes it and leaves the pulses that matter here
+    // (the broad ones are 27 us)
+    const int smooth = max(3, (int)lround(period * 2.0 / 64.0));
+    vector<float> d(d_raw.size());
+    double acc = 0;
+    for (size_t i = 0; i < d_raw.size(); i++) {
+        acc += d_raw[i];
+        if (i >= (size_t)smooth)
+            acc -= d_raw[i - smooth];
+        d[i] = (float)(acc / (double)min(i + 1, (size_t)smooth));
+    }
 
     // Sync tip slicing level: the tip holds the lowest ~7 % of the samples,
-    // so the 5th percentile is inside it, and the 25th sits at or above
-    // blanking, 40 IRE up; slice half way between them
+    // so the 5th percentile is inside it, and the 99.5th is at or near white;
+    // blanking sits 0.3 of that span above the tip on both standards, so
+    // slice half way up to it.  (A percentile for the blanking level itself
+    // depends on the picture: on the GGV1011 colour bars the 25th sat in the
+    // picture, the level landed at blanking, and every blank VBI line read
+    // as a vertical sync line.)
     vector<float> sorted(d);
     nth_element(sorted.begin(), sorted.begin() + sorted.size() / 20, sorted.end());
     const float p5 = sorted[sorted.size() / 20];
-    nth_element(sorted.begin(), sorted.begin() + sorted.size() / 4, sorted.end());
-    const float p25 = sorted[sorted.size() / 4];
-    const float threshold = p5 + 0.5f * (p25 - p5);
+    nth_element(sorted.begin(), sorted.begin() + sorted.size() * 199 / 200, sorted.end());
+    const float p995 = sorted[sorted.size() * 199 / 200];
+    const float threshold = p5 + 0.15f * (p995 - p5);
 
     // Per line period, the fraction of samples at sync tip; a run of lines
     // above one half is a vertical sync group

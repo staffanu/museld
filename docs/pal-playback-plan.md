@@ -102,7 +102,14 @@ Open after this step:
   green full fields read 4-6° off the bar hues with V matching and U off in opposite
   directions, identically on the spatial and temporal paths -- the fields are not the bar
   primaries (the blue field's chroma is 0.43 against a 75 % blue's 0.34); the bars remain the
-  reference.
+  reference.  With the complete side (23.7 GB, ~980 s): CAV picture numbers decode and count
+  (frame 20794, 20795, ... chapter 34 in the still-photo section from ~800 s, which looks
+  natural: skin, sky, water, painted figures); the pilot timebase check over 20 s and 984
+  fields gives p1/p99 −13/+37 ns, max 53 ns, 1.7 ns line-to-line jitter.  The probe needed
+  two fixes the disc exposed: the sync-tip slicing level is now set from the tip-to-white
+  span (blanking is 0.3 of it above the tip on both standards) instead of a percentile that
+  bright content moves to blanking, and a 2 µs running mean removes the pilot burst, which
+  straddled any level set between tip and blanking.
 - **Test material**: the NYCSTM programme mixes colour with black-and-white archive film;
   the GGV1011 PAL CAV test disc (DdD capture, FLAC in Ogg) has the colour bars (at ~190-210 s
   on side 1), a modulated staircase, multiburst, line patterns, full white and black fields.
