@@ -99,6 +99,11 @@ SdtvFrameReader::SdtvFrameReader(
           m_frame_meas(0),
           m_frame_log_k(0),
           m_curve_base(0),
+          m_pilot_valid(false),
+          m_pilot_phase_ref(0),
+          m_pilot_amp_ref(0),
+          m_pilot_corr_next(0),
+          m_pilot_corr_next_valid(false),
           m_anchored(false),
           m_timebase_restarted(false),
           m_line1_k(0),
@@ -190,6 +195,8 @@ void SdtvFrameReader::resetTimebase(const char *why) {
     m_meas.clear();
     m_broad_falls.clear();
     m_curve.clear();
+    m_pilot_valid = false;
+    m_pilot_corr_next_valid = false;
     m_anchored = false;
     m_pending_drift = 0;
     m_qscale = 1.0;
@@ -826,10 +833,30 @@ int64_t SdtvFrameReader::inputOffsetOfStreamPos(double stream_pos) const {
 bool SdtvFrameReader::consumeFinalized(std::unique_ptr<SdtvInputBlock> const &output_block) {
     const int64_t B = (int64_t)c_input_sub_buffer_size;
     while (m_curve.size() >= 2) {
-        const double t0 = m_curve[0], t1 = m_curve[1];
+        double t0 = m_curve[0], t1 = m_curve[1];
         if (t1 + 3 >= (double)m_stream_pos)
             return false; // resampling needs samples that have not arrived yet
         const double min_valid = (double)((m_blocks_fetched - c_number_of_input_sub_buffers) * B + 4);
+        // The pilot's refinement of both ends (the far end's is reused as
+        // the near end's of the next line)
+        if (m_video_standard.pilot_hz > 0 && t0 >= min_valid) {
+            const double c0 = m_pilot_corr_next_valid ? m_pilot_corr_next : pilotCorrection(t0);
+            const double c1 = pilotCorrection(t1);
+            m_pilot_corr_next = c1;
+            m_pilot_corr_next_valid = true;
+            t0 += c0;
+            t1 += c1;
+            // Debug aid, with MUSELD_DUMP_TIMEBASE: the corrected curve, for
+            // tools/pal-pilot-check.py to measure the residual
+            static const char *dump_prefix = getenv("MUSELD_DUMP_TIMEBASE");
+            if (dump_prefix != nullptr) {
+                if (FILE *f = fopen((std::string(dump_prefix) + ".pilot.f64").c_str(), "ab")) {
+                    double rec[2] = {(double)m_curve_base, t0};
+                    fwrite(rec, sizeof rec, 1, f);
+                    fclose(f);
+                }
+            }
+        }
         bool resampled_last = false;
         if (t0 >= min_valid && m_anchored) {
             if (m_curve_base - m_line1_k + 1 > m_video_standard.total_lines)
@@ -850,6 +877,49 @@ bool SdtvFrameReader::consumeFinalized(std::unique_ptr<SdtvInputBlock> const &ou
             return true;
     }
     return false;
+}
+
+double SdtvFrameReader::pilotCorrection(double t) {
+    // Correlate the window 0.8-3.8 us after the line start (inside the
+    // pilot's 0.5-4.1 us, clear of the filtered edges) against the pilot
+    // frequency, phased to the line start itself
+    const double w = 2 * M_PI * m_video_standard.pilot_hz / m_sample_rate; // radians per sample
+    const int n0 = (int)(0.8e-6 * m_sample_rate), n1 = (int)(3.8e-6 * m_sample_rate);
+    const int64_t base = (int64_t)floor(t);
+    const double frac = t - (double)base;
+    double re = 0, im = 0, mean = 0;
+    for (int n = n0; n < n1; n++)
+        mean += m_input_buffer[(size_t)(base + n) & c_input_buffer_size_mask];
+    mean /= (n1 - n0);
+    for (int n = n0; n < n1; n++) {
+        const double x = m_input_buffer[(size_t)(base + n) & c_input_buffer_size_mask] - mean;
+        const double ph = w * ((double)n - frac);
+        re += x * cos(ph);
+        im -= x * sin(ph);
+    }
+    const double amp = hypot(re, im) / (n1 - n0);
+    const double phase = atan2(im, re);
+    // Seed the references from the first lines, then track slowly: the
+    // reference phase follows mastering drift over hundreds of lines, never
+    // the line-to-line jitter this exists to remove; a line whose pilot is
+    // weak (a dropout through the tip, the vertical interval where the
+    // half-line bursts are optional) gets no correction and does not move
+    // the references
+    if (!m_pilot_valid) {
+        m_pilot_phase_ref = phase;
+        m_pilot_amp_ref = amp;
+        m_pilot_valid = true;
+        return 0;
+    }
+    if (amp < 0.6 * m_pilot_amp_ref)
+        return 0;
+    m_pilot_amp_ref += 0.01 * (amp - m_pilot_amp_ref);
+    const double dev = remainder(phase - m_pilot_phase_ref, 2 * M_PI);
+    m_pilot_phase_ref = remainder(m_pilot_phase_ref + 0.01 * dev, 2 * M_PI);
+    // A pilot that arrives later than the line start it is phased to has a
+    // more negative phase; the start is that much later
+    const double correction = -dev / w;
+    return clamp(correction, -0.25 * 2 * M_PI / w, 0.25 * 2 * M_PI / w);
 }
 
 void SdtvFrameReader::resampleLine(std::unique_ptr<SdtvInputBlock> const &output_block,

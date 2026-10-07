@@ -110,6 +110,20 @@ Open after this step:
   span (blanking is 0.3 of it above the tip on both standards) instead of a percentile that
   bright content moves to blanking, and a 2 µs running mean removes the pilot burst, which
   straddled any level set between tip and blanking.
+- **Pilot timebase refinement (2026-10-07)**: the "noise" on flat colour was per-line jitter
+  of the chroma reference (1.8° rms of phase and 4.5 % of magnitude from line to line on the
+  bars, proportional to saturation -- horizontal streaking, not pixel noise).  Two sources:
+  the curve's ~1.4 ns line-to-line timing error, which the burst at the line start cannot
+  cancel for the picture further along the line, and the burst's own measurement noise (~2°
+  per pair on a 27 dB capture).  `SdtvFrameReader::pilotCorrection` now measures the pilot
+  phase 0.8-3.8 µs after each curve line start against a slowly tracked reference and shifts
+  the start by the deviation (0.4 ns residual jitter, max error 5 ns, by
+  `tools/pal-pilot-check.py` on the `.pilot.f64` dump), and with the sampling phase stable the
+  field decoder averages the −U axis over five lines (1 2 3 2 1, each pair estimate brought
+  into the line's frame by the structural rotation; `pal_smoothed_axis` in
+  `sdtv_comb_taps.h`, also used for the temporal frame-pair rotation).  Bars: phase jitter
+  1.82° → 1.23°, magnitude 4.5 % → 3.1 %, hue and saturation unchanged; a nine-line window or
+  a narrower chroma lowpass (0.7-0.9 MHz) gained nothing more, so the rest is chroma noise.
 - **Test material**: the NYCSTM programme mixes colour with black-and-white archive film;
   the GGV1011 PAL CAV test disc (DdD capture, FLAC in Ogg) has the colour bars (at ~190-210 s
   on side 1), a modulated staircase, multiburst, line patterns, full white and black fields.

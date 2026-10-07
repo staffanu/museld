@@ -64,6 +64,9 @@ private:
     // Resample finalized lines into the frame; returns true when a frame completed
     bool consumeFinalized(std::unique_ptr<SdtvInputBlock> const &output_block);
     void resampleLine(std::unique_ptr<SdtvInputBlock> const &output_block, int row, double t0, double t1);
+    // The pilot burst's correction to a curve line start, in demodulated
+    // samples (0 without a pilot, or where the line has none)
+    double pilotCorrection(double t);
     void resetTimebase(const char *why);
 
     [[nodiscard]] bool process(std::unique_ptr<SdtvInputBlock> const &output_block);
@@ -158,6 +161,19 @@ private:
 
     std::deque<double> m_curve;         // finalized T(k), k from m_curve_base
     int64_t m_curve_base;
+
+    // --- pilot burst timing refinement (PAL) ---
+    // The curve is the smoothed hsync timing, good to a couple of ns; the
+    // pilot burst on each sync tip (60 IRE, 13.5 cycles of 240 fH) measures
+    // the line start to a fraction of that.  Its phase against the curve's
+    // line start is constant when the curve is right, so the deviation from
+    // a slowly tracked reference phase is the line's timing error, and each
+    // line is resampled from the corrected starts of both its ends.
+    bool m_pilot_valid;                 // the reference phase and amplitude are seeded
+    double m_pilot_phase_ref;           // slow average of the pilot phase at the line starts
+    double m_pilot_amp_ref;             // slow average of the pilot amplitude, gating missing pilots
+    double m_pilot_corr_next;           // the correction of m_curve[1], carried to the next line
+    bool m_pilot_corr_next_valid;
 
     // --- vertical anchor: the standard's line numbers on the lattice ---
     // A group of broad pulses starting on a lattice line boundary is field 1

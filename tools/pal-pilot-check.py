@@ -11,7 +11,9 @@
 #
 # with the dumps from one run: MUSELD_DUMP_TIMEBASE=<prefix> and
 # MUSELD_DUMP_DEMOD=<dump> (float32 at the video-decimated rate, 20 MHz for a
-# 40 MHz capture).
+# 40 MHz capture).  <prefix>.curve.f64 is the hsync curve before the reader's
+# own pilot refinement; <prefix>.pilot.f64 the refined line starts, in the
+# same format -- copy it to <other>.curve.f64 to measure the residual.
 import sys
 import numpy as np
 from PIL import Image, ImageDraw

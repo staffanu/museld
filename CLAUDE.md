@@ -213,7 +213,9 @@ must stay within ±0.1 µs with no walks; `ntsc-burst-check.py <prefix> <dump> <
 <fs>` measures the curve's timing error against the colour burst phase, content-
 independent — expect ±40 ns and ~1 ns line-to-line jitter; `pal-pilot-check.py <prefix>
 <dump> <out> <fs>` is the PAL counterpart, against the 3.75 MHz pilot burst on the sync tip
-(measured ±30 ns, 2 ns jitter on the GGV1011 test disc and the NYCSTM captures).
+(measured ±30 ns, 2 ns jitter on the GGV1011 test disc and the NYCSTM captures; the reader
+refines PAL line starts with the pilot, and `<prefix>.pilot.f64` holds the corrected curve --
+run the tool on it as a prefix to see the residual, 0.4 ns).
 
 **Frames**: `--seek T --export-frame-at T2 --export-frame f.png` writes the decoded
 764×480 image (all of it: the display shows only its 4:3 middle, see `PictureFormat`; `V3`

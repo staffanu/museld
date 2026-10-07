@@ -187,66 +187,24 @@ f16vec2 demodulated_chroma(const float16_t c_src[19], uint frame_col) {
 }
 
 #ifdef SDTV_PAL
-// The PAL decode reads one of three frames: this one (src 0), or the
-// previous / next for the temporal dropout donor (-1 / +1).  GLSL has no
-// buffer references, so the source is selected per access.
-float16_t pal_f(int src, uint fl, uint fc) {
-    return src == 0 ? input_frame[fl][fc] : src < 0 ? prev_frame[fl][fc] : next_frame[fl][fc];
-}
-
-f16vec2 pal_burst(int src, uint fl) {
-    return src == 0 ? phase_data[fl] : src < 0 ? prev_phase_data[fl] : next_phase_data[fl];
-}
-
-// The field neighbour a line pairs with: the one below, except for the
-// field's last line
-uint pal_pair_line(uint fl, uint field_last) {
-    return fl < field_last ? fl + 1 : fl - 1;
-}
-
-// The line's chroma estimate at a column: the composite less the mean of
-// its two field neighbours, whose chroma is at -90 and +90 degrees and
-// cancels (the field's first line borrows the blank line above it)
-float16_t pal_chroma(int src, uint fl, uint field_last, uint fc) {
-    // on the field's last line the line two above (181 degrees, the same V
-    // switch) stands in as a two-line comb
-    return fl < field_last
-        ? pal_f(src, fl, fc) - 0.5hf * (pal_f(src, fl - 1, fc) + pal_f(src, fl + 1, fc))
-        : 0.5hf * (pal_f(src, fl, fc) - pal_f(src, fl - 2, fc));
-}
-
-// The line's luma at a column: the composite less the chroma band of the
-// comb estimate
-float16_t pal_luma(int src, uint fl, uint field_last, uint fc) {
-    return pal_f(src, fl, fc) - (0.5hf * pal_chroma(src, fl, field_last, fc)
-                                 - 0.25hf * (pal_chroma(src, fl, field_last, fc - 2) + pal_chroma(src, fl, field_last, fc + 2)));
-}
-
-// The -U axis reference of a PAL line from the line pair, with the
-// burst-referenced gain in its magnitude, and the line's V switch (see
-// main); false where there is no usable burst
+// The -U axis reference of a PAL line (the smoothed axis of
+// sdtv_comb_taps.h), with the burst-referenced gain in its magnitude, and
+// the line's V switch (see main); false where there is no usable burst.
 bool pal_reference(int src, uint fl, uint field_last, out vec2 bref, out float vs) {
-    const uint nxt = pal_pair_line(fl, field_last);
-    // The measured phasor is the conjugate of the subcarrier phase (see the
-    // sine LUT), so the physical advance of +270.576 degrees per line is
-    // undone by rotating the next line's phasor by +270.576 (the previous
-    // line's by -270.576).
+    vec2 r = pal_smoothed_axis(src, fl, field_last);
     vec2 m0 = vec2(pal_burst(src, fl));
-    vec2 m1 = vec2(pal_burst(src, nxt));
-    const float delta = radians(270.576) * (nxt > fl ? 1.0 : -1.0);
-    vec2 m1r = vec2(m1.x * cos(delta) - m1.y * sin(delta), m1.x * sin(delta) + m1.y * cos(delta));
-    vec2 r = m0 + m1r;
     float rl = length(r);
     bref = vec2(0.0);
     vs = 1.0;
-    if (dot(m0, m0) <= 0.04 || dot(m1, m1) <= 0.04 || rl <= 0.5)
+    if (dot(m0, m0) <= 0.04 || rl <= 0.5)
         return false;
     // Burst-referenced AGC: a nominal 0.214-unit burst measures 3.43 per
     // line, 4.85 for the pair sum along -U; 3.75 is the value calibrated
     // against the GGV1011 test disc's colour bars (the decoded saturation
     // was 1.3 times what the bars' own luma implied; the burst window reads
-    // low against steady chroma, as NTSC's 2.92 against 3.2 covers there)
-    float gain = clamp(3.75 / rl, 0.25, 8.0);
+    // low against steady chroma, as NTSC's 2.92 against 3.2 covers there).
+    // The weighted average above sums to 9 pair estimates' worth.
+    float gain = clamp(3.75 * 9.0 / rl, 0.25, 8.0);
     bref = r / rl * gain;
     // this line's V switch: which side of -U its burst swung to
     vs = (m0.y * r.x - m0.x * r.y) >= 0.0 ? 1.0 : -1.0;
