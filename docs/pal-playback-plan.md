@@ -67,6 +67,17 @@ Done, in one step rather than the phasing below:
   (`box_aligned`), since no PAL frame pair at spacing 1 is phase aligned; the comb and the
   dropout paths keep the spacing-2 masks.  The line pattern now bobs; the bars and the
   crosshatch are unchanged (0.006 % of the crosshatch's pixels differ), NTSC bit-identical.
+- **Noise, PAL vs NTSC, same disc series (2026-10-08)**: GGV1069 (the NTSC twin of the
+  GGV1011, same pattern sequence) plays, probes as NTSC, and lets the bar noise be compared like
+  for like.  Capture SNR 29.0 dB (PAL) vs 31.7 dB (NTSC).  In the decoded bars the random noise
+  (row and column means removed) is 2.4× larger on PAL in Y, U and V (7.5 dB); in the raw
+  line-locked composite the white/black bars are 2.0× (6 dB) and the coloured bars 4-5×.  All of
+  it is accounted for by the signal, not the decoder: 2.7 dB capture, plus for luma the 5.8 vs
+  4.2 MHz bandwidth under FM's triangular noise ((5.8/4.2)³ = 4.2 dB → 6.9 dB expected, 6 dB
+  measured), and for chroma the single lower sideband (3 dB) and the subcarrier's place in that
+  noise spectrum ((4.43/3.58)² = 1.9 dB → 7.6 dB expected, 7.5 dB measured).  The GGV1069's bars
+  are the 75 % SMPTE kind, the GGV1011's 100 %, so the PAL bars' chroma is also larger -- its
+  decoded chroma noise is the 1.2° line-to-line phase jitter on that amplitude.
 - Verified on the NYCSTM captures (D515 and LD-V4400 players, CLV, EFM): sync supported on
   610 of 625 lines (the 15 vertical-interval lines), VBI chapter/time/picture decode, both
   fields placed right.  The LD-V4400 captures run 0.7 % fast and lock anyway.
