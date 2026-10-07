@@ -417,9 +417,18 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // de-emphasis attenuates the raw blanking sigma.
         const int d = m_temporal_distance;
         float sigma_c = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.55f : 0.01f;
-        m_shaders.detectMotion(*m_first_stage_command_buffer, frame->data(), m_frames[d]->data(),
-                               m_frames[2 * d]->data(), m_frames[3 * d]->data(),
-                               m_frame_no > 1, max(0.012f, 4.0f * sigma_c), max(0.04f, 10.0f * sigma_c));
+        m_shaders.detectMotion(*m_first_stage_command_buffer, SdtvShaders::MotionSet::eComb,
+                               frame->data(), m_frames[d]->data(), m_frames[2 * d]->data(), m_frames[3 * d]->data(),
+                               m_frame_no > 1, max(0.012f, 4.0f * sigma_c), max(0.04f, 10.0f * sigma_c), false);
+        // The de-interlacer needs frame-to-frame motion, which the comb's
+        // spacing hides on PAL (a pattern that inverts every frame is
+        // identical two frames apart): a second set from the consecutive
+        // frames, with the two-frame differences boxed since no PAL frame
+        // pair at that spacing is phase aligned
+        if (d > 1)
+            m_shaders.detectMotion(*m_first_stage_command_buffer, SdtvShaders::MotionSet::eWeave,
+                                   m_frames[d - 1]->data(), m_frames[d]->data(), m_frames[d + 1]->data(), m_frames[d + 2]->data(),
+                                   m_frame_no > 1, max(0.012f, 4.0f * sigma_c), max(0.04f, 10.0f * sigma_c), true);
     }
     m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
 

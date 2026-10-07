@@ -23,12 +23,21 @@
 // 4 fsc grid, leaving low-frequency luma motion with single-frame span.
 // Comparing rows of the same frame index also means comparing fields of the
 // same parity, so still vertical detail never registers as motion.
+//
+// On PAL the decoder runs this twice: with frames at spacing 2 (N +- 2, N +- 4,
+// where the chroma relations are NTSC's) for the temporal comb's masks, and
+// at spacing 1 for the de-interlacer's, which must see frame-to-frame motion
+// -- the GGV1011's line pattern inverts every frame and is identical two
+// frames apart.  At spacing 1 no PAL frame pair is phase aligned, so
+// box_aligned sends the two-frame differences through the fsc-nulling box as
+// well.
 
 layout(push_constant) uniform PushConstants {
     uint processing_phase;
     uint use_prev_movement; // 0 on the first frame
     float motion_none;      // difference at or below this is considered noise
     float motion_full;      // difference at which the pixel is fully moving
+    uint box_aligned;       // 1: the two-frame differences go through the box too, see below
 };
 
 layout(set = 0, binding = 0) buffer readonly restrict frame_next_buffer {
@@ -85,13 +94,21 @@ void main() {
 
         float past_lf = 0.0;
         float future_lf = 0.0;
+        float past_aligned_lf = 0.0;
+        float future_aligned_lf = 0.0;
         for (int i = -4; i < 4; i++) {
             uint xx = uint(clamp(int(x) + i, 0, SDTV_TOTAL_WIDTH - 1));
             past_lf += float(frame0[line][xx]) - float(frame1[line][xx]);
             future_lf += float(frame_next[line][xx]) - float(frame0[line][xx]);
+            past_aligned_lf += float(frame0[line][xx]) - float(frame2[line][xx]);
+            future_aligned_lf += float(frame_next[line][xx]) - float(frame1[line][xx]);
         }
         past_lf = abs(past_lf) * 0.125;
         future_lf = abs(future_lf) * 0.125;
+        if (box_aligned != 0u) {
+            past_aligned = abs(past_aligned_lf) * 0.125;
+            future_aligned = abs(future_aligned_lf) * 0.125;
+        }
 
         // Edges shimmer slightly with sampling jitter even when still, so
         // raise the thresholds with the local gradient.  The vertical

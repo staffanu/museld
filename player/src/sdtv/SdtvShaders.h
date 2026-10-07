@@ -53,14 +53,19 @@ public:
                          float rot_re, float rot_im, float level_floor, float level_ceiling,
                          float chroma_sel_floor, bool pal_v_flip);
 
-  // Computes the per-pixel motion mask from the composite frame history into
-  // the current movement buffer (flipping the ping-pong index)
-  void detectMotion(musevk::CommandBuffer &sq,
+  // Computes the per-pixel motion masks from the composite frame history into
+  // the current movement buffer (flipping the ping-pong index).  The comb set
+  // serves the temporal comb and the dropout paths, at the comb's frame
+  // spacing; the weave set serves the de-interlacer, and exists only where
+  // the two spacings differ (PAL): there it is computed from the consecutive
+  // frames, with box_aligned set (see sdtv_detect_motion.comp)
+  enum class MotionSet { eComb, eWeave };
+  void detectMotion(musevk::CommandBuffer &sq, MotionSet set,
                     std::shared_ptr<musevk::VulkanBuffer> const &frame_next,
                     std::shared_ptr<musevk::VulkanBuffer> const &frame0,
                     std::shared_ptr<musevk::VulkanBuffer> const &frame1,
                     std::shared_ptr<musevk::VulkanBuffer> const &frame2,
-                    bool use_prev_movement, float motion_none, float motion_full);
+                    bool use_prev_movement, float motion_none, float motion_full, bool box_aligned);
 
   void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only,
                                   unsigned int field_parity, bool output_yuv, float black_setup);
@@ -116,6 +121,11 @@ private:
 
   int m_current_movement_buffer_index;
   std::vector<std::shared_ptr<musevk::VulkanBuffer>> m_movement_buffers; // field_lines * 2, y_buf_width
+  // the weave set (PAL only; on NTSC the combine reads the comb set)
+  bool m_has_weave_masks;
+  int m_current_weave_buffer_index;
+  std::vector<std::shared_ptr<musevk::VulkanBuffer>> m_weave_movement_buffers;
+  std::shared_ptr<musevk::VulkanBuffer> m_weave_future_movement_buffer;
 
   // used for final result
   std::shared_ptr<musevk::VulkanImage> m_image_out;
