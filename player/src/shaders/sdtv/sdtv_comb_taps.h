@@ -102,3 +102,96 @@ float16_t rotated_next_pair(uint fl, uint fc, f16vec2 r) {
     return c0 * r.x + 0.5hf * (cm - cp) * r.y;
 }
 
+
+#ifdef SDTV_PAL
+// --- PAL: the frame sources, the spatial comb, the line-pair -U axis ---
+// The PAL decode reads one of three frames: this one (src 0), or the
+// previous / next for the temporal dropout donor (-1 / +1).  GLSL has no
+// buffer references, so the source is selected per access.
+float16_t pal_f(int src, uint fl, uint fc) {
+    return src == 0 ? input_frame[fl][fc] : src < 0 ? prev_frame[fl][fc] : next_frame[fl][fc];
+}
+
+f16vec2 pal_burst(int src, uint fl) {
+    return src == 0 ? phase_data[fl] : src < 0 ? prev_phase_data[fl] : next_phase_data[fl];
+}
+
+// The field neighbour a line pairs with: the one below, except for the
+// field's last line
+uint pal_pair_line(uint fl, uint field_last) {
+    return fl < field_last ? fl + 1 : fl - 1;
+}
+
+// The line's chroma estimate at a column: the composite less the mean of
+// its two field neighbours, whose chroma is at -90 and +90 degrees and
+// cancels (the field's first line borrows the blank line above it)
+float16_t pal_chroma(int src, uint fl, uint field_last, uint fc) {
+    // on the field's last line the line two above (181 degrees, the same V
+    // switch) stands in as a two-line comb
+    return fl < field_last
+        ? pal_f(src, fl, fc) - 0.5hf * (pal_f(src, fl - 1, fc) + pal_f(src, fl + 1, fc))
+        : 0.5hf * (pal_f(src, fl, fc) - pal_f(src, fl - 2, fc));
+}
+
+// The line's luma at a column: the composite less the chroma band of the
+// comb estimate
+float16_t pal_luma(int src, uint fl, uint field_last, uint fc) {
+    return pal_f(src, fl, fc) - (0.5hf * pal_chroma(src, fl, field_last, fc)
+                                 - 0.25hf * (pal_chroma(src, fl, field_last, fc - 2) + pal_chroma(src, fl, field_last, fc + 2)));
+}
+
+// One line's -U axis estimate from its pair with the field neighbour, in
+// the line's own grid frame: the neighbour's burst de-rotated by the
+// structural 270.576 degrees added to the line's own (the +-45 degree
+// swings cancel).  Zero where either burst is missing.
+vec2 pal_pair_axis(int src, uint fl, uint field_last) {
+    const uint nxt = pal_pair_line(fl, field_last);
+    vec2 m0 = vec2(pal_burst(src, fl));
+    vec2 m1 = vec2(pal_burst(src, nxt));
+    if (dot(m0, m0) <= 0.04 || dot(m1, m1) <= 0.04)
+        return vec2(0.0);
+    // The measured phasor is the conjugate of the subcarrier phase (see the
+    // sine LUT), so the physical advance of +270.576 degrees per line is
+    // undone by rotating the next line's phasor by +270.576 (the previous
+    // line's by -270.576).
+    const float delta = radians(270.576) * (nxt > fl ? 1.0 : -1.0);
+    return m0 + vec2(m1.x * cos(delta) - m1.y * sin(delta), m1.x * sin(delta) + m1.y * cos(delta));
+}
+
+
+// The -U axis of a line averaged over its two neighbours on either side,
+// each pair estimate brought into this line's grid frame by the structural
+// rotation and weighted (1 2 3 2 1): the sampling phase is stable from line
+// to line once the pilot has refined the timebase, so what the average
+// removes is the burst's measurement noise, about 2 degrees per line pair
+// on a 27 dB capture.  The sum is 9 pair estimates' worth; zero where none
+// is usable.
+vec2 pal_smoothed_axis(int src, uint fl, uint field_last) {
+    const uint field_first = field_last + 1 - SDTV_FIELD_HEIGHT;
+    const float delta = radians(270.576);
+    vec2 r = vec2(0.0);
+    for (int k = -2; k <= 2; k++) {
+        int l = int(fl) + k;
+        if (l < int(field_first) || l > int(field_last))
+            continue;
+        vec2 rk = pal_pair_axis(src, uint(l), field_last);
+        if (dot(rk, rk) <= 0.25)
+            continue;
+        const float a = delta * float(k); // line fl + k's frame is k advances ahead
+        const float wk = 3.0 - abs(float(k));
+        r += wk * vec2(rk.x * cos(a) - rk.y * sin(a), rk.x * sin(a) + rk.y * cos(a));
+    }
+    return r;
+}
+
+// The frame-pair rotation for PAL's temporal comb (frames N and N +- 2, see
+// SdtvDecoder), from the smoothed -U axes of the same line in both frames
+// rather than from two single bursts: the axes carry the structural 180
+// degrees between the frames like NTSC's bursts do, so pair_rotation applies
+// as it is
+f16vec2 pal_pair_rotation(int src_n, uint fl, uint field_last) {
+    vec2 rn = pal_smoothed_axis(src_n, fl, field_last);
+    vec2 r0 = pal_smoothed_axis(0, fl, field_last);
+    return pair_rotation(f16vec2(rn), f16vec2(r0));
+}
+#endif

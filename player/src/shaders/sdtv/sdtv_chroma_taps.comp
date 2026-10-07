@@ -79,11 +79,19 @@ void main() {
 
     float16_t cs = chroma_sample(frame_line, next_line, fc);
 
+    uint nl = row + 1 < SDTV_FIELD_HEIGHT ? frame_line + 1 : frame_line;
+#ifdef SDTV_PAL
+    const uint field_last = SDTV_FIELD_START_Y + SDTV_FIELD2_OFFSET * field_parity + SDTV_FIELD_HEIGHT - 1;
+    f16vec2 rot_p0 = pal_pair_rotation(-1, frame_line, field_last);
+    f16vec2 rot_n0 = pal_pair_rotation(1, frame_line, field_last);
+    f16vec2 rot_p1 = pal_pair_rotation(-1, nl, field_last);
+    f16vec2 rot_n1 = pal_pair_rotation(1, nl, field_last);
+#else
     f16vec2 rot_p0 = pair_rotation(prev_phase_data[frame_line], phase_data[frame_line]);
     f16vec2 rot_n0 = pair_rotation(next_phase_data[frame_line], phase_data[frame_line]);
-    uint nl = row + 1 < SDTV_FIELD_HEIGHT ? frame_line + 1 : frame_line;
     f16vec2 rot_p1 = pair_rotation(prev_phase_data[nl], phase_data[nl]);
     f16vec2 rot_n1 = pair_rotation(next_phase_data[nl], phase_data[nl]);
+#endif
 
     float t = clamp((float(fc) - float(SDTV_BURST_START + 16)) / float(SDTV_TOTAL_WIDTH), 0.0, 1.0); // from the middle of the burst
     float16_t rp = rotated_prev_pair(frame_line, fc, lerp_rotation(rot_p0, rot_p1, t));

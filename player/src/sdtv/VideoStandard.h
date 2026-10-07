@@ -43,6 +43,12 @@ struct VideoStandard {
     int vsync_broad_start_line;
     int vsync_broad_pulses;
 
+    // A pilot burst on the sync tip, an integer number of cycles per line
+    // (PAL: 240 fH = 3.75 MHz, IEC 60856 9.1.2, 0.5-4.1 us after the sync
+    // edge); 0 when the standard has none.  The reader refines each line's
+    // timing with it.
+    double pilot_hz;
+
     // The video FM carrier: sync tip at center - deviation, white at center + deviation
     double rf_center_hz;
     double rf_deviation_hz;

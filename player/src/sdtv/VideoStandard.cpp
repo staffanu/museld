@@ -27,6 +27,7 @@ const VideoStandard &VideoStandard::ntsc() {
         // six broad pulses from the top of line 4 to the middle of line 6
         .vsync_broad_start_line = 4,
         .vsync_broad_pulses = 6,
+        .pilot_hz = 0,
         // sync tip 7.6 MHz, blanking 8.1, white 9.3
         .rf_center_hz = 8.5e6,
         .rf_deviation_hz = 0.85e6,
@@ -83,6 +84,7 @@ const VideoStandard &VideoStandard::pal() {
         // from the top of line 1 to the middle of line 3
         .vsync_broad_start_line = 1,
         .vsync_broad_pulses = 5,
+        .pilot_hz = 240 * 15625.0,
         // sync tip 6.76 MHz, blanking 7.1, white 7.9
         .rf_center_hz = 7.33e6,
         .rf_deviation_hz = 0.57e6,
