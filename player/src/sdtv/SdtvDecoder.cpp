@@ -442,7 +442,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // much the comb and the de-emphasis attenuate the measured raw
         // blanking noise.
         float sigma_out = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.52f : 0.02f;
-        float level_floor = -max(0.02f, 2.5f * sigma_out);
+        float level_floor = -max((float)m_standard.rescue_floor, 2.5f * sigma_out);
         float level_ceiling = 1.4f;
         // With a film cadence locked, the field's pairing is known exactly:
         // weave unconditionally when the previously decoded field belongs to
@@ -558,6 +558,12 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
                 dump_frame = -1;
                 if (FILE *f = fopen((std::string(dump) + ".raw").c_str(), "wb")) {
                     fwrite(input_block->video_data->data<float>(), sizeof(float),
+                           (size_t)m_standard.samples_per_line * m_standard.total_lines, f);
+                    fclose(f);
+                }
+                // and the detector's dropout flags of the same frame, one byte per sample, to <path>.do
+                if (FILE *f = fopen((std::string(dump) + ".do").c_str(), "wb")) {
+                    fwrite(input_block->dropout_data->data<uint8_t>(), 1,
                            (size_t)m_standard.samples_per_line * m_standard.total_lines, f);
                     fclose(f);
                 }

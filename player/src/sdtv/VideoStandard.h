@@ -84,6 +84,11 @@ struct VideoStandard {
     bool has_black_setup;         // NTSC-M's 7.5 IRE pedestal (and the automatic M/J choice)
     bool has_closed_captions;     // EIA-608 on line 21
     bool has_white_flag;          // the 100 IRE film frame flag on a VBI line
+    // The illegal-level rescue's floor below blanking, at least this (in
+    // units of the 0..1 blanking-to-white range) or 2.5 sigma of the noise:
+    // the filtered luma beside a sharp white line legally undershoots by the
+    // channel's ringing, and that must stay above it
+    double rescue_floor;
     bool has_film_cadence;        // 3:2 pulldown
     double luma_bandwidth_hz;     // for the SNR report
 

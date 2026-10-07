@@ -204,8 +204,9 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   floats (the 4 fsc frame-buffer row).
 - `MUSELD_DUMP_FRAME=<path>` — one whole frame buffer (the de-emphasized, rescaled
   composite, `total_lines × samples_per_line` float32, blanking 0, white 1) and the
-  reader's raw line-locked composite of the same frame as `<path>.raw`; the first frame
-  after `MUSELD_DUMP_FRAME_NO` (default 30).
+  reader's raw line-locked composite of the same frame as `<path>.raw` and the dropout
+  detector's flags as `<path>.do` (one byte per sample); the first frame after
+  `MUSELD_DUMP_FRAME_NO` (default 30).
 
 **Offline checks** (`tools/`, numpy + scipy + PIL): `ntsc-sync-delta.py <fs> <demod
 dump> <timebase prefix> <out>` plots detected minus reconstructed sync per line —
