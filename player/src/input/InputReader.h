@@ -14,6 +14,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <format>
 #include <stdexcept>
 #include "ByteSource.h"
@@ -42,7 +43,11 @@ public:
     virtual void initialize() = 0;
     virtual void seek(int64_t no_samples) = 0;
     virtual int readFloats(float *f) = 0;
+    // The width and signedness of the samples as the file holds them.  The readers
+    // hand out the file's own codes as floats (less the DC estimate when enabled), so
+    // these two facts are all a consumer needs to map them into its working range.
     virtual int bitsPerSample() const = 0;
+    virtual bool signedSamples() const = 0;
 
     uint32_t block_size() const {
         return m_block_size;
@@ -154,6 +159,7 @@ public:
 
     void initialize() override {}
     int bitsPerSample() const override { return sizeof(T) * 8; }
+    bool signedSamples() const override { return std::is_signed_v<T>; }
 
     void seek(int64_t no_samples) override {
         seekBytes(no_samples * (int64_t)sizeof(*m_buffer));

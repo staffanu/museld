@@ -22,6 +22,7 @@ public:
     void seek(int64_t no_samples) override;
     int readFloats(float *f) override;
     int bitsPerSample() const override { return 10; }
+    bool signedSamples() const override { return false; }
 
 private:
     uint8_t *m_buffer;

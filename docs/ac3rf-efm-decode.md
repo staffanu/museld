@@ -48,7 +48,7 @@ Format is auto-detected from the filename extension (`.u8`, `.s8`, `.u16`, `.s16
 `lds` and `ldf` are the file formats used by the [ld-decode](https://github.com/happycube/ld-decode)
 toolchain: `lds` files contain 10-bit samples packed so that four samples occupy five bytes, and
 `ldf` files contain 16-bit samples compressed with FLAC inside an Ogg container. `flac` files
-contain 8- or 16-bit samples in plain FLAC. The extensions are not used consistently in the
+contain 8-, 10- or 16-bit samples in plain FLAC (any width up to 16 bits is read). The extensions are not used consistently in the
 wild (plain FLAC `.ldf` files exist), so the container is read from the file's first bytes
 whichever of `flac` or `ldf` the name or `--input-format` says; the hint only decides a stream
 that starts with neither signature.
