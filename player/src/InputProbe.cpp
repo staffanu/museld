@@ -473,6 +473,11 @@ InputProbeResult probeInputFile(Logger &log, const string &filename,
     InputProbeResult result;
 
     result.format = known_format ? known_format : detectFormatByMagic(filename);
+    // The FLAC reader decides between plain FLAC and FLAC in Ogg from the stream
+    // itself, whatever the extension says; report what it will find
+    if (result.format == eFlac || result.format == eFlacOgg)
+        if (auto magic = detectFormatByMagic(filename))
+            result.format = magic;
     vector<InputFormat> candidates;
     if (result.format)
         candidates = {*result.format};

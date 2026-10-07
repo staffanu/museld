@@ -7,14 +7,19 @@
 #include <cerrno>
 #include <chrono>
 #include <mutex>
+#include <optional>
 #include <thread>
+#include <cstring>
 #include "FLAC++/decoder.h"
 #include "LdfInputReader.h"
+#include "logging/Logger.h"
 
-LdfInputReader::LdfInputReader(std::unique_ptr<ByteSource> source, uint32_t block_size, InputFormat format)
+LdfInputReader::LdfInputReader(std::unique_ptr<ByteSource> source, uint32_t block_size, InputFormat format,
+                               Logger *log)
   : InputReader(std::move(source), block_size),
     FLAC::Decoder::Stream(),
-    m_format(format) {
+    m_format(format),
+    m_log(log) {
     assert(format == eFlacOgg || format == eFlac);
 }
 
@@ -43,8 +48,40 @@ void LdfInputReader::processSingleChecked() {
             FLAC__StreamDecoderStateString[get_state()]));
 }
 
+// Reads the stream's signature to tell plain FLAC ("fLaC") from FLAC in Ogg ("OggS").
+// The bytes are kept for read_callback, so this also works on a fifo or a network stream
+// where they cannot be read twice.  Returns the format hint unchanged when the stream
+// starts with neither.
+InputFormat LdfInputReader::detectContainer() {
+    while (m_pushback_size < sizeof m_pushback) {
+        ssize_t r = m_source->read(m_pushback + m_pushback_size, sizeof m_pushback - m_pushback_size);
+        if (r == -1 && errno == EAGAIN) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+        if (r == -1)
+            throw std::runtime_error(std::format("Error reading input: {}", strerror(errno)));
+        if (r == 0)
+            break; // the stream ends inside the signature; libFLAC gets to report that
+        m_pushback_size += r;
+    }
+    if (m_pushback_size < sizeof m_pushback)
+        return m_format;
+    std::optional<InputFormat> detected;
+    if (memcmp(m_pushback, "fLaC", 4) == 0)
+        detected = eFlac;
+    else if (memcmp(m_pushback, "OggS", 4) == 0)
+        detected = eFlacOgg;
+    if (!detected)
+        return m_format;
+    if (*detected != m_format && m_log)
+        m_log->info(eInput, std::format("The input is {}, not {} as its name suggests",
+            *detected == eFlac ? "plain FLAC" : "FLAC in Ogg", m_format == eFlac ? "plain FLAC" : "FLAC in Ogg"));
+    return *detected;
+}
+
 void LdfInputReader::initialize() {
-    auto status = m_format == eFlac ? init() : init_ogg();
+    auto status = detectContainer() == eFlac ? init() : init_ogg();
     if (status != FLAC__STREAM_DECODER_INIT_STATUS_OK)
         throw std::runtime_error(std::format("Error initializing decoder: {}", FLAC__StreamDecoderInitStatusString[status]));
 
@@ -94,6 +131,13 @@ int LdfInputReader::readFloats(float *f) {
 }
 
 FLAC__StreamDecoderReadStatus LdfInputReader::read_callback(FLAC__byte buffer[], size_t *bytes) {
+    if (m_pushback_read < m_pushback_size) {
+        const size_t n = std::min(*bytes, m_pushback_size - m_pushback_read);
+        memcpy(buffer, m_pushback + m_pushback_read, n);
+        m_pushback_read += n;
+        *bytes = n;
+        return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
+    }
     // libFLAC has no "try again later": a live source that has nothing yet is
     // waited for here, as the raw readers do in readFully.
     ssize_t r;
@@ -151,7 +195,7 @@ FLAC__StreamDecoderTellStatus LdfInputReader::tell_callback(FLAC__uint64 *absolu
             return FLAC__STREAM_DECODER_TELL_STATUS_UNSUPPORTED;
         return FLAC__STREAM_DECODER_TELL_STATUS_ERROR;
     }
-    *absolute_byte_offset = (FLAC__uint64)position;
+    *absolute_byte_offset = (FLAC__uint64)position - (m_pushback_size - m_pushback_read);
     return FLAC__STREAM_DECODER_TELL_STATUS_OK;
 }
 
@@ -162,6 +206,7 @@ FLAC__StreamDecoderSeekStatus LdfInputReader::seek_callback(FLAC__uint64 absolut
             return FLAC__STREAM_DECODER_SEEK_STATUS_UNSUPPORTED;
         return FLAC__STREAM_DECODER_SEEK_STATUS_ERROR;
     }
+    m_pushback_read = m_pushback_size; // the source is positioned explicitly from here on
     return FLAC__STREAM_DECODER_SEEK_STATUS_OK;
 }
 
