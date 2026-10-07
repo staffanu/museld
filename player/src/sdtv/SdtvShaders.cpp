@@ -28,6 +28,11 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
   m_current_movement_buffer_index(0),
   m_movement_buffers({ createVulkanBuffer(standard.field_lines * 2, standard.y_buf_width),
                      createVulkanBuffer(standard.field_lines * 2, standard.y_buf_width) }),
+  m_has_weave_masks(!standard.ntsc_chroma),
+  m_current_weave_buffer_index(0),
+  m_weave_movement_buffers({ createVulkanBuffer(standard.field_lines * 2, standard.y_buf_width),
+                             createVulkanBuffer(standard.field_lines * 2, standard.y_buf_width) }),
+  m_weave_future_movement_buffer(createVulkanBuffer(standard.field_lines * 2, standard.y_buf_width)),
 
   m_image_out(make_unique<VulkanImage>(m_vulkan_manager,
                                        standard.y_buf_width, standard.field_lines * 2,
@@ -91,7 +96,7 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
           spirv("decode_single_field"), Size(standard.y_buf_width, standard.field_lines)));
   m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_detect_motion",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 4,
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 5,
           spirv("detect_motion"), Size(standard.y_buf_width, standard.field_lines * 2)));
   m_combine_still_and_moving_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_combine_still_and_moving",
@@ -162,22 +167,25 @@ void SdtvShaders::decodeSingleField(CommandBuffer &sq, SdtvFieldView &field,
         std::bit_cast<uint32_t>(chroma_sel_floor), pal_v_flip ? 1u : 0u });
 }
 
-void SdtvShaders::detectMotion(CommandBuffer &sq,
+void SdtvShaders::detectMotion(CommandBuffer &sq, MotionSet set,
                                std::shared_ptr<musevk::VulkanBuffer> const &frame_next,
                                std::shared_ptr<musevk::VulkanBuffer> const &frame0,
                                std::shared_ptr<musevk::VulkanBuffer> const &frame1,
                                std::shared_ptr<musevk::VulkanBuffer> const &frame2,
-                               bool use_prev_movement, float motion_none, float motion_full) {
-    int out = 1 - m_current_movement_buffer_index; // the other buffer holds the previous mask
+                               bool use_prev_movement, float motion_none, float motion_full, bool box_aligned) {
+    auto &buffers = set == MotionSet::eComb ? m_movement_buffers : m_weave_movement_buffers;
+    auto &future = set == MotionSet::eComb ? m_future_movement_buffer : m_weave_future_movement_buffer;
+    int &current = set == MotionSet::eComb ? m_current_movement_buffer_index : m_current_weave_buffer_index;
+    int out = 1 - current; // the other buffer holds the previous mask
     m_detect_motion_algo->updateBufferDescriptorsInSet(0,
         {frame_next, frame0, frame1, frame2, m_raw_past_buffer, m_raw_future_buffer,
-         m_movement_buffers[m_current_movement_buffer_index],
-         m_movement_buffers[out], m_future_movement_buffer});
+         buffers[current], buffers[out], future});
     for (uint32_t phase : {1u, 2u})
         sq.enqueueComputeShader<uint32_t>(m_detect_motion_algo,
             { phase, use_prev_movement ? 1u : 0u,
-              std::bit_cast<uint32_t>(motion_none), std::bit_cast<uint32_t>(motion_full) });
-    m_current_movement_buffer_index = out;
+              std::bit_cast<uint32_t>(motion_none), std::bit_cast<uint32_t>(motion_full),
+              box_aligned ? 1u : 0u });
+    current = out;
 }
 
 void SdtvShaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only,
@@ -190,7 +198,9 @@ void SdtvShaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field
           0,
           {m_field_Y_buffers[0], m_field_U_buffers[0], m_field_V_buffers[0],
            m_field_Y_buffers[1], m_field_U_buffers[1], m_field_V_buffers[1],
-           m_movement_buffers[m_current_movement_buffer_index], m_future_movement_buffer, m_image_out,
+           m_has_weave_masks ? m_weave_movement_buffers[m_current_weave_buffer_index]
+                             : m_movement_buffers[m_current_movement_buffer_index],
+           m_has_weave_masks ? m_weave_future_movement_buffer : m_future_movement_buffer, m_image_out,
            m_image_Y_out, m_image_U_out, m_image_V_out});
   sq.enqueueComputeShader(m_combine_still_and_moving_algo,
                           vector{force_field_only ? 1u : 0u, force_inter_frame_only ? 1u : 0u, field_parity, output_yuv ? 1u : 0u,

@@ -58,7 +58,15 @@ Done, in one step rather than the phasing below:
   On the GGV1011 bars and staircase: luma and chroma noise −3 dB on top of the line
   averaging; no ghosting on moving content; 7.5 ms of the 40 ms budget per frame.  All seven
   slots are live: the frames the comb skips on one read (N ± 1, N − 3) are the ones it uses
-  on the next, when N + 1 is displayed -- two interleaved chains.
+  on the next, when N + 1 is displayed -- two interleaved chains.  **Weave masks
+  (2026-10-07)**: the spacing hides frame-to-frame motion from the de-interlacer -- the
+  GGV1011's line pattern (5-30 s) inverts every frame and is identical two frames apart, so
+  the combine wove each field with the inverted one.  On PAL the motion detector runs a
+  second time on the consecutive frames (N + 1, N, N − 1, N − 2) into its own mask set for
+  the combine, with the two-frame differences sent through the fsc-nulling box as well
+  (`box_aligned`), since no PAL frame pair at spacing 1 is phase aligned; the comb and the
+  dropout paths keep the spacing-2 masks.  The line pattern now bobs; the bars and the
+  crosshatch are unchanged (0.006 % of the crosshatch's pixels differ), NTSC bit-identical.
 - Verified on the NYCSTM captures (D515 and LD-V4400 players, CLV, EFM): sync supported on
   610 of 625 lines (the 15 vertical-interval lines), VBI chapter/time/picture decode, both
   fields placed right.  The LD-V4400 captures run 0.7 % fast and lock anyway.
