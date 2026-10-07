@@ -9,9 +9,16 @@
 #include "InputReader.h"
 #include <FLAC++/decoder.h>
 
+class Logger;
+
+// Reads FLAC-compressed captures, in a plain FLAC stream or wrapped in Ogg.  The
+// container is read from the first bytes of the stream: the extensions do not tell
+// them apart reliably (plain FLAC .ldf files exist alongside the usual Ogg ones), so
+// `format` only decides the case where the stream starts with neither signature.
 class LdfInputReader : public InputReader, private FLAC::Decoder::Stream  {
 public:
-    LdfInputReader(std::unique_ptr<ByteSource> source, uint32_t block_size, InputFormat format);
+    LdfInputReader(std::unique_ptr<ByteSource> source, uint32_t block_size, InputFormat format,
+                   Logger *log = nullptr);
 
     LdfInputReader(const LdfInputReader &) = delete;
     LdfInputReader &operator=(const LdfInputReader &) = delete;
@@ -35,6 +42,7 @@ private:
     void recordError(std::string message);
     void throwIfFailed() const;
     void processSingleChecked();
+    InputFormat detectContainer();
 
     FLAC__StreamDecoderReadStatus read_callback(FLAC__byte buffer[], size_t *bytes) override;
     FLAC__StreamDecoderWriteStatus write_callback(const ::FLAC__Frame *frame, const FLAC__int32 *const buffer[]) override;
@@ -46,6 +54,12 @@ private:
     bool eof_callback() override;
 
     InputFormat m_format;
+    Logger *m_log;
+    // The signature bytes read ahead of libFLAC by initialize(), handed back through
+    // read_callback before anything further is read from the source
+    uint8_t m_pushback[4] = {};
+    size_t m_pushback_size = 0;
+    size_t m_pushback_read = 0;
     int m_bits_per_sample = 0;
     uint32_t m_flac_allocated_size = 0;
     uint32_t m_flac_used_size = 0;

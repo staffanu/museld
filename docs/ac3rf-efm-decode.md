@@ -43,14 +43,15 @@ time); `--help` lists all options.
 | `--duration <seconds>` | Stop after decoding this many seconds of audio |
 
 Format is auto-detected from the filename extension (`.u8`, `.s8`, `.u16`, `.s16`,
-`.u16be`, `.s16be`, `.lds`, `.flac`, `.flac.ldf`, `.ldf`) when no format flag is given.
+`.u16be`, `.s16be`, `.lds`, `.flac`, `.flac.ldf`, `.ldf`, `.oga`, `.ogg`) when no format flag is given.
 
 `lds` and `ldf` are the file formats used by the [ld-decode](https://github.com/happycube/ld-decode)
 toolchain: `lds` files contain 10-bit samples packed so that four samples occupy five bytes, and
 `ldf` files contain 16-bit samples compressed with FLAC inside an Ogg container. `flac` files
-contain 8- or 16-bit samples in plain FLAC. Some `.ldf` files in the wild are plain FLAC rather
-than FLAC-in-Ogg; those need an explicit `--input-format flac` (run `file` on the file to find out
-which kind it is).
+contain 8- or 16-bit samples in plain FLAC. The extensions are not used consistently in the
+wild (plain FLAC `.ldf` files exist), so the container is read from the file's first bytes
+whichever of `flac` or `ldf` the name or `--input-format` says; the hint only decides a stream
+that starts with neither signature.
 
 Seeking in FLAC input only works if the file contains a seek table in its metadata; one can be
 added with the `flac` tool (e.g. `--seekpoint=100x` for 100 evenly spaced seek points).
