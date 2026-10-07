@@ -177,10 +177,13 @@ void LdfInputReader::metadata_callback(const ::FLAC__StreamMetadata *metadata) {
     if (metadata->type == FLAC__METADATA_TYPE_STREAMINFO) {
         if (metadata->data.stream_info.channels != 1)
             recordError("LDF files should have only one channel");
-        if (metadata->data.stream_info.bits_per_sample == 8 || metadata->data.stream_info.bits_per_sample == 16)
-            m_bits_per_sample = metadata->data.stream_info.bits_per_sample;
+        // Any width up to the 16 bits the sample store holds: captures come as 8, 10
+        // (Domesday Duplicator) or 16 bits
+        const auto bits = metadata->data.stream_info.bits_per_sample;
+        if (bits >= 4 && bits <= 16)
+            m_bits_per_sample = (int)bits;
         else
-            recordError("LDF files should have 8 or 16 bits per sample");
+            recordError(std::format("LDF files should have 4 to 16 bits per sample, not {}", bits));
     }
 }
 

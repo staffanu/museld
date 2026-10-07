@@ -40,6 +40,7 @@ public:
     void seek(int64_t no_samples) override;
     int readFloats(float *f) override;
     int bitsPerSample() const override { return m_inner->bitsPerSample(); }
+    bool signedSamples() const override { return m_inner->signedSamples(); }
 
     // The DC estimate must live in the inner reader, where it is applied with one block of
     // lag by the conversion loop; this reader never touches the samples.

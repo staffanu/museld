@@ -46,6 +46,7 @@ public:
     }
 
     int bitsPerSample() const override { return 12; }
+    bool signedSamples() const override { return false; }
 
     void setDcBlocking(bool enabled) override { dc_blocking = enabled; }
 

@@ -31,6 +31,7 @@ public:
     void seek(int64_t no_samples) override;
     int readFloats(float *f) override;
     int bitsPerSample() const override { return m_bits_per_sample; }
+    bool signedSamples() const override { return true; } // FLAC samples always are
 
 private:
     // libFLAC invokes the callbacks below from its own C frames, which must not be unwound
