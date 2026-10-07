@@ -124,6 +124,15 @@ Open after this step:
   `sdtv_comb_taps.h`, also used for the temporal frame-pair rotation).  Bars: phase jitter
   1.82° → 1.23°, magnitude 4.5 % → 3.1 %, hue and saturation unchanged; a nine-line window or
   a narrower chroma lowpass (0.7-0.9 MHz) gained nothing more, so the rest is chroma noise.
+- **Rescue floor (2026-10-07)**: the GGV1011 crosshatch came out with its vertical lines
+  repainted for ~8 frames after the cut into it (38 000 pixels a frame in highlight mode).
+  Not the envelope detector (its flags were zero there) but the illegal-level rescue: the
+  filtered luma beside a one-sample white line legally undershoots to −0.06, the noise-scaled
+  floor was −0.05, and the motion masks' persistence after a cut supplies the "moving"
+  condition.  `VideoStandard::rescue_floor` sets the floor's minimum margin: PAL 0.08, NTSC
+  its old 0.02, untouched.  After: 120-180 pixels in those frames, 0 later; the NYCSTM's real
+  dropouts are still handled; `MUSELD_DUMP_FRAME` now also writes the detector's flags to
+  `<path>.do`, which is how this was separated from the detector.
 - **Test material**: the NYCSTM programme mixes colour with black-and-white archive film;
   the GGV1011 PAL CAV test disc (DdD capture, FLAC in Ogg) has the colour bars (at ~190-210 s
   on side 1), a modulated staircase, multiburst, line patterns, full white and black fields.
