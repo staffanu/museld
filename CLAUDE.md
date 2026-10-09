@@ -196,6 +196,15 @@ must stay within ±0.1 µs with no walks; `ntsc-burst-check.py <prefix> <dump> <
 <fs>` measures the curve's timing error against the colour burst phase, content-
 independent — expect ±40 ns and ~1 ns line-to-line jitter.
 
+**Sample rates**: anything in the sync pass and timebase that is a count of (decimated)
+samples must be derived from a time, never a constant: a 30 MHz Domesday Duplicator capture
+(`~/Downloads/RF_Reference_30mhz.ddd.s16`, with a 40 MHz capture of the same disc beside it)
+exposed two such constants in 2026-10 -- a back-porch window that reached into the picture at
+15 MHz demod rate, and pulse widths in whole decimated samples (0.53 µs there) that let
+equalizing pulses pass as hsync. Both showed as per-field sawtooth in `ntsc-burst-check.py`,
+vertical-interval missing-runs shorter than 9 in the timebase dump, and `vertical drift`/
+`lattice slipped` warnings. Re-run the 30, 40 and 62.5 MHz checks after touching that code.
+
 **Frames**: `--seek T --export-frame-at T2 --export-frame f.png` writes the decoded
 764×480 image (all of it: the display shows only its 4:3 middle, see `PictureFormat`; `V3`
 logs the part shown and where) (`--field-interpolation intra-field` for a single field, `--no-3d-comb`,

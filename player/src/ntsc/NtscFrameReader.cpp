@@ -21,8 +21,12 @@
 using namespace std;
 
 namespace {
-    // Pulse widths on the lowpassed signal, in microseconds
-    constexpr double c_hsync_width_min = 3.0, c_hsync_width_max = 6.5;
+    // Pulse widths on the lowpassed signal, in microseconds.  Equalizing
+    // pulses (2.3 us) come out at 2.5-3.0 us after the lowpass and the
+    // hysteresis, hsync (4.7 us) at 4.5-5.5: the minimum sits between
+    // them with a margin on both sides, since an equalizing pulse taken
+    // for an hsync lands half a line off and derails the lattice chain
+    constexpr double c_hsync_width_min = 3.5, c_hsync_width_max = 6.5;
     constexpr double c_broad_width_min = 20.0, c_broad_width_max = 32.0;
     // Hysteresis slicer levels (the demodulated video is normalized: sync tip
     // ~0.0, blanking ~0.3)
@@ -74,6 +78,7 @@ NtscFrameReader::NtscFrameReader(
           m_sync_delay(0),
           m_sync_below(false),
           m_sync_fall_idx(0),
+          m_sync_fall_frac(0),
           m_sync_rise_idx(0),
           m_blank_level(c_blank_nominal),
           m_lattice_valid(false),
@@ -400,15 +405,22 @@ void NtscFrameReader::syncPass(const float *data, int64_t stream_base, int count
         float y = 0.f;
         for (int j = 0; j < ntaps; j++)
             y += m_sync_fir[j] * m_sync_fir_in[(size_t)(full_ix - j) & in_mask];
+        const float y_prev = m_sync_dec_count > 0 ? m_sync_filt[(m_sync_dec_count - 1) % c_sync_filt_ring] : y;
         m_sync_filt[m_sync_dec_count % c_sync_filt_ring] = y;
 
         if (!m_sync_below && y < c_slice_low) {
             m_sync_below = true;
             m_sync_fall_idx = m_sync_dec_count;
+            // The crossing's fractional position, for the width: in whole
+            // decimated samples (0.5 us at a 30 MHz capture) an equalizing
+            // pulse could round up to the hsync minimum
+            m_sync_fall_frac = y_prev > y ? (y_prev - c_slice_low) / (y_prev - y) : 1.0;
         } else if (m_sync_below && y > c_slice_high) {
             m_sync_below = false;
             const double dec_rate = m_sample_rate / c_sync_decim;
-            const double width_us = (double)(m_sync_dec_count - m_sync_fall_idx) / dec_rate * 1e6;
+            const double rise_frac = y > y_prev ? (c_slice_high - y_prev) / (y - y_prev) : 1.0;
+            const double width_us = ((double)(m_sync_dec_count - m_sync_fall_idx) + rise_frac - m_sync_fall_frac)
+                                    / dec_rate * 1e6;
             const bool is_hsync = width_us > c_hsync_width_min && width_us < c_hsync_width_max;
             const bool is_broad = width_us > c_broad_width_min && width_us < c_broad_width_max;
             auto filt = [this](int64_t k) { return m_sync_filt[k % c_sync_filt_ring]; };
@@ -420,14 +432,23 @@ void NtscFrameReader::syncPass(const float *data, int64_t stream_base, int count
             // and a bright edge there raised the 50% level enough to place
             // the crossing a microsecond early on the smeared slope, for as
             // many lines as the bright edge lasted.  Slow global average, so
-            // a dropout there cannot move it.
-            if (m_sync_rise_idx > 0 && m_sync_dec_count - m_sync_rise_idx < c_sync_filt_ring - 16) {
-                float bp[8];
-                for (int j = 0; j < 8; j++)
-                    bp[j] = filt(m_sync_rise_idx + 5 + j);
-                nth_element(bp, bp + 4, bp + 8);
-                if (bp[4] > 0.15f && bp[4] < 0.6f)
-                    m_blank_level += 0.02f * (bp[4] - m_blank_level);
+            // a dropout there cannot move it.  The window is in time, not
+            // decimated samples: the back porch ends 4.7 us after the rise,
+            // and a sample count that fit at 62.5 MHz reached into the
+            // picture at 30 MHz, where the level then followed the picture's
+            // left edge down the field and took the 50% crossings with it
+            // (a 0.3 us sawtooth per field, and slips at the worst lines).
+            const int bp_first = (int)lround(1.5e-6 * dec_rate);
+            const int bp_count = clamp((int)lround(2.5e-6 * dec_rate), 3, 16);
+            if (m_sync_rise_idx > 0 && m_sync_dec_count - m_sync_rise_idx < c_sync_filt_ring - 16
+                && m_sync_dec_count - m_sync_rise_idx > bp_first + bp_count) {
+                float bp[16];
+                for (int j = 0; j < bp_count; j++)
+                    bp[j] = filt(m_sync_rise_idx + bp_first + j);
+                nth_element(bp, bp + bp_count / 2, bp + bp_count);
+                const float level = bp[bp_count / 2];
+                if (level > 0.15f && level < 0.6f)
+                    m_blank_level += 0.02f * (level - m_blank_level);
             }
             m_sync_rise_idx = m_sync_dec_count;
             if ((is_hsync || is_broad) && m_sync_dec_count - m_sync_fall_idx < c_sync_filt_ring - 24) {
