@@ -84,7 +84,8 @@ if [ -f "$pkg/museld" ]; then
     grep -q '\.\./\.\./lib/libMoltenVK\.dylib' "$pkg/vulkan/icd.d/MoltenVK_icd.json" \
         || { echo "failed to point the MoltenVK manifest at the bundled driver" >&2; exit 1; }
 else
-    cp "$repo_root/packaging/macos/README-ac3rf-efm-decode.txt" "$pkg/README.txt"
+    echo "every package carries museld (the decoder CLI alone is no longer packaged)" >&2
+    exit 1
 fi
 
 # Copy the Homebrew dylibs the binaries need, transitively.

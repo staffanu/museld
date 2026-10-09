@@ -240,9 +240,9 @@ cadence phase jump at ~25 s).
 ## CI and Packaging
 
 `.github/workflows/ci.yml` builds on Linux, macOS and Windows (MSYS2 UCRT64) on every push,
-and also packages downloadable binaries: three zips per platform (player, player with
-FFmpeg for `--write`, and `ac3rf-efm-decode` alone), attached to a GitHub release when a
-`v*` tag is pushed. The staging scripts live in `packaging/`.
+and also packages downloadable binaries: two zips per platform (the player and the decoder
+CLI, with and without FFmpeg for `--write` and ONNX Runtime for `--ocr`), attached to a
+GitHub release when a `v*` tag is pushed. The staging scripts live in `packaging/`.
 
 Two options exist for the packages and matter when touching the build:
 

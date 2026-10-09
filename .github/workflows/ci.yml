@@ -171,7 +171,6 @@ jobs:
           mkdir -p "$out"
           "$stage" build-lean "$out/museld-macos" museld ac3rf-efm-decode
           "$stage" build-full "$out/museld-macos-full" museld ac3rf-efm-decode
-          "$stage" build-lean "$out/ac3rf-efm-decode-macos" ac3rf-efm-decode
 
       - name: Check the staged packages
         run: |
@@ -216,11 +215,10 @@ jobs:
         run: |
           set -euo pipefail
           merge=packaging/macos/merge-universal.sh
-          for name in museld-macos museld-macos-full ac3rf-efm-decode-macos; do
+          for name in museld-macos museld-macos-full; do
             case "$name" in
               museld-macos)                  out=museld-macos-universal ;;
               museld-macos-full)             out=museld-macos-universal-full ;;
-              ac3rf-efm-decode-macos)        out=ac3rf-efm-decode-macos-universal ;;
             esac
             "$merge" "stage/arm64/$name" "stage/x86_64/$name" "$out"
             zip -qry "$out.zip" "$out"
@@ -229,8 +227,7 @@ jobs:
       - name: Smoke test the packages
         run: |
           set -euo pipefail
-          for pkg in museld-macos-universal museld-macos-universal-full \
-                     ac3rf-efm-decode-macos-universal; do
+          for pkg in museld-macos-universal museld-macos-universal-full; do
             (packaging/macos/smoke-test.sh "$pkg" --universal)
           done
 
@@ -372,13 +369,11 @@ jobs:
           stage=packaging/windows/stage-package.sh
           "$stage" build-lean museld-windows-x86_64 museld.exe ac3rf-efm-decode.exe
           "$stage" build-full museld-windows-x86_64-full museld.exe ac3rf-efm-decode.exe
-          "$stage" build-lean ac3rf-efm-decode-windows-x86_64 ac3rf-efm-decode.exe
 
       - name: Smoke test the packages
         run: |
           set -euo pipefail
-          for pkg in museld-windows-x86_64 museld-windows-x86_64-full \
-                     ac3rf-efm-decode-windows-x86_64; do
+          for pkg in museld-windows-x86_64 museld-windows-x86_64-full; do
             (packaging/windows/smoke-test.sh "$pkg")
           done
 
