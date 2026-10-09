@@ -37,7 +37,8 @@ if [ -f "$pkg/museld.exe" ]; then
     cp "$build_dir/src/fonts/NotoSansJP-Regular.ttf" "$pkg/fonts/"
     cp "$repo_root/packaging/windows/README-museld.txt" "$pkg/README.txt"
 else
-    cp "$repo_root/packaging/windows/README-ac3rf-efm-decode.txt" "$pkg/README.txt"
+    echo "every package carries museld (the decoder CLI alone is no longer packaged)" >&2
+    exit 1
 fi
 
 # Copy the UCRT64 DLLs the binaries need, transitively. The test is whether
