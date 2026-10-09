@@ -6,54 +6,58 @@
 #include <cmath>
 #include <format>
 #include <vector>
-#include "NtscFrame.h"
-#include "NtscConstants.h"
-#include "NtscFieldView.h"
-#include "NtscInputBlock.h"
+#include "SdtvFrame.h"
+#include "SdtvFieldView.h"
 #include "musevk/VulkanBuffer.h"
 #include "musevk/VulkanManager.h"
 #include "musevk/HalfFloatUtil.h"
 #include "util/RobustNoise.h"
 
-NtscFrame::NtscFrame(Logger &log, int frame_no, musevk::VulkanManager &manager)
+SdtvFrame::SdtvFrame(Logger &log, int frame_no, musevk::VulkanManager &manager, const VideoStandard &standard)
 : m_log(log),
+        m_standard(standard),
         m_frame_no(frame_no),
         m_input_offset(-1),
         m_input_samples_per_sample(0),
         m_data(std::make_unique<musevk::VulkanBuffer>(
-                manager, musevk::Size(NtscInputBlock::c_samples_per_video_line, NtscInputBlock::c_total_video_lines), 2 /* sizeof(float16) */,
+                manager, musevk::Size(standard.samples_per_line, standard.total_lines), 2 /* sizeof(float16) */,
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostRead)),
         m_burst_phase_data(std::make_unique<musevk::VulkanBuffer>(
-                manager, musevk::Size(NtscInputBlock::c_total_video_lines), 4 /* 2 * sizeof(float16) */,
+                manager, musevk::Size(standard.total_lines), 4 /* 2 * sizeof(float16) */,
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostNone)),
         m_dropout_data(std::make_unique<musevk::VulkanBuffer>(
-                manager, musevk::Size(NtscInputBlock::c_samples_per_video_line, NtscInputBlock::c_total_video_lines), sizeof(uint8_t),
+                manager, musevk::Size(standard.samples_per_line, standard.total_lines), sizeof(uint8_t),
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::eHostNone)),
-        m_fields({NtscFieldView(log, frame_no, m_data, m_burst_phase_data, m_dropout_data, 0),
-                  NtscFieldView(log, frame_no, m_data, m_burst_phase_data, m_dropout_data, 1) }) {
+        m_fields({SdtvFieldView(log, frame_no, m_data, m_burst_phase_data, m_dropout_data, 0),
+                  SdtvFieldView(log, frame_no, m_data, m_burst_phase_data, m_dropout_data, 1) }) {
 }
 
-NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data) {
-    // Back porch windows sit after the colour burst (which reaches ~column 112)
-    // and before active video at column NTSC_FIELD_START_X = 129; sync tip
-    // windows inside the ~67-sample horizontal sync pulse.  Rows 40-250 and
-    // 303-513 keep clear of vertical sync and the VBI code lines (white flag,
-    // picture numbers).
+SdtvFrame::NoiseEstimate SdtvFrame::EstimateNoise(float const *data, const VideoStandard &standard) {
+    // Back porch windows sit after the colour burst and before active video
+    // (NTSC: the burst reaches ~column 112, the picture starts at 129); sync
+    // tip windows inside the horizontal sync pulse (67 samples on NTSC; on
+    // PAL only the last 0.5 us of the 83, after the 3.75 MHz pilot burst
+    // that rides on the tip).  211 rows per field from noise_rows_start
+    // (NTSC: 40-250 and 303-513) keep clear of vertical sync and the VBI
+    // code lines (white flag, picture numbers).
+    const int width = standard.samples_per_line;
     NoiseEstimate est{};
     std::vector<float> porch_residuals, sync_residuals, centers;
     porch_residuals.reserve(422 * 16);
-    sync_residuals.reserve(422 * 48);
+    sync_residuals.reserve(422 * standard.noise_sync_len);
     centers.reserve(422);
-    for (int field_start : {40, 303}) {
+    for (int field_start : standard.noise_rows_start) {
         for (int row = field_start; row <= field_start + 210; row++) {
             float center;
-            RobustNoise::appendDetrendedResiduals(data + row * NTSC_TOTAL_WIDTH + 113, 16, porch_residuals, &center);
+            RobustNoise::appendDetrendedResiduals(data + row * width + standard.noise_porch_col, 16, porch_residuals, &center);
             centers.push_back(center);
-            RobustNoise::appendDetrendedResiduals(data + row * NTSC_TOTAL_WIDTH + 8, 48, sync_residuals);
+            if (standard.noise_sync_len > 0)
+                RobustNoise::appendDetrendedResiduals(data + row * width + standard.noise_sync_col,
+                                                      standard.noise_sync_len, sync_residuals);
         }
     }
     est.sigma_blanking = RobustNoise::robustSigma(porch_residuals);
-    est.sigma_sync = RobustNoise::robustSigma(sync_residuals);
+    est.sigma_sync = sync_residuals.empty() ? -1.0f : RobustNoise::robustSigma(sync_residuals);
     est.blanking_level = RobustNoise::median(centers);
 
     // White flag: a full flat line at 100 IRE in the vertical interval (IEC
@@ -63,22 +67,25 @@ NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data) {
     // pulses, which detrend to σ ≈ 0.5) and sits at the nominal 0.7 V above
     // the blanking level just measured (rejects blank lines and captions).
     // It is the only trustworthy gain reference on this medium: sync depth
-    // measures ~14 % off its 40 IRE definition on real captures.
+    // measures ~14 % off its 40 IRE definition on real captures.  PAL discs
+    // carry no white flag.
     std::vector<float> white_centers;
     float sigma_gate = std::max(3.0f * est.sigma_blanking, 0.02f);
-    for (int row : {8, 10, 11, 12, 13, 14, 270, 272, 273, 274, 275, 276}) {
-        float row_centers[2];
-        bool qualified = true;
-        for (int w = 0; w < 2; w++) {
-            std::vector<float> residuals;
-            RobustNoise::appendDetrendedResiduals(
-                    data + row * NTSC_TOTAL_WIDTH + (w == 0 ? 150 : 425), 256, residuals, &row_centers[w]);
-            if (std::abs(row_centers[w] - est.blanking_level - 0.7f) > 0.15f ||
-                RobustNoise::robustSigma(residuals) > sigma_gate)
-                qualified = false;
+    if (standard.has_white_flag) {
+        for (int row : standard.blank_vbi_lines) {
+            float row_centers[2];
+            bool qualified = true;
+            for (int w = 0; w < 2; w++) {
+                std::vector<float> residuals;
+                RobustNoise::appendDetrendedResiduals(
+                        data + row * width + standard.noise_psd_cols[w], 256, residuals, &row_centers[w]);
+                if (std::abs(row_centers[w] - est.blanking_level - 0.7f) > 0.15f ||
+                    RobustNoise::robustSigma(residuals) > sigma_gate)
+                    qualified = false;
+            }
+            if (qualified && std::abs(row_centers[0] - row_centers[1]) < 0.05f)
+                white_centers.push_back(0.5f * (row_centers[0] + row_centers[1]));
         }
-        if (qualified && std::abs(row_centers[0] - row_centers[1]) < 0.05f)
-            white_centers.push_back(0.5f * (row_centers[0] + row_centers[1]));
     }
     est.white_flag_level = white_centers.empty() ? -1.0f : RobustNoise::median(white_centers);
 
@@ -86,10 +93,10 @@ NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data) {
     // 4 fsc grid, so the chroma cancels) across the active picture of the
     // same rows, a microsecond clear of both blanking edges
     est.luma_hist.fill(0);
-    for (int field_start : {40, 303}) {
+    for (int field_start : standard.noise_rows_start) {
         for (int row = field_start; row <= field_start + 210; row++) {
-            const float *line = data + row * NTSC_TOTAL_WIDTH;
-            for (int col = 152; col + 4 <= 872; col += 4) {
+            const float *line = data + row * width;
+            for (int col = standard.luma_hist_col0; col + 4 <= standard.luma_hist_col1; col += 4) {
                 const float mean = 0.25f * (line[col] + line[col + 1] + line[col + 2] + line[col + 3]);
                 const int bin = (int)std::floor((mean - est.blanking_level - NoiseEstimate::c_luma_hist_min)
                                                 / NoiseEstimate::c_luma_hist_bin);
@@ -102,18 +109,22 @@ NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data) {
     // Burst phase: correlate the colour burst window (columns 78..110, 8
     // subcarrier cycles on the 4 fsc grid) against the quadrature pair per
     // line.  The burst inverts line to line, so odd lines are flipped before
-    // the amplitude-weighted circular statistics.
-    {
+    // the amplitude-weighted circular statistics.  NTSC only: PAL's burst
+    // swings +-45 degrees and walks against the line-locked grid, so this
+    // statistic means nothing there (the PAL colour decoder is to come).
+    est.burst_phase = 0;
+    est.burst_phase_sigma = 0;
+    if (standard.ntsc_chroma) {
         static constexpr float lut_cos[4] = {1, 0, -1, 0};
         static constexpr float lut_sin[4] = {0, 1, 0, -1};
         std::vector<std::pair<float, float>> line_vecs;
         line_vecs.reserve(422);
         double sum_i = 0, sum_q = 0;
-        for (int field_start : {40, 303}) {
+        for (int field_start : standard.noise_rows_start) {
             for (int row = field_start; row <= field_start + 210; row++) {
                 float bi = 0, bq = 0;
                 for (int x = 78; x < 110; x++) {
-                    float v = data[row * NTSC_TOTAL_WIDTH + x];
+                    float v = data[row * width + x];
                     bi += v * lut_cos[x % 4];
                     bq += v * lut_sin[x % 4];
                 }
@@ -138,26 +149,27 @@ NtscFrame::NoiseEstimate NtscFrame::EstimateNoise(float const *data) {
     return est;
 }
 
-int NtscFrame::AccumulateNoisePsd(float const *data, double *psd, float max_sigma) {
+int SdtvFrame::AccumulateNoisePsd(float const *data, double *psd, float max_sigma, const VideoStandard &standard) {
     // Candidate blank VBI rows.  Discs differ in which lines carry the white
     // flag, picture numbers, and captions, so every window must qualify
     // instead: level close to blanking (rejects the white flag and active
     // video) and sigma below the gate (a Philips code line measures ~0.5).
+    const int width = standard.samples_per_line;
     int windows = 0;
-    for (int row : {8, 10, 11, 12, 13, 14, 270, 272, 273, 274, 275, 276})
-        for (int col : {150, 425}) {
+    for (int row : standard.blank_vbi_lines)
+        for (int col : standard.noise_psd_cols) {
             std::vector<float> residuals;
             float center;
-            RobustNoise::appendDetrendedResiduals(data + row * NTSC_TOTAL_WIDTH + col, 256, residuals, &center);
+            RobustNoise::appendDetrendedResiduals(data + row * width + col, 256, residuals, &center);
             if (std::abs(center - 0.3f) > 0.1f || RobustNoise::robustSigma(residuals) > max_sigma)
                 continue;
-            RobustNoise::accumulateDetrendedWindowPsd(data + row * NTSC_TOTAL_WIDTH + col, 256, psd);
+            RobustNoise::accumulateDetrendedWindowPsd(data + row * width + col, 256, psd);
             windows++;
         }
     return windows;
 }
 
-void NtscFrame::set_frame_no(int frame_no, int64_t input_offset, double input_samples_per_sample) {
+void SdtvFrame::set_frame_no(int frame_no, int64_t input_offset, double input_samples_per_sample) {
     m_frame_no = frame_no;
     m_input_offset = input_offset;
     m_input_samples_per_sample = input_samples_per_sample;
@@ -165,52 +177,53 @@ void NtscFrame::set_frame_no(int frame_no, int64_t input_offset, double input_sa
     m_fields[1].set_frame_no(frame_no);
 }
 
-int64_t NtscFrame::getInputOffset() const {
+int64_t SdtvFrame::getInputOffset() const {
     return m_input_offset;
 }
 
-double NtscFrame::getInputSamplesPerNtscSample() const {
+double SdtvFrame::getInputSamplesPerSdtvSample() const {
     return m_input_samples_per_sample;
 }
 
-std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::data() {
+std::shared_ptr<musevk::VulkanBuffer> &SdtvFrame::data() {
     return m_data;
 }
 
-std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::dropout_data() {
+std::shared_ptr<musevk::VulkanBuffer> &SdtvFrame::dropout_data() {
     return m_dropout_data;
 }
 
-std::shared_ptr<musevk::VulkanBuffer> &NtscFrame::burst_phase_data() {
+std::shared_ptr<musevk::VulkanBuffer> &SdtvFrame::burst_phase_data() {
     return m_burst_phase_data;
 }
 
 
-NtscFieldView &NtscFrame::get_field(int parity) {
+SdtvFieldView &SdtvFrame::get_field(int parity) {
     return m_fields[parity];
 }
 
-std::shared_ptr<VbiData> NtscFrame::getVbiData() const {
+std::shared_ptr<VbiData> SdtvFrame::getVbiData() const {
     return m_vbi_data;
 }
 
-std::optional<std::pair<uint8_t, uint8_t>> NtscFrame::getClosedCaptionBytes() const {
+std::optional<std::pair<uint8_t, uint8_t>> SdtvFrame::getClosedCaptionBytes() const {
     return m_cc_bytes;
 }
 
-void NtscFrame::processVbi() {
+void SdtvFrame::processVbi() {
     m_vbi_data = nullptr;
 
     // EIA-608 closed captions ride on line 21 of field 1 (the caption
     // services of field 2, line 284, carry CC3/CC4 and XDS and are not
-    // decoded).
-    m_cc_bytes = processCcLine(21);
+    // decoded).  NTSC only.
+    m_cc_bytes = m_standard.has_closed_captions ? processCcLine(21) : std::nullopt;
 
     // The Philips VBI codes appear on lines 16/17/18 of each field, and this
     // frame's buffer holds the two fields back to back: field 1 from line 1 and
-    // field 2 from line 264, so field 2's code lines are 279/280/281.
+    // field 2 from line 264 (314 on PAL), so field 2's code lines are
+    // 279/280/281 (329-331).
     //
-    // That layout holds only because NtscFrameReader identifies the field from
+    // That layout holds only because SdtvFrameReader identifies the field from
     // the phase of the vertical sync pattern and always starts a frame on field
     // 1; a frame started on field 2 would put the second field's codes one line
     // earlier.  Rather than depend on that, we probe every candidate line and
@@ -220,7 +233,7 @@ void NtscFrame::processVbi() {
     // wrong field, so a lock that slips cannot turn a CLV disc into a CAV one by
     // losing the 87FFFF marker.
     std::vector<int> codes;
-    for (int line : {16, 17, 18, 278, 279, 280, 281}) {
+    for (int line : m_standard.vbi_code_lines) {
         int code = processVbiLine(line);
         if (code >= 0)
             codes.push_back(code);
@@ -287,6 +300,8 @@ void NtscFrame::processVbi() {
     }
 
 
+    // Chapter number "8 X1 X2 D D D" (§10.1.8): the top bit of X1 is a flag,
+    // set over the first 400 frames of a chapter, not part of the number
     std::optional<int> chapter = std::nullopt;
     if (chapter_data != -1) {
         // The first bit after the key (the top bit of X1) is the chapter's
@@ -365,7 +380,7 @@ void NtscFrame::processVbi() {
                                           cx_enabled ? (*cx_enabled ? "on" : "off") : "-"));
     }
     m_vbi_data = std::make_shared<VbiData>(is_lead_in, is_lead_out, is_clv, is_stop_code, chapter,
-        clv_time_seconds, clv_picture_number, cav_picture_number, cx_enabled);
+        clv_time_seconds, clv_picture_number, cav_picture_number, cx_enabled, m_standard.framesPerSecond());
 
     if (m_log.isEnabled(eDebug, eDecoder)) {
         auto strings = m_vbi_data->asStrings();
@@ -377,7 +392,7 @@ void NtscFrame::processVbi() {
 }
 
 // Notice line starts at 1
-int NtscFrame::processVbiLine(int line) {
+int SdtvFrame::processVbiLine(int line) {
     // The code starts at ~0.172 H (spec: 0.172 H or 0.188 H).  Sample 0 is at
     // 0H within a sample or two (measured from the colour burst, which starts
     // ~0.083 H; the sync tip itself is clamped out of this buffer), so the code's
@@ -387,16 +402,15 @@ int NtscFrame::processVbiLine(int line) {
     // (~24 samples clear of the burst).  0.165 H was too late — it coincided with
     // the code's own rising edge and failed the gate (alien1 lines 16/17 — the
     // programme status and CLV marker).
-    int16_t *vbi = m_data->data<int16_t>() +
-        (line - 1) * NtscInputBlock::c_samples_per_video_line +
-            (int)(0.15 * NtscInputBlock::c_samples_per_video_line);
+    const int width = m_standard.samples_per_line;
+    int16_t *vbi = m_data->data<int16_t>() + (line - 1) * width + (int)(0.15 * width);
 
     if (HalfFloatUtil::half_to_float(vbi[0]) > 0.5) {
         m_log.debug(eDecoder, std::format("VBI line {}: signal present before code start", line));
         return -1;
     }
 
-    for (int i = 0; i < (int)(0.005e-3 * NtscInputBlock::c_video_sampling_frequency); i++) {
+    for (int i = 0; i < (int)(0.005e-3 * m_standard.sampling_frequency); i++) {
         if (HalfFloatUtil::half_to_float(*vbi) > 0.7)
             goto found_start;
         vbi++;
@@ -406,7 +420,7 @@ int NtscFrame::processVbiLine(int line) {
 
     found_start:
 
-    int samples_per_half_bit = 1e-6 * NtscInputBlock::c_video_sampling_frequency;
+    int samples_per_half_bit = 1e-6 * m_standard.sampling_frequency;
     long half_bits = 0b01; // first two half bits are 01, already found
     int prev = 1;
     // A half bit is 14 samples, so a one- or two-sample dip or spike (a
@@ -432,11 +446,11 @@ int NtscFrame::processVbiLine(int line) {
 
         if (t < samples_per_half_bit * 3 / 4) {
             m_log.debug(eDecoder, std::format("VBI line {}: transition time too short", line));
-            // Debug aid: MUSELD_DUMP_VBI_FAIL=<path> appends the failing line (910 floats)
+            // Debug aid: MUSELD_DUMP_VBI_FAIL=<path> appends the failing line (samples_per_line floats)
             if (static const char *dump = getenv("MUSELD_DUMP_VBI_FAIL"); dump != nullptr) {
                 if (FILE *f = fopen(dump, "ab")) {
-                    const int16_t *row = m_data->data<int16_t>() + (line - 1) * NtscInputBlock::c_samples_per_video_line;
-                    for (int j = 0; j < NtscInputBlock::c_samples_per_video_line; j++) {
+                    const int16_t *row = m_data->data<int16_t>() + (line - 1) * width;
+                    for (int j = 0; j < width; j++) {
                         float v = HalfFloatUtil::half_to_float(row[j]);
                         fwrite(&v, sizeof v, 1, f);
                     }
@@ -480,9 +494,9 @@ int NtscFrame::processVbiLine(int line) {
 // 16 NRZ data bits, LSB first, at the same rate.  0 is the blanking level, 1 is
 // 50 IRE.  Returns the two bytes with their (odd) parity bits intact, or
 // nullopt when no caption waveform is found on the line.
-std::optional<std::pair<uint8_t, uint8_t>> NtscFrame::processCcLine(int line) {
-    constexpr int width = NtscInputBlock::c_samples_per_video_line;
-    constexpr double T = width / 32.0; // one 608 clock period in samples
+std::optional<std::pair<uint8_t, uint8_t>> SdtvFrame::processCcLine(int line) {
+    const int width = m_standard.samples_per_line;
+    const double T = width / 32.0; // one 608 clock period in samples
     const int16_t *row = m_data->data<int16_t>() + (line - 1) * width;
     auto sample = [row](int i) { return HalfFloatUtil::half_to_float(row[i]); };
 

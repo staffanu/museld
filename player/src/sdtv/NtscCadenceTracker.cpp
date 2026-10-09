@@ -5,7 +5,6 @@
 #include <cmath>
 #include <format>
 #include "NtscCadenceTracker.h"
-#include "NtscConstants.h"
 #include "musevk/HalfFloatUtil.h"
 
 namespace {
@@ -80,8 +79,8 @@ NtscCadenceTracker::FieldDiffs NtscCadenceTracker::MeasureFieldDiffs(int16_t con
         double sum = 0;
         long boxes = 0;
         for (int row = 24 + field * 263; row <= 258 + field * 263; row += 3) {
-            int16_t const *c = cur + row * NTSC_TOTAL_WIDTH;
-            int16_t const *p = prev + row * NTSC_TOTAL_WIDTH;
+            int16_t const *c = cur + row * c_frame_width;
+            int16_t const *p = prev + row * c_frame_width;
             for (int x = 152; x + 8 <= 856; x += 12) {
                 float box = 0;
                 for (int i = 0; i < 8; i++)

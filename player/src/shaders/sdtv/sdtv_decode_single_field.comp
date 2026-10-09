@@ -1,7 +1,7 @@
 #version 450
 
 // This shader should be invoked with global invocation ids
-// from (0, 0) until (NTSC_Y_BUF_WIDTH, NTSC_FIELD_HEIGHT).
+// from (0, 0) until (SDTV_Y_BUF_WIDTH, SDTV_FIELD_HEIGHT).
 
 #include "muse.h"
 
@@ -12,14 +12,15 @@ layout(push_constant) uniform PushConstants {
     float rot_re;
     float rot_im;
     float level_floor;   // below this, picture luma is considered illegal
-    float level_ceiling; // likewise above this; both computed in NtscDecoder
+    float level_ceiling; // likewise above this; both computed in SdtvDecoder
                          // from the measured blanking level and noise
     float chroma_sel_floor; // noise floor for the spatial/temporal comb
                             // selector, scaled from the measured sigma
+    uint pal_v_flip;        // PAL: invert the derived V switch (calibration aid)
 };
 
 layout(set = 0, binding = 0) buffer readonly input_frame_buffer {
-    float16_t input_frame[][NTSC_TOTAL_WIDTH];
+    float16_t input_frame[][SDTV_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 1) buffer readonly color_burst_phase_data_buffer {
@@ -27,36 +28,36 @@ layout(set = 0, binding = 1) buffer readonly color_burst_phase_data_buffer {
 };
 
 layout(set = 0, binding = 2) buffer writeonly Y_data_buffer {
-    float16_t Y_data[][NTSC_Y_BUF_WIDTH];
+    float16_t Y_data[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 3) buffer writeonly r_data_buffer {
-    float16_t U_data[][NTSC_Y_BUF_WIDTH];
+    float16_t U_data[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 4) buffer writeonly b_data_buffer {
-    float16_t V_data[][NTSC_Y_BUF_WIDTH];
+    float16_t V_data[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 5) buffer readonly dropout_data_buffer {
-    uint8_t dropout_data[][NTSC_TOTAL_WIDTH];
+    uint8_t dropout_data[][SDTV_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 6) buffer readonly prev_frame_buffer {
-    float16_t prev_frame[][NTSC_TOTAL_WIDTH]; // composite of frame N-1
+    float16_t prev_frame[][SDTV_TOTAL_WIDTH]; // composite of frame N-1
 };
 
 layout(set = 0, binding = 7) buffer readonly next_frame_buffer {
-    float16_t next_frame[][NTSC_TOTAL_WIDTH]; // composite of frame N+1 (lookahead)
+    float16_t next_frame[][SDTV_TOTAL_WIDTH]; // composite of frame N+1 (lookahead)
 };
 
-// Directional motion masks from ntsc_detect_motion.comp, frame-row indexed
+// Directional motion masks from sdtv_detect_motion.comp, frame-row indexed
 layout(set = 0, binding = 8) buffer readonly past_motion_buffer {
-    float16_t past_motion[][NTSC_Y_BUF_WIDTH];
+    float16_t past_motion[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 9) buffer readonly future_motion_buffer {
-    float16_t future_motion[][NTSC_Y_BUF_WIDTH];
+    float16_t future_motion[][SDTV_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 10) buffer readonly prev_burst_phase_buffer {
@@ -68,18 +69,18 @@ layout(set = 0, binding = 11) buffer readonly next_burst_phase_buffer {
 };
 
 layout(set = 0, binding = 12) buffer readonly prev_dropout_buffer {
-    uint8_t prev_dropout[][NTSC_TOTAL_WIDTH];
+    uint8_t prev_dropout[][SDTV_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 13) buffer readonly next_dropout_buffer {
-    uint8_t next_dropout[][NTSC_TOTAL_WIDTH];
+    uint8_t next_dropout[][SDTV_TOTAL_WIDTH];
 };
 
-// Per-column chroma estimates from ntsc_chroma_taps.comp: (spatial comb,
+// Per-column chroma estimates from sdtv_chroma_taps.comp: (spatial comb,
 // pure temporal, motion-gated temporal, unused), field-row indexed, column
-// x holding frame column x + NTSC_FIELD_START_X - NTSC_CHROMA_TAP_HALO
+// x holding frame column x + SDTV_FIELD_START_X - SDTV_CHROMA_TAP_HALO
 layout(set = 0, binding = 14) buffer readonly chroma_taps_buffer {
-    f16vec4 chroma_taps[][NTSC_CHROMA_TAPS_WIDTH];
+    f16vec4 chroma_taps[][SDTV_CHROMA_TAPS_WIDTH];
 };
 
 float16_t cosine_lut[] = { 1.hf, 0.hf, -1.hf, 0.hf };
@@ -117,7 +118,7 @@ float16_t comb_luma_next(uint fl, uint nl, uint fc) {
     return 0.25hf * next_frame[fl - 1][fc] + 0.5hf * next_frame[fl][fc] + 0.25hf * next_frame[nl][fc];
 }
 
-#include "ntsc/ntsc_comb_taps.h"
+#include "sdtv/sdtv_comb_taps.h"
 
 // A neighbour frame's spatial luma: its composite less the band around fsc
 // of its own 3-line comb chroma estimate (see y_spatial in main)
@@ -185,19 +186,201 @@ f16vec2 demodulated_chroma(const float16_t c_src[19], uint frame_col) {
     return f16vec2(c_re, c_im);
 }
 
+#ifdef SDTV_PAL
+// The -U axis reference of a PAL line (the smoothed axis of
+// sdtv_comb_taps.h), with the burst-referenced gain in its magnitude, and
+// the line's V switch (see main); false where there is no usable burst.
+bool pal_reference(int src, uint fl, uint field_last, out vec2 bref, out float vs) {
+    vec2 r = pal_smoothed_axis(src, fl, field_last);
+    vec2 m0 = vec2(pal_burst(src, fl));
+    float rl = length(r);
+    bref = vec2(0.0);
+    vs = 1.0;
+    if (dot(m0, m0) <= 0.04 || rl <= 0.5)
+        return false;
+    // Burst-referenced AGC: a nominal 0.214-unit burst measures 3.43 per
+    // line, 4.85 for the pair sum along -U; 3.75 is the value calibrated
+    // against the GGV1011 test disc's colour bars (the decoded saturation
+    // was 1.3 times what the bars' own luma implied; the burst window reads
+    // low against steady chroma, as NTSC's 2.92 against 3.2 covers there).
+    // The weighted average above sums to 9 pair estimates' worth.
+    float gain = clamp(3.75 * 9.0 / rl, 0.25, 8.0);
+    bref = r / rl * gain;
+    // this line's V switch: which side of -U its burst swung to
+    vs = (m0.y * r.x - m0.x * r.y) >= 0.0 ? 1.0 : -1.0;
+    if (pal_v_flip != 0u)
+        vs = -vs;
+    return true;
+}
+
+// U and V from a chroma window, against the reference
+vec2 pal_demod(const float16_t c_src[19], uint frame_col, vec2 bref, float vs) {
+    f16vec2 c_demod = demodulated_chroma(c_src, frame_col);
+    float I = float(c_demod.x) * bref.x + float(c_demod.y) * bref.y;
+    float Q = float(c_demod.y) * bref.x - float(c_demod.x) * bref.y;
+    // as for NTSC: U + jV = e^(ja) conj(I + jQ), a = 180 + tint
+    return vec2(Q * rot_re + I * rot_im, (I * rot_re - Q * rot_im) * vs);
+}
+
+// One PAL line's U and V at a column from its own spatial comb
+vec2 pal_line_uv(int src, uint fl, uint field_last, uint frame_col) {
+    vec2 bref; float vs;
+    if (!pal_reference(src, fl, field_last, bref, vs))
+        return vec2(0.0);
+    float16_t c_src[19];
+    for (int n = 0; n < 19; n++)
+        c_src[n] = pal_chroma(src, fl, field_last, uint(int(frame_col) + n - 9));
+    return pal_demod(c_src, frame_col, bref, vs);
+}
+#endif
+
 void main() {
     uint row = gl_GlobalInvocationID.y;
     uint col = gl_GlobalInvocationID.x;
 
-    if (row >= NTSC_FIELD_HEIGHT || col >= NTSC_Y_BUF_WIDTH)
+    if (row >= SDTV_FIELD_HEIGHT || col >= SDTV_Y_BUF_WIDTH)
         return;
 
-    uint frame_line = 22 + row + 263 * field_parity;
-    uint frame_col = col + NTSC_FIELD_START_X;
+    uint frame_line = SDTV_FIELD_START_Y + row + SDTV_FIELD2_OFFSET * field_parity;
+    uint frame_col = col + SDTV_FIELD_START_X;
     uint mask_row = row * 2 + field_parity;
 
     // the comb degrades to two lines on the frame's last line
-    uint next_line = min(frame_line + 1, NTSC_TOTAL_HEIGHT - 1);
+    uint next_line = min(frame_line + 1, SDTV_TOTAL_HEIGHT - 1);
+
+#ifdef SDTV_PAL
+    // PAL, 2D.  Adjacent lines of a field are 283.75 subcarrier cycles apart,
+    // so their chroma phasors sit at -90 and +90 degrees from this line's
+    // (270.576 and -270.576 on the line-locked 1135-sample grid, which is
+    // 4 fsc to within 100 Hz): the two neighbours' chroma cancels in their
+    // sum, whatever the V switch does (they share its sign), and
+    //   c = f - (f_prev + f_next) / 2
+    // is the line's chroma with a 1 % luma leak -- the same 3-line comb as
+    // NTSC's with the centre tap doubled (there the neighbours are at 180
+    // degrees).  The chroma reference is the -U axis, which the +-45 degree
+    // swinging burst only gives from a line pair: the next line's burst
+    // de-rotated by the structural 270.576 degrees into this line's frame,
+    // added to this line's, is 2 cos 45 times the burst amplitude along -U
+    // (the V parts cancel), and the side of that axis this line's burst
+    // lies on is the line's V switch.  With use_3d_comb set (key 4, its
+    // only meaning on PAL) the line's U and V are averaged with the
+    // previous line's, the classic PAL delay-line step: 3 dB less chroma
+    // noise, and a differential phase error, which lands on V with opposite
+    // signs on consecutive lines, cancels instead of showing as Hanover
+    // bars.  The dropout paths are NTSC's (see below): the illegal-level
+    // rescue substitutes the nearest healthy line of the field -- any line
+    // will do, each decodes against its own burst -- and a flagged pixel
+    // takes the same pixel of the stiller neighbour frame, decoded in
+    // place.  No temporal comb yet.
+    {
+        const uint field_first = SDTV_FIELD_START_Y + SDTV_FIELD2_OFFSET * field_parity;
+        const uint field_last = field_first + SDTV_FIELD_HEIGHT - 1;
+        float16_t Yp = pal_luma(0, frame_line, field_last, frame_col);
+        bool pal_painted = false;
+        bool pal_rescued = false;
+        uint src_line = frame_line;
+
+        int outside_p = 0;
+        for (int dx = -2; dx <= 2; dx++) {
+            float16_t y = dx == 0 ? Yp : pal_luma(0, frame_line, field_last, uint(int(frame_col) + dx));
+            outside_p += (y < float16_t(level_floor) || y > float16_t(level_ceiling)) ? 1 : 0;
+        }
+        float16_t motion_p = max(past_motion[mask_row][col], future_motion[mask_row][col]);
+        if (dropout_mode != 1 && outside_p >= 3 && motion_p > 0.1hf) {
+            if (dropout_mode == 2) {
+                pal_painted = true;
+            } else {
+                for (int k = 1; k <= 4 && !pal_rescued; k++) {
+                    for (int side = -1; side <= 1 && !pal_rescued; side += 2) {
+                        int fl = int(frame_line) + side * k;
+                        if (fl < int(field_first) || fl > int(field_last))
+                            continue;
+                        float16_t y2 = pal_luma(0, uint(fl), field_last, frame_col);
+                        if (y2 >= float16_t(level_floor) && y2 <= float16_t(level_ceiling)) {
+                            Yp = y2;
+                            src_line = uint(fl);
+                            pal_rescued = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        int pal_src = 0;
+        if (dropout_mode == 0 && !pal_rescued && dropout_data[frame_line][frame_col] != 0 && motion_p > 0.1hf) {
+            float16_t mp = past_motion[mask_row][col];
+            float16_t mf = future_motion[mask_row][col];
+            for (int attempt = 0; attempt < 2 && pal_src == 0; attempt++) {
+                bool try_prev = (mp <= mf) == (attempt == 0);
+                if ((try_prev ? mp : mf) > 0.5hf)
+                    continue;
+                if ((try_prev ? prev_dropout[frame_line][frame_col] : next_dropout[frame_line][frame_col]) != 0)
+                    continue;
+                pal_src = try_prev ? -1 : 1;
+            }
+            if (pal_src != 0)
+                Yp = pal_luma(pal_src, frame_line, field_last, frame_col);
+        }
+
+        vec2 uv;
+        const bool pal_temporal = use_3d_comb != 0u && !pal_rescued && pal_src == 0
+                                  && dropout_data[frame_line][frame_col] == 0;
+        if (pal_temporal) {
+            // 3D comb, as NTSC's below with the frames two apart: the
+            // subcarrier advances 270 degrees per frame and the V switch
+            // flips, so it is frames N +- 2 whose chroma is inverted and
+            // whose V switch matches -- the decoder feeds this shader (and
+            // the motion detector) frames at that spacing.  The per-column
+            // estimates come from sdtv_chroma_taps.comp: the PAL spatial
+            // comb, and the temporal pairs through the burst pair rotation,
+            // motion gated.
+            float16_t cs_arr[19], ct_arr[19], pure_arr[19], c_src[19];
+            for (int n = 0; n < 19; n++) {
+                f16vec4 taps = chroma_taps[row][col + n];
+                cs_arr[n] = taps.x;
+                pure_arr[n] = taps.y;
+                ct_arr[n] = taps.z;
+            }
+            float16_t w_t = temporal_weight(cs_arr, pure_arr);
+            for (int n = 0; n < 19; n++)
+                c_src[n] = mix(cs_arr[n], ct_arr[n], w_t);
+            // luma as below: the composite less the chroma band of the
+            // spatial estimate, averaged with the still neighbour frames'
+            // own spatial lumas, or less the temporal estimate's band where
+            // the spatial comb leaks
+            float16_t f0 = input_frame[frame_line][frame_col];
+            float16_t y_spatial = f0 - (0.5hf * cs_arr[9] - 0.25hf * (cs_arr[7] + cs_arr[11]));
+            float16_t wp = prev_dropout[frame_line][frame_col] != 0 ? 0.hf : 1.hf - past_motion[mask_row][col];
+            float16_t wf = next_dropout[frame_line][frame_col] != 0 ? 0.hf : 1.hf - future_motion[mask_row][col];
+            float16_t y_avg = (0.5hf * y_spatial
+                               + 0.25hf * (wp * pal_luma(-1, frame_line, field_last, frame_col)
+                                           + wf * pal_luma(1, frame_line, field_last, frame_col)))
+                              / (0.5hf + 0.25hf * (wp + wf));
+            float16_t ct_band = 0.5hf * ct_arr[9] - 0.25hf * (ct_arr[7] + ct_arr[11]);
+            Yp = mix(y_avg, f0 - ct_band, w_t);
+            vec2 bref; float vs;
+            uv = pal_reference(0, frame_line, field_last, bref, vs) ? pal_demod(c_src, frame_col, bref, vs) : vec2(0.0);
+        } else {
+            uv = pal_line_uv(pal_src, src_line, field_last, frame_col);
+        }
+        if (use_3d_comb != 0u && !pal_rescued && pal_src == 0) {
+            // the delay-line U/V average with the line above (its own
+            // spatial comb; the temporal estimate is per pixel here)
+            const uint other = frame_line > field_first ? frame_line - 1 : frame_line + 1;
+            uv = 0.5 * (uv + pal_line_uv(0, other, field_last, frame_col));
+        }
+        float16_t Up = float16_t(uv.x), Vp = float16_t(uv.y);
+        if (dropout_mode == 2 && (pal_painted || (dropout_data[frame_line][frame_col] != 0 && motion_p > 0.1hf))) {
+            Yp = 0.299hf;  // paint detected dropouts red, as below
+            Up = -0.14714hf;
+            Vp = 0.61497hf;
+        }
+        Y_data[row][col] = Yp;
+        U_data[row][col] = Up;
+        V_data[row][col] = Vp;
+        return;
+    }
+#endif
 
     float16_t Y = comb_luma(frame_line, next_line, frame_col);
     bool painted = false;
@@ -228,16 +411,16 @@ void main() {
             painted = true;
         } else {
             for (int k = 2; k <= 8; k += 2) {
-                uint fl = uint(clamp(int(frame_line) - k, 22, NTSC_TOTAL_HEIGHT - 1));
+                uint fl = uint(clamp(int(frame_line) - k, SDTV_FIELD_START_Y, SDTV_TOTAL_HEIGHT - 1));
                 float16_t y2 = comb_luma(fl, fl + 1, frame_col);
                 if (y2 < float16_t(level_floor) || y2 > float16_t(level_ceiling)) {
-                    fl = uint(clamp(int(frame_line) + k, 22, NTSC_TOTAL_HEIGHT - 1));
+                    fl = uint(clamp(int(frame_line) + k, SDTV_FIELD_START_Y, SDTV_TOTAL_HEIGHT - 1));
                     y2 = comb_luma(fl, fl + 1, frame_col);
                 }
                 if (y2 >= float16_t(level_floor) && y2 <= float16_t(level_ceiling)) {
                     Y = y2;
                     frame_line = fl;
-                    next_line = min(fl + 1, NTSC_TOTAL_HEIGHT - 1);
+                    next_line = min(fl + 1, SDTV_TOTAL_HEIGHT - 1);
                     rescued = true;
                     break;
                 }
@@ -276,7 +459,7 @@ void main() {
     // motion-gated per column, so a moving column degenerates to spatial and
     // pulls the weight down with it).
     float16_t c_src[19];
-    float t_burst = clamp((float(frame_col) - 94.0) / 910.0, 0.0, 1.0); // burst sits at ~column 94
+    float t_burst = clamp((float(frame_col) - float(SDTV_BURST_START + 16)) / float(SDTV_TOTAL_WIDTH), 0.0, 1.0); // from the middle of the burst
     f16vec2 burst_ref = interpolated_burst(phase_data[frame_line], phase_data[next_line], t_burst);
     if (donor != 0) {
         for (int n = 0; n < 19; n++) {
@@ -300,7 +483,7 @@ void main() {
         // it is worth anything -- feeding it the gated blend would let a
         // half-raised mask erase the disagreement it needs to see.
         // All three estimates are properties of the column, not of this
-        // pixel, so ntsc_chroma_taps.comp evaluates them once per column
+        // pixel, so sdtv_chroma_taps.comp evaluates them once per column
         // (this window used to recompute each of them 19 times).
         float16_t cs_arr[19], ct_arr[19], pure_arr[19];
         for (int n = 0; n < 19; n++) {
@@ -389,7 +572,7 @@ void main() {
     // direction of the sine LUT with the subcarrier's, and the angle folds
     // together the structural 180 degrees, the calibrated offset, and the
     // --tint option; --saturation scales the magnitude.  The values are
-    // computed in NtscDecoder.
+    // computed in SdtvDecoder.
     float16_t V = I * float16_t(rot_re) - Q * float16_t(rot_im);
     float16_t U = Q * float16_t(rot_re) + I * float16_t(rot_im);
 

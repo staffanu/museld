@@ -232,16 +232,16 @@ if(BUILD_MUSE)
         muse/MuseInputBlock.h
         muse/MuseConstants.h
         muse/DiscCode.h muse/DiscCode.cpp
-        ntsc/NtscRfDemodulator.cpp ntsc/NtscRfDemodulator.h
-        ntsc/NtscFrameReader.cpp ntsc/NtscFrameReader.h
-        ntsc/NtscInputBlock.h
-        ntsc/NtscConstants.h
-        ntsc/NtscCadenceTracker.cpp ntsc/NtscCadenceTracker.h
-        ntsc/NtscDecoder.cpp ntsc/NtscDecoder.h
-        ntsc/NtscShaders.cpp ntsc/NtscShaders.h
-        ntsc/NtscFrame.cpp ntsc/NtscFrame.h
-        ntsc/NtscFieldView.cpp ntsc/NtscFieldView.h
-        ntsc/VbiData.cpp ntsc/VbiData.h
+        sdtv/SdtvRfDemodulator.cpp sdtv/SdtvRfDemodulator.h
+        sdtv/SdtvFrameReader.cpp sdtv/SdtvFrameReader.h
+        sdtv/SdtvInputBlock.h
+        sdtv/VideoStandard.cpp sdtv/VideoStandard.h
+        sdtv/NtscCadenceTracker.cpp sdtv/NtscCadenceTracker.h
+        sdtv/SdtvDecoder.cpp sdtv/SdtvDecoder.h
+        sdtv/SdtvShaders.cpp sdtv/SdtvShaders.h
+        sdtv/SdtvFrame.cpp sdtv/SdtvFrame.h
+        sdtv/SdtvFieldView.cpp sdtv/SdtvFieldView.h
+        sdtv/VbiData.cpp sdtv/VbiData.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandBuffer.cpp musevk/CommandBuffer.h
         musevk/CommandPool.h
@@ -293,19 +293,32 @@ if(BUILD_MUSE)
     # Compile GLSL compute shaders to SPIR-V
     set(GLSLC "glslc")
     file(GLOB_RECURSE GLSL_SOURCE_FILES ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.comp)
-    foreach(GLSL ${GLSL_SOURCE_FILES})
-        get_filename_component(FILE_NAME ${GLSL} NAME)
-        set(SPIRV "${CMAKE_CURRENT_BINARY_DIR}/shaders/${FILE_NAME}.spv")
+    # add_spirv(<glsl source> <output name> [<glslc define>]): one SPIR-V build
+    function(add_spirv GLSL SPIRV_NAME)
+        set(SPIRV "${CMAKE_CURRENT_BINARY_DIR}/shaders/${SPIRV_NAME}")
         add_custom_command(
             OUTPUT ${SPIRV}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/shaders/"
-            COMMAND ${GLSLC} -Werror -O ${GLSL}
+            COMMAND ${GLSLC} -Werror -O ${ARGN} ${GLSL}
                     -I ${CMAKE_CURRENT_SOURCE_DIR}/shaders
                     -I ${CMAKE_CURRENT_SOURCE_DIR}/shaders/muse
                     -o ${SPIRV}
             DEPENDS ${GLSL}
         )
-        list(APPEND SPIRV_BINARY_FILES ${SPIRV})
+        set(SPIRV_BINARY_FILES ${SPIRV_BINARY_FILES} ${SPIRV} PARENT_SCOPE)
+    endfunction()
+    # One SPIR-V per shader, except the SD shaders (shaders/sdtv/sdtv_*.comp),
+    # which are built once per video standard: ntsc_*.comp.spv with the NTSC
+    # frame geometry and pal_*.comp.spv with -DSDTV_PAL (see shaders/muse/muse.h);
+    # SdtvShaders picks the set by VideoStandard::shader_prefix
+    foreach(GLSL ${GLSL_SOURCE_FILES})
+        get_filename_component(FILE_NAME ${GLSL} NAME)
+        if(FILE_NAME MATCHES "^sdtv_(.*)$")
+            add_spirv(${GLSL} "ntsc_${CMAKE_MATCH_1}.spv")
+            add_spirv(${GLSL} "pal_${CMAKE_MATCH_1}.spv" -DSDTV_PAL)
+        else()
+            add_spirv(${GLSL} "${FILE_NAME}.spv")
+        endif()
     endforeach()
     add_custom_target(Shaders DEPENDS ${SPIRV_BINARY_FILES})
     add_dependencies(museld Shaders)

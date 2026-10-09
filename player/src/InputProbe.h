@@ -23,13 +23,16 @@ class Logger;
 // The signal type and sample rate come from the video line structure: the FM
 // carrier's instantaneous frequency repeats every line, and an autocorrelation
 // peak gives the line period in samples.  The period fixes the sample rate for
-// each hypothesis (NTSC lines at 15.734 kHz, MUSE at 33.75 kHz), and two
-// sample-rate-independent quantities decide between them: the mean carrier
-// frequency in cycles per line (NTSC ~520, MUSE ~340), and the narrowband
-// NTSC analog audio carrier at 2.301 MHz = 146.3 cycles per line, which MUSE
-// discs do not have.
+// each hypothesis (NTSC lines at 15.734 kHz, PAL at 15.625, MUSE at 33.75),
+// and sample-rate-independent quantities decide between them: the mean carrier
+// frequency in cycles per line separates MUSE (~340) from the SD standards
+// (NTSC ~520, PAL ~470, overlapping), and between those the field period
+// does: the lines between the vertical sync groups, 262.5 or 312.5, counted
+// in line periods from where the sync tip takes over whole lines.  The
+// narrowband NTSC analog audio carrier at 2.301 MHz = 146.3 cycles per line
+// is the tie breaker when the field count is inconclusive.
 struct InputProbeResult {
-    enum class Type { eNtscRf, eMuseRf, eMuse16Baseband, eUnknown };
+    enum class Type { eNtscRf, ePalRf, eMuseRf, eMuse16Baseband, eUnknown };
 
     std::optional<InputFormat> format; // detected, or the caller's echoed back
     Type type = Type::eUnknown;
@@ -41,6 +44,7 @@ struct InputProbeResult {
     double line_strength = 0;       // autocorrelation at the line period, 0..1
     double cycles_per_line = 0;     // mean FM carrier cycles per video line
     double audio_carrier_ratio = 0; // narrowband PSD ratio at 146.3 cycles/line
+    double field_lines = 0;         // measured lines per field (262.5 NTSC, 312.5 PAL); 0 when not measured
 };
 
 InputProbeResult probeInputFile(Logger &log, const std::string &filename,

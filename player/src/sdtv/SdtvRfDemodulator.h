@@ -1,8 +1,8 @@
 // Copyright 2024-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
-#ifndef MUSECPP_NTSCRFDEMODULATOR_H
-#define MUSECPP_NTSCRFDEMODULATOR_H
+#ifndef MUSECPP_SDTVRFDEMODULATOR_H
+#define MUSECPP_SDTVRFDEMODULATOR_H
 
 #include <cstdint>
 #include <fcntl.h>
@@ -25,8 +25,9 @@
 #include "ac3/Ac3RfDemodulator.h"
 #include "efm/EfmDemodulator.h"
 #include "analog/AnalogAudioDemodulator.h"
+#include "VideoStandard.h"
 
-namespace NtscRfDemodulatorConstants {
+namespace SdtvRfDemodulatorConstants {
     static constexpr int c_sample_block_size = 512 * 1024;
     static constexpr int c_video_decimation_rate = 2;
     static constexpr int c_audio_decimation_rate = 4;
@@ -35,17 +36,17 @@ namespace NtscRfDemodulatorConstants {
     static constexpr int c_audio_block_size = c_sample_block_size / c_audio_decimation_rate;
 }
 
-struct NtscDemodulatedBlock {
-    explicit NtscDemodulatedBlock(musevk::VulkanManager &vulkan_manager)
+struct SdtvDemodulatedBlock {
+    explicit SdtvDemodulatedBlock(musevk::VulkanManager &vulkan_manager)
     : input_offset(0) {
         video_data = std::make_unique<musevk::VulkanBuffer>(
-                vulkan_manager, musevk::Size(NtscRfDemodulatorConstants::c_video_block_size), sizeof(float),
+                vulkan_manager, musevk::Size(SdtvRfDemodulatorConstants::c_video_block_size), sizeof(float),
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);
         dropouts = std::make_unique<musevk::VulkanBuffer>(
-                vulkan_manager, musevk::Size(NtscRfDemodulatorConstants::c_video_block_size), sizeof(uint8_t),
+                vulkan_manager, musevk::Size(SdtvRfDemodulatorConstants::c_video_block_size), sizeof(uint8_t),
                 vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, musevk::HostAccess::eHostRead);;
         audio_data = std::make_unique<musevk::VulkanBuffer>(
-                vulkan_manager, musevk::Size(NtscRfDemodulatorConstants::c_audio_block_size), sizeof(float),
+                vulkan_manager, musevk::Size(SdtvRfDemodulatorConstants::c_audio_block_size), sizeof(float),
                 vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);
     }
 
@@ -63,17 +64,17 @@ struct NtscDemodulatedBlock {
     std::shared_ptr<musevk::VulkanBuffer> audio_data;
 };
 
-class NtscRfDemodulator : public RfDemodulator<NtscDemodulatedBlock> {
+class SdtvRfDemodulator : public RfDemodulator<SdtvDemodulatedBlock> {
 public:
-    NtscRfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
+    SdtvRfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
                       musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
-                      AudioTrack audio_track, int efm_adaptive_filter_size);
-    NtscRfDemodulator(const NtscRfDemodulator&) = delete;
-    void operator=(const NtscRfDemodulator&) = delete;
+                      AudioTrack audio_track, int efm_adaptive_filter_size, const VideoStandard &video_standard);
+    SdtvRfDemodulator(const SdtvRfDemodulator&) = delete;
+    void operator=(const SdtvRfDemodulator&) = delete;
 
     // Join the demodulator thread while demodulate() and m_efm_demodulator
     // still exist; the base destructor's cleanup() would be too late.
-    ~NtscRfDemodulator() {
+    ~SdtvRfDemodulator() {
         cleanup();
     }
 
@@ -91,15 +92,15 @@ public:
 
     // enough buffers for two frames
     [[nodiscard]] int numberOfBlockBuffers() const {
-        return std::max(2, (int)(2 * m_sample_frequency / 30 / NtscRfDemodulatorConstants::c_sample_block_size));
+        return std::max(2, (int)(2 * m_sample_frequency / m_video_standard.framesPerSecond()
+                                 / SdtvRfDemodulatorConstants::c_sample_block_size));
     }
 
 protected:
     void demodulate() override;
 
 private:
-    static constexpr float c_center_frequency = 8.5e6f;
-    static constexpr float c_frequency_deviation = 0.85e6f;
+    const VideoStandard &m_video_standard;
     EfmDemodulator m_efm_demodulator;
     AnalogAudioDemodulator m_analog_demodulator;
     Ac3RfDemodulator m_ac3_demodulator;
@@ -110,4 +111,4 @@ private:
     std::atomic<bool> m_analog_cx;
 };
 
-#endif //MUSECPP_NTSCRFDEMODULATOR_H
+#endif //MUSECPP_SDTVRFDEMODULATOR_H

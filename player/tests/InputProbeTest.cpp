@@ -19,17 +19,23 @@ namespace {
 // An FM video carrier at base_hz with deviation dev_hz, driven by a synthetic
 // line-periodic pattern (sync tip plus non-harmonic in-line content, so the
 // only strong periodicity is the line itself), with an optional unmodulated
-// audio carrier and a little noise.
+// audio carrier and a little noise.  With lines_per_field set (262.5 NTSC,
+// 312.5 PAL), every field starts with three lines of sync tip, standing in
+// for the vertical sync's broad pulses.
 vector<float> synthesizeRf(size_t n, double fs, double line_hz,
-                           double base_hz, double dev_hz, double audio_hz) {
+                           double base_hz, double dev_hz, double audio_hz,
+                           double lines_per_field = 0) {
     vector<float> out(n);
     double phase = 0, audio_phase = 0;
     mt19937 rng(1234);
     uniform_real_distribution<float> noise(-0.05f, 0.05f);
     const double line_period = fs / line_hz;
+    const double field_period = lines_per_field * line_period;
     for (size_t i = 0; i < n; i++) {
         double p = fmod((double)i, line_period) / line_period;
         double video = p < 0.08 ? -1.0 : 0.4 * sin(2 * M_PI * 1.3 * p);
+        if (field_period > 0 && fmod((double)i, field_period) < 3 * line_period)
+            video = -1.0;
         phase += 2 * M_PI * (base_hz + dev_hz * video) / fs;
         float s = (float)(0.8 * cos(phase));
         if (audio_hz > 0) {
@@ -90,7 +96,7 @@ constexpr size_t c_samples = 6 << 20;
 
 TEST_CASE("Probe detects synthetic NTSC RF in an extension-less s16 file", "[InputProbe]") {
     auto path = tempFile("museld-probe-ntsc.bin");
-    writeS16(path, synthesizeRf(c_samples, 40e6, 15734.2657, 8.2e6, 0.9e6, 2.301e6));
+    writeS16(path, synthesizeRf(c_samples, 40e6, 15734.2657, 8.2e6, 0.9e6, 2.301e6, 262.5));
     auto r = probe(path);
     filesystem::remove(path);
 
@@ -99,6 +105,34 @@ TEST_CASE("Probe detects synthetic NTSC RF in an extension-less s16 file", "[Inp
     CHECK(r.type == InputProbeResult::Type::eNtscRf);
     CHECK_THAT(r.sample_frequency, Catch::Matchers::WithinRel(40e6, 0.001));
     CHECK(r.audio_carrier_ratio > 50);
+    CHECK_THAT(r.field_lines, Catch::Matchers::WithinAbs(262.5, 1.0));
+}
+
+TEST_CASE("Probe tells PAL RF from NTSC by the lines between vertical syncs", "[InputProbe]") {
+    // PAL's carrier band overlaps NTSC's and its line rate is 0.7 % off, so
+    // only the field length can tell them apart; no audio carrier, as on a
+    // digital-sound PAL disc
+    auto path = tempFile("museld-probe-pal.bin");
+    writeS16(path, synthesizeRf(c_samples, 40e6, 15625.0, 7.3e6, 0.57e6, 0, 312.5));
+    auto r = probe(path);
+    filesystem::remove(path);
+
+    REQUIRE(r.format.has_value());
+    CHECK(r.type == InputProbeResult::Type::ePalRf);
+    CHECK_THAT(r.sample_frequency, Catch::Matchers::WithinRel(40e6, 0.001));
+    CHECK_THAT(r.field_lines, Catch::Matchers::WithinAbs(312.5, 1.0));
+}
+
+TEST_CASE("Probe falls back on the audio carrier when no vertical sync is seen", "[InputProbe]") {
+    // A purely line-periodic signal has no field structure; the NTSC analog
+    // audio carrier still says NTSC
+    auto path = tempFile("museld-probe-ntsc-nofield.bin");
+    writeS16(path, synthesizeRf(c_samples, 40e6, 15734.2657, 8.2e6, 0.9e6, 2.301e6));
+    auto r = probe(path);
+    filesystem::remove(path);
+
+    CHECK(r.type == InputProbeResult::Type::eNtscRf);
+    CHECK(r.field_lines == 0);
 }
 
 TEST_CASE("Probe detects synthetic MUSE RF and its sample rate", "[InputProbe]") {
@@ -114,7 +148,7 @@ TEST_CASE("Probe detects synthetic MUSE RF and its sample rate", "[InputProbe]")
 }
 
 TEST_CASE("Probe detects u8 and lds sample formats by content", "[InputProbe]") {
-    auto samples = synthesizeRf(c_samples, 40e6, 15734.2657, 8.2e6, 0.9e6, 2.301e6);
+    auto samples = synthesizeRf(c_samples, 40e6, 15734.2657, 8.2e6, 0.9e6, 2.301e6, 262.5);
 
     auto u8_path = tempFile("museld-probe-u8.bin");
     writeU8(u8_path, samples);
