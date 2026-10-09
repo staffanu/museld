@@ -152,6 +152,13 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     auto t0 = chrono::high_resolution_clock::now();
 
+    // A metadata probe only needs the first stage (the frame copy the VBI
+    // slicer reads) of the frame just read; the displayed picture is left
+    // alone and the audio is skipped.  The EFM and AC3 side data of the
+    // skipped blocks is dropped with them.
+    const bool decode_video = m_decode_video && !controls.metadata_only;
+    const bool decode_audio = m_decode_audio && !controls.metadata_only;
+
     // Closes the current timing section: adds the time since the previous mark
     // to the given bucket.  Skipped code between two marks just leaves the
     // earlier bucket at zero.
@@ -189,8 +196,11 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         auto frame = m_frames.back();
         m_frames.pop_back();
         m_frames.push_front(frame);
+        std::rotate(m_frame_seek_generation.rbegin(), m_frame_seek_generation.rbegin() + 1,
+                    m_frame_seek_generation.rend());
 
         frame->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_video_sample);
+        m_frame_seek_generation[0] = input_block->seek_generation;
 
         if (input_block->timebase_restarted && m_black_peak_v >= 0) {
             // A new disc: its black is measured afresh
@@ -412,7 +422,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     // Always begin the batch here since it will wait for the first stage semaphore to complete
     // (or it won't be unsignaled)
     m_second_stage_command_buffer->begin();
-    if (m_decode_video && (m_decode_all_fields || m_field_index == 0)) {
+    if (decode_video && (m_decode_all_fields || m_field_index == 0)) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
         out.last_frame_buffer_input_offset = m_frames[1]->getInputOffset();
@@ -524,9 +534,14 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     if (input_block != nullptr) {
         m_frames[0]->processVbi();
         if (auto vbi = m_frames[0]->getVbiData()) {
-            if (m_prev_vbi && !input_block->timebase_restarted)
+            // The flags carry over between consecutive frames only: not
+            // across a signal loss, and not across a seek, where the chapter
+            // of the abandoned position would be reported for the new one
+            if (m_prev_vbi && !input_block->timebase_restarted
+                && input_block->seek_generation == m_prev_vbi_seek_generation)
                 vbi->inheritDiscFlags(*m_prev_vbi);
             m_prev_vbi = vbi;
+            m_prev_vbi_seek_generation = input_block->seek_generation;
         }
         // A new frame was read, so this pair has not been delivered before.
         // It leads the displayed frame (m_frames[1]) by one frame time, which
@@ -556,7 +571,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // the VBI processing needs).  The decision this feeds is always about
         // the DISPLAYED frame m_frames[1], so running one frame behind the
         // read costs nothing.
-        if (m_decode_video && m_decode_all_fields && m_frame_no > 1) {
+        if (decode_video && m_decode_all_fields && m_frame_no > 1) {
             auto diffs = NtscCadenceTracker::MeasureFieldDiffs(
                     m_frames[0]->data()->data<int16_t>(), m_frames[1]->data()->data<int16_t>());
             // Predicted per-sample sigma of the frame buffer data: the raw
@@ -568,7 +583,7 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
         section_ms(m_sec_cadence_ms); // MeasureFieldDiffs reads two mapped frame buffers on the CPU
     }
 
-    if (m_decode_audio && m_field_index == 0) {
+    if (decode_audio && m_field_index == 0) {
         // Deliver the audio held from the previous read (it belongs to the
         // frame being displayed), then decode and hold this block's audio.
         // AC3/DTS decode in whole compressed frames, so a delivery can exceed
@@ -682,7 +697,18 @@ bool NtscDecoder::next(const DecodeControls &controls, DecodedField &out) {
     else
         m_field_index = (m_field_index + 1) % 2;
 
-    out.disc_info = m_frames[1]->getVbiData();
+    // The displayed frame's VBI data, one frame behind the read.  A probe
+    // reports the frame just read instead: it is what the seek produced,
+    // and waiting a frame for it to move up would double the probe's cost.
+    if (controls.metadata_only) {
+        out.disc_info = m_frames[0]->getVbiData();
+        out.disc_info_input_offset = m_frames[0]->getInputOffset();
+        out.seek_generation = m_frame_seek_generation[0];
+    } else {
+        out.disc_info = m_frames[1]->getVbiData();
+        out.disc_info_input_offset = m_frames[1]->getInputOffset();
+        out.seek_generation = m_frame_seek_generation[1];
+    }
     // Let the disc info overlay show what the CX expander actually does when
     // the user forces it away from the VBI flag
     if (auto vbi = m_frames[1]->getVbiData())

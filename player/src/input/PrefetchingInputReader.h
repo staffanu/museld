@@ -37,7 +37,7 @@ public:
     ~PrefetchingInputReader() override;
 
     void initialize() override;
-    void seek(int64_t no_samples) override;
+    bool seek(int64_t no_samples) override;
     int readFloats(float *f) override;
     int bitsPerSample() const override { return m_inner->bitsPerSample(); }
     bool signedSamples() const override { return m_inner->signedSamples(); }
@@ -46,6 +46,7 @@ public:
     // lag by the conversion loop; this reader never touches the samples.
     void setDcBlocking(bool enabled) override { m_inner->setDcBlocking(enabled); }
     bool isLive() const override { return m_inner->isLive(); }
+    int64_t sampleCount() override { return m_inner->sampleCount(); }
 
 private:
     void produce();

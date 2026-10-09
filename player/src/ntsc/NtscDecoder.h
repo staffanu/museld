@@ -83,6 +83,10 @@ private:
     float m_black_auto_ire;           // the automatic choice, 7.5 (NTSC-M) until the held black says NTSC-J
     float m_black_ire;                // the black setup in effect this frame, from the mode and the automatic choice
     std::shared_ptr<VbiData> m_prev_vbi; // last frame's VBI data, for the disc-level flags a frame may miss
+    uint32_t m_prev_vbi_seek_generation = 0;
+    // The seek generation of each frame in m_frames (same order), so the
+    // disc info handed out can say which seek it belongs to
+    std::array<uint32_t, 4> m_frame_seek_generation{};
     double m_prev_burst_phase;        // last frame's burst phase, NAN before the first
     double m_burst_coherence_avg;     // EWMA of the frame-to-frame burst phase error, -1 until seeded
     std::array<double, 256> m_noise_psd; // cumulative blank-VBI-line power spectrum

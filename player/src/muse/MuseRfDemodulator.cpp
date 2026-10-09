@@ -311,7 +311,10 @@ void MuseRfDemodulator::demodulate() {
         const bool efm_enabled = m_efm_enabled;
         float *input_samples = input_buffer->data<float>() + bandpass_filter_size - 1;
         input_staging.resize(MuseDemodulatedBlock::c_sample_block_size);
-        if (!readFloats(input_staging.data(), MuseDemodulatedBlock::c_sample_block_size))
+        int64_t block_input_offset;
+        uint32_t block_seek_generation;
+        if (!readInput(input_staging.data(), MuseDemodulatedBlock::c_sample_block_size,
+                       block_input_offset, block_seek_generation))
             break;
         memcpy(input_samples, input_staging.data(), MuseDemodulatedBlock::c_sample_block_size * sizeof(float));
         auto t_after_read = timing_clock::now();
@@ -337,8 +340,8 @@ void MuseRfDemodulator::demodulate() {
         }
         auto t_after_acquire = timing_clock::now();
         // The first byte of the output lags the actual input due to three filters being applied
-        block->input_offset = m_total_samples_read - (bandpass_filter_size + lowpass_filter_size + rrc_filter_size) / 2;
-        m_total_samples_read += MuseDemodulatedBlock::c_sample_block_size;
+        block->input_offset = block_input_offset - (bandpass_filter_size + lowpass_filter_size + rrc_filter_size) / 2;
+        block->seek_generation = block_seek_generation;
 
         // Begin Vulkan command buffer and reset the timestamp query pool if we use one
         command_buffer->begin();

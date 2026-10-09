@@ -26,6 +26,7 @@
 #include "FrameReader.h"
 #include "TextRenderer.h"
 #include "Decoder.h"
+#include "ChapterSearch.h"
 #include "PlayerState.h"
 #include "OsdOverlay.h"
 #include "FrameBlitter.h"
@@ -358,7 +359,8 @@ static void runPlayer(Logger &log,
                       double export_frame_after_seconds,
                       double write_duration_seconds,
                       double seconds_per_iteration,
-                      double initial_seek_seconds) {
+                      double initial_seek_seconds,
+                      std::optional<int> start_chapter) {
     vk::Device &device = manager.getDevice();
 
     vk::SemaphoreCreateInfo semaphoreInfo{};
@@ -520,20 +522,133 @@ static void runPlayer(Logger &log,
                     dropout_mode,
                     output_yuv,
                     state.black_level_mode,
+                    // metadata_only: a probe; a redo during the search is the
+                    // one clean decode of the displayed field it starts with
+                    state.chapter_search != nullptr && !redo,
             };
+        };
+
+        // Moves playback to an input sample offset and keeps the stream clock
+        // (the subtitle fallback time base) in step: afterwards the stream
+        // position reads as the file position of that offset.  Returns false
+        // when the reader cannot seek there.
+        auto seekToInputSample = [&](int64_t offset) -> bool {
+            if (!reader_controls.seekToInputSample || reader_controls.samples_per_second <= 0)
+                return false;
+            const auto generation = reader_controls.seekToInputSample(offset);
+            if (!generation)
+                return false;
+            state.search_generation = *generation;
+            const double file_seconds = (double)offset / reader_controls.samples_per_second;
+            state.stream_seek_offset_seconds = file_seconds - state.stream_start_seconds
+                                               - state.field_count * seconds_per_iteration;
+            return true;
+        };
+
+        // Carries out the chapter search's pending action.  The search ends
+        // where the chapter was found, or back where it started on failure.
+        auto runChapterSearchAction = [&]() {
+            using Kind = ChapterSearch::Action::Kind;
+            const auto &action = state.chapter_search->action();
+            switch (action.kind) {
+                case Kind::eWait:
+                    break;
+                case Kind::eSeek:
+                    if (!seekToInputSample(action.offset)) {
+                        // A reader that can seek but was refused this position
+                        // (the input's end, a container limit) stays put
+                        state.osd_text = reader_controls.seekToInputSample && reader_controls.samples_per_second > 0
+                                         ? "SEEK FAILED" : "SEARCH NOT AVAIL";
+                        state.chapter_search.reset();
+                        break;
+                    }
+                    state.osd_text = "SEARCH";
+                    break;
+                case Kind::eDone:
+                case Kind::eFailed: {
+                    const bool found = action.kind == Kind::eDone;
+                    const int64_t destination = found ? action.offset : state.chapter_search->originOffset();
+                    log.info(eApplication, found
+                             ? std::format("Chapter search: chapter {} found at input sample {} after {} probes",
+                                           action.chapter, action.offset, state.chapter_search->probes())
+                             : std::format("Chapter search: {} after {} probes, returning to input sample {}",
+                                           action.reason, state.chapter_search->probes(), destination));
+                    seekToInputSample(destination);
+                    // Shown with the first frame from there, not on the probe image
+                    state.osd_text_pending = found ? std::format("CHAPTER {}", action.chapter) : action.reason;
+                    state.osd_text_pending_generation = state.search_generation;
+                    if (state.search_resume_paused)
+                        state.paused_countdown = 5;
+                    state.chapter_search.reset();
+                    break;
+                }
+            }
         };
 
         while ((state.paused && !state.redo_last_field)
                || decoder.next(make_controls(state.redo_last_field), state.last_decoded)) {
 
+            // A chapter search owns the decoder while it runs: its probe
+            // frames are not played (no clock, picture, audio, captions or
+            // file output), only read for their disc code
+            const bool searching = state.chapter_search != nullptr;
+
             // Only fields that were actually decoded: next() also returns true
             // when the input timed out, and counting those would make
             // --export-frame-at fire early and the frame rate below flattering.
-            if (!state.paused && state.last_decoded.decoded)
+            if (!state.paused && state.last_decoded.decoded && !searching)
                 state.field_count++;
             state.stream_seconds = state.field_count * seconds_per_iteration
                                    + state.stream_seek_offset_seconds;
             state.redo_last_field = false;
+
+            // --chapter: once the disc code is readable, go there.  Before
+            // the first chapter code every frame is a candidate, and a disc
+            // without chapter codes just plays from the start.
+            if (start_chapter && !searching && state.last_decoded.decoded && state.last_decoded.disc_info
+                && state.last_decoded.disc_info->chapter()) {
+                if (!startChapterSearch(state, reader_controls, log, ChapterSearch::Direction::eNext, start_chapter))
+                    log.warn(eApplication, std::format("--chapter {}: {}", *start_chapter, state.osd_text));
+                start_chapter.reset();
+            }
+
+            if (!searching && !state.osd_text_pending.empty() && state.last_decoded.decoded
+                && state.last_decoded.seek_generation == state.osd_text_pending_generation) {
+                state.osd_text = std::move(state.osd_text_pending);
+                state.osd_text_pending.clear();
+            }
+
+            if (searching) {
+                // Frames from before the pending probe's seek (still in the
+                // pipeline) say nothing about where it landed
+                if (!state.search_action_pending && state.last_decoded.decoded
+                    && state.last_decoded.seek_generation == state.search_generation) {
+                    ChapterSearch::Reading reading{state.last_decoded.disc_info_input_offset};
+                    if (const auto &info = state.last_decoded.disc_info) {
+                        reading.chapter = info->chapter();
+                        reading.lead_in = info->isLeadIn();
+                        reading.lead_out = info->isLeadOut();
+                    }
+                    if (state.chapter_search->feed(reading).kind != ChapterSearch::Action::Kind::eWait)
+                        state.search_action_pending = true;
+                }
+                if (state.search_action_pending) {
+                    state.search_action_pending = false;
+                    runChapterSearchAction();
+                }
+            } else if (state.honor_picture_stops && !vfw && !export_frame_filename && !state.paused
+                       && state.last_decoded.decoded && state.last_decoded.disc_info
+                       && state.last_decoded.disc_info->pictureStop()
+                       && state.last_decoded.field_parity == 1 // the frame is complete on screen
+                       && state.last_picture_stop_offset != state.last_decoded.disc_info_input_offset) {
+                // The disc asks for a still here (IEC 60857 10.1.4); once per
+                // stop, so resuming plays on through it
+                state.last_picture_stop_offset = state.last_decoded.disc_info_input_offset;
+                state.paused = true;
+                state.osd_text = "PICTURE STOP";
+                log.info(eApplication, std::format("Picture stop at input sample {}",
+                                                   state.last_decoded.disc_info_input_offset));
+            }
 
             // Once a minute of stream time, log the decoded field count against the
             // disc's own time code.  The offset is what to shift .srt files made from
@@ -553,7 +668,7 @@ static void runPlayer(Logger &log,
 
             // Scripted export: decode until the requested stream position is reached
             bool scripted_export = false;
-            if (export_frame_filename &&
+            if (export_frame_filename && !searching &&
                 state.field_count * seconds_per_iteration >= export_frame_after_seconds) {
                 state.export_frame = true;
                 scripted_export = true;
@@ -561,7 +676,7 @@ static void runPlayer(Logger &log,
 
             // Export before the OSD and subtitles are drawn into the image, so
             // the file contains only the decoded picture
-            if (state.export_frame) {
+            if (state.export_frame && !searching) {
                 state.export_frame = false;
                 auto path = frame_exporter.exportFrame(*images.out_image,
                                                        scripted_export ? export_frame_filename : std::nullopt);
@@ -571,7 +686,7 @@ static void runPlayer(Logger &log,
                                       : "EXPORT FAILED";
             }
 
-            if (cc_track_index >= 0 && state.last_decoded.cc_bytes && subtitle_tracks) {
+            if (cc_track_index >= 0 && state.last_decoded.cc_bytes && subtitle_tracks && !searching) {
                 // After a seek the caption memories describe the abandoned
                 // stream position; a forward jump also loses the pop-on load
                 // in progress, so start over in both directions
@@ -602,7 +717,7 @@ static void runPlayer(Logger &log,
 
 #ifdef HAVE_OCR
             if (ocr_worker) {
-                if (!state.paused && state.last_decoded.decoded
+                if (!state.paused && state.last_decoded.decoded && !searching
                     && ++ocr_sample_countdown >= ocr_sample_every) {
                     ocr_sample_countdown = 0;
                     int band_width, band_height;
@@ -665,7 +780,7 @@ static void runPlayer(Logger &log,
 #endif
 
 #ifdef HAVE_LIBAV
-            if (vfw) {
+            if (vfw && !searching) {
                 vfw->addVideoFrameWithAudio(images.out_Y, images.out_U, images.out_V,
                                             state.last_decoded.audio_mode,
                                             state.last_decoded.audio_sample_count,
@@ -678,7 +793,7 @@ static void runPlayer(Logger &log,
 #endif
 
             if (audio_playback && state.last_decoded.audio_sample_count != 0
-                && state.last_decoded.audio_mode != MODE_UNKNOWN && !state.paused) {
+                && state.last_decoded.audio_mode != MODE_UNKNOWN && !state.paused && !searching) {
                 // Channel selection for the listener (bilingual discs, or the
                 // left-only analog audio on AC3 discs).  Mutating the decoded
                 // samples is safe here: the file writer above has already
@@ -831,7 +946,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   optional<string> const &export_frame_filename,
                   double export_frame_after_seconds,
                   double write_duration_seconds,
-                  double initial_seek_seconds) {
+                  double initial_seek_seconds,
+                  std::optional<int> start_chapter) {
     glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -951,7 +1067,10 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
 
         constexpr bool is_muse = std::is_same<InputBlock, MuseInputBlock>::value;
         ReaderControls reader_controls{
-                [&reader](double seconds) { reader.seek(seconds); },
+                [&reader](double seconds) { return reader.seek(seconds); },
+                [&reader](int64_t sample) { return reader.seekToInputSample(sample); },
+                reader.inputSampleRate(),
+                [&reader]() { return reader.inputSampleCount(); },
                 [&reader](AudioTrack track) { reader.setAudioTrack(track); },
                 is_muse ? "MUSE AUDIO" : "ANALOG AUDIO",
                 CompressedAudioDecoder::available() ? "AC3 AUDIO" : "AC3 AUDIO (NO FFMPEG)",
@@ -1005,7 +1124,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   vfw, audio_playback.get(), executable_dir,
                   subtitle_setup,
                   export_frame_filename, export_frame_after_seconds, write_duration_seconds, seconds_per_iteration,
-                  initial_seek_seconds);
+                  initial_seek_seconds, start_chapter);
     }
 
 #ifdef HAVE_LIBAV
@@ -1105,6 +1224,7 @@ int main(int argc, char *argv[]) {
     std::optional<InputFormat> input_format_option = std::nullopt;
     std::optional<double> sample_frequency_option;      // unset means measure it from the file
     double initial_seek_seconds = 0;
+    std::optional<int> start_chapter; // --chapter: search for it once the disc code reads
     bool start_paused = false;
     auto field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
     bool use_3d_comb = true;
@@ -1188,6 +1308,11 @@ int main(int argc, char *argv[]) {
     options.flag("--probe", "Detect each input file's sample format, RF type and sample rate "
                             "from its contents, print the result, and exit without decoding", [&] () -> void {
         probe_only = true;
+    });
+    options.option("--chapter", "N", "Start playing at chapter N, found by searching the capture for its "
+                   "chapter codes (after --seek, if given; the Up and Down keys do the same for the next and "
+                   "previous chapter)", [&] () -> void {
+        start_chapter = stoi(*(it++));
     });
     options.option("--seek", "SECONDS", "Seek to this position before playing", [&] () -> void {
         initial_seek_seconds = stod(*(it++));
@@ -1723,7 +1848,7 @@ int main(int argc, char *argv[]) {
                                                      benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                     initial_seek_seconds);
+                                     initial_seek_seconds, start_chapter);
                         break;
                     }
                     case eMuse16MHz: {
@@ -1734,7 +1859,7 @@ int main(int argc, char *argv[]) {
                                      audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                     initial_seek_seconds);
+                                     initial_seek_seconds, start_chapter);
                         break;
                     }
                     case eMuseOversampled:
@@ -1748,7 +1873,7 @@ int main(int argc, char *argv[]) {
                                      audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                      subtitle_setup,
                                      export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                     initial_seek_seconds);
+                                     initial_seek_seconds, start_chapter);
                         break;
                     }
                     default:

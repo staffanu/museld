@@ -15,7 +15,7 @@ DiscCode::DiscCode(int mode, int cadr, int fadr1, int fadr2) :
 std::vector<std::string> DiscCode::asStrings() const {
     std::string disc_code_string1 =
         std::format("{}{} {}", pf() ? "TOC " : "", sz() ? "20 cm" : "30 cm", df() ? "CLV" : "CAV");
-    std::string disc_code_string2 = std::format("Chapter {} Frame {}", chapter(), frame());
+    std::string disc_code_string2 = std::format("Chapter {} Frame {}", chapterNumber(), frame());
 
     return {disc_code_string1, disc_code_string2};
 }

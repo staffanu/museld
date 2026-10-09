@@ -102,15 +102,15 @@ int PrefetchingInputReader::readFloats(float *f) {
     return (int)m_block_size;
 }
 
-void PrefetchingInputReader::seek(int64_t no_samples) {
+bool PrefetchingInputReader::seek(int64_t no_samples) {
     if (isLive())
-        return;
+        return true;
     std::unique_lock<std::mutex> lock(m_mutex);
     if (!m_producer.joinable()) {
         // Before initialize() nothing has been read ahead, so pass the request through.
-        m_inner->seek(no_samples);
-        return;
+        return m_inner->seek(no_samples);
     }
+    bool ok = true;
     m_seek_pending = true;
     m_cv.notify_all();
     m_cv.wait(lock, [this] { return m_producer_parked || m_producer_exception; });
@@ -120,12 +120,16 @@ void PrefetchingInputReader::seek(int64_t no_samples) {
             int64_t adjusted = no_samples - (int64_t)m_filled.size() * (int64_t)m_block_size;
             if (m_inner_position + adjusted < 0)
                 adjusted = -m_inner_position; // clamp to the start of the stream
-            m_inner->seek(adjusted);
-            m_inner_position += adjusted;
-            for (auto &block : m_filled)
-                m_vacant.push_back(std::move(block));
-            m_filled.clear();
-            m_eof = false;
+            // A refused seek leaves the inner reader, and so the queue, as
+            // they were
+            ok = m_inner->seek(adjusted);
+            if (ok) {
+                m_inner_position += adjusted;
+                for (auto &block : m_filled)
+                    m_vacant.push_back(std::move(block));
+                m_filled.clear();
+                m_eof = false;
+            }
         } catch (...) {
             m_seek_pending = false;
             m_cv.notify_all();
@@ -134,4 +138,5 @@ void PrefetchingInputReader::seek(int64_t no_samples) {
     }
     m_seek_pending = false;
     m_cv.notify_all();
+    return ok;
 }

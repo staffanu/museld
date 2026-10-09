@@ -239,9 +239,13 @@ void NtscFrame::processVbi() {
     // The five BCD digits of a picture number must all be 0-9.  This is what
     // separates a CAV picture number (§10.1.4) from a CLV programme time code
     // (§10.1.6): both start with an F, but the time code's "DD" is not BCD.
+    // The top bit of X1 (the ten-thousands digit) is a flag: on the early
+    // discs it is the picture stop indication (0 = stop, §10.1.4 note), and
+    // the GGV1069 test disc keeps it set on every picture, so that digit is
+    // 0-7 under the flag (the maximum picture number is 79 999, amendment 2)
     auto isBcdPictureNumber = [](int code) {
         if ((code & 0xf00000) != 0xf00000) return false;
-        for (int shift = 0; shift < 20; shift += 4)
+        for (int shift = 0; shift < 16; shift += 4)
             if (((code >> shift) & 0xf) > 9) return false;
         return true;
     };
@@ -278,15 +282,18 @@ void NtscFrame::processVbi() {
             return isBcdPictureNumber(code) && count(code) >= 2;
         });
         if (it != codes.end())
-            cav_picture_number = ((*it & 0xf0000) >> 16) * 10000 + ((*it & 0xf000) >> 12) * 1000 +
+            cav_picture_number = ((*it & 0x70000) >> 16) * 10000 + ((*it & 0xf000) >> 12) * 1000 +
                 ((*it & 0xf00) >> 8) * 100 + ((*it & 0xf0) >> 4) * 10 + (*it & 0xf);
     }
 
 
     std::optional<int> chapter = std::nullopt;
     if (chapter_data != -1) {
+        // The first bit after the key (the top bit of X1) is the chapter's
+        // stop bit (§10.1.5), set for the first 400 tracks of a chapter to
+        // disable search; it is not part of the number
         chapter = (chapter_data & 0xf00fff) == 0x800ddd ?
-        std::make_optional(((chapter_data & 0xf0000) >> 16) * 10 + ((chapter_data & 0xf000) >> 12)) : std::nullopt;
+        std::make_optional(((chapter_data & 0x70000) >> 16) * 10 + ((chapter_data & 0xf000) >> 12)) : std::nullopt;
     }
 
     std::optional<int> clv_time_seconds = std::nullopt;
@@ -352,7 +359,8 @@ void NtscFrame::processVbi() {
         m_log.debug(eDecoder, std::format("VBI frame {}: codes{}; clv {} time {} pic {} chapter {} cx {}",
                                           m_frame_no, hex, is_clv,
                                           clv_time_seconds ? std::to_string(*clv_time_seconds) : "-",
-                                          clv_picture_number ? std::to_string(*clv_picture_number) : "-",
+                                          clv_picture_number ? std::to_string(*clv_picture_number)
+                                          : cav_picture_number ? std::to_string(*cav_picture_number) : "-",
                                           chapter ? std::to_string(*chapter) : "-",
                                           cx_enabled ? (*cx_enabled ? "on" : "off") : "-"));
     }

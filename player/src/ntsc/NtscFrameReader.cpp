@@ -59,6 +59,7 @@ NtscFrameReader::NtscFrameReader(
                       inputIsLive(filename),
                       initial_seek_seconds, output_filename),
           m_demodulator(nullptr),
+          m_input_sample_rate(sample_rate),
           m_sample_rate(sample_rate / NtscRfDemodulatorConstants::c_video_decimation_rate),
           m_input_samples_decimation_rate(NtscRfDemodulatorConstants::c_video_decimation_rate),
           m_p_nominal(0),
@@ -99,6 +100,8 @@ NtscFrameReader::NtscFrameReader(
           m_curve_base(0),
           m_anchored(false),
           m_timebase_restarted(false),
+          m_seek_generation(0),
+          m_frame_partial(true),
           m_line1_k(0),
           m_pending_drift(0),
           m_frame_start_offset(0),
@@ -154,11 +157,31 @@ void NtscFrameReader::cleanup() {
     }
 }
 
-void NtscFrameReader::seek(double seconds) {
-    if (!m_input_is_realtime) {
-        m_demodulator->seek(seconds);
-        resetTimebase("seek");
-    }
+// The seeks only move the demodulator's input: the timebase is reset on the
+// reader thread when the first block after the seek arrives (readInputBlock
+// sees its generation change), so the reset never races the thread's own
+// use of the timebase state, and the blocks still in flight are consumed
+// under the old timebase and delivered with the old generation.
+bool NtscFrameReader::seek(double seconds) {
+    if (m_input_is_realtime)
+        return true;
+    if (!m_demodulator->seek(seconds))
+        return false;
+    discardFilledBuffers();
+    return true;
+}
+
+std::optional<uint32_t> NtscFrameReader::seekToInputSample(int64_t sample) {
+    if (m_input_is_realtime)
+        return std::nullopt;
+    const auto generation = m_demodulator->seekToSample(sample);
+    if (generation)
+        discardFilledBuffers();
+    return generation;
+}
+
+int64_t NtscFrameReader::inputSampleCount() const {
+    return m_demodulator->inputSampleCount();
 }
 
 void NtscFrameReader::setAudioTrack(AudioTrack track) {
@@ -202,6 +225,7 @@ void NtscFrameReader::resetTimebase(const char *why) {
     m_frame_resid_bad = 0;
     m_frame_meas = 0;
     m_frame_log_k = 0;
+    m_frame_partial = true;
     m_log.info(eInput, std::format("NtscFrameReader: timebase reset ({})", why));
 }
 
@@ -237,6 +261,7 @@ void NtscFrameReader::threadFunc() {
         }
 
         output_block->input_offset = m_frame_start_offset;
+        output_block->seek_generation = m_seek_generation;
         output_block->timebase_restarted = m_timebase_restarted;
         m_timebase_restarted = false;
         output_block->input_samples_per_video_sample =
@@ -307,6 +332,11 @@ bool NtscFrameReader::readInputBlock(std::unique_ptr<NtscInputBlock> const &outp
                                        m_curve_base));
         m_curve.pop_front();
         m_curve_base++;
+    }
+
+    if (block->seek_generation != m_seek_generation) {
+        m_seek_generation = block->seek_generation;
+        resetTimebase("seek");
     }
 
     const int slot = (int)(m_blocks_fetched % c_number_of_input_sub_buffers);
@@ -827,6 +857,7 @@ bool NtscFrameReader::consumeFinalized(std::unique_ptr<NtscInputBlock> const &ou
                 if (ntsc_line == 1) {
                     m_frame_start_offset = inputOffsetOfStreamPos(t0);
                     m_frame_period = t1 - t0;
+                    m_frame_partial = false;
                 }
                 resampleLine(output_block, (int)ntsc_line, t0, t1);
                 resampled_last = ntsc_line == NtscInputBlock::c_total_video_lines;
@@ -834,7 +865,11 @@ bool NtscFrameReader::consumeFinalized(std::unique_ptr<NtscInputBlock> const &ou
         }
         m_curve.pop_front();
         m_curve_base++;
-        if (resampled_last)
+        // A frame whose first rows predate the anchoring (the start of the
+        // input, a seek, a re-acquired signal) would show half of one
+        // picture and half of another, and report the offset and VBI codes
+        // of the wrong one: wait for the next whole frame instead
+        if (resampled_last && !m_frame_partial)
             return true;
     }
     return false;

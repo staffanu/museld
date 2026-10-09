@@ -210,6 +210,7 @@ if(BUILD_MUSE)
         DisplayGeometry.cpp DisplayGeometry.h
         FrameExporter.cpp FrameExporter.h
         InputController.cpp InputController.h
+        ChapterSearch.cpp ChapterSearch.h
 
         bch/BchDecoder.cpp bch/BchDecoder.h
         util/PercentileFilter.cpp util/PercentileFilter.h

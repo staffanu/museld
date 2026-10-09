@@ -125,17 +125,24 @@ void ResamplingFrameReader::cleanup() {
     m_input_reader.reset();
 }
 
-void ResamplingFrameReader::seek(double seconds) {
+// With the RF demodulator the seek only moves its input: the PLL is unlocked
+// on the reader thread when the first block after the seek arrives (readInput
+// sees its generation change), so nothing here races the thread.
+bool ResamplingFrameReader::seek(double seconds) {
     if (!m_input_is_realtime) {
         if (m_demodulator != nullptr) {
-            m_demodulator->seek(seconds);
+            if (!m_demodulator->seek(seconds))
+                return false;
+            discardFilledBuffers();
+            return true;
         } else {
             std::unique_lock<std::mutex> lock(m_mutex);
 
             int64_t samples_to_seek = (int64_t) (seconds * 16.2e6 * m_input_samples_per_sample);
             m_log.info(eInput, std::format("Seeking relative time {} s, {} samples.",
                                            seconds, samples_to_seek));
-            m_input_reader->seek(samples_to_seek);
+            if (!m_input_reader->seek(samples_to_seek))
+                return false;
 
             // discard content in existing input buffers
             move(m_filled_input_buffers.begin(), m_filled_input_buffers.end(),
@@ -145,6 +152,21 @@ void ResamplingFrameReader::seek(double seconds) {
         }
         setUnlocked(); // do not wait to discover that we lost sync
     }
+    return true;
+}
+
+std::optional<uint32_t> ResamplingFrameReader::seekToInputSample(int64_t sample) {
+    // The baseband path keeps no input offsets, so only the RF path can
+    if (m_input_is_realtime || m_demodulator == nullptr)
+        return std::nullopt;
+    const auto generation = m_demodulator->seekToSample(sample);
+    if (generation)
+        discardFilledBuffers();
+    return generation;
+}
+
+int64_t ResamplingFrameReader::inputSampleCount() const {
+    return m_demodulator != nullptr ? m_demodulator->inputSampleCount() : -1;
 }
 
 void ResamplingFrameReader::threadFunc() {
@@ -182,6 +204,7 @@ void ResamplingFrameReader::threadFunc() {
         }
 
         output_block->input_offset = m_frame_start_offset;
+        output_block->seek_generation = m_seek_generation;
         output_block->input_samples_per_muse_sample = m_input_samples_per_sample * m_input_samples_decimation_rate;
         std::unique_lock<std::mutex> lock(m_mutex);
         m_cv_filled.notify_one();
@@ -225,6 +248,10 @@ bool ResamplingFrameReader::readInput(std::unique_ptr<MuseInputBlock> const &out
         if (block == nullptr) {
             m_log.info(eInput, "ResamplingFrameReader: no more demodulated blocks");
             return false;
+        }
+        if (block->seek_generation != m_seek_generation) {
+            m_seek_generation = block->seek_generation;
+            setUnlocked(); // do not wait to discover that we lost sync
         }
         memcpy(read_ptr, block->video_data->data<float>(), MuseDemodulatedBlock::c_video_block_size * sizeof(float));
         memcpy(dropout_read_ptr, block->dropouts->data<uint8_t>(), MuseDemodulatedBlock::c_video_block_size * sizeof(uint8_t));

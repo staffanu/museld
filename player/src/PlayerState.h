@@ -4,9 +4,12 @@
 #ifndef MUSECPP_PLAYERSTATE_H
 #define MUSECPP_PLAYERSTATE_H
 
+#include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
+#include "ChapterSearch.h"
 #include "Decoder.h"
 #include "DisplayGeometry.h"
 
@@ -60,6 +63,26 @@ struct PlayerState {
     int subtitle_secondary = -1; // top of the frame
 
     Decoder::DecodedField last_decoded{};
+
+    // Picture stops (the CAV still-frame code): pause on them unless the
+    // user turns it off with the P key; each stop pauses once
+    bool honor_picture_stops = true;
+    std::optional<int64_t> last_picture_stop_offset;
+
+    // A chapter search in progress (Up/Down keys): the loop performs its
+    // seeks, feeds it the frames decoded after each one and shows nothing
+    // new until it ends.  search_generation is the reader's seek generation
+    // of the pending probe, which the fed frames must match;
+    // search_action_pending asks the loop to carry out search->action().
+    std::unique_ptr<ChapterSearch> chapter_search;
+    uint32_t search_generation = 0;
+    bool search_action_pending = false;
+    bool search_resume_paused = false; // playback was paused when the search began
+    // OSD text to show once a frame of the given seek generation is on
+    // screen (the search's result, which must not be drawn over the probe
+    // image still showing)
+    std::string osd_text_pending;
+    uint32_t osd_text_pending_generation = 0;
 };
 
 #endif //MUSECPP_PLAYERSTATE_H
