@@ -289,10 +289,13 @@ void SdtvFrame::processVbi() {
     // it is not really validated by its pattern; require the two lines that
     // carry it (17 and 18 of the field) to agree, as they always do on a clean
     // read.  Both are inside the probe set under either alignment.
+    // On a picture stop frame the stop code takes line 17 (and 280), so the
+    // number is on line 16 alone and cannot agree with a second line: take
+    // the single copy there, as the stop code itself validates the frame
     std::optional<int> cav_picture_number = std::nullopt;
     if (!is_clv) {
         auto it = std::find_if(codes.begin(), codes.end(), [&](int code) {
-            return isBcdPictureNumber(code) && count(code) >= 2;
+            return isBcdPictureNumber(code) && count(code) >= (is_stop_code ? 1 : 2);
         });
         if (it != codes.end())
             cav_picture_number = ((*it & 0x70000) >> 16) * 10000 + ((*it & 0xf000) >> 12) * 1000 +
