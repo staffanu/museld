@@ -107,6 +107,7 @@ private:
     double m_sync_delay;                // group delay, in demodulated samples
     bool m_sync_below;                  // hysteresis slicer state
     int64_t m_sync_fall_idx;            // decimated index of the pending fall
+    double m_sync_fall_frac;            // its crossing's fraction between the sample before and that one
     int64_t m_sync_rise_idx;            // decimated index of the previous rise
     float m_blank_level;                // slow average of the back-porch level
 
