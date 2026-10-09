@@ -1,7 +1,173 @@
 # PAL Laserdisc Playback — Assessment and Plan
 
-Status: assessment only, nothing implemented. Written 2026-09-02 from a survey of the NTSC
-path; to be revisited before any work starts. Line references are to the tree at that date.
+Written 2026-09-02 from a survey of the NTSC path; line references are to the tree at that
+date (the class and file names were changed to their post-rename forms on 2026-10-02 --
+`Ntsc…` became `Sdtv…` for everything both standards share -- so a reference like
+`SdtvFrameReader.cpp:504` means the NTSC-only file of that date).  Reviewed 2026-09-30 (corrections folded in below) and work started 2026-10-01 on the
+`pal-playback` branch.
+
+## Status (2026-10-01)
+
+Done, in one step rather than the phasing below:
+
+- `sdtv/VideoStandard.{h,cpp}`: the runtime descriptor the SD pipeline reads its geometry,
+  frame rate, RF carrier, VBI lines and noise windows from (`VideoStandard::ntsc()` /
+  `pal()`); `SdtvInputBlock`, `SdtvRfDemodulator`, `SdtvFrameReader`, `SdtvFrame`,
+  `SdtvShaders`, `SdtvDecoder` and `VbiData` take it.  The SD shaders are compiled twice,
+  `ntsc_*.spv` and `pal_*.spv` (`-DPAL_GEOMETRY`, `shaders/muse/muse.h`); the literal
+  NTSC geometry in their bodies became macros.
+- `--input-type pal-rf`: 1135 × 625 line-locked frame buffer at 17.734375 MHz, 944 × 576
+  image, sync and vertical anchoring (PAL's five broad pulses put both ends of the group on
+  the same half-line phase, unlike NTSC's six), Philips code on lines 16-18 / 329-331,
+  EFM audio, `--write` with BT.470BG tags, real-time pacing by the clock (the display loop
+  otherwise runs at the 60 Hz refresh).  NTSC output is bit-identical to before.
+- **Colour, 2D (2026-10-05)**: `sdtv_decode_single_field.comp` under `SDTV_PAL`.  Chroma
+  = f − ½(f₋₁ + f₊₁) over the field's adjacent lines, whose chroma sits at ∓90° (270.576°
+  on the grid) and cancels in the sum regardless of the V switch; the NTSC 19-tap
+  demodulation; luma = composite less the chroma band of that estimate.  The −U axis
+  comes from a line pair: the neighbour's burst de-rotated by the structural 270.576° added
+  to the line's own (the ±45° swing cancels, 2 cos 45° of the amplitude is the AGC
+  reference, nominal 4.85 in 16-sample correlation units), and the side of that axis the
+  line's burst swung to is its V switch.  Verified on the NYCSTM programme, which turned
+  out to be in colour (natural skin tones, no Hanover bars: even/odd row chroma alternation
+  under 1/255 against saturations of 30-50).  In the grid frame the burst sequence is b, b,
+  −b, −b (steps 0°/180°: the 270.6° structural advance and the ±90° swing are degenerate on
+  a 4 fsc grid), which is what the pair derivation untangles.  EBU primaries in the combine
+  shader; the demodulation angle is the structural 180° (NTSC's is calibrated at 185.8°);
+  `MUSELD_PAL_VFLIP=1` inverts the V switch for calibration.  The 1H U/V averaging (the
+  PAL delay-line step) is on key 4 / `--no-3d-comb`, on by default (2026-10-06: R−G noise
+  on the GGV1011 modulated staircase 10.3 → 6.9, line alternation on the NYCSTM 1.05 →
+  0.41).  Calibrated against the GGV1011 test disc's colour bars (2026-10-06, measured on
+  the lossless `--write` output): hue errors −0.6…+0.3° (no tint offset needed: the
+  demodulation angle stays the structural 180°), saturation within ±10 % of what each bar's
+  own luma implies after the AGC constant went from the nominal 4.85 to 3.75 (bright bars
+  read slightly high, dark ones low -- differential gain, not a constant), full-white field
+  Y = 0.996, black bar 0.012.  The dropout paths are NTSC's (2026-10-06): the illegal-level
+  rescue substitutes the nearest healthy line of the field (any line does: each decodes
+  against its own burst, so the NTSC "same subcarrier phase" constraint is moot), and a
+  flagged pixel takes the same pixel of the stiller neighbour frame decoded in place, with
+  the frame source selected per access since GLSL has no buffer references.  On the NYCSTM
+  (27 dB) they remove the specks and touch 200-400 pixels a frame; on the rotted disc (13 dB)
+  the motion masks are noise and the donor misplaces content, as NTSC's would -- there
+  `--no-dropout` is the right setting.  **Temporal (3D) comb (2026-10-06)**: the decoder
+  keeps 3d + 1 frames with d = 2 on PAL (1 on NTSC) and shows frame N two reads behind, so
+  the comb and the motion detector see frames N ± 2 (chroma inverted, V switch matching) and
+  N ± 4 -- NTSC's phase assumptions hold at that spacing, so `sdtv_chroma_taps.comp` and the
+  motion detector are reused with only the spatial comb swapped (PAL's f − ½(f₋₁ + f₊₁); a
+  two-line comb on the field's last line).  The audio is held one read longer to match.
+  On the GGV1011 bars and staircase: luma and chroma noise −3 dB on top of the line
+  averaging; no ghosting on moving content; 7.5 ms of the 40 ms budget per frame.  All seven
+  slots are live: the frames the comb skips on one read (N ± 1, N − 3) are the ones it uses
+  on the next, when N + 1 is displayed -- two interleaved chains.  **Weave masks
+  (2026-10-07)**: the spacing hides frame-to-frame motion from the de-interlacer -- the
+  GGV1011's line pattern (5-30 s) inverts every frame and is identical two frames apart, so
+  the combine wove each field with the inverted one.  On PAL the motion detector runs a
+  second time on the consecutive frames (N + 1, N, N − 1, N − 2) into its own mask set for
+  the combine, with the two-frame differences sent through the fsc-nulling box as well
+  (`box_aligned`), since no PAL frame pair at spacing 1 is phase aligned; the comb and the
+  dropout paths keep the spacing-2 masks.  The line pattern now bobs; the bars and the
+  crosshatch are unchanged (0.006 % of the crosshatch's pixels differ), NTSC bit-identical.
+- **Noise, PAL vs NTSC, same disc series (2026-10-08)**: GGV1069 (the NTSC twin of the
+  GGV1011, same pattern sequence) plays, probes as NTSC, and lets the bar noise be compared like
+  for like.  Capture SNR 29.0 dB (PAL) vs 31.7 dB (NTSC).  In the decoded bars the random noise
+  (row and column means removed) is 2.4× larger on PAL in Y, U and V (7.5 dB); in the raw
+  line-locked composite the white/black bars are 2.0× (6 dB) and the coloured bars 4-5×.  All of
+  it is accounted for by the signal, not the decoder: 2.7 dB capture, plus for luma the 5.8 vs
+  4.2 MHz bandwidth under FM's triangular noise ((5.8/4.2)³ = 4.2 dB → 6.9 dB expected, 6 dB
+  measured), and for chroma the single lower sideband (3 dB) and the subcarrier's place in that
+  noise spectrum ((4.43/3.58)² = 1.9 dB → 7.6 dB expected, 7.5 dB measured).  The GGV1069's bars
+  are the 75 % SMPTE kind, the GGV1011's 100 %, so the PAL bars' chroma is also larger -- its
+  decoded chroma noise is the 1.2° line-to-line phase jitter on that amplitude.
+- Verified on the NYCSTM captures (D515 and LD-V4400 players, CLV, EFM): sync supported on
+  610 of 625 lines (the 15 vertical-interval lines), VBI chapter/time/picture decode, both
+  fields placed right.  The LD-V4400 captures run 0.7 % fast and lock anyway.
+- Debug aid: `MUSELD_DUMP_FRAME=<path>` writes one frame buffer (and `<path>.raw`, the
+  reader's line-locked composite) as float32.
+- **Probe** (2026-10-04): PAL is detected.  Not by the field-lag autocorrelation proposed
+  below -- wow moves the sync pulses by more than their width over a field, so nothing
+  lines up at any one lag and the scores came out within ±0.05 of zero on real captures --
+  but by the fallback: count the lines between vertical sync groups (runs of line periods
+  spent mostly at sync tip) on a separate chunk of 3.5 PAL fields.  Content-independent and
+  wow-immune; 312.3-312.5 on the four PAL captures, 261.3-262.7 on four NTSC ones, the
+  audio carrier breaks ties when no group is found.  `--probe` prints the count.
+
+Open after this step:
+- **RF band** (resolved 2026-10-05): the "fc - 3.8 MHz component" is the **PAL pilot burst**,
+  IEC 60856 §9.1.2 (`../analogue-video-specifications/docs/laserdisc/`): 240 × fH =
+  3.75 MHz superimposed on the sync tip, 6/7 of blanking-to-white peak-to-peak (≈60 IRE),
+  13.5 cycles from 0.5 to 4.1 µs after the sync edge (optionally in the equalizing and field
+  pulses too); it modulates the tip carrier, hence the sideband at 6.76 − 3.75 = 3.0 MHz with a
+  weak mirror at 10.5.  NTSC has none (its §9.1.2 is the colour burst).  ld-decode uses it for
+  fine hsync timing (`pilot_mhz`).  What followed: the conceal shader's sync clamp now covers
+  the PAL pulse (`SDTV_SYNC_END`), the sync-tip noise figure is "n/a" on PAL (the pilot fills
+  the tip up to the rising edge once filtered).  The band is 2.3-14 MHz with a gentle 2.5 MHz
+  transition (2026-10-05): **the lower chroma sideband is not optional on PAL laserdisc** -- the
+  upper one at 11.5 MHz is lost to the disc MTF, and with NTSC's 3.5 MHz edge the burst
+  demodulated at 0.03 (the noise floor) against 0.25 with the sideband admitted.  The earlier
+  experiment that argued against it used sharp FIRs (0.6-1.0 MHz transitions, 160-270 taps),
+  whose ringing carried the pilot into the back porch; ld-decode's 2nd-order edge at 2.3 MHz
+  (`FilterParams_PAL`, "to protect the lower chroma sideband and its group delay") is the same
+  idea.  decode-orc does not demodulate video RF (its PAL sinks are the ld-decode-tools ports
+  on TBC'd baseband).  `tools/pal-pilot-check.py` checks the timebase against the pilot
+  (2026-10-06: ±15-30 ns, 1.6-2.2 ns line-to-line jitter on the GGV1011 test disc and the
+  NYCSTM captures -- the same figures as NTSC's burst check).
+- **GGV1011 checks (2026-10-07, side 1 to ~600 s)**: full colour fields decode with no
+  Hanover bars (even/odd row chroma difference 0.0000) and 1-2 % uniformity over the frame;
+  the crosshatch cells are square to 0.2 % after the 944/1135 pixel aspect, with 0.006 of
+  cross-colour; black field Y = 0.012, window 0.996 over 0.06 with no overshoot past the
+  edges and no false dropout rescues (1 pixel); the zone plate is animated (frame-to-frame
+  luma difference 0.06 of a 0.27 pattern), so its residual centre chroma (0.30 with the
+  temporal comb, 0.44 without) is moving-content cross-colour, not a comb fault.  The red and
+  green full fields read 4-6° off the bar hues with V matching and U off in opposite
+  directions, identically on the spatial and temporal paths -- the fields are not the bar
+  primaries (the blue field's chroma is 0.43 against a 75 % blue's 0.34); the bars remain the
+  reference.  With the complete side (23.7 GB, ~980 s): CAV picture numbers decode and count
+  (frame 20794, 20795, ... chapter 34 in the still-photo section from ~800 s, which looks
+  natural: skin, sky, water, painted figures); the pilot timebase check over 20 s and 984
+  fields gives p1/p99 −13/+37 ns, max 53 ns, 1.7 ns line-to-line jitter.  The probe needed
+  two fixes the disc exposed: the sync-tip slicing level is now set from the tip-to-white
+  span (blanking is 0.3 of it above the tip on both standards) instead of a percentile that
+  bright content moves to blanking, and a 2 µs running mean removes the pilot burst, which
+  straddled any level set between tip and blanking.
+- **Pilot timebase refinement (2026-10-07)**: the "noise" on flat colour was per-line jitter
+  of the chroma reference (1.8° rms of phase and 4.5 % of magnitude from line to line on the
+  bars, proportional to saturation -- horizontal streaking, not pixel noise).  Two sources:
+  the curve's ~1.4 ns line-to-line timing error, which the burst at the line start cannot
+  cancel for the picture further along the line, and the burst's own measurement noise (~2°
+  per pair on a 27 dB capture).  `SdtvFrameReader::pilotCorrection` now measures the pilot
+  phase 0.8-3.8 µs after each curve line start against a slowly tracked reference and shifts
+  the start by the deviation (0.4 ns residual jitter, max error 5 ns, by
+  `tools/pal-pilot-check.py` on the `.pilot.f64` dump), and with the sampling phase stable the
+  field decoder averages the −U axis over five lines (1 2 3 2 1, each pair estimate brought
+  into the line's frame by the structural rotation; `pal_smoothed_axis` in
+  `sdtv_comb_taps.h`, also used for the temporal frame-pair rotation).  Bars: phase jitter
+  1.82° → 1.23°, magnitude 4.5 % → 3.1 %, hue and saturation unchanged; a nine-line window or
+  a narrower chroma lowpass (0.7-0.9 MHz) gained nothing more, so the rest is chroma noise.
+- **Rescue floor (2026-10-07)**: the GGV1011 crosshatch came out with its vertical lines
+  repainted for ~8 frames after the cut into it (38 000 pixels a frame in highlight mode).
+  Not the envelope detector (its flags were zero there) but the illegal-level rescue: the
+  filtered luma beside a one-sample white line legally undershoots to −0.06, the noise-scaled
+  floor was −0.05, and the motion masks' persistence after a cut supplies the "moving"
+  condition.  `VideoStandard::rescue_floor` sets the floor's minimum margin: PAL 0.08, NTSC
+  its old 0.02, untouched.  After: 120-180 pixels in those frames, 0 later; the NYCSTM's real
+  dropouts are still handled; `MUSELD_DUMP_FRAME` now also writes the detector's flags to
+  `<path>.do`, which is how this was separated from the detector.
+- **Test material**: the NYCSTM programme mixes colour with black-and-white archive film;
+  the GGV1011 PAL CAV test disc (DdD capture, FLAC in Ogg) has the colour bars (at ~190-210 s
+  on side 1), a modulated staircase, multiburst, line patterns, full white and black fields.
+- Analog audio (verified 2026-10-06 on the GGV1011, an analog-sound disc): IEC 60856 clause 8
+  has channel I (left) at 43.75 fH = 683.6 kHz, channel II (right) at 68.25 fH = 1066.4 kHz,
+  ±100 kHz for 100 % modulation -- the test disc's 1 kHz tone on the right channel spreads
+  exactly ±100 kHz in the RF and decodes at −12.9 dBFS, where ±100 kHz through the 75 µs
+  de-emphasis predicts −12.6.  The carriers are only 383 kHz apart, so the channel-select
+  filter (NTSC: pass 315 / stop 330 kHz for 511 kHz spacing) had to become per standard
+  (PAL: 150 / 240 kHz); with the NTSC edges the right carrier's inner sideband beat the
+  left channel's discriminator into permanent squelch.  (The GGV1011's CAV behaviour is
+  still to be checked.)
+- Nothing in the SNR report: the Rec. 567 weighting is the unified network (BT.1439 Annex 2,
+  the same for 525 and 625), and the bandwidth and de-emphasis terms already follow the
+  standard.  PAL has no black setup (black is at blanking), and the combine shader has the
+  EBU primaries.
 
 ## Summary
 
@@ -20,7 +186,7 @@ PAL laserdisc parameters that matter here (IEC 60857):
 | Lines / fields per second | 525 / 59.94 | 625 / 50 |
 | Line rate | 15734.27 Hz | 15625 Hz (0.7 % lower) |
 | Video FM carrier, sync tip → white | 7.6 → 9.3 MHz | 6.76 → 7.9 MHz |
-| Colour subcarrier | 3.579545 MHz | 4.433619 MHz (+25 Hz offset, 1135.0069 cycles/line) |
+| Colour subcarrier | 3.579545 MHz | 4.433619 MHz (+25 Hz offset, 283.7516 cycles/line) |
 | 4 fsc sampling grid | 910 samples/line, integer | 1135 + 4/625 samples/line, non-integer |
 | Analog audio carriers | 2.3011 / 2.8125 MHz, ±100 kHz | 0.6836 / 1.0664 MHz, ±50 kHz |
 | Digital audio | EFM (and AC3-RF at 2.88 MHz) | EFM **instead of** analog audio; no AC3 |
@@ -56,37 +222,37 @@ an audio carrier cannot serve as a PAL detector.
   de-emphasis is the same. CX is standard-agnostic; the CX enable comes from the Philips
   code and stays so. Output level `c_output_level` (`.h:113`) was calibrated on NTSC and
   should be re-measured.
-- **`ntsc/NtscRfDemodulator`**: `c_center_frequency` 8.5 → ~7.33 MHz, deviation 0.85 →
+- **`sdtv/SdtvRfDemodulator`**: `c_center_frequency` 8.5 → ~7.33 MHz, deviation 0.85 →
   0.57 MHz (`.h:97-98`); bandpass/lowpass edges (`.cpp:72, 89, 101`); dropout detector
   literals `30000/1001 * 525` and the 40 MHz slew reference (`.cpp:397-398`);
   `numberOfBlockBuffers()` divides by 30 (`.h:88`).
-- **`museld.cpp`** (about six sites): window size from `NTSC_Y_BUF_WIDTH × 2·FIELD_HEIGHT`
+- **`museld.cpp`** (about six sites): window size from `SDTV_Y_BUF_WIDTH × 2·FIELD_HEIGHT`
   (:805-816); colour standard / DAR / fps (:858-869); `fields_per_second` pacing (:934);
   `InputType` enum, `--input-type` parsing, probe mapping and reader construction
   (:956-1103, :1418-1564).
 - **Geometry constants** are duplicated: `ntsc/NtscConstants.h` (4 defines) and
-  `shaders/muse/muse.h:22-27` (same 4 plus `NTSC_FIELD_START_X/Y`), with 129 hardcoded
-  again in `NtscDecoder.cpp:594`. Consolidate before adding a second standard.
+  `shaders/muse/muse.h:22-27` (same 4 plus `SDTV_FIELD_START_X/Y`), with 129 hardcoded
+  again in `SdtvDecoder.cpp:594`. Consolidate before adding a second standard.
 - **`InputProbe`**: see the dedicated section below.
 
 ## What needs new code (mechanical)
 
-- **Sync detection** (`NtscFrameReader.cpp:504-533`, lock logic at :326, :377, :385):
+- **Sync detection** (`SdtvFrameReader.cpp:504-533`, lock logic at :326, :377, :385):
   the vertical-sync half-line table hardcodes NTSC line numbers 1–9 / 263–272. PAL needs
   625/312.5 with its 2.5-line broad-pulse sequence and 2.5-line equalizing runs.
-- **VBI** (`NtscFrame.cpp`): white-flag / blank rows (:69, :130), Philips code lines
+- **VBI** (`SdtvFrame.cpp`): white-flag / blank rows (:69, :130), Philips code lines
   `{16,17,18,278,279,280,281}` (:206) → second field at +312/313; CC line 21 (:190)
   becomes a no-op (`cc_bytes` stays `nullopt`); burst columns 78..110 and porch windows
   (:50-52, :98) move to the 1135 grid. The IEC 60857 code patterns themselves (:237-300)
   are identical on PAL.
 - **`VbiData.cpp:57`**: `ntsc_fps` for CLV picture → time becomes 25.
-- **Frame buffer**: `NtscInputBlock.h:26-28` (910 × 525 @ 14.318 MHz) → 1135 × 625 @
+- **Frame buffer**: `SdtvInputBlock.h:26-28` (910 × 525 @ 14.318 MHz) → 1135 × 625 @
   17.734 MHz. Decide how to handle the +4 samples per frame from the 25 Hz offset (see
   colour, below).
 - **`NtscCadenceTracker`**: 3:2 pulldown only; inert on PAL, or grows 2:2 detection.
   Its 8-sample fsc-nulling box (`.cpp:75`) assumes the 4 fsc grid, as does
-  `ntsc_detect_motion.comp:22-23`.
-- **SNR reporting** in `NtscDecoder.cpp:230-264` hardcodes the System M sample rate,
+  `sdtv_detect_motion.comp:22-23`.
+- **SNR reporting** in `SdtvDecoder.cpp:230-264` hardcodes the System M sample rate,
   4.2 MHz bandwidth and Rec.567 weighting; PAL is 5.0/5.5 MHz.
 
 ## The hard part: colour
@@ -94,22 +260,22 @@ an audio carrier cannot serve as a PAL detector.
 Every stage of the chroma chain assumes NTSC subcarrier topology on a line-locked
 4 fsc grid:
 
-- `ntsc_detect_color_burst_phase.comp:19-27`: `col % 4` sine/cosine LUT demodulator,
+- `sdtv_detect_color_burst_phase.comp:19-27`: `col % 4` sine/cosine LUT demodulator,
   burst window at fixed columns, 20 IRE burst amplitude calibration.
-- `ntsc_decode_single_field.comp:99-113`: 3-line spatial comb assuming adjacent lines
+- `sdtv_decode_single_field.comp:99-113`: 3-line spatial comb assuming adjacent lines
   are 180° apart in subcarrier phase.
-- `ntsc_decode_single_field.comp:118-120, 350-353` and `NtscDecoder.cpp:580-583`:
+- `sdtv_decode_single_field.comp:118-120, 350-353` and `SdtvDecoder.cpp:580-583`:
   temporal (3D) comb assuming the subcarrier inverts frame to frame.
-- `ntsc_combine_still_and_moving.comp:117-140`: SMPTE C primaries → sRGB and the
+- `sdtv_combine_still_and_moving.comp:117-140`: SMPTE C primaries → sRGB and the
   NTSC CRT EOTF.
-- `ntsc_deemphasis.comp`: LaserVision de-emphasis FIR precomputed for the
+- `sdtv_deemphasis.comp`: LaserVision de-emphasis FIR precomputed for the
   4 × 3.58 MHz grid (same time constants on PAL, taps must be regenerated at 4 × 4.43 MHz).
-- Chroma rotation `185.8° + tint` in `NtscDecoder.cpp:72-74` is calibrated for I/Q.
+- Chroma rotation `185.8° + tint` in `SdtvDecoder.cpp:72-74` is calibrated for I/Q.
 
 PAL breaks all of this: V-axis switching per line, the ±45° swinging burst, the 4-field
-(8-field with the 25 Hz offset) sequence, and the non-integer 1135.0069 samples per line
+(8-field with the 25 Hz offset) sequence, and the non-integer 1135.0064 samples per line
 mean a line-locked grid gives no clean `% 4` phase LUT. The one piece that ports is the
-burst-referenced U/V demodulation at `ntsc_decode_single_field.comp:415-421`.
+burst-referenced U/V demodulation at `sdtv_decode_single_field.comp:415-421`.
 
 Sampling grid: **line-locked 1135 samples per line, with per-line burst phase.**
 Exact 4 fsc is 1135.0064 samples per line (integer only per frame: 709379), so no grid
@@ -121,8 +287,16 @@ keeps the DPLL on hsync and the frame buffer rectangular; the subcarrier then wa
 The burst phase is already measured per line for NTSC and applied as a rotation, so
 making that the phase reference, with the LUT only as a basis, absorbs the drift; the
 V switch and swinging burst require per-line phase handling anyway. Same choice as
-ld-decode's PAL path. Adjacent same-field lines are then 2270.0128 samples apart
-(180° + 1.15°), handled by the same per-line correction.
+ld-decode's PAL path.
+
+Comb structure (corrected 2026-09-30): adjacent lines of a field are one line period
+apart, 283.75 cycles = 270.6° of subcarrier, so NTSC's 3-line comb (adjacent lines 180°
+apart) does not carry over. Lines n ± 2 of a field are 2270.0128 samples apart (180° +
+1.15°) and share the V-switch sign, which is the 2H comb; the simpler first step is the
+classic 1H delay-line U/V separation. Temporally the subcarrier advances 270° per frame and
+the V switch flips (625 is odd), so frames N ± 1 do not cancel: a PAL 3D comb needs frames
+N ± 2, i.e. more frame history than the current three-frame window -- a separate, later
+phase.
 
 Expect: a new burst-phase shader, a new PAL field decoder (roughly 500 lines of GLSL),
 EBU primaries and BT.470 gamma in the combine shader, and a re-derived motion detector.
@@ -182,8 +356,8 @@ Estimated size: ~100 lines plus the variable-length read.
 1. **Refactor, no behaviour change.** Consolidate geometry constants into one header
    shared with the shaders; introduce a video-standard descriptor (lines, field lines,
    samples per line, sampling frequency, line rate, fps, carrier centre/deviation, VBI
-   line numbers) and thread it through `NtscInputBlock`, `NtscFrameReader`, `NtscFrame`,
-   `NtscDecoder`, `NtscRfDemodulator`. Decide between runtime struct and template
+   line numbers) and thread it through `SdtvInputBlock`, `SdtvFrameReader`, `SdtvFrame`,
+   `SdtvDecoder`, `SdtvRfDemodulator`. Decide between runtime struct and template
    parameter; the existing `if constexpr` dispatch on block type in `museld.cpp` suggests
    a `PalInputBlock` alias over a templated block is the path of least resistance.
 2. **Probe.** Field-lag detection and `ePalRf`, testable on captures before anything

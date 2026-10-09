@@ -34,7 +34,7 @@ single CPU thread.
 | Option | Description |
 |---|---|
 | `--input-format <fmt>` | Input sample type: `u8`, `s8`, `u16`, `s16`, `u16be`, `s16be`, `lds`, `flac`, `ldf`. Auto-detected from the filename extension, or failing that from the file contents (or, for a `udp://` stream, from its packets). `flac` is plain FLAC and `ldf` FLAC in an Ogg container, but the two are told apart by the file's first bytes, so a plain FLAC `.ldf` (or an Ogg `.flac`, `.oga` or `.ogg`) plays without a flag. |
-| `--input-type <type>` | Input type: `muse-rf`, `ntsc-rf`, `muse-16`, `muse-os`, or `auto` (the default): detect the type from the file contents. |
+| `--input-type <type>` | Input type: `muse-rf`, `ntsc-rf`, `pal-rf`, `muse-16`, `muse-os`, or `auto` (the default): detect the type from the file contents. |
 | `--sample-freq <Hz>` | Sets the input sample rate. Measured from the file contents when omitted. |
 | `--probe` | Print what content-based detection finds for each following input file (sample format, RF type, sample rate, and a ready-to-paste option line) instead of decoding it. |
 
@@ -42,6 +42,11 @@ The input types:
 
 - `muse-rf` — RF from the disc surface (or a player's RF tap) of a MUSE Hi-Vision laserdisc, typically captured at 62.5 MHz.
 - `ntsc-rf` — RF of a standard NTSC laserdisc, typically a DomesDay Duplicator capture at 40 MHz.
+- `pal-rf` — RF of a PAL laserdisc, decoded in colour (spatial and temporal combs, as NTSC),
+  with the Philips code (chapter, CLV time, picture number), the analog or EFM track
+  (`--efm`; PAL discs carry one or the other) and `--write`
+  (colour metadata tagged BT.470BG; 50 frames/s, one per field, or 25 with `--full-frames-only`,
+  as 59.94/29.97 for NTSC). See `docs/pal-playback-plan.md`.
 - `muse-16` — MUSE baseband resampled to exactly one sample per pixel at 16.2 MHz, phase locked to the line structure (480 samples per line). This is museld's own intermediate format, produced with `--write-muse16` (see below); `--sample-freq` does not apply.
 - `muse-os` — MUSE baseband (a player's output, before any resampling) captured at an arbitrary rate, e.g. an oscilloscope capture at 50 MHz. The resampling DPLL locks to it like to RF, but skips the FM demodulation.
 
@@ -68,9 +73,10 @@ A file over http is not: it plays like a local file, including seeking with the 
 Detection reads a few short stretches spread across the file
 and takes well under a second: the sample format is whichever interpretation of the bytes looks
 like a band-limited signal, the line period in samples comes from the periodicity of the FM
-carrier's instantaneous frequency, and NTSC against MUSE is decided by the carrier's mean
-cycles-per-line and the 2.3 MHz NTSC analog audio carrier. The line period then fixes the sample
-rate (NTSC lines at 15.734 kHz, MUSE at 33.75 kHz), snapped to a common capture rate when one is
+carrier's instantaneous frequency; standard definition against MUSE is decided by the carrier's
+mean cycles-per-line, and NTSC against PAL by the lines between vertical sync groups (262.5 or
+312.5), with the 2.3 MHz NTSC analog audio carrier as the tie breaker. The line period then fixes
+the sample rate (NTSC lines at 15.734 kHz, PAL at 15.625, MUSE at 33.75), snapped to a common capture rate when one is
 within about a percent.
 
 ```console
@@ -137,7 +143,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--benchmark-shaders` | Print GPU shader timing statistics |
 | `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |
 | `--field-interpolation <mode>` | Initial de-interlacing mode: `normal` (motion-adaptive), `intra-field`, or `inter-frame` — same as keys 1/2/3 |
-| `--no-3d-comb` | NTSC: start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4 |
+| `--no-3d-comb` | Start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4. On PAL the key also switches the U/V line averaging (the PAL delay-line step) |
 | `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
 | `--black-level <mode>` | NTSC: where the disc puts black — `auto` (default) reads it off the picture, `m` forces NTSC-M (US discs: 7.5 IRE above blanking), `j` forces NTSC-J (Japanese discs: black at blanking). Same as the J key. Wrong in the M direction, a Japanese disc loses its darkest 7.5 IRE; wrong in the J direction, a US disc shows black as dark grey and slightly desaturated |
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
@@ -396,8 +402,8 @@ run on the main thread. The GPU pipeline has two stages separated by a semaphore
 ### Data flow — NTSC
 
 ```
-RF capture (any rate; 30, 40 and 62.5 MHz tested) → NtscRfDemodulator → NtscFrameReader (timebase, resampling to 4 fsc)
-  → NtscFrame → Vulkan GPU shaders (sync burst detection, color filtering, field decode)
+RF capture (any rate; 30, 40 and 62.5 MHz tested) → SdtvRfDemodulator → SdtvFrameReader (timebase, resampling to 4 fsc)
+  → SdtvFrame → Vulkan GPU shaders (sync burst detection, color filtering, field decode)
   → GLFW window
 ```
 

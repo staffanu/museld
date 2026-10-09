@@ -1,17 +1,17 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
-#ifndef MUSECPP_NTSCFRAMEREADER_H
-#define MUSECPP_NTSCFRAMEREADER_H
+#ifndef MUSECPP_SDTVFRAMEREADER_H
+#define MUSECPP_SDTVFRAMEREADER_H
 
 #include <cstdint>
 #include <deque>
 #include <vector>
 #include "FrameReader.h"
-#include "NtscRfDemodulator.h"
+#include "SdtvRfDemodulator.h"
 #include "input/InputReader.h"
 #include "util/ConstExprHelpers.h"
-#include "NtscInputBlock.h"
+#include "SdtvInputBlock.h"
 
 // Feed-forward timebase: instead of a causal DPLL resampling the signal as it
 // arrives, the reader finds sync pulses in a cheap lowpassed/decimated pass,
@@ -25,22 +25,23 @@
 // corroborates it), and since every output sample's
 // input position is known before resampling, the resampling itself has no
 // feedback and can move to SIMD or the GPU wholesale.
-class NtscFrameReader : public FrameReader<NtscInputBlock> {
+class SdtvFrameReader : public FrameReader<SdtvInputBlock> {
 public:
-    explicit NtscFrameReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
+    explicit SdtvFrameReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
                              const std::string &filename, InputFormat input_format,
                              double sample_rate, double initial_seek_seconds,
                              bool benchmark_shaders, AudioTrack audio_track, int efm_adaptive_filter_size,
-                             const std::optional<std::string> &output_filename);
-    NtscFrameReader(const NtscFrameReader&) = delete;
-    void operator=(const NtscFrameReader&) = delete;
+                             const std::optional<std::string> &output_filename,
+                             const VideoStandard &video_standard);
+    SdtvFrameReader(const SdtvFrameReader&) = delete;
+    void operator=(const SdtvFrameReader&) = delete;
     // Join the reader thread while threadFunc() and the demodulator still
     // exist; the base destructor's cleanup() would be too late.
-    ~NtscFrameReader() override {
-        NtscFrameReader::cleanup();
+    ~SdtvFrameReader() override {
+        SdtvFrameReader::cleanup();
     }
 
-    bool initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) override;
+    bool initialize(std::vector<std::unique_ptr<SdtvInputBlock>> &buffers) override;
     void cleanup() override;
     bool seek(double seconds) override;
     std::optional<uint32_t> seekToInputSample(int64_t sample) override;
@@ -57,22 +58,26 @@ protected:
 private:
     // Fetch one demodulated block into the ring and run the sync pass on it;
     // appends the audio side data to output_block while anchored
-    bool readInputBlock(std::unique_ptr<NtscInputBlock> const &output_block);
+    bool readInputBlock(std::unique_ptr<SdtvInputBlock> const &output_block);
     void syncPass(const float *data, int64_t stream_base, int count);
     void handlePulse(double t, double width_us);
     bool canFinalize() const;
     void finalizeBatch();
     void evaluateAnchors();
     // Resample finalized lines into the frame; returns true when a frame completed
-    bool consumeFinalized(std::unique_ptr<NtscInputBlock> const &output_block);
-    void resampleLine(std::unique_ptr<NtscInputBlock> const &output_block, int row, double t0, double t1);
+    bool consumeFinalized(std::unique_ptr<SdtvInputBlock> const &output_block);
+    void resampleLine(std::unique_ptr<SdtvInputBlock> const &output_block, int row, double t0, double t1);
+    // The pilot burst's correction to a curve line start, in demodulated
+    // samples (0 without a pilot, or where the line has none)
+    double pilotCorrection(double t);
     void resetTimebase(const char *why);
 
-    [[nodiscard]] bool process(std::unique_ptr<NtscInputBlock> const &output_block);
+    [[nodiscard]] bool process(std::unique_ptr<SdtvInputBlock> const &output_block);
 
     int64_t inputOffsetOfStreamPos(double stream_pos) const;
 
-    NtscRfDemodulator *m_demodulator;
+    const VideoStandard &m_video_standard;
+    SdtvRfDemodulator *m_demodulator;
     const double m_input_sample_rate;
     double m_sample_rate;               // demodulated (video-decimated) rate
     int m_input_samples_decimation_rate;
@@ -83,7 +88,7 @@ private:
     // blocks after its samples arrived and the ring keeps a comfortable
     // margin.  The total size stays a power of two for cheap masking.
     static constexpr int c_number_of_input_sub_buffers = 4;
-    static constexpr size_t c_input_sub_buffer_size = NtscRfDemodulatorConstants::c_video_block_size;
+    static constexpr size_t c_input_sub_buffer_size = SdtvRfDemodulatorConstants::c_video_block_size;
     static constexpr size_t c_input_buffer_size = c_input_sub_buffer_size * c_number_of_input_sub_buffers;
     static_assert((c_input_sub_buffer_size & (c_input_sub_buffer_size - 1)) == 0);
     static_assert((c_number_of_input_sub_buffers & (c_number_of_input_sub_buffers - 1)) == 0);
@@ -116,7 +121,7 @@ private:
     // (wow included), so round(dt / period) is unambiguous for gaps of
     // hundreds of lines and needs no lock-in phase.  The period is tracked
     // from clean consecutive intervals only, never from the filter (see
-    // handlePulse for the runaway that causes).  NTSC line numbers are
+    // handlePulse for the runaway that causes).  Line numbers are
     // attached separately by the vertical anchor below.
     bool m_lattice_valid;
     double m_lat_t;                     // last accepted pulse
@@ -162,16 +167,30 @@ private:
     std::deque<double> m_curve;         // finalized T(k), k from m_curve_base
     int64_t m_curve_base;
 
-    // --- vertical anchor: NTSC line numbers on the lattice ---
+    // --- pilot burst timing refinement (PAL) ---
+    // The curve is the smoothed hsync timing, good to a couple of ns; the
+    // pilot burst on each sync tip (60 IRE, 13.5 cycles of 240 fH) measures
+    // the line start to a fraction of that.  Its phase against the curve's
+    // line start is constant when the curve is right, so the deviation from
+    // a slowly tracked reference phase is the line's timing error, and each
+    // line is resampled from the corrected starts of both its ends.
+    bool m_pilot_valid;                 // the reference phase and amplitude are seeded
+    double m_pilot_phase_ref;           // slow average of the pilot phase at the line starts
+    double m_pilot_amp_ref;             // slow average of the pilot amplitude, gating missing pilots
+    double m_pilot_corr_next;           // the correction of m_curve[1], carried to the next line
+    bool m_pilot_corr_next_valid;
+
+    // --- vertical anchor: the standard's line numbers on the lattice ---
     // A group of broad pulses starting on a lattice line boundary is field 1
-    // (the group spans lines 4-6); starting half a line in, field 2.
+    // (the group spans lines 4-6 on NTSC, 1-3 on PAL); starting half a line
+    // in, field 2.
     bool m_anchored;
     bool m_timebase_restarted;          // report the next frame as the first after a signal loss
     uint32_t m_seek_generation;         // of the demodulated blocks being consumed
     // Rows of the frame being filled come from before a timebase reset: the
     // frame is not delivered, the next whole one is
     bool m_frame_partial;
-    int64_t m_line1_k;                  // lattice line of the current frame's NTSC line 1
+    int64_t m_line1_k;                  // lattice line of the current frame's line 1
     int64_t m_pending_drift;            // re-anchor hysteresis: last unconfirmed drift
     int64_t m_frame_start_offset;
     double m_frame_period;              // demod samples per line, at frame start
@@ -182,4 +201,4 @@ private:
     int m_timed_frames;
 };
 
-#endif //MUSECPP_NTSCFRAMEREADER_H
+#endif //MUSECPP_SDTVFRAMEREADER_H

@@ -16,6 +16,18 @@ Supported formats:
 - **AC3RF**: QPSK-demodulated AC3 surround audio
 - **Analog**: NTSC analog FM stereo audio (2.3011/2.8125 MHz carriers, CX expansion, squelch)
 
+The SD pipeline (`sdtv/`) is parameterized by a `VideoStandard` (`sdtv/VideoStandard.h`:
+geometry of the line-locked frame buffer, frame rate, RF carrier, VBI lines, noise windows;
+`VideoStandard::ntsc()` and `::pal()`), and the `shaders/sdtv/sdtv_*.comp` sources are compiled
+once per standard, as `ntsc_*.spv` and as `pal_*.spv` with `-DSDTV_PAL` (the `SDTV_*` macros in
+`shaders/muse/muse.h` take the PAL values there).  Names: `Sdtv…` is what both standards share
+(`SdtvFrameReader`, `SdtvDecoder`, ...), `Ntsc…`/`Pal…` only what belongs to one of them
+(`NtscCadenceTracker`).  `--input-type pal-rf` is work in progress:
+picture (colour: a 3-line comb over the ±90° neighbours, a line-pair burst reference for the
+swinging burst and V switch, the delay-line U/V average and a temporal comb over frames N ± 2
+-- the decoder keeps 3d + 1 frames with d = 2 on PAL and shows frame N two reads behind),
+VBI, EFM audio, `--write` and content detection work; calibrated on the GGV1011 test disc.  `docs/pal-playback-plan.md` has the plan and the status.
+
 NTSC playback in museld selects between the analog, EFM and AC3-RF tracks (`AudioTrack`,
 A key / `--efm` / `--ac3`); a DTS bitstream on the EFM track is auto-detected. AC3 and DTS
 are decoded by `CompressedAudioDecoder` (libavcodec + libswresample), which is gated on
@@ -40,11 +52,12 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
     logging/       — Abstract Logger, StreamLogger (shared by both binaries)
     bch/           — BCH decoder (MUSE control data)
     muse/          — MUSE frame buffers, audio/video decoders, GPU shaders interface
-    ntsc/          — NTSC frame buffers, sync detection, field decoder
+    sdtv/          — Standard definition (NTSC and PAL) frame buffers, sync detection, field
+                     decoder, the video standard descriptor
     musevk/        — Vulkan abstraction layer (buffers, images, command pools, compute)
     subtitles/     — SRT parser, stb_truetype-based glyph atlas, GPU subtitle overlay,
                      EIA-608 closed caption decoder (live "CC" track on NTSC discs,
-                     line 21 sliced in ntsc/NtscFrame; --cc-write saves <input>.CC.srt)
+                     line 21 sliced in sdtv/SdtvFrame; --cc-write saves <input>.CC.srt)
     ocr/           — Live subtitle OCR + translation (PP-OCR on ONNX Runtime, no OpenCV):
                      OcrEngine, OcrWorker thread, Vulkan band readback, TranslationWorker
                      (OpenAI-compatible HTTP, cpp-httplib + nlohmann/json).  Built with
@@ -189,12 +202,21 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   measurements. Use together with a demod dump **from the same run**.
 - `MUSELD_DUMP_VBI_FAIL=<path>` — each VBI code line that failed to slice, as 910
   floats (the 4 fsc frame-buffer row).
+- `MUSELD_DUMP_FRAME=<path>` — one whole frame buffer (the de-emphasized, rescaled
+  composite, `total_lines × samples_per_line` float32, blanking 0, white 1) and the
+  reader's raw line-locked composite of the same frame as `<path>.raw` and the dropout
+  detector's flags as `<path>.do` (one byte per sample); the first frame after
+  `MUSELD_DUMP_FRAME_NO` (default 30).
 
 **Offline checks** (`tools/`, numpy + scipy + PIL): `ntsc-sync-delta.py <fs> <demod
 dump> <timebase prefix> <out>` plots detected minus reconstructed sync per line —
 must stay within ±0.1 µs with no walks; `ntsc-burst-check.py <prefix> <dump> <out>
 <fs>` measures the curve's timing error against the colour burst phase, content-
-independent — expect ±40 ns and ~1 ns line-to-line jitter.
+independent — expect ±40 ns and ~1 ns line-to-line jitter; `pal-pilot-check.py <prefix>
+<dump> <out> <fs>` is the PAL counterpart, against the 3.75 MHz pilot burst on the sync tip
+(measured ±30 ns, 2 ns jitter on the GGV1011 test disc and the NYCSTM captures; the reader
+refines PAL line starts with the pilot, and `<prefix>.pilot.f64` holds the corrected curve --
+run the tool on it as a prefix to see the residual, 0.4 ns).
 
 **Sample rates**: anything in the sync pass and timebase that is a count of (decimated)
 samples must be derived from a time, never a constant: a 30 MHz Domesday Duplicator capture
@@ -237,7 +259,7 @@ split, what museld loads at runtime, and how Vulkan is wired up on macOS.
 
 ### src/ Internal Structure
 
-The `src/` directory is the include root for both binaries. The `ac3rf` CMake target covers the reusable library (`ac3/`, `analog/`, `efm/`, `filter/`, `rs/`, `logging/`). The `museld` target adds everything else (`muse/`, `ntsc/`, `musevk/`, `bch/`, `util/`, `shaders/`).
+The `src/` directory is the include root for both binaries. The `ac3rf` CMake target covers the reusable library (`ac3/`, `analog/`, `efm/`, `filter/`, `rs/`, `logging/`). The `museld` target adds everything else (`muse/`, `sdtv/`, `musevk/`, `bch/`, `util/`, `shaders/`).
 
 ### Key Design Patterns
 
@@ -312,7 +334,7 @@ HD video + miniaudio
 
 **NTSC path:**
 ```
-RF (40 MHz) → NtscRfDemodulator → NtscFrameReader (feed-forward timebase: sync pulse
+RF (40 MHz) → SdtvRfDemodulator → SdtvFrameReader (feed-forward timebase: sync pulse
 pass → line lattice → fixed-lag Kalman smoother → per-line resample, no DPLL) →
 NTSC frame buffer (4 fsc, 910×525) → Vulkan GPU color decode → video output
 ```

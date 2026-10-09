@@ -34,8 +34,18 @@
  */
 class AnalogAudioDemodulator {
 public:
+    // The carriers default to the NTSC pair, 511 kHz apart, with a
+    // channel-select filter passing +-315 kHz; PAL discs put them at 683.59
+    // and 1066.41 kHz, only 382.8 kHz apart, so the filter must stop before
+    // the neighbour's inner sideband (each carrier spreads +-100 kHz of
+    // deviation): +-150 kHz pass, +-240 kHz stop.  The deviation is +-100 kHz
+    // for 100 % on both (IEC 60856 8.1, IEC 60857), confirmed on the GGV1011
+    // test disc's 1 kHz tone.
     AnalogAudioDemodulator(Logger &log, double input_sample_frequency, int input_block_size,
-                           double output_sample_frequency, bool use_simd);
+                           double output_sample_frequency, bool use_simd,
+                           double left_carrier_frequency = c_left_carrier_frequency,
+                           double right_carrier_frequency = c_right_carrier_frequency,
+                           double channel_pass_hz = 315e3, double channel_stop_hz = 330e3);
     ~AnalogAudioDemodulator();
 
     AnalogAudioDemodulator(const AnalogAudioDemodulator &) = delete;
@@ -87,6 +97,7 @@ private:
     double m_input_sample_frequency;
     int m_input_block_size;
     double m_output_sample_frequency;
+    double m_channel_pass_hz, m_channel_stop_hz; // the channel-select lowpass edges
 
     static constexpr double c_left_carrier_frequency = 2.3011e6;
     static constexpr double c_right_carrier_frequency = 2.8125e6;

@@ -15,6 +15,7 @@ enum class VideoWriterPreset {
 enum class VideoColorStandard {
     eBt709,     // HD (MUSE)
     eSmpte170m, // SD (NTSC)
+    eBt470bg,   // SD (PAL)
 };
 
 #endif //MUSECPP_VIDEOWRITEROPTIONS_H
