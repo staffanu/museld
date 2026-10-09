@@ -385,7 +385,7 @@ of components.
 ### Data flow — MUSE
 
 ```
-RF capture (62.5 MHz) → MuseRfDemodulator → ResamplingFrameReader (DPLL, 16.2 MHz)
+RF capture (any rate; 62.5 MHz typical) → MuseRfDemodulator → ResamplingFrameReader (DPLL, 16.2 MHz)
   → FrameBuffer → Vulkan GPU shaders (de-emphasis, gamma, color decode, motion detection)
   → GLFW window + miniaudio
 ```
@@ -396,7 +396,7 @@ run on the main thread. The GPU pipeline has two stages separated by a semaphore
 ### Data flow — NTSC
 
 ```
-RF capture (40 MHz) → NtscRfDemodulator → NtscFrameReader (timebase, resampling to 4 fsc)
+RF capture (any rate; 30, 40 and 62.5 MHz tested) → NtscRfDemodulator → NtscFrameReader (timebase, resampling to 4 fsc)
   → NtscFrame → Vulkan GPU shaders (sync burst detection, color filtering, field decode)
   → GLFW window
 ```
