@@ -31,7 +31,12 @@ public:
 
     bool initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) override;
     void cleanup() override;
-    void seek(double seconds) override;
+    bool seek(double seconds) override;
+    std::optional<uint32_t> seekToInputSample(int64_t sample) override;
+    [[nodiscard]] double inputSampleRate() const override {
+        return m_demodulator != nullptr ? m_sample_rate * MuseDemodulatedBlock::c_video_decimation_rate : 0;
+    }
+    [[nodiscard]] int64_t inputSampleCount() const override;
     void setEfmEnabled(bool enabled) override;
     void setEfmAdaptiveFilterSize(int size) override;
     [[nodiscard]] int efmAdaptiveFilterSize() const override;
@@ -84,6 +89,7 @@ private:
 
     double m_input_samples_per_sample_ref;
     double m_input_samples_per_sample;
+    uint32_t m_seek_generation = 0; // of the demodulated blocks being consumed
     // These variable names and the computations performed are heavily influenced by
     // the TI publication "Introduction to phase-locked loop system modeling"
     // (Analog Applications Journal SLYT015 - May 2000 Analog and Mixed-Signal Products)

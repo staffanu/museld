@@ -59,8 +59,8 @@ vector<float> readChunk(const string &filename, InputFormat format,
     try {
         auto reader = makeInputReader(filename, format, chunk_samples);
         reader->initialize();
-        if (sample_offset > 0)
-            reader->seek(sample_offset);
+        if (sample_offset > 0 && !reader->seek(sample_offset))
+            return {};
         if (reader->readFloats(samples.data()) != (int)chunk_samples)
             return {};
     } catch (const std::exception &) {
@@ -70,10 +70,9 @@ vector<float> readChunk(const string &filename, InputFormat format,
 }
 
 // Read a chunk at the requested offset, falling back toward the start when the
-// reader cannot get there.  Long FLAC captures need this: STREAMINFO stores the
-// sample count in 36 bits, so anything past 2^36 samples (18 minutes at 62.5
-// MHz) records a wrapped total, and libFLAC then refuses every seek beyond that
-// wrapped value even though the frames decode fine.  Backing off keeps the
+// reader cannot get there (a short file; a FLAC seek that fails for some other
+// reason -- the 36-bit STREAMINFO count that used to limit seeks in long
+// captures is hidden from libFLAC by the reader now).  Backing off keeps the
 // probe reading real data instead of reporting an unreadable file.
 vector<float> readChunkNear(Logger &log, const string &filename, InputFormat format,
                             int64_t &sample_offset, uint32_t chunk_samples) {

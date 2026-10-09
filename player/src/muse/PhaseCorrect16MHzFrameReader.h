@@ -23,7 +23,7 @@ public:
     bool initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) override;
     void cleanup() override;
 
-    void seek(double seconds) override;
+    bool seek(double seconds) override;
 
 protected:
     void threadFunc() override;

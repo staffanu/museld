@@ -52,8 +52,8 @@ void processFile(Logger &logger, Operation input_type,
     double target_sample_frequency, bool analog_cx, double analog_output_frequency) {
 
     reader->initialize();
-    if (initial_seek_seconds != 0)
-        reader->seek((int64_t)(input_sample_frequency * initial_seek_seconds));
+    if (initial_seek_seconds != 0 && !reader->seek((int64_t)(input_sample_frequency * initial_seek_seconds)))
+        throw std::runtime_error(std::format("Cannot seek to {} s in the input", initial_seek_seconds));
     auto *input_buffer = new float[block_size];
 
     switch (input_type) {

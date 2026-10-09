@@ -42,7 +42,10 @@ public:
 
     bool initialize(std::vector<std::unique_ptr<NtscInputBlock>> &buffers) override;
     void cleanup() override;
-    void seek(double seconds) override;
+    bool seek(double seconds) override;
+    std::optional<uint32_t> seekToInputSample(int64_t sample) override;
+    [[nodiscard]] double inputSampleRate() const override { return m_input_sample_rate; }
+    [[nodiscard]] int64_t inputSampleCount() const override;
     void setAudioTrack(AudioTrack track) override;
     void setAnalogCx(bool enabled) override;
     void setEfmAdaptiveFilterSize(int size) override;
@@ -70,6 +73,7 @@ private:
     int64_t inputOffsetOfStreamPos(double stream_pos) const;
 
     NtscRfDemodulator *m_demodulator;
+    const double m_input_sample_rate;
     double m_sample_rate;               // demodulated (video-decimated) rate
     int m_input_samples_decimation_rate;
     double m_p_nominal;                 // demodulated samples per line
@@ -162,6 +166,10 @@ private:
     // (the group spans lines 4-6); starting half a line in, field 2.
     bool m_anchored;
     bool m_timebase_restarted;          // report the next frame as the first after a signal loss
+    uint32_t m_seek_generation;         // of the demodulated blocks being consumed
+    // Rows of the frame being filled come from before a timebase reset: the
+    // frame is not delivered, the next whole one is
+    bool m_frame_partial;
     int64_t m_line1_k;                  // lattice line of the current frame's NTSC line 1
     int64_t m_pending_drift;            // re-anchor hysteresis: last unconfirmed drift
     int64_t m_frame_start_offset;

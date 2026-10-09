@@ -12,6 +12,9 @@ add_executable(museld-tests
     PrefetchingInputReaderTest.cpp
     SrtParserTest.cpp
     DisplayGeometryTest.cpp
+    ChapterSearchTest.cpp
+    LdfInputReaderTest.cpp
+    ../src/ChapterSearch.cpp
     ../src/subtitles/Eia608Decoder.cpp
     ../src/bch/BchDecoder.cpp
     ../src/InputProbe.cpp

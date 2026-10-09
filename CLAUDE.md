@@ -238,6 +238,23 @@ The `src/` directory is the include root for both binaries. The `ac3rf` CMake ta
 
 **Pluggable erasure concealment**: Abstract `ErasureConcealer` interface with four implementations (`RepeatingSample`, `LinearInterpolation`, `Ar`, `SlowAr`), selected via CLI.
 
+**Chapter search and picture stops**: the Up/Down keys and `--chapter` find a chapter start by
+probing the input (`ChapterSearch`, pure decision logic with a Catch2 test, driven by the
+player loop in `museld.cpp`). Probes use `DecodeControls::metadata_only` (first decoder stage
+only, no picture or audio), absolute seeks (`FrameReader::seekToInputSample`, returning a seek
+generation that every frame carries in `DecodedField::seek_generation`, so frames from before
+the seek are told apart) and the input length (`InputReader::sampleCount()`, taken from the
+file's tail for FLAC: the last Ogg page's granule position, or the last frame header of a
+plain stream). STREAMINFO's sample count is only 36 bits (28 min at 40 MHz), so long captures
+have it at zero or wrapped, and libFLAC refuses seeks beyond a wrapped value: `LdfInputReader`
+zeroes the field in the bytes it hands libFLAC (re-checksumming the Ogg page), which makes it
+seek by stream length instead. A seek the input refuses returns false up the chain
+(`InputReader::seek`, `RfDemodulator::seekLocked`, `FrameReader::seek`) and nothing moves. Readers
+reset their timebase/PLL on the reader thread when a block's generation changes, never from
+the seeking thread, and the NTSC reader drops the partial frame after a reset. A probe costs
+about 50 ms. `DiscInfo` exposes chapter, lead-in/out and the CAV picture stop (which pauses
+playback unless turned off with P).
+
 **Input format abstraction**: `InputReader` specializations (raw widths, lds, FLAC) with
 auto-detection by file extension, reading through a `ByteSource` (`input/ByteSource.h`) that
 hides where the bytes come from: a file or fifo (`FdByteSource`), a web server via HTTP range

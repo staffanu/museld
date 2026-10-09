@@ -47,7 +47,7 @@ void PhaseCorrect16MHzFrameReader::cleanup() {
     m_input_reader.reset();
 }
 
-void PhaseCorrect16MHzFrameReader::seek(double seconds) {
+bool PhaseCorrect16MHzFrameReader::seek(double seconds) {
     if (!m_input_is_realtime) {
         std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -58,7 +58,8 @@ void PhaseCorrect16MHzFrameReader::seek(double seconds) {
         double actual_seek_time = (double)frames_to_seek / 30.0;
         m_log.info(eInput, std::format("Seeking relative time {} s, {} samples.",
                                        actual_seek_time, samples_to_seek));
-        m_input_reader->seek(samples_to_seek);
+        if (!m_input_reader->seek(samples_to_seek))
+            return false;
         m_frame_position += frames_to_seek;
 
         // discard content in existing input buffers
@@ -66,6 +67,7 @@ void PhaseCorrect16MHzFrameReader::seek(double seconds) {
         m_filled_input_buffers.clear();
         m_cv_vacant.notify_one();
     }
+    return true;
 }
 
 void PhaseCorrect16MHzFrameReader::threadFunc() {

@@ -50,6 +50,7 @@ struct NtscDemodulatedBlock {
     }
 
     int64_t input_offset; // the number of samples in the input before this block
+    uint32_t seek_generation = 0; // the demodulator's seek count when the block's input was read
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropouts; // 1-to-1 with the video_data array. 0 or 1 for now, but could indicate how certain we are in the future
     std::vector<float> raw_input; // raw input samples staged for the audio worker thread; empty when no audio demodulator is enabled

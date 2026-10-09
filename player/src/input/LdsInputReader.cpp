@@ -23,8 +23,9 @@ LdsInputReader::~LdsInputReader() {
 void LdsInputReader::initialize() {
 }
 
-void LdsInputReader::seek(int64_t no_samples) {
+bool LdsInputReader::seek(int64_t no_samples) {
     seekBytes(no_samples / 4 * 5);
+    return true;
 }
 
 int LdsInputReader::readFloats(float *f) {

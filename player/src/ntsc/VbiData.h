@@ -19,6 +19,10 @@ public:
 
     std::vector<std::string> asStrings() const override;
     std::optional<double> playbackTimeSeconds() const override;
+    std::optional<int> chapter() const override { return m_chapter; }
+    bool isLeadIn() const override { return m_is_lead_in; }
+    bool isLeadOut() const override { return m_is_lead_out; }
+    bool pictureStop() const override { return m_is_stop_code; }
     [[nodiscard]] std::optional<bool> cxEnabled() const { return m_cx_enabled; }
 
     // Disc-level facts (CX flag, chapter, CLV) are on every frame of a disc

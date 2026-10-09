@@ -62,6 +62,10 @@ public:
         // NTSC: where the disc puts black; black is placed at output zero
         // and the picture above it (chroma included) rescaled to fill the range
         BlackLevelMode black_level;
+        // Only the disc metadata is wanted (the chapter search probing the
+        // input): the video stays at the previous frame and no audio is
+        // decoded, which makes a probe cost little more than the seek
+        bool metadata_only = false;
     };
 
     struct DecodedField {
@@ -81,6 +85,14 @@ public:
         int64_t last_frame_buffer_input_offset;
         double input_samples_per_muse_sample;
         std::shared_ptr<DiscInfo> disc_info;
+        // The input sample offset of the frame disc_info was read from
+        // (the two decoders attach the info of different frames relative to
+        // the displayed one), and the seek generation that frame came from:
+        // readers count their seeks and stamp every frame with the count,
+        // so a frame still in flight from before a seek can be told apart
+        // from the first one after it
+        int64_t disc_info_input_offset;
+        uint32_t seek_generation;
         // EIA-608 closed caption byte pair from NTSC line 21 (field 1, parity
         // bits intact).  Set at most once per frame read, so the consumer sees
         // each pair exactly once; always unset for decoders without captions

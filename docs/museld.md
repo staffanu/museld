@@ -124,6 +124,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--aspect <mode>` | How the picture is fitted to the window — same as the F key. `normal` (default) keeps its shape, 16:9 for MUSE and 4:3 for NTSC, with black bars where the window is wider or taller; `zoom` fills the window and crops what overflows, which shows a letterboxed film full width on a wide screen; `squeeze` is for anamorphic NTSC discs, whose 4:3 frame holds a 16:9 picture squeezed horizontally; `stretch` fills the window ignoring the shape |
 | `--overscan <percent>` | How much of the edges to hide, as a TV does — same as the O key. `0` (default) shows the standard picture: for NTSC the part of the decoded image that is exactly 4:3, which leaves out the blanking margins at the sides (black on most discs). A percentage hides that much more in each dimension, half on either side (`5` shows the central 95 %). `full` shows the whole decoded image, margins included |
 | `--seek <seconds>` | Seek to position before starting playback |
+| `--chapter <n>` | Start playing at chapter `n`, found by searching the capture for its chapter codes (see below); after `--seek`, if given |
 | `--pause` | Start paused |
 | `--export-frame <file>` | Save one decoded frame as PNG to `<file>` and quit. Combine with `--export-frame-at` to give the decoder (sync lock, adaptive equaliser, motion detection) a warm-up run from the `--seek` position. |
 | `--export-frame-at <seconds>` | Stream position of the frame saved by `--export-frame` (absolute, same units as `--seek` — not a delay after it). Default: the first decoded frame. |
@@ -254,6 +255,18 @@ with N to watch its 3, 2, 3, 2 rhythm), `hold` marks the fields that re-show the
 frame, and `adapt` a locked frame whose missing repeat made it fall back to the motion-adaptive
 path.
 
+**Chapters**: laserdisc frames carry their chapter number (the VBI codes for NTSC/PAL, the
+line 564 disc code for MUSE) on discs that have chapters.  A chapter index exists only on some
+discs, in the lead-in, which captures usually leave out, and `museld` doesn't read it.  The Up
+and Down keys, and `--chapter`, therefore search iteratively for the chapter boundary: this
+typically takes less than a second.  Down goes to the start of the current chapter, or, within
+the first seconds of it, to the chapter before.  The search needs the input's length, and works
+on files and http input, not on live streams or the 16.2 MHz baseband reader.
+
+**Stop code**: The picture stop code of NTSC
+CAV discs (`82CFFF`, IEC 60857 10.1.4) pauses playback on the frame it marks, once per stop;
+the P key turns that off.  If `--write` or `--export-frame` was given, picture stops are ignored.
+
 **NTSC level calibration**: video levels are calibrated automatically against references in the
 signal. Black (0 IRE) tracks the measured back porch blanking level; the gain (100 IRE) is taken
 from the white flag — a flat 100 IRE line in the vertical interval that most discs carry — when
@@ -298,6 +311,8 @@ also given, which is the mode to use for batch rendering.
 | Space | Pause / resume |
 | N | Step one field forward (while paused) |
 | Left / Right | Seek ±10 seconds |
+| Up / Down | Next / previous chapter (see Chapters above) |
+| P | Toggle honouring the picture stop codes (on by default) |
 | 1 | Normal field interpolation (motion detection) |
 | 2 | Force intra-field interpolation (treat everything as motion) |
 | 3 | Force inter-frame interpolation (treat everything as still) |
@@ -308,7 +323,7 @@ also given, which is the mode to use for batch rendering.
 | E | Cycle the EFM adaptive filter size: 3 → 5 → 9 → 17 → 35 → 71 taps → off → 3 (RF input only, see `--efm-filter-size`). The filter restarts from identity at each change. |
 | B | Cycle the audio channels heard: stereo → left only → right only (bilingual discs, or the left-only analog track on AC3 discs; `--write` output always keeps stereo) |
 | X | Cycle CX noise reduction for the NTSC analog audio: auto (follow the VBI flag, the default) → off → on; `--cx` sets the initial mode. Shown in parentheses when the audio playing is not the analog track (the setting is remembered but inaudible). The V info line shows the CX status: the disc's flag in auto mode, or e.g. "CX off forced (disc on)" when overridden. |
-| V | Toggle disc code / chapter / frame display, plus the NTSC film mode and black level status (TOC reading is not implemented) |
+| V | Toggle disc code / chapter / frame display, plus the NTSC film mode and black level status |
 | J | NTSC: cycle the black level: auto → NTSC-M (7.5 IRE) → NTSC-J (0 IRE), see `--black-level` |
 | C | Show cursor coordinates and input-file offsets (see below) |
 | L | Toggle non-linear de-emphasis processing |

@@ -66,6 +66,7 @@ private:
     musevk::VulkanManager &m_manager;
     Shaders m_shaders;
     const bool m_decode_video;
+    uint32_t m_frame_seek_generation = 0; // of the frame in m_frame_buffers[0]
     const bool m_decode_all_fields;
     const bool m_decode_audio;
     musevk::TimestampQueryPool *m_timestamp_query_pool; // if set we use it

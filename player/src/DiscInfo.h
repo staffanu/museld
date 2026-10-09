@@ -20,6 +20,15 @@ public:
         return std::nullopt;
     }
 
+    // The format-independent navigation facts, for the chapter search and
+    // the picture stop.  Each is unset or false when the format or this
+    // particular frame does not carry it.
+    [[nodiscard]] virtual std::optional<int> chapter() const { return std::nullopt; }
+    [[nodiscard]] virtual bool isLeadIn() const { return false; }
+    [[nodiscard]] virtual bool isLeadOut() const { return false; }
+    // The disc asks the player to stop on this picture (a CAV still frame)
+    [[nodiscard]] virtual bool pictureStop() const { return false; }
+
     virtual ~DiscInfo() = default;
 
 protected:
