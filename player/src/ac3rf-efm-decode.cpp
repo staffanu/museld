@@ -263,6 +263,10 @@ int main(int argc, char *argv[]) {
                                    "transitions (implies --input-format u8)", [&] () -> void {
         input_format_option = std::make_optional(eUint8);
         operation = EfmTValues;
+        // One byte per T value, about a million per second of audio: the
+        // default block of a million left anything shorter unread (a partial
+        // block at the end is dropped), so take them in small steps
+        block_size = 4096;
     });
     options.option("--resample", "HZ", "Resample the input to HZ and write it as raw u8; no audio "
                                        "is decoded", [&] () -> void {
@@ -440,7 +444,10 @@ int main(int argc, char *argv[]) {
                 log.info(eApplication, std::format("Processing input file {}", filename));
                 processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
                     [&] { auto r = makeInputReader(filename, input_format, block_size, &log);
-                          r->setDcBlocking(true); // RF carries no legitimate DC
+                          // RF carries no legitimate DC; t-values are small
+                          // integers whose mean is the data
+                          if (operation != EfmTValues)
+                              r->setDcBlocking(true);
                           return r; }(), block_size, out_fd, use_simd,
                     efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,
                     efm_t_values_output_filename, efm_circ_debug_filename, concealment_impl, target_sample_frequency,
