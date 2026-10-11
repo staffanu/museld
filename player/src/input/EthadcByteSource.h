@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include "ByteSource.h"
@@ -39,10 +40,10 @@ public:
     int64_t size() override { return -1; }
     bool isLive() const override { return true; }
 
-    // Binds the port just long enough to see one packet, and reports its
-    // header; nullopt when none arrived within `timeout`.  The port is free
-    // again on return.
-    static std::optional<StreamInfo> probe(const std::string &url, std::chrono::milliseconds timeout);
+    // What the first packet's header said, waiting up to `timeout` for it;
+    // nullopt when none arrived in time.  Nothing is consumed: the samples
+    // keep queueing for read().
+    std::optional<StreamInfo> waitForStream(std::chrono::milliseconds timeout);
 
 private:
     struct Impl;

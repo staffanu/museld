@@ -3,13 +3,16 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <cerrno>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include <vector>
 #include "InputProbe.h"
+#include "input/PreparedInput.h"
 #include "logging/StreamLogger.h"
 
 using namespace std;
@@ -88,6 +91,41 @@ void writeLds(const filesystem::path &path, const vector<float> &samples) {
 InputProbeResult probe(const filesystem::path &path) {
     StreamLogger log(StreamLogger::c_log_warn, cerr, false);
     return probeInputFile(log, path.string(), nullopt);
+}
+
+// A live input, as a pipe is to the probe: bytes arrive in pieces, cannot be
+// seeked, have no size, and once they are gone they are gone.
+class LiveBytes : public ByteSource {
+public:
+    explicit LiveBytes(vector<uint8_t> bytes) : m_bytes(std::move(bytes)) {}
+
+    ssize_t read(uint8_t *buf, size_t len) override {
+        const size_t n = min({len, m_bytes.size() - m_pos, (size_t)65521}); // odd pieces, like a pipe
+        memcpy(buf, m_bytes.data() + m_pos, n);
+        m_pos += n;
+        return (ssize_t)n;
+    }
+    int64_t seek(int64_t, int) override {
+        errno = ESPIPE;
+        return -1;
+    }
+    int64_t size() override { return -1; }
+    bool isLive() const override { return true; }
+
+private:
+    vector<uint8_t> m_bytes;
+    size_t m_pos = 0;
+};
+
+vector<uint8_t> s16Bytes(const vector<float> &samples) {
+    vector<uint8_t> bytes;
+    bytes.reserve(samples.size() * 2);
+    for (float s : samples) {
+        auto v = (int16_t)lround(s * 20000.0f);
+        bytes.push_back((uint8_t)(v & 0xFF));
+        bytes.push_back((uint8_t)((uint16_t)v >> 8));
+    }
+    return bytes;
 }
 
 constexpr size_t c_samples = 6 << 20;
@@ -205,4 +243,70 @@ TEST_CASE("Probe reports white noise as unclassifiable", "[InputProbe]") {
     filesystem::remove(path);
 
     CHECK(r.type == InputProbeResult::Type::eUnknown);
+}
+
+TEST_CASE("Probe reads a live input window after window until the signal starts", "[InputProbe]") {
+    // A capture device started before PLAY: 12M samples of noise, then NTSC
+    // RF.  The probe has to wait through the noise without committing to a
+    // format or a type, and the player then has to continue from the reader
+    // the probe decoded the stream with -- there is no reopening a pipe.
+    mt19937 rng(11);
+    uniform_real_distribution<float> dist(-0.1f, 0.1f);
+    vector<float> samples(12 << 20);
+    for (auto &s : samples) s = dist(rng);
+    const auto rf = synthesizeRf(c_samples, 40e6, 15734.2657, 8.2e6, 0.9e6, 2.301e6, 262.5);
+    samples.insert(samples.end(), rf.begin(), rf.end());
+    // and a marker the player can recognize after the handover, starting on a
+    // block boundary of the player's reader so a lost sample would show as a
+    // misaligned marker
+    REQUIRE(samples.size() % 4096 == 0);
+    for (int i = 0; i < 1 << 20; i++)
+        samples.push_back(i % 2 ? 1.0f : -1.0f);
+
+    StreamLogger log(StreamLogger::c_log_warn, cerr, false);
+    PreparedInput input("live", make_unique<LiveBytes>(s16Bytes(samples)));
+    REQUIRE(input.isLive());
+    auto r = probeInput(log, input, nullopt);
+
+    REQUIRE(r.format.has_value());
+    CHECK(*r.format == eSint16);
+    CHECK(r.type == InputProbeResult::Type::eNtscRf);
+    CHECK_THAT(r.sample_frequency, Catch::Matchers::WithinRel(40e6, 0.001));
+    CHECK(r.line_strength > 0.6); // measured on a clean window, not the one the signal starts in
+
+    // The player opens the input in its own block size and reads on to the marker
+    auto reader = input.open(4096, nullptr);
+    reader->initialize();
+    CHECK(reader->isLive());
+    // The reader starts somewhere inside the RF (the probe consumed the rest),
+    // and the marker has to turn up whole, at the start of a block: RF never
+    // alternates between exactly the two extremes
+    vector<float> block(4096);
+    auto markerAt = [&](size_t i) {
+        for (size_t k = 0; k < 8; k++)
+            if (block[i + k] != ((i + k) % 2 ? 20000.0f : -20000.0f))
+                return false;
+        return true;
+    };
+    bool marker_seen = false, marker_aligned = false;
+    while (!marker_seen && reader->readFloats(block.data()) == 4096) {
+        for (size_t i = 0; i + 8 <= block.size(); i++) {
+            if (markerAt(i)) {
+                marker_seen = true;
+                marker_aligned = i == 0;
+                break;
+            }
+        }
+    }
+    CHECK(marker_seen);
+    CHECK(marker_aligned);
+}
+
+TEST_CASE("Probe takes a live input of known format from its first window", "[InputProbe]") {
+    const auto rf = synthesizeRf(c_samples, 62.5e6, 33750.0, 11.5e6, 2e6, 0);
+    StreamLogger log(StreamLogger::c_log_warn, cerr, false);
+    PreparedInput input("live", make_unique<LiveBytes>(s16Bytes(rf)), eSint16);
+    auto r = probeInput(log, input, eSint16);
+    CHECK(r.type == InputProbeResult::Type::eMuseRf);
+    CHECK_THAT(r.sample_frequency, Catch::Matchers::WithinRel(62.5e6, 0.001));
 }

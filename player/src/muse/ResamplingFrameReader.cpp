@@ -21,13 +21,13 @@ using namespace std;
 
 ResamplingFrameReader::ResamplingFrameReader(
         Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
-        const std::string &filename, InputFormat input_format, double sample_rate,
+        PreparedInput input, double sample_rate,
         double initial_seek_seconds, bool demodulate, bool benchmark_shaders, bool efm_enabled,
         int efm_adaptive_filter_size, const std::optional<std::string> &output_filename)
-        : FrameReader(log, filename,
-                      inputIsLive(filename),
+        : FrameReader(log, input.name(),
+                      input.isLive(),
                       initial_seek_seconds, output_filename),
-          m_input_format(input_format),
+          m_input(std::move(input)),
           m_demodulate(demodulate),
           m_input_reader(nullptr),
           m_sample_rate(demodulate ? sample_rate / MuseDemodulatedBlock::c_video_decimation_rate : sample_rate),
@@ -53,8 +53,8 @@ ResamplingFrameReader::ResamplingFrameReader(
           m_frame_start_offset(0),
           m_error_sum(0) {
     if (m_demodulate) {
-        m_demodulator = new MuseRfDemodulator(log, executable_dir, m_filename, (float)sample_rate, vulkan_manager,
-                                              m_input_format, benchmark_shaders, efm_enabled,
+        m_demodulator = new MuseRfDemodulator(log, executable_dir, std::move(m_input), (float)sample_rate, vulkan_manager,
+                                              benchmark_shaders, efm_enabled,
                                               efm_adaptive_filter_size);
         // The demodulator already scales output to MUSE 0..255 range.
         m_input_scale = 1.f;
@@ -65,7 +65,7 @@ ResamplingFrameReader::ResamplingFrameReader(
 
 bool ResamplingFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
     if (m_demodulator == nullptr) {
-        m_input_reader = makeInputReader(m_filename, m_input_format, c_input_sub_buffer_size, &m_log);
+        m_input_reader = m_input.open(c_input_sub_buffer_size, &m_log);
         m_input_reader->initialize();
         // File mode: the reader hands out the file's own sample codes, so map them to
         // the ~0..255 range that downstream sync detection expects from their width

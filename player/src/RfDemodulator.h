@@ -26,18 +26,18 @@
 #include "logging/Logger.h"
 #include "input/InputReader.h"
 #include "input/InputReaderFactory.h"
+#include "input/PreparedInput.h"
 #include "musevk/VulkanManager.h"
 
 template<class B>
 class RfDemodulator {
 public:
-    RfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
-                  musevk::VulkanManager &vulkan_manager, InputFormat input_format, uint32_t input_block_size,
+    RfDemodulator(Logger &log, std::string executable_dir, PreparedInput input, float sample_frequency,
+                  musevk::VulkanManager &vulkan_manager, uint32_t input_block_size,
                   bool benchmark_shaders)
             : m_executable_dir(std::move(executable_dir)),
-              m_filename(std::move(filename)),
+              m_input(std::move(input)),
               m_sample_frequency(sample_frequency),
-              m_input_format(input_format),
               m_input_block_size(input_block_size),
               m_vulkan_manager(vulkan_manager),
               m_benchmark_shaders(benchmark_shaders),
@@ -65,7 +65,7 @@ public:
     }
 
     bool initialize(int number_of_block_buffers) {
-        m_input_reader = makeInputReader(m_filename, m_input_format, m_input_block_size, &m_log);
+        m_input_reader = m_input.open(m_input_block_size, &m_log);
         m_input_reader->setDcBlocking(true); // RF carries no legitimate DC
         m_input_is_fifo = m_input_reader->isLive();
         m_input_reader->initialize();
@@ -227,9 +227,8 @@ protected:
     }
 
     const std::string m_executable_dir;
-    const std::string m_filename;
+    PreparedInput m_input; // until initialize() opens it as m_input_reader
     const float m_sample_frequency;
-    const InputFormat m_input_format;
     const uint32_t m_input_block_size;
     musevk::VulkanManager &m_vulkan_manager;
     bool m_benchmark_shaders;

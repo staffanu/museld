@@ -288,17 +288,26 @@ playback unless turned off with P).
 
 **Input format abstraction**: `InputReader` specializations (raw widths, lds, FLAC) with
 auto-detection by file extension, reading through a `ByteSource` (`input/ByteSource.h`) that
-hides where the bytes come from: a file or fifo (`FdByteSource`), a web server via HTTP range
-requests (`HttpByteSource`, cpp-httplib, prefetching 3×4 MiB ahead) or the live ethadc UDP
-capture stream (`EthadcByteSource`, built on the vendored `third_party/ethadc` receiver; not
-in the Windows build). Names starting with `http://` or `udp://` select them; `inputIsLive()`
-replaces the old `filesystem::is_fifo()` checks. A udp:// stream's format and rate come from its
-packet headers (`probeNetworkStream`), and the ethadc `u10p` format is the `.lds` packing.
+hides where the bytes come from: a file, fifo or stdin (`FdByteSource`; `-` names stdin, which
+is live when it is a pipe and a plain seekable source when a file is redirected in, decided by
+`fstat`), a web server via HTTP range requests (`HttpByteSource`, cpp-httplib, prefetching
+3×4 MiB ahead) or the live ethadc UDP capture stream (`EthadcByteSource`, built on the vendored
+`third_party/ethadc` receiver; not in the Windows build). Names starting with `http://` or
+`udp://` select them; `inputIsLive()` replaces the old `filesystem::is_fifo()` checks. A udp://
+stream's format and rate come from its packet headers (`networkStreamInfo()` on the open source;
+options that contradict them are refused), and the ethadc `u10p` format is the `.lds` packing.
+museld opens every input once, in `museld.cpp`, as a `PreparedInput` (`input/PreparedInput.h`)
+that the probe reads and the frame reader then opens as its `InputReader`: a live input cannot
+be reopened where detection left it. Where detection had to decode a live stream (one reader
+per stream, so FLAC works), the player takes that reader over through `RebatchingInputReader`.
 
 **Content-based input detection**: `src/InputProbe.{h,cpp}` (museld only, CPU-only, no GPU)
-detects sample format, MUSE/NTSC RF type and sample rate from short chunks of the file.
-This is museld's default: `--input-type` and `--sample-freq` are probed when not given
-(so fifo input needs both), and `--probe` prints the measurements instead of decoding.
+detects sample format, MUSE/NTSC RF type and sample rate from short windows of samples: a file
+is sampled at a few positions spread over its length, a live input (pipe, fifo, udp://) is read
+window after window until the verdict is clear (what it consumed is gone; the first window is
+replayed to the reader so a FLAC header is not lost). This is museld's default: type, rate and
+format are each detected only when not given (`--input-type`, `--sample-freq`, `--input-format`
+or the extension), and `--probe` prints the measurements instead of decoding.
 
 **No bare `long` for sample offsets or bit patterns**: Windows is LLP64, so `long` is 32
 bits there (this once broke NTSC vertical sync lock on Windows only). Sample/file offsets
