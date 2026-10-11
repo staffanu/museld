@@ -235,11 +235,11 @@ int main(int argc, char *argv[]) {
 
     auto usage = [&options] (std::ostream &out, int status) -> void {
         options.printHelp(out, "ac3rf-efm-decode [options] [<input_file> ...]");
-        out << "\nInput is read from stdin when no file is given, and the output is written to\n"
-               "stdout unless --output-filename says otherwise.  Several input files can be given,\n"
-               "with options in between; each one is decoded with the options in effect where it\n"
-               "appears.  An argument starting with ! is ignored, which is practical for disabling\n"
-               "an option in a saved command line.\n";
+        out << "\nInput is read from stdin when no file is given (or when the file is named \"-\"),\n"
+               "and the output is written to stdout unless --output-filename says otherwise.\n"
+               "Several input files can be given, with options in between; each one is decoded\n"
+               "with the options in effect where it appears.  An argument starting with ! is\n"
+               "ignored, which is practical for disabling an option in a saved command line.\n";
         exit(status);
     };
 
@@ -422,7 +422,7 @@ int main(int argc, char *argv[]) {
                 option->action();
             } else if (it->find("!", 0) == 0) {
                 it++; // used to ignore options (to easily enable/disable options in debug settings etc.)
-            } else if (it->find("-", 0) == 0) {
+            } else if (*it != "-" && it->find("-", 0) == 0) {
                 std::cerr << "Unknown option: " << *it << std::endl;
                 usage(std::cerr, EXIT_FAILURE);
             } else {
@@ -462,7 +462,7 @@ int main(int argc, char *argv[]) {
                 throw std::runtime_error("Input format must be given for stdin");
 
             log.info(eApplication, std::format("Processing stdin"));
-            auto stdin_reader = makeStdinInputReader(input_format_option.value(), block_size);
+            auto stdin_reader = makeInputReader("-", input_format_option.value(), block_size, &log);
             processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
                 std::move(stdin_reader), block_size, out_fd, use_simd,
                 efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,

@@ -2,17 +2,23 @@
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
 #include <algorithm>
+#include <cassert>
+#include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstring>
-#include <filesystem>
 #include <format>
-#include <fstream>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <thread>
 #include <valarray>
 #include <vector>
 #include "InputProbe.h"
 #include "input/ByteSource.h"
 #include "input/InputReaderFactory.h"
+#include "input/PreparedInput.h"
 #include "filter/WindowedSinc.h"
 #include "filter/FFT.h"
 #include "logging/Logger.h"
@@ -65,23 +71,220 @@ struct ChunkStats {
     double muse16_ratio;        // ...relative to off-period control folds
 };
 
-// Read chunk_samples floats starting at the given sample offset with a fresh
-// reader, so probing never disturbs playback state.  Returns an empty vector
-// when the file does not reach that far.
-vector<float> readChunk(const string &filename, InputFormat format,
-                        int64_t sample_offset, uint32_t chunk_samples) {
-    vector<float> samples(chunk_samples);
-    try {
-        auto reader = makeInputReader(filename, format, chunk_samples);
-        reader->initialize();
-        if (sample_offset > 0 && !reader->seek(sample_offset))
-            return {};
-        if (reader->readFloats(samples.data()) != (int)chunk_samples)
-            return {};
-    } catch (const std::exception &) {
-        return {}; // unreadable at this offset (e.g. a FLAC seek past the end)
+// --- Where the measurements get their samples ------------------------------
+//
+// The measurements read windows of samples under a format, and do not care
+// where they come from.  A seekable input gives a window at any position, so
+// it is sampled at a few positions spread over its length; a live input gives
+// the next samples to arrive and nothing else, and is read window after
+// window until the verdict is clear.
+
+// A source over bytes held in memory: the first window of a live input of
+// unknown format, read once and then interpreted under each candidate format.
+class MemoryByteSource : public ByteSource {
+public:
+    MemoryByteSource(const uint8_t *data, size_t size) : m_data(data), m_size(size) {}
+
+    ssize_t read(uint8_t *buf, size_t len) override {
+        const size_t n = min(len, m_size - m_pos);
+        memcpy(buf, m_data + m_pos, n);
+        m_pos += n;
+        return (ssize_t)n;
     }
-    return samples;
+
+    int64_t seek(int64_t offset, int whence) override {
+        int64_t target = whence == SEEK_SET ? offset : whence == SEEK_CUR ? (int64_t)m_pos + offset
+                                                                          : (int64_t)m_size + offset;
+        if (target < 0 || target > (int64_t)m_size) {
+            errno = EINVAL;
+            return -1;
+        }
+        m_pos = (size_t)target;
+        return target;
+    }
+
+    int64_t size() override { return (int64_t)m_size; }
+    bool isLive() const override { return false; }
+
+private:
+    const uint8_t *m_data;
+    size_t m_size;
+    size_t m_pos = 0;
+};
+
+// A view of a source that is owned elsewhere, so that the probe's short-lived
+// readers can be opened over the player's input without taking it.
+class BorrowedByteSource : public ByteSource {
+public:
+    explicit BorrowedByteSource(ByteSource &inner) : m_inner(inner) {}
+    ssize_t read(uint8_t *buf, size_t len) override { return m_inner.read(buf, len); }
+    int64_t seek(int64_t offset, int whence) override { return m_inner.seek(offset, whence); }
+    int64_t size() override { return m_inner.size(); }
+    bool isLive() const override { return m_inner.isLive(); }
+
+private:
+    ByteSource &m_inner;
+};
+
+// The bytes a live input's first window held, followed by the rest of the
+// input: the reader that decodes the live input from here starts at the
+// stream's own start, which matters for FLAC (its header is in that window)
+// and costs nothing for raw samples.
+class ReplayByteSource : public ByteSource {
+public:
+    ReplayByteSource(vector<uint8_t> head, unique_ptr<ByteSource> rest)
+        : m_head(std::move(head)), m_rest(std::move(rest)) {}
+
+    ssize_t read(uint8_t *buf, size_t len) override {
+        if (m_pos < m_head.size()) {
+            const size_t n = min(len, m_head.size() - m_pos);
+            memcpy(buf, m_head.data() + m_pos, n);
+            m_pos += n;
+            return (ssize_t)n;
+        }
+        return m_rest->read(buf, len);
+    }
+
+    int64_t seek(int64_t, int) override {
+        errno = ESPIPE;
+        return -1;
+    }
+
+    int64_t size() override { return -1; }
+    bool isLive() const override { return true; }
+
+private:
+    vector<uint8_t> m_head;
+    size_t m_pos = 0;
+    unique_ptr<ByteSource> m_rest;
+};
+
+class SampleSource {
+public:
+    virtual ~SampleSource() = default;
+    // chunk_samples floats under `format` from `sample_offset` (a live
+    // source ignores the offset and gives the next samples).  Empty when the
+    // input does not reach that far, or the stream has ended.
+    virtual vector<float> read(InputFormat format, int64_t sample_offset, uint32_t chunk_samples) = 0;
+    // The input's length in bytes, or -1 when unknown (live).
+    virtual int64_t sizeBytes() = 0;
+    // The first bytes of the input, for the container signatures; empty when
+    // they cannot be had.
+    virtual vector<uint8_t> head(size_t n) = 0;
+};
+
+// A seekable input, read with a fresh reader per window so the readers' own
+// state (a FLAC decoder's position) never leaks between measurements; the
+// source is left wherever the last window ended, and the player rewinds it.
+class SeekableSamples : public SampleSource {
+public:
+    explicit SeekableSamples(ByteSource &source) : m_source(source) {}
+
+    vector<float> read(InputFormat format, int64_t sample_offset, uint32_t chunk_samples) override {
+        vector<float> samples(chunk_samples);
+        try {
+            if (m_source.seek(0, SEEK_SET) != 0)
+                return {};
+            auto reader = makeInputReader(make_unique<BorrowedByteSource>(m_source), format, chunk_samples);
+            reader->initialize();
+            if (sample_offset > 0 && !reader->seek(sample_offset))
+                return {};
+            if (reader->readFloats(samples.data()) != (int)chunk_samples)
+                return {};
+        } catch (const std::exception &) {
+            return {}; // unreadable at this offset (e.g. a FLAC seek past the end)
+        }
+        return samples;
+    }
+
+    int64_t sizeBytes() override { return m_source.size(); }
+
+    vector<uint8_t> head(size_t n) override {
+        vector<uint8_t> bytes(n);
+        if (m_source.seek(0, SEEK_SET) != 0)
+            return {};
+        size_t got = 0;
+        while (got < n) {
+            const ssize_t r = m_source.read(bytes.data() + got, n - got);
+            if (r <= 0)
+                break;
+            got += (size_t)r;
+        }
+        bytes.resize(got);
+        return bytes;
+    }
+
+private:
+    ByteSource &m_source;
+};
+
+// A window of bytes held in memory, interpreted under whatever format is asked
+// for: how a live input of unknown format is looked at.
+class MemorySamples : public SampleSource {
+public:
+    explicit MemorySamples(const vector<uint8_t> &bytes) : m_bytes(bytes) {}
+
+    vector<float> read(InputFormat format, int64_t sample_offset, uint32_t chunk_samples) override {
+        vector<float> samples(chunk_samples);
+        try {
+            auto reader = makeInputReader(make_unique<MemoryByteSource>(m_bytes.data(), m_bytes.size()),
+                                          format, chunk_samples);
+            reader->initialize();
+            if (sample_offset > 0 && !reader->seek(sample_offset))
+                return {};
+            if (reader->readFloats(samples.data()) != (int)chunk_samples)
+                return {};
+        } catch (const std::exception &) {
+            return {};
+        }
+        return samples;
+    }
+
+    int64_t sizeBytes() override { return (int64_t)m_bytes.size(); }
+
+    vector<uint8_t> head(size_t n) override {
+        return {m_bytes.begin(), m_bytes.begin() + (ptrdiff_t)min(n, m_bytes.size())};
+    }
+
+private:
+    const vector<uint8_t> &m_bytes;
+};
+
+// A live input decoded by one reader that keeps its place: the measurements
+// get consecutive windows, and the player takes the reader over afterwards.
+class LiveSamples : public SampleSource {
+public:
+    LiveSamples(InputReader &reader, InputFormat format) : m_reader(reader), m_format(format) {}
+
+    vector<float> read(InputFormat format, int64_t, uint32_t chunk_samples) override {
+        assert(format == m_format);
+        if (m_ended)
+            return {};
+        // Whole reader blocks: a little more than asked for does no harm
+        const uint32_t block = m_reader.block_size();
+        vector<float> samples((chunk_samples + block - 1) / block * block);
+        for (size_t at = 0; at < samples.size(); at += block) {
+            if (m_reader.readFloats(samples.data() + at) != (int)block) {
+                m_ended = true;
+                return {};
+            }
+        }
+        return samples;
+    }
+
+    int64_t sizeBytes() override { return -1; }
+    vector<uint8_t> head(size_t) override { return {}; }
+    bool ended() const { return m_ended; }
+
+private:
+    InputReader &m_reader;
+    const InputFormat m_format;
+    bool m_ended = false;
+};
+
+vector<float> readChunk(SampleSource &source, InputFormat format,
+                        int64_t sample_offset, uint32_t chunk_samples) {
+    return source.read(format, sample_offset, chunk_samples);
 }
 
 // Read a chunk at the requested offset, falling back toward the start when the
@@ -89,12 +292,12 @@ vector<float> readChunk(const string &filename, InputFormat format,
 // reason -- the 36-bit STREAMINFO count that used to limit seeks in long
 // captures is hidden from libFLAC by the reader now).  Backing off keeps the
 // probe reading real data instead of reporting an unreadable file.
-vector<float> readChunkNear(Logger &log, const string &filename, InputFormat format,
+vector<float> readChunkNear(Logger &log, SampleSource &source, InputFormat format,
                             int64_t &sample_offset, uint32_t chunk_samples) {
     constexpr int c_max_backoffs = 12;
     const int64_t requested = sample_offset;
     for (int attempt = 0; ; attempt++) {
-        auto samples = readChunk(filename, format, sample_offset, chunk_samples);
+        auto samples = readChunk(source, format, sample_offset, chunk_samples);
         if (!samples.empty()) {
             if (sample_offset != requested)
                 log.debug(eInput, std::format("Probe: sample {} unreadable, used sample {} instead",
@@ -123,18 +326,13 @@ double lag1Autocorrelation(const vector<float> &x) {
     return denom > 0 ? num / denom : 0;
 }
 
-optional<InputFormat> detectFormatByMagic(const string &filename) {
-    uint8_t magic[4] = {};
-    try {
-        auto source = openByteSource(filename);
-        if (source->isLive() || source->read(magic, 4) != 4)
-            return nullopt;
-    } catch (const std::exception &) {
+optional<InputFormat> detectFormatByMagic(SampleSource &source) {
+    const auto magic = source.head(4);
+    if (magic.size() < 4)
         return nullopt;
-    }
-    if (memcmp(magic, "fLaC", 4) == 0)
+    if (memcmp(magic.data(), "fLaC", 4) == 0)
         return eFlac;
-    if (memcmp(magic, "OggS", 4) == 0)
+    if (memcmp(magic.data(), "OggS", 4) == 0)
         return eFlacOgg;
     return nullopt;
 }
@@ -147,16 +345,16 @@ optional<InputFormat> detectFormatByMagic(const string &filename) {
 // (a u8 file read as u16 still pairs correlated bytes) and only the distance
 // to perfect correlation separates them.  When more than one candidate
 // survives, the caller breaks the tie by which one shows video line structure.
-vector<InputFormat> rawFormatCandidates(Logger &log, const string &filename) {
+vector<InputFormat> rawFormatCandidates(Logger &log, SampleSource &source) {
     constexpr InputFormat formats[] = {eUint8, eSint8, eUint16, eSint16, eUint16BE, eSint16BE, eLds};
     constexpr uint32_t score_samples = 1 << 20;
     vector<pair<double, InputFormat>> scored;
     for (InputFormat fmt : formats) {
         // Score away from the file start, where lead-in may not look like RF,
         // but fall back to the start for short files
-        auto samples = readChunk(filename, fmt, 8 << 20, score_samples);
+        auto samples = readChunk(source, fmt, 8 << 20, score_samples);
         if (samples.empty())
-            samples = readChunk(filename, fmt, 0, score_samples);
+            samples = readChunk(source, fmt, 0, score_samples);
         if (samples.empty())
             continue;
         double score = lag1Autocorrelation(samples);
@@ -358,12 +556,12 @@ double foldSignificance(const vector<float> &x, int period) {
 
 // Lines per field from one chunk, for a line period in input samples; 0 when
 // fewer than two vertical sync groups were found or they disagree
-double measureFieldLines(Logger &log, const string &filename, InputFormat format,
+double measureFieldLines(Logger &log, SampleSource &source, InputFormat format,
                          int64_t offset, double line_period) {
     const double want = c_field_chunk_fields * 312.5 * line_period + c_analytic_taps + 1;
     // a multiple of 4: the lds reader unpacks four samples at a time
     const auto chunk_samples = (uint32_t)min<double>(want, c_field_chunk_max) / 4 * 4;
-    auto samples = readChunkNear(log, filename, format, offset, chunk_samples);
+    auto samples = readChunkNear(log, source, format, offset, chunk_samples);
     if (samples.empty())
         return 0;
     auto analytic = analyticSignal(samples);
@@ -471,13 +669,12 @@ double formatBytesPerSample(InputFormat format) {
     }
 }
 
-vector<int64_t> chunkOffsets(const string &filename, InputFormat format) {
+vector<int64_t> chunkOffsets(int64_t size_bytes, InputFormat format) {
     double bytes_per_sample = formatBytesPerSample(format);
-    const int64_t size = inputSize(filename);
-    int64_t total = (int64_t)((double)size / bytes_per_sample);
+    int64_t total = (int64_t)((double)size_bytes / bytes_per_sample);
     // An input of unknown size -- a live stream -- is probed on the one
     // stretch it can give us: the next samples to arrive
-    if (size < 0 || total < (int64_t)c_chunk_samples)
+    if (size_bytes < 0 || total < (int64_t)c_chunk_samples)
         return {0};
     vector<int64_t> offsets;
     for (double frac : {0.08, 0.45, 0.75}) {
@@ -505,13 +702,13 @@ struct FileAnalysis {
     bool isMuse16() const { return muse16_significance > 5 && muse16_ratio > 3; }
 };
 
-FileAnalysis analyzeFile(Logger &log, const string &filename, InputFormat format) {
+FileAnalysis analyzeFile(Logger &log, SampleSource &source, InputFormat format) {
     FileAnalysis analysis;
     vector<ChunkStats> chunks;
     vector<int64_t> chunk_offsets;
     vector<double> fold_significances, fold_ratios;
-    for (int64_t offset : chunkOffsets(filename, format)) {
-        auto samples = readChunkNear(log, filename, format, offset, c_chunk_samples);
+    for (int64_t offset : chunkOffsets(source.sizeBytes(), format)) {
+        auto samples = readChunkNear(log, source, format, offset, c_chunk_samples);
         if (samples.empty())
             continue;
         ChunkStats stats = analyzeChunk(log, samples, offset);
@@ -573,26 +770,16 @@ FileAnalysis analyzeFile(Logger &log, const string &filename, InputFormat format
     return analysis;
 }
 
-} // namespace
+// The format of the input and, when it shows video structure, the analysis
+// behind it.  `source` is read under each candidate format: only the true one
+// decodes into a video signal.
+struct FormatVerdict {
+    optional<InputFormat> format; // the one found, or nullopt when nothing is convincing
+    FileAnalysis best{};
+    bool have_structure = false;  // best is meaningful
+};
 
-InputProbeResult probeInputFile(Logger &log, const string &filename,
-                                optional<InputFormat> known_format) {
-    InputProbeResult result;
-
-    result.format = known_format ? known_format : detectFormatByMagic(filename);
-    // The FLAC reader decides between plain FLAC and FLAC in Ogg from the stream
-    // itself, whatever the extension says; report what it will find
-    if (result.format == eFlac || result.format == eFlacOgg)
-        if (auto magic = detectFormatByMagic(filename))
-            result.format = magic;
-    vector<InputFormat> candidates;
-    if (result.format)
-        candidates = {*result.format};
-    else
-        candidates = rawFormatCandidates(log, filename);
-    if (candidates.empty())
-        return result;
-
+FormatVerdict findFormat(Logger &log, SampleSource &source, const vector<InputFormat> &candidates) {
     // Analyze under each candidate format and let the video structure break
     // byte-level ties: only the true format decodes into a video signal (a
     // smooth baseband u16 capture scores high as u8 too, but shows no line
@@ -604,27 +791,26 @@ InputProbeResult probeInputFile(Logger &log, const string &filename,
     // format that shows structure is the truth, no matter how well a wider
     // one scores.  Among equal widths, a muse-16 fold hit outranks an RF line
     // lock, since the fold is the far more specific signature.
-    FileAnalysis best{};
-    bool have_best = false;
+    FormatVerdict verdict;
     auto quality = [](const FileAnalysis &a) {
         return a.isMuse16() ? 100.0 + a.muse16_significance
                             : (a.consensus ? a.line_strength : 0.0);
     };
     for (InputFormat fmt : candidates) {
-        FileAnalysis a = analyzeFile(log, filename, fmt);
+        FileAnalysis a = analyzeFile(log, source, fmt);
         if (quality(a) <= 0)
             continue;
-        bool narrower = have_best &&
-                formatBytesPerSample(fmt) < formatBytesPerSample(*result.format);
-        bool wider = have_best &&
-                formatBytesPerSample(fmt) > formatBytesPerSample(*result.format);
-        if (!have_best || narrower || (!wider && quality(a) > quality(best))) {
-            best = a;
-            result.format = fmt;
-            have_best = true;
+        bool narrower = verdict.have_structure &&
+                formatBytesPerSample(fmt) < formatBytesPerSample(*verdict.format);
+        bool wider = verdict.have_structure &&
+                formatBytesPerSample(fmt) > formatBytesPerSample(*verdict.format);
+        if (!verdict.have_structure || narrower || (!wider && quality(a) > quality(verdict.best))) {
+            verdict.best = a;
+            verdict.format = fmt;
+            verdict.have_structure = true;
         }
     }
-    if (!have_best) {
+    if (!verdict.have_structure && !candidates.empty()) {
         // No format shows video structure.  Report the byte-level winner if it
         // was unambiguous, or -- by the same asymmetry as above -- if the top
         // scorer is strictly narrower than every other candidate: the wider
@@ -633,17 +819,21 @@ InputProbeResult probeInputFile(Logger &log, const string &filename,
         for (size_t i = 1; i < candidates.size(); i++)
             narrowest &= formatBytesPerSample(candidates.front()) < formatBytesPerSample(candidates[i]);
         if (candidates.size() == 1 || narrowest)
-            result.format = candidates.front();
-        return result;
+            verdict.format = candidates.front();
     }
+    return verdict;
+}
 
+// The type and the sample rate from an analysis that found video structure;
+// the field period test reads more of `source` where it is needed.
+void classify(Logger &log, SampleSource &source, const FileAnalysis &best, InputProbeResult &result) {
     if (best.isMuse16()) {
         result.type = InputProbeResult::Type::eMuse16Baseband;
         result.line_period = 480;
         result.line_strength = best.line_strength;
         result.sample_frequency = 16.2e6;
         result.sample_frequency_snapped = true;
-        return result;
+        return;
     }
 
     result.line_period = best.line_period;
@@ -658,7 +848,7 @@ InputProbeResult probeInputFile(Logger &log, const string &filename,
         result.type = Type::eMuse16Baseband;
         result.sample_frequency = 16.2e6;
         result.sample_frequency_snapped = true;
-        return result;
+        return;
     }
 
     // Otherwise classify on the carrier frequency: NTSC deviates between 7.6
@@ -702,7 +892,7 @@ InputProbeResult probeInputFile(Logger &log, const string &filename,
             result.type = Type::eMuseRf;
             break;
         }
-        result.field_lines = measureFieldLines(log, filename, *result.format, best.reference_offset, result.line_period);
+        result.field_lines = measureFieldLines(log, source, *result.format, best.reference_offset, result.line_period);
         if (abs(result.field_lines - 262.5) <= 1.5)
             result.type = Type::eNtscRf;
         else if (abs(result.field_lines - 312.5) <= 1.5)
@@ -712,13 +902,160 @@ InputProbeResult probeInputFile(Logger &log, const string &filename,
         break;
     }
     if (result.type == Type::eUnknown)
-        return result;
+        return;
 
     result.sample_frequency = estimateSampleFrequency(result, result.type);
     for (double rate : c_known_rates)
         if (result.sample_frequency == rate)
             result.sample_frequency_snapped = true;
+}
+
+// A seekable input, or one window of a live one: the format first, from the
+// signature or by trying the raw formats, then the classification.
+InputProbeResult probeSamples(Logger &log, SampleSource &source, optional<InputFormat> known_format) {
+    InputProbeResult result;
+
+    result.format = known_format ? known_format : detectFormatByMagic(source);
+    // The FLAC reader decides between plain FLAC and FLAC in Ogg from the stream
+    // itself, whatever the extension says; report what it will find
+    if (result.format == eFlac || result.format == eFlacOgg)
+        if (auto magic = detectFormatByMagic(source))
+            result.format = magic;
+    vector<InputFormat> candidates;
+    if (result.format)
+        candidates = {*result.format};
+    else
+        candidates = rawFormatCandidates(log, source);
+    if (candidates.empty())
+        return result;
+
+    const FormatVerdict verdict = findFormat(log, source, candidates);
+    if (verdict.format)
+        result.format = verdict.format;
+    if (verdict.have_structure)
+        classify(log, source, verdict.best, result);
     return result;
+}
+
+// The first window of a live input of unknown format: enough bytes for the
+// line-period chunk under the widest raw format.  The field period test needs
+// more, and gets it from the stream once the format is known.
+constexpr size_t c_live_window_bytes = (size_t)c_chunk_samples * 2;
+// The reader a live input is decoded with while it is probed, and then
+// played from: small blocks, so a window of any size is a whole number of them
+constexpr uint32_t c_live_block_samples = 1 << 16;
+// How often to say that a live input still shows nothing recognizable
+constexpr int c_live_report_every = 10;
+// A line lock this strong needs no second window (clean RF measures 0.9+)
+constexpr double c_live_clear_strength = 0.6;
+
+// Reads `n` bytes from a live source, waiting for them; fewer at the end of
+// the stream.
+vector<uint8_t> readLiveWindow(ByteSource &source, size_t n) {
+    vector<uint8_t> bytes(n);
+    size_t got = 0;
+    while (got < n) {
+        const ssize_t r = source.read(bytes.data() + got, n - got);
+        if (r == -1 && errno == EAGAIN) {
+            this_thread::sleep_for(chrono::milliseconds(1));
+            continue;
+        }
+        if (r == -1)
+            throw runtime_error(std::format("Error reading input: {}", strerror(errno)));
+        if (r == 0)
+            break;
+        got += (size_t)r;
+    }
+    bytes.resize(got);
+    return bytes;
+}
+
+// A live input is read window after window until the verdict is clear:
+// started before the player plays, it waits through the lead-in, and whatever
+// the detection consumed is gone, which a live input does not miss.  The
+// format comes first, from windows of raw bytes interpreted under each
+// candidate (committed to only once one shows video structure, or the
+// stream's signature says FLAC); from then on one reader decodes the stream,
+// so that FLAC works too, and the player continues from that reader.
+InputProbeResult probeLive(Logger &log, PreparedInput &input, optional<InputFormat> known_format, bool need_type) {
+    InputProbeResult result;
+    optional<InputFormat> format = known_format;
+    vector<uint8_t> window;
+    unique_ptr<InputReader> reader;
+    bool have_result = false; // a verdict is in `result`
+    bool confirming = false;  // ...and this window is the one more it gets
+    for (int windows = 1; ; windows++) {
+        if (!format) {
+            window = readLiveWindow(input.source(), c_live_window_bytes);
+            if (window.empty())
+                return result; // the stream ended before anything came
+            MemorySamples samples(window);
+            if (auto magic = detectFormatByMagic(samples)) {
+                format = magic;
+            } else {
+                const auto candidates = rawFormatCandidates(log, samples);
+                const FormatVerdict verdict = findFormat(log, samples, candidates);
+                if (verdict.have_structure)
+                    format = verdict.format;
+            }
+            if (!format) {
+                if (window.size() < c_live_window_bytes)
+                    return result; // the stream ended
+                if (windows % c_live_report_every == 0)
+                    log.warn(eInput, std::format("Probe: no recognizable signal in the live input yet "
+                                                 "({} windows of {} MiB read); waiting for more",
+                                                 windows, c_live_window_bytes >> 20));
+                continue;
+            }
+        }
+        if (!reader) {
+            // From here one reader decodes the stream, starting with the
+            // window already read where there is one
+            reader = makeInputReader(make_unique<ReplayByteSource>(std::move(window), input.releaseSource()),
+                                     *format, c_live_block_samples, &log);
+            reader->initialize();
+            window.clear();
+        }
+        LiveSamples samples(*reader, *format);
+        InputProbeResult attempt;
+        attempt.format = format;
+        const FormatVerdict verdict = findFormat(log, samples, {*format});
+        if (verdict.have_structure)
+            classify(log, samples, verdict.best, attempt);
+        const bool decided = need_type ? attempt.type != InputProbeResult::Type::eUnknown
+                                       : attempt.line_period > 0;
+        if (decided && attempt.line_strength > result.line_strength) {
+            result = attempt;
+            have_result = true;
+        }
+        // The window the signal begins in is part lead-in, and measures the
+        // line period off a little; a weak first verdict is given one more
+        // window to improve on, a clear one is taken as it is
+        if (have_result && (result.line_strength >= c_live_clear_strength || confirming))
+            break;
+        if (samples.ended())
+            break;
+        confirming = have_result;
+        if (!have_result && windows % c_live_report_every == 0)
+            log.warn(eInput, std::format("Probe: no recognizable signal in the live input yet "
+                                         "({} windows read); waiting for more", windows));
+    }
+    input.adoptReader(std::move(reader), *format);
+    return result;
+}
+
+} // namespace
+
+InputProbeResult probeInput(Logger &log, PreparedInput &input, optional<InputFormat> known_format, bool need_type) {
+    if (input.isLive())
+        return probeLive(log, input, known_format, need_type);
+    SeekableSamples samples(input.source());
+    return probeSamples(log, samples, known_format);
+}
+
+InputProbeResult probeInputFile(Logger &log, const string &filename, optional<InputFormat> known_format) {
+    PreparedInput input(filename, openByteSource(filename, &log), known_format);
+    return probeInput(log, input, known_format);
 }
 
 double estimateSampleFrequency(const InputProbeResult &result, InputProbeResult::Type type) {

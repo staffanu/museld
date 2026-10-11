@@ -16,7 +16,7 @@
 class ResamplingFrameReader : public FrameReader<MuseInputBlock> {
 public:
     explicit ResamplingFrameReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
-                                   const std::string &filename, InputFormat input_format,
+                                   PreparedInput input,
                                    double sample_rate, double initial_seek_seconds,
                                    bool demodulate, bool benchmark_shaders, bool efm_enabled,
                                    int efm_adaptive_filter_size,
@@ -56,7 +56,7 @@ private:
     [[nodiscard]] bool process(std::unique_ptr<MuseInputBlock> const &output_block);
     void setUnlocked();
 
-    InputFormat m_input_format;
+    PreparedInput m_input; // until initialize() opens it (file mode) or the demodulator takes it
     bool m_demodulate;
     std::unique_ptr<InputReader> m_input_reader;
     double m_sample_rate;
