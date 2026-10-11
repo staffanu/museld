@@ -23,6 +23,9 @@ class PreparedInput;
 // under each candidate format and keeping the one whose output looks like a
 // band-limited signal (highest lag-1 autocorrelation); every wrong
 // interpretation of packed or offset binary decorrelates adjacent samples.
+// When no format correlates (the carrier high in the band, as in a 30 MHz
+// capture of NTSC), every format is analysed for video structure instead,
+// which takes several times longer but still finds the one that decodes.
 //
 // The signal type and sample rate come from the video line structure: the FM
 // carrier's instantaneous frequency repeats every line, and an autocorrelation
