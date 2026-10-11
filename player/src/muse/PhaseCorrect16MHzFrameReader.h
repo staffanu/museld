@@ -7,11 +7,12 @@
 #include <memory>
 #include "FrameReader.h"
 #include "input/InputReader.h"
+#include "input/PreparedInput.h"
 #include "muse/MuseInputBlock.h"
 
 class PhaseCorrect16MHzFrameReader : public FrameReader<MuseInputBlock> {
 public:
-    explicit PhaseCorrect16MHzFrameReader(Logger &log, const std::string &filename, InputFormat input_format,
+    explicit PhaseCorrect16MHzFrameReader(Logger &log, PreparedInput input,
                                           double initial_seek_seconds,
                                           const std::optional<std::string> &output_filename);
     // Join the reader thread while threadFunc() and m_input_reader still
@@ -31,7 +32,7 @@ protected:
 private:
     std::pair<int, std::pair<float, float>> compute_initial_skip(Logger &log);
 
-    InputFormat m_input_format;
+    PreparedInput m_input; // until initialize() opens it as m_input_reader
     std::unique_ptr<InputReader> m_input_reader;
     std::pair<float, float> m_input_scale = {0.f, 0.f};
     // Input-reader position in frames past the sync origin found by

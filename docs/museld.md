@@ -55,8 +55,15 @@ finds: the input type, the sample rate (unless `--sample-freq` was given -- and 
 `--input-type` the rate is measured under that type, which works even for captures the classifier
 finds ambiguous), and the sample format (when the extension is not recognized). Files whose
 measurements are ambiguous are refused rather than guessed at; `--probe` shows the numbers behind
-the verdict. Reading from a pipe cannot use detection, so fifo input needs explicit
-`--input-type` and `--sample-freq`.
+the verdict. The three are independent: whatever `--input-type`, `--sample-freq` and
+`--input-format` (or the extension) give is used as given and never measured, and only the rest
+is detected.
+
+Detection works on live input too (a pipe, a fifo, the `udp://` stream): the samples are read
+window after window until the verdict is clear, so museld can be started before the disc plays
+and waits through whatever comes before. What detection reads from a live input is not played;
+it is at most a second of a signal that keeps coming. A file is instead sampled at a few positions
+spread over its length, which keeps a lead-in or a dropout from deciding.
 
 ### Network input
 
@@ -68,7 +75,9 @@ The input can be a URL instead of a file:
 | `udp://[address]:port` | The live [ethadc](https://github.com/staffanu/ethadc) capture stream, received on that port (bound on all interfaces unless an address is given). The sample format and rate come from the stream's packets; the input type is detected from the first samples unless `--input-type` says. Packets that never arrive are concealed by holding the last sample; the losses are reported in the input log (`--log I3`). `ethadc-tx` from that repository replays a capture file as such a stream, for testing without the hardware. |
 
 A network stream is live like a fifo: `--seek` does not apply, and the player has to keep up.
-A file over http is not: it plays like a local file, including seeking with the arrow keys.
+Its packets say what it carries, so an `--input-format` or `--sample-freq` that disagrees with
+them is refused rather than applied. A file over http is not live: it plays like a local file,
+including seeking with the arrow keys.
 
 Detection reads a few short stretches spread across the file
 and takes well under a second: the sample format is whichever interpretation of the bytes looks
@@ -110,10 +119,27 @@ museld muse.ldf --no-dropout
 
 An argument disabled with a leading `!` is not reported, since ignoring it is the point.
 
-If an input file is a FIFO (named pipe), museld assumes the data is produced in real time, e.g. by
-a capture program such as picostream. Playback speed then follows the incoming data rate: an empty
-pipe means waiting rather than end of file, a field is dropped if the input buffers fill up, and
-the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO input.
+### Piped input
+
+The input can be piped in. `-` names the standard input, and when no file is given at all and
+stdin is a pipe or a redirected file, that is played too, with the options that came last:
+
+```
+capture-program | museld -
+capture-program | museld --input-type ntsc-rf --sample-freq 40e6 --input-format s16
+museld < capture.lds
+```
+
+This is also the way to feed museld from a capture program on Windows, which has no `mkfifo`.
+A pipe (or a FIFO given by name, as made by `mkfifo`) is live: museld assumes the data is produced
+in real time, e.g. by a capture program such as picostream, and playback follows the incoming
+data rate. An empty pipe means waiting rather than end of file (a FIFO is even waited through
+its writer going away and coming back; a pipe on stdin ends when its writer does), a field is
+dropped if the input buffers fill up, and the OS pipe buffer size is increased (Linux). Seeking
+is not possible with live input, and `--seek` is refused. A file redirected into stdin is not
+live: it plays like a file named on the command line, seeking included. Being live has nothing
+to do with speed: a file piped through `cat` arrives faster than real time and loses the fields
+the decoder cannot keep up with, so play files by name.
 
 ## Playback options
 
@@ -472,11 +498,11 @@ DTS: EFM stereo samples → DTS sync detection → byte stream → libavcodec dc
 - **Motion vectors**: MUSE specifies motion compensation in control data (3+4 bits), but these bits are
   always zero on every disc tested. It is unclear whether this feature was ever used on MUSE laserdiscs.
 - **Non-linear de-emphasis**: Unclear whether it has already been applied on baseband (player output) input; use the L key to toggle.
-- **Direct USB input**: Currently requires an external capture program writing to a FIFO (e.g., picostream).
+- **Direct USB input**: Currently requires an external capture program writing to a pipe or a FIFO (e.g., picostream).
 - **Picture filters**: Most filters were computed early in the project; picture quality could probably be improved by spending more time on them.
 - **Motion detection**: The algorithm is quite simplistic and could probably be improved.
 - **LD MUSE vs BS MUSE**: Available documentation describes the satellite broadcasting standard. MUSE decoders have separate inputs for the two signals, so presumably there is some difference, but it is unknown what it is.
-- **Input detection on fifos, live MUSE/NTSC switching**: For the decoder-box use case (fifo from a capture device to the TV), detection should run on the live stream and the player should switch type when the disc changes. Needs the per-type reader/demodulator/decoder pipeline setup refactored so it can be swapped mid-playback; the detection itself is the easy part.
+- **Live MUSE/NTSC switching**: For the decoder-box use case (a pipe from a capture device to the TV), the player should switch type when the disc changes. Detection runs on live input now (window after window, and the player keeps whether the type was given or detected), but the per-type reader/demodulator/decoder pipeline setup has to be refactored so it can be torn down and rebuilt mid-playback.
 - **Subtitle OCR** (experimental; see the option section above):
   - The full release packages include ONNX Runtime but not the PP-OCR models, which have to be downloaded separately (see above); the minimal packages are built without OCR (see docs/packaging.md).
   - `--ocr-translate` speaks plain HTTP only; hosted TLS endpoints would need an OpenSSL-enabled cpp-httplib build.

@@ -11,7 +11,7 @@
 #include "LdsInputReader.h"
 #include "PrefetchingInputReader.h"
 
-static std::unique_ptr<InputReader> makeInputReaderForSource(
+std::unique_ptr<InputReader> makeInputReader(
         std::unique_ptr<ByteSource> source, InputFormat format, uint32_t block_size, Logger *log) {
     switch (format) {
         case eUint8:    return std::make_unique<InputReaderImpl<uint8_t>>(std::move(source), block_size);
@@ -33,22 +33,19 @@ static std::unique_ptr<InputReader> makeInputReaderForSource(
 
 std::unique_ptr<InputReader> makeInputReader(
     const std::string &name, InputFormat format, uint32_t block_size, Logger *log) {
-    return makeInputReaderForSource(openByteSource(name, log), format, block_size, log);
+    return makeInputReader(openByteSource(name, log), format, block_size, log);
 }
 
-std::unique_ptr<InputReader> makeStdinInputReader(InputFormat format, uint32_t block_size) {
-    return makeInputReaderForSource(openStdinByteSource(), format, block_size, nullptr);
-}
-
-std::optional<NetworkStreamInfo> probeNetworkStream(const std::string &name, double timeout_seconds) {
-    const auto info = EthadcByteSource::probe(
-            name, std::chrono::milliseconds((int64_t)(timeout_seconds * 1000)));
+std::optional<NetworkStreamInfo> networkStreamInfo(ByteSource &source, double timeout_seconds) {
+    auto *stream = dynamic_cast<EthadcByteSource *>(&source);
+    if (!stream)
+        return std::nullopt;
+    const auto info = stream->waitForStream(std::chrono::milliseconds((int64_t)(timeout_seconds * 1000)));
     if (!info)
         return std::nullopt;
     if (info->format_name == "s10p")
-        throw std::runtime_error(std::format(
-                "{}: the stream carries signed packed 10-bit samples (s10p), which museld cannot read yet",
-                name));
+        throw std::runtime_error(
+                "the stream carries signed packed 10-bit samples (s10p), which museld cannot read yet");
     return NetworkStreamInfo{inputFormatFromString(info->format_name), info->sample_frequency};
 }
 

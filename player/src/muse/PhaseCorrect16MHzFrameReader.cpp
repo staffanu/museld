@@ -20,21 +20,21 @@ static constexpr int64_t c_samples_per_frame = MUSE_TOTAL_HEIGHT * MUSE_TOTAL_WI
 
 PhaseCorrect16MHzFrameReader::PhaseCorrect16MHzFrameReader(
         Logger &log,
-        const std::string &filename, InputFormat input_format, double initial_seek_seconds,
+        PreparedInput input, double initial_seek_seconds,
         const std::optional<std::string> &output_filename)
-        : FrameReader(log, filename,
-                      inputIsLive(filename),
+        : FrameReader(log, input.name(),
+                      input.isLive(),
                       initial_seek_seconds, output_filename),
-          m_input_format(input_format),
+          m_input(std::move(input)),
           m_input_reader(nullptr) {
 }
 
 bool PhaseCorrect16MHzFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
+    m_input_reader = m_input.open(c_samples_per_frame, &m_log);
+    m_input_reader->initialize();
+
     auto [samples_to_skip, input_scale] = compute_initial_skip(m_log);
     m_input_scale = input_scale;
-
-    m_input_reader = makeInputReader(m_filename, m_input_format, c_samples_per_frame, &m_log);
-    m_input_reader->initialize();
 
     m_log.info(eInput, std::format("Skipping {} initial samples", samples_to_skip));
     m_input_reader->seek(samples_to_skip);
@@ -100,14 +100,16 @@ void PhaseCorrect16MHzFrameReader::threadFunc() {
     m_reader_thread_finished = true;
 }
 
+// Looks at the first two frames of the input through m_input_reader and puts
+// it back to the start afterwards (a live input cannot go back: the two
+// frames are lost, and the skip then counts from the third).
 pair<int, pair<float, float>> PhaseCorrect16MHzFrameReader::compute_initial_skip(Logger &log) {
-    constexpr int64_t two_frame_size = 480 * 1125 * 2;
-    auto reader = makeInputReader(m_filename, m_input_format, two_frame_size);
-    reader->initialize();
-
+    constexpr int64_t two_frame_size = c_samples_per_frame * 2;
     vector<float> buffer(two_frame_size);
-    if (reader->readFloats(buffer.data()) != (int)two_frame_size)
-        throw runtime_error("PhaseCorrect16MHzFrameReader: not enough input data to compute initial skip");
+    for (int64_t at = 0; at < two_frame_size; at += c_samples_per_frame)
+        if (m_input_reader->readFloats(buffer.data() + at) != (int)c_samples_per_frame)
+            throw runtime_error("PhaseCorrect16MHzFrameReader: not enough input data to compute initial skip");
+    m_input_reader->seek(-two_frame_size);
 
     auto sorted(buffer);
     sort(sorted.begin(), sorted.end());
