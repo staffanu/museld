@@ -194,6 +194,11 @@ std::unique_ptr<ByteSource> openStdinByteSource() {
     if (kind.live)
         fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | O_NONBLOCK);
 #endif
+#ifdef linux
+    // Room for the writer while the input probe computes on a window, as for a fifo
+    if (kind.live)
+        fcntl(STDIN_FILENO, F_SETPIPE_SZ, 1024 * 1024);
+#endif
     // A pipe or socket is live and its end is final (the writer that closed
     // it cannot be replaced); anything else -- a redirected file, mostly --
     // reads like the file it is.
