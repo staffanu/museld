@@ -28,7 +28,7 @@
 class SdtvFrameReader : public FrameReader<SdtvInputBlock> {
 public:
     explicit SdtvFrameReader(Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
-                             const std::string &filename, InputFormat input_format,
+                             PreparedInput input,
                              double sample_rate, double initial_seek_seconds,
                              bool benchmark_shaders, AudioTrack audio_track, int efm_adaptive_filter_size,
                              const std::optional<std::string> &output_filename,

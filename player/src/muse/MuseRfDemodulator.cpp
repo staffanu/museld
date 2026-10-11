@@ -22,12 +22,12 @@
 using namespace std;
 using namespace musevk;
 
-MuseRfDemodulator::MuseRfDemodulator(Logger &log, std::string executable_dir, std::string filename,
+MuseRfDemodulator::MuseRfDemodulator(Logger &log, std::string executable_dir, PreparedInput input,
                                      float sample_frequency,
-                                     musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
+                                     musevk::VulkanManager &vulkan_manager, bool benchmark_shaders,
                                      bool efm_enabled, int efm_adaptive_filter_size)
-: RfDemodulator<MuseDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency,
-                                      vulkan_manager, input_format, MuseDemodulatedBlock::c_sample_block_size,
+: RfDemodulator<MuseDemodulatedBlock>(log, std::move(executable_dir), std::move(input), sample_frequency,
+                                      vulkan_manager, MuseDemodulatedBlock::c_sample_block_size,
                                       benchmark_shaders),
   m_efm_demodulator(log, sample_frequency, MuseDemodulatedBlock::c_sample_block_size,
                     FirFilterStage::simdSupported(), true,

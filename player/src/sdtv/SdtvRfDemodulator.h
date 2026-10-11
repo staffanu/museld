@@ -66,8 +66,8 @@ struct SdtvDemodulatedBlock {
 
 class SdtvRfDemodulator : public RfDemodulator<SdtvDemodulatedBlock> {
 public:
-    SdtvRfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
-                      musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
+    SdtvRfDemodulator(Logger &log, std::string executable_dir, PreparedInput input, float sample_frequency,
+                      musevk::VulkanManager &vulkan_manager, bool benchmark_shaders,
                       AudioTrack audio_track, int efm_adaptive_filter_size, const VideoStandard &video_standard);
     SdtvRfDemodulator(const SdtvRfDemodulator&) = delete;
     void operator=(const SdtvRfDemodulator&) = delete;

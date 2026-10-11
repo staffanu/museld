@@ -189,6 +189,8 @@ if(BUILD_MUSE)
         input/LdsInputReader.cpp input/LdsInputReader.h
         input/LdfInputReader.cpp input/LdfInputReader.h
         input/PrefetchingInputReader.cpp input/PrefetchingInputReader.h
+        input/PreparedInput.cpp input/PreparedInput.h
+        input/RebatchingInputReader.h
         InputProbe.cpp InputProbe.h
         AudioPlayback.cpp AudioPlayback.h
         CompressedAudioDecoder.cpp CompressedAudioDecoder.h

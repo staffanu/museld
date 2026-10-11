@@ -24,12 +24,12 @@ using namespace std;
 using namespace musevk;
 using namespace SdtvRfDemodulatorConstants;
 
-SdtvRfDemodulator::SdtvRfDemodulator(Logger &log, std::string executable_dir, std::string filename,  float sample_frequency,
-                                     musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
+SdtvRfDemodulator::SdtvRfDemodulator(Logger &log, std::string executable_dir, PreparedInput input, float sample_frequency,
+                                     musevk::VulkanManager &vulkan_manager, bool benchmark_shaders,
                                      AudioTrack audio_track, int efm_adaptive_filter_size,
                                      const VideoStandard &video_standard)
-: RfDemodulator<SdtvDemodulatedBlock>(log, std::move(executable_dir), std::move(filename), sample_frequency,
-                                      vulkan_manager, input_format,
+: RfDemodulator<SdtvDemodulatedBlock>(log, std::move(executable_dir), std::move(input), sample_frequency,
+                                      vulkan_manager,
                                       SdtvRfDemodulatorConstants::c_sample_block_size,
                                       benchmark_shaders),
   m_video_standard(video_standard),

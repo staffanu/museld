@@ -10,10 +10,14 @@
 #include "input/InputReader.h"
 
 class Logger;
+class PreparedInput;
 
-// Content-based detection of what a capture file holds, for museld --probe and
-// --input-type auto.  Works from short chunks sampled across the file, so it is
-// cheap even on multi-gigabyte captures, and needs no GPU.
+// Content-based detection of what a capture holds, for museld --probe and
+// --input-type auto.  Works from short windows of samples, so it is cheap even
+// on multi-gigabyte captures, and needs no GPU.  A file is sampled at a few
+// positions spread over its length; a live input (a fifo, a pipe on stdin,
+// the network stream) is read window after window until the verdict is
+// clear, so the player can be started before the disc plays.
 //
 // The sample format is found by magic bytes (FLAC/Ogg) or by decoding a chunk
 // under each candidate format and keeping the one whose output looks like a
@@ -47,6 +51,15 @@ struct InputProbeResult {
     double field_lines = 0;         // measured lines per field (262.5 NTSC, 312.5 PAL); 0 when not measured
 };
 
+// Probes an open input.  A seekable input is left for the player to rewind;
+// a live one has had whatever the detection read consumed, and carries the
+// reader the detection decoded it with, which the player continues from.
+// With the type given by the caller (need_type false), a live input is read
+// only until the line structure is found, which is all the sample rate needs.
+InputProbeResult probeInput(Logger &log, PreparedInput &input, std::optional<InputFormat> known_format,
+                            bool need_type = true);
+
+// Opens the input by name and probes it; for --probe and the tests.
 InputProbeResult probeInputFile(Logger &log, const std::string &filename,
                                 std::optional<InputFormat> known_format);
 

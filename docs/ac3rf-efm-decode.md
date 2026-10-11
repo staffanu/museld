@@ -14,8 +14,8 @@ ac3rf-efm-decode [options] <input_file>
 
 Multiple input files can be given and are processed in order; each file uses the most recent
 input format, sample rate, and output settings, so options can appear between filenames.
-Input is read from stdin if no filename is given (the input format must then be specified
-explicitly). An input name may also be an `http://` URL, read with range requests from a web
+Input is read from stdin if no filename is given, or if the filename is `-` (the input format
+must then be specified explicitly). An input name may also be an `http://` URL, read with range requests from a web
 server that supports them, or `udp://[address]:port` for the live ethadc capture stream (see
 the museld reference). Output is written to stdout by default.
 
