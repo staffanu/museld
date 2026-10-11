@@ -368,6 +368,18 @@ vector<InputFormat> rawFormatCandidates(Logger &log, SampleSource &source) {
     for (const auto &[score, fmt] : scored)
         if (candidates.size() < 3 && (1 - scored.front().first) > 0.5 * (1 - score))
             candidates.push_back(fmt);
+    // The lag-1 correlation is low under every format when the carrier sits
+    // high in the band (a 30 MHz capture of NTSC: 8.1 MHz is 0.27 of the
+    // rate, where adjacent samples are nearly a quarter cycle apart), so it
+    // then cannot pick the candidates.  The line-structure analysis still
+    // can -- only the true format decodes into a video signal -- at the
+    // cost of analysing every format.
+    if (candidates.empty()) {
+        log.info(eInput, "Probe: no sample format shows adjacent-sample correlation; "
+                         "looking for video structure under each of them");
+        for (InputFormat fmt : formats)
+            candidates.push_back(fmt);
+    }
     return candidates;
 }
 
@@ -641,7 +653,12 @@ ChunkStats analyzeChunk(Logger &log, const vector<float> &samples, int64_t offse
     auto [period, strength] = findLinePeriod(ac);
     ChunkStats stats{period, strength, mean_carrier * period, audioCarrierRatio(samples, period), 0, 0};
     stats.muse16_significance = foldSignificance(samples, 480);
-    double control = max(foldSignificance(samples, 455), foldSignificance(samples, 509));
+    // The controls share 480's small factors (both are 8 x a prime): a byte
+    // misread of a 16-bit file repeats with period 2, an lds misread of one
+    // with period 8, and such a pattern folds as coherently at any period it
+    // divides -- at 480 and at these, so the ratio stays near 1.  Odd
+    // controls (455 and 509 once) let it through as a MUSE line structure.
+    double control = max(foldSignificance(samples, 472), foldSignificance(samples, 488));
     stats.muse16_ratio = control > 0 ? stats.muse16_significance / control : 0;
     log.debug(eInput, std::format(
             "Probe: chunk at sample {}: line period {:.1f} (autocorrelation {:.3f}), "

@@ -62,7 +62,9 @@ is detected.
 Detection works on live input too (a pipe, a fifo, the `udp://` stream): the samples are read
 window after window until the verdict is clear, so museld can be started before the disc plays
 and waits through whatever comes before. What detection reads from a live input is not played;
-it is at most a second of a signal that keeps coming. A file is instead sampled at a few positions
+it is at most a second of a signal that keeps coming (a few seconds when the sample format has to
+be found by trying every format, as for a capture whose carrier sits high in the band, like NTSC
+at 30 MHz). A file is instead sampled at a few positions
 spread over its length, which keeps a lead-in or a dropout from deciding.
 
 ### Network input
