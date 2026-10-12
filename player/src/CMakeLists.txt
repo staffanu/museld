@@ -295,6 +295,9 @@ if(BUILD_MUSE)
     # Compile GLSL compute shaders to SPIR-V
     set(GLSLC "glslc")
     file(GLOB_RECURSE GLSL_SOURCE_FILES ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.comp)
+    # the headers the shaders include: glslc writes no depfile here, so every
+    # SPIR-V build depends on all of them
+    file(GLOB_RECURSE GLSL_HEADER_FILES ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.h)
     # add_spirv(<glsl source> <output name> [<glslc define>]): one SPIR-V build
     function(add_spirv GLSL SPIRV_NAME)
         set(SPIRV "${CMAKE_CURRENT_BINARY_DIR}/shaders/${SPIRV_NAME}")
@@ -305,7 +308,7 @@ if(BUILD_MUSE)
                     -I ${CMAKE_CURRENT_SOURCE_DIR}/shaders
                     -I ${CMAKE_CURRENT_SOURCE_DIR}/shaders/muse
                     -o ${SPIRV}
-            DEPENDS ${GLSL}
+            DEPENDS ${GLSL} ${GLSL_HEADER_FILES}
         )
         set(SPIRV_BINARY_FILES ${SPIRV_BINARY_FILES} ${SPIRV} PARENT_SCOPE)
     endfunction()
