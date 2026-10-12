@@ -1504,11 +1504,11 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
     });
-    options.option("--tint", "DEGREES", "NTSC: rotate the chroma hue, like a TV's tint control "
+    options.option("--tint", "DEGREES", "NTSC/PAL: rotate the chroma hue, like a TV's tint control "
                                         "(default 0)", [&] () -> void {
         tint_degrees = (float)stod(*(it++));
     });
-    options.option("--saturation", "FACTOR", "NTSC: scale the chroma gain (default 1.0)", [&] () -> void {
+    options.option("--saturation", "FACTOR", "NTSC/PAL: scale the chroma gain (default 1.0)", [&] () -> void {
         saturation = (float)stod(*(it++));
     });
     options.option("--cx", "MODE", "NTSC analog audio CX expansion: auto follows the disc's VBI "

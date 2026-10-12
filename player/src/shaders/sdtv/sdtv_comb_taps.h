@@ -164,12 +164,15 @@ vec2 pal_pair_axis(int src, uint fl, uint field_last) {
 // rotation and weighted (1 2 3 2 1): the sampling phase is stable from line
 // to line once the pilot has refined the timebase, so what the average
 // removes is the burst's measurement noise, about 2 degrees per line pair
-// on a 27 dB capture.  The sum is 9 pair estimates' worth; zero where none
-// is usable.
+// on a 27 dB capture.  The result is scaled to 9 pair estimates' worth
+// whatever the window held (the field's first lines, or the pairs a lost
+// burst takes out, otherwise read as a low burst amplitude and a too-high
+// AGC gain); zero where none is usable.
 vec2 pal_smoothed_axis(int src, uint fl, uint field_last) {
     const uint field_first = field_last + 1 - SDTV_FIELD_HEIGHT;
     const float delta = radians(270.576);
     vec2 r = vec2(0.0);
+    float w = 0.0;
     for (int k = -2; k <= 2; k++) {
         int l = int(fl) + k;
         if (l < int(field_first) || l > int(field_last))
@@ -180,8 +183,9 @@ vec2 pal_smoothed_axis(int src, uint fl, uint field_last) {
         const float a = delta * float(k); // line fl + k's frame is k advances ahead
         const float wk = 3.0 - abs(float(k));
         r += wk * vec2(rk.x * cos(a) - rk.y * sin(a), rk.x * sin(a) + rk.y * cos(a));
+        w += wk;
     }
-    return r;
+    return w > 0.0 ? r * (9.0 / w) : r;
 }
 
 // The frame-pair rotation for PAL's temporal comb (frames N and N +- 2, see

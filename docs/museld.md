@@ -46,7 +46,7 @@ The input types:
   with the Philips code (chapter, CLV time, picture number), the analog or EFM track
   (`--efm`; PAL discs carry one or the other) and `--write`
   (colour metadata tagged BT.470BG; 50 frames/s, one per field, or 25 with `--full-frames-only`,
-  as 59.94/29.97 for NTSC). See `docs/pal-playback-plan.md`.
+  as 59.94/29.97 for NTSC). See `docs/pal-decoding.md`.
 - `muse-16` — MUSE baseband resampled to exactly one sample per pixel at 16.2 MHz, phase locked to the line structure (480 samples per line). This is museld's own intermediate format, produced with `--write-muse16` (see below); `--sample-freq` does not apply.
 - `muse-os` — MUSE baseband (a player's output, before any resampling) captured at an arbitrary rate, e.g. an oscilloscope capture at 50 MHz. The resampling DPLL locks to it like to RF, but skips the FM demodulation.
 

@@ -63,7 +63,7 @@ const VideoStandard &VideoStandard::pal() {
     // 4 fsc (exact 4 fsc is 1135.0064 samples per line because of the 25 Hz
     // offset), so the subcarrier walks 0.576 degrees per line against the
     // grid -- one cycle per frame -- and a colour decoder must take its
-    // phase from each line's burst.  See docs/pal-playback-plan.md.
+    // phase from each line's burst.  See docs/pal-decoding.md.
     static const VideoStandard s{
         .name = "PAL",
         .shader_prefix = "pal",
