@@ -84,7 +84,10 @@ tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parse
                      srt-furigana.py for beginner-friendly Japanese subtitle variants,
                      subocr/ prototype: OCR burned-in Japanese subtitles from rendered
                      frames to .srt and translate them via the Claude API or a local
-                     OpenAI-compatible model server)
+                     OpenAI-compatible model server; muse-ctlscan.py and
+                     muse-fieldpair-{check,analyze}.py scan a 16.2 MHz MUSE baseband
+                     file (u16 capture or --write-muse16 dump) for the control bits and
+                     for frame-paired field processing, the MUSE-III encoder signatures)
 packaging/         — Scripts and per-package READMEs for the Windows/macOS downloads
 docs/              — Reference documentation (player, CLI, AC3-RF decoding, packaging)
 ```
