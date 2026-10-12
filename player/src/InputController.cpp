@@ -68,6 +68,8 @@ bool InputController::poll(GLFWwindow *window,
                            int window_width,
                            int window_height) {
     glfwPollEvents();
+    if (m_ignore_keys)
+        return true;
 
     if (checkKey(window, GLFW_KEY_ESCAPE) || checkKey(window, GLFW_KEY_Q))
         return false;
