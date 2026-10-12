@@ -58,7 +58,8 @@ bool startChapterSearch(PlayerState &state, const ReaderControls &reader, Logger
 
 class InputController {
 public:
-    explicit InputController(Logger &log) : m_log(log) {}
+    // ignore_keys: poll only pumps the window events (--no-keys)
+    explicit InputController(Logger &log, bool ignore_keys = false) : m_log(log), m_ignore_keys(ignore_keys) {}
 
     // Returns false if the user requested quit.
     bool poll(GLFWwindow *window,
@@ -74,6 +75,7 @@ private:
     bool checkKey(GLFWwindow *window, int key);
 
     Logger &m_log;
+    const bool m_ignore_keys;
     std::set<int> m_keys_down;
     // Window size to return to from full screen (0: not yet seen windowed)
     int m_windowed_width = 0, m_windowed_height = 0;

@@ -152,6 +152,7 @@ the decoder cannot keep up with, so play files by name.
 | `--efm-filter-size <n>` | Number of taps in the adaptive FIR filter ahead of the EFM timing detector (default 3, 0 disables it). Try 9 or 11 when a distorted signal causes many errors; the same setting as `ac3rf-efm-decode --adaptive-filter-size`. The E key cycles it during playback. |
 | `--no-video` / `--no-audio` | Disable video or audio output |
 | `--no-sync` | Display frames as fast as possible (benchmark mode) |
+| `--no-keys` | Ignore the keyboard and open the window without taking input focus. For runs made beside other work (measurements, scripts): nothing typed into another window can pause or change the decode. The window's close button still quits. |
 | `--full-frames-only` | Skip every other field update (reduces CPU/GPU load) |
 | `--all-fields` | Update display at 60 Hz (default) |
 | `--full-screen` | Start full screen (at the monitor's current mode; the picture is scaled to it) |
@@ -336,6 +337,8 @@ decoded.
 also given, which is the mode to use for batch rendering.
 
 ## Keyboard shortcuts during playback
+
+All of these are off with `--no-keys`, which also keeps the window from taking the keyboard focus when it opens.
 
 | Key | Action |
 |---|---|

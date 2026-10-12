@@ -195,6 +195,9 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   misses scores`.
 - Options must precede the input file they apply to; trailing options are ignored
   with a warning.
+- Always add `--no-keys` to museld runs made for measurements or exports: the window then
+  opens without taking the keyboard focus and ignores keys, so the user's typing in another
+  window cannot pause the decode or toggle a stage mid-run.
 
 **Dumps** (environment variables, append to the file; delete old dumps first):
 - `MUSELD_DUMP_DEMOD=<path>` with `MUSELD_DUMP_DEMOD_BLOCKS=<n>` (default 32; a block

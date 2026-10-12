@@ -339,7 +339,7 @@ static void runPlayer(Logger &log,
                       Decoder &decoder,
                       ReaderControls &reader_controls,
                       GLFWwindow *window,
-                      bool full_screen,
+                      bool full_screen, bool no_keys,
                       AspectMode initial_aspect_mode,
                       const PictureFormat &picture_format,
                       bool initial_full_image, double initial_overscan,
@@ -394,7 +394,7 @@ static void runPlayer(Logger &log,
 
         OsdOverlay osd;
         FrameBlitter blitter;
-        InputController input(log);
+        InputController input(log, no_keys);
         FrameExporter frame_exporter(log, manager, command_pool);
 
         // All tracks are parsed and warmed into the shared glyph atlas up front,
@@ -967,7 +967,7 @@ template<class InputBlock>
 void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, FrameReader<InputBlock> &reader,
                   const VideoStandard *video_standard,
                   bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool full_image, double overscan,
-                  bool no_sync,
+                  bool no_sync, bool no_keys,
                   bool start_paused, Decoder::FieldInterpolationMode field_interpolation_mode,
                   bool use_3d_comb, bool film_mode, Decoder::CxMode cx_mode, Decoder::BlackLevelMode black_level_mode, bool decode_video,
                   DropoutMode dropout_mode,
@@ -986,6 +986,12 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    if (no_keys) {
+        // a run made beside other work: the window must not take the
+        // keyboard away from whatever the user is typing into
+        glfwWindowHint(GLFW_FOCUSED, GLFW_FALSE);
+        glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
+    }
 
     // The decoded image size (also the size of a written video file), where
     // the picture sits in it and the shape of its pixels, and a window of the
@@ -1169,7 +1175,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             log.info(eApplication, std::format("Pacing playback by the clock: {:.2f} fields/s on a {:.0f} Hz display",
                                                fields_per_second, refresh_hz));
 
-        runPlayer(log, manager, *decoder, reader_controls, window, full_screen, aspect_mode, picture_format,
+        runPlayer(log, manager, *decoder, reader_controls, window, full_screen, no_keys, aspect_mode, picture_format,
                   full_image, overscan,
                   window_w, window_h, start_paused,
                   field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, dropout_mode, audio_track,
@@ -1277,6 +1283,7 @@ int main(int argc, char *argv[]) {
     bool full_image = false;
     double overscan = 0.0;
     bool no_sync = false;
+    bool no_keys = false;
     std::optional<InputType> input_type_option;         // unset (the default) means auto-detect
     bool probe_only = false;      // --probe: print what probing finds and skip decoding
     std::optional<InputFormat> input_format_option = std::nullopt;
@@ -1622,6 +1629,12 @@ int main(int argc, char *argv[]) {
                  [&] () -> void {
         no_sync = true;
     });
+    options.flag("--no-keys", "Ignore the keyboard and open the window without taking input focus, "
+                              "for runs made beside other work (measurements, scripts): nothing typed "
+                              "elsewhere can pause or change the decode; the close button still quits",
+                 [&] () -> void {
+        no_keys = true;
+    });
 
     options.section("Output options:");
     options.option("--export-frame", "FILE", "Save one decoded frame as PNG to FILE and quit", [&] () -> void {
@@ -1919,7 +1932,7 @@ int main(int argc, char *argv[]) {
                                     file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
                                     efm_adaptive_filter_size, muse_output_filename, standard);
                     process_file<SdtvInputBlock>(log, executable_dir, manager, *reader, &standard, decode_all_fields,
-                                                 full_screen, aspect_mode, full_image, overscan, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
+                                                 full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                  audio_track,
                                                  benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                  subtitle_setup,
@@ -1931,7 +1944,7 @@ int main(int argc, char *argv[]) {
                     auto reader = make_unique<PhaseCorrect16MHzFrameReader>(
                             log, std::move(input), initial_seek_seconds, muse_output_filename);
                     process_file<MuseInputBlock>(log, executable_dir, manager, *reader, nullptr, decode_all_fields,
-                                 full_screen, aspect_mode, full_image, overscan, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
+                                 full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
@@ -1945,7 +1958,7 @@ int main(int argc, char *argv[]) {
                             file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
                             audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
                     process_file<MuseInputBlock>(log, executable_dir, manager, *reader, nullptr, decode_all_fields,
-                                 full_screen, aspect_mode, full_image, overscan, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
+                                 full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
