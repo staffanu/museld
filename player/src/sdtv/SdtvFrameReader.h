@@ -115,6 +115,7 @@ private:
     double m_sync_fall_frac;            // its crossing's fraction between the sample before and that one
     int64_t m_sync_rise_idx;            // decimated index of the previous rise
     float m_blank_level;                // slow average of the back-porch level
+    float m_blank_local;                // the last pulse's back-porch level, when near the average
 
     // --- lattice: integer line numbers for hsync timestamps ---
     // Chained pulse to pulse: the nominal period is known a priori to ~0.1%

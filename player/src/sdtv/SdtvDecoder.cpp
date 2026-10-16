@@ -305,6 +305,10 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // nominal 0.7 V span stays.
         if (m_noise.sigma_blanking >= 0)
             m_level_offset_v = noise_estimate.blanking_level;
+        // ... and the shaders clamp each line on its own back porch around
+        // that: the WOW disc's eccentricity moved the carrier by +-7 IRE
+        // within a rotation, one field against the other.
+        SdtvFrame::RowBlankingLevels(input_block->video_data->data<float>(), m_level_offset_v, m_standard, m_row_blanking_v);
         if (m_white_flag_frames >= 30)
             m_level_scale = std::clamp(1.0f / (float)(m_white_avg - m_blanking_avg), 1.1f, 1.9f);
         m_noise_psd_windows += SdtvFrame::AccumulateNoisePsd(input_block->video_data->data<float>(),
@@ -401,7 +405,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
         m_shaders.extendDropouts(*m_first_stage_command_buffer, input_block->dropout_data, frame->dropout_data());
         m_shaders.copyToFrame(*m_first_stage_command_buffer, input_block->video_data, frame->dropout_data(),
-            frame->data(), dropout_mode, m_level_offset_v, m_level_scale);
+            frame->data(), dropout_mode, m_row_blanking_v, m_level_scale);
         frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
 
         m_shaders.detectColorBurstPhase(*m_first_stage_command_buffer, frame);

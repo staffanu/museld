@@ -149,6 +149,57 @@ SdtvFrame::NoiseEstimate SdtvFrame::EstimateNoise(float const *data, const Video
     return est;
 }
 
+void SdtvFrame::RowBlankingLevels(float const *data, float frame_level, const VideoStandard &standard,
+                                  std::vector<float> &out) {
+    // A per-line keyed clamp, on the back porch (the sync amplitude is no
+    // reference: it measures well off nominal and moves with the level).
+    // A CAV capture with heavy eccentricity (the WOW demo disc) had its FM
+    // carrier, and with it the whole baseband, moving +-7 IRE over each
+    // rotation, which is one frame, so that one field was 7 IRE brighter
+    // than the other under a per-frame offset.
+    const int width = standard.samples_per_line;
+    const int rows = standard.total_lines;
+    constexpr int c_window = 16;        // the same porch window as EstimateNoise
+    constexpr float c_gate = 0.07f;     // 10 IRE: a porch further from the frame's level is not a porch
+    constexpr int c_median = 7;         // rejects the three broad-pulse rows of a vertical interval in one go
+    constexpr int c_box = 5;
+    std::vector<float> raw(rows), med(rows), scratch;
+    std::vector<bool> valid(rows);
+    for (int row = 0; row < rows; row++) {
+        raw[row] = RobustNoise::robustCenter(data + (size_t)row * width + standard.noise_porch_col, c_window);
+        valid[row] = std::abs(raw[row] - frame_level) <= c_gate;
+    }
+    // A row without a porch takes the line between its nearest valid
+    // neighbours (the level is continuous in time across it), the frame's
+    // level only when a whole side has none
+    int prev = -1;
+    for (int row = 0; row < rows; row++) {
+        if (valid[row]) {
+            prev = row;
+            continue;
+        }
+        int next = row + 1;
+        while (next < rows && !valid[next])
+            next++;
+        const bool have_prev = prev >= 0, have_next = next < rows;
+        raw[row] = have_prev && have_next ? raw[prev] + (raw[next] - raw[prev]) * (float)(row - prev) / (float)(next - prev)
+                 : have_prev ? raw[prev] : have_next ? raw[next] : frame_level;
+    }
+    for (int row = 0; row < rows; row++) {
+        scratch.clear();
+        for (int k = -(c_median / 2); k <= c_median / 2; k++)
+            scratch.push_back(raw[std::clamp(row + k, 0, rows - 1)]);
+        med[row] = RobustNoise::median(scratch);
+    }
+    out.resize(rows);
+    for (int row = 0; row < rows; row++) {
+        float sum = 0;
+        for (int k = -(c_box / 2); k <= c_box / 2; k++)
+            sum += med[std::clamp(row + k, 0, rows - 1)];
+        out[row] = sum / (float)c_box;
+    }
+}
+
 int SdtvFrame::AccumulateNoisePsd(float const *data, double *psd, float max_sigma, const VideoStandard &standard) {
     // Candidate blank VBI rows.  Discs differ in which lines carry the white
     // flag, picture numbers, and captions, so every window must qualify

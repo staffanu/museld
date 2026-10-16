@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <bit>
+#include <cstring>
+#include <stdexcept>
 #include "SdtvShaders.h"
 #include "DropoutMode.h"
 
@@ -56,6 +58,8 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
                                            vk::BufferUsageFlagBits::eStorageBuffer, eHostNone)),
   m_concealed_composite(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.samples_per_line, standard.total_lines), sizeof(float),
                                                   vk::BufferUsageFlagBits::eStorageBuffer, eHostNone)),
+  m_row_blanking(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.total_lines), sizeof(float),
+                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostWrite)),
   m_chroma_taps(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.y_buf_width + 2 * VideoStandard::c_chroma_tap_halo, standard.field_lines), 4 * 2 /* f16vec4 */,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostNone))
 {
@@ -74,13 +78,13 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
           spirv("extend_dropouts"), Size(standard.samples_per_line, standard.total_lines)));
   m_conceal_composite_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_conceal_composite",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 2,
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 1,
           spirv("conceal_composite"), Size(standard.samples_per_line, standard.total_lines)));
   // one-dimensional over the flattened frame: the causal filter runs on in
   // scan order across row ends
   m_deemphasis_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_deemphasis",
-          {eBuffer, eBuffer}, sizeof(uint32_t) * 2,
+          {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 1,
           spirv("deemphasis"), Size((standard.samples_per_line * standard.total_lines + 3) / 4 /* PER_INVOCATION */)));
   m_chroma_taps_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_chroma_taps",
@@ -119,16 +123,21 @@ void SdtvShaders::extendDropouts(musevk::CommandBuffer &sq, std::shared_ptr<muse
 
 void SdtvShaders::copyToFrame(musevk::CommandBuffer &sq, std::shared_ptr<musevk::VulkanBuffer> const &video_input,
   std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane, std::shared_ptr<musevk::VulkanBuffer> const &buffer,
-  DropoutMode dropout_mode, float level_offset_v, float level_scale) {
+  DropoutMode dropout_mode, const std::vector<float> &row_blanking_v, float level_scale) {
+
+  // The previous frame's first stage was waited for before this one is
+  // recorded (SdtvDecoder::next), so the row buffer is free to overwrite
+  if (row_blanking_v.size() != (size_t)m_standard.total_lines)
+    throw std::logic_error("copyToFrame: one blanking level per row expected");
+  memcpy(m_row_blanking->data<float>(), row_blanking_v.data(), row_blanking_v.size() * sizeof(float));
+  m_row_blanking->synchronizeHostWrites(sq);
 
   m_conceal_composite_algo->updateBufferDescriptorsInSet(0, {video_input, dropout_plane, m_concealed_composite,
-      m_movement_buffers[m_current_movement_buffer_index], m_future_movement_buffer});
+      m_movement_buffers[m_current_movement_buffer_index], m_future_movement_buffer, m_row_blanking});
   sq.enqueueComputeShader<uint32_t>(m_conceal_composite_algo,
-      { dropout_mode == DropoutMode::eNormal ? 0u : dropout_mode == DropoutMode::eDisabled ? 1u : 2u,
-        std::bit_cast<uint32_t>(level_offset_v) });
-  m_deemphasis_algo->updateBufferDescriptorsInSet(0, {m_concealed_composite, buffer});
-  sq.enqueueComputeShader<uint32_t>(m_deemphasis_algo,
-      { std::bit_cast<uint32_t>(level_offset_v), std::bit_cast<uint32_t>(level_scale) });
+      { dropout_mode == DropoutMode::eNormal ? 0u : dropout_mode == DropoutMode::eDisabled ? 1u : 2u });
+  m_deemphasis_algo->updateBufferDescriptorsInSet(0, {m_concealed_composite, buffer, m_row_blanking});
+  sq.enqueueComputeShader<uint32_t>(m_deemphasis_algo, { std::bit_cast<uint32_t>(level_scale) });
 }
 
 void SdtvShaders::detectColorBurstPhase(musevk::CommandBuffer &sq, SdtvFrame *frame) {

@@ -23,7 +23,6 @@
 #include "muse.h"
 
 layout(push_constant) uniform PushConstants {
-    float level_offset; // measured blanking level in reader voltage units
     float level_scale;  // output units per volt: 1 / (white - blanking)
 };
 
@@ -33,6 +32,12 @@ layout(set = 0, binding = 0) buffer readonly concealed_in_buffer {
 
 layout(set = 0, binding = 1) buffer writeonly frame_out_buffer {
     float16_t frame_out[];
+};
+
+// The blanking level of each row in reader voltage units, measured on its
+// back porch (SdtvFrame::RowBlankingLevels): the per-line black clamp
+layout(set = 0, binding = 2) buffer readonly row_blanking_buffer {
+    float row_blanking[];
 };
 
 // LaserVision video de-emphasis (IEC 60857 Figure 9): flat to omega1 = 1/320 ns,
@@ -82,7 +87,9 @@ void main() {
         // A loose clamp: the picture path re-clamps to 0..1 at the end, and the
         // colour burst swings below blanking level -- clipping it would corrupt the
         // burst phase and amplitude reference.
-        if (first_out + i < total)
+        if (first_out + i < total) {
+            float level_offset = row_blanking[(first_out + i) / SDTV_TOTAL_WIDTH];
             frame_out[first_out + i] = clamp(float16_t((v - level_offset) * level_scale), -0.5hf, 1.5hf);
+        }
     }
 }

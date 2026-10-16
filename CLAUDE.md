@@ -232,7 +232,12 @@ exposed two such constants in 2026-10 -- a back-porch window that reached into t
 15 MHz demod rate, and pulse widths in whole decimated samples (0.53 µs there) that let
 equalizing pulses pass as hsync. Both showed as per-field sawtooth in `ntsc-burst-check.py`,
 vertical-interval missing-runs shorter than 9 in the timebase dump, and `vertical drift`/
-`lattice slipped` warnings. Re-run the 30, 40 and 62.5 MHz checks after touching that code.
+`lattice slipped` warnings. Re-run the 30, 40 and 62.5 MHz checks after touching that code. The slicer's 50% threshold must
+come from the last pulse's own back porch, not a slow average: the WOW demo capture's baseband
+wanders ±4 IRE per rotation (eccentricity), and an averaged reference biased the crossings ±50 ns
+in step with it, which put the two fields a pixel apart (2026-10). `ntsc-sync-delta.py` slices at a
+fixed level and is biased the same way on such captures; the burst check is not. The direct test for
+field displacement is a static-text frame: cross-correlate each odd row with its even neighbours.
 
 **Frames**: `--seek T --export-frame-at T2 --export-frame f.png` writes the decoded
 764×480 image (all of it: the display shows only its 4:3 middle, see `PictureFormat`; `V3`

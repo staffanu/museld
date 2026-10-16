@@ -304,7 +304,10 @@ the P key turns that off.  If `--write`, `--export-frame` or `--no-keys` was giv
 stops are ignored.
 
 **NTSC level calibration**: video levels are calibrated automatically against references in the
-signal. Black (0 IRE) tracks the measured back porch blanking level; the gain (100 IRE) is taken
+signal. Black (0 IRE) is clamped to the back porch blanking level of every line (a keyed
+clamp): the FM carrier, and with it the whole baseband, can wander with the disc's eccentricity
+(+-7 IRE within one rotation on one CAV capture, which lit one field against the other under a
+per-frame offset) or over seconds (a PAL capture flickered at 2.5 Hz). The gain (100 IRE) is taken
 from the white flag — a flat 100 IRE line in the vertical interval that most discs carry — when
 one is found, and stays at the nominal FM deviation mapping otherwise. Where black sits above
 blanking is a property of the disc's standard rather than of the signal: NTSC-M (US) discs put it
