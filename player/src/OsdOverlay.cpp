@@ -107,6 +107,11 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         auto disc_info_strings = state.last_decoded.disc_info
                 ? state.last_decoded.disc_info->asStrings()
                 : std::vector<std::string>{"No disc info"};
+        // The field on screen, after the frame number: a frame is shown twice,
+        // and a defect on one field only (a dropout, a cadence slip) is
+        // otherwise impossible to point at while stepping with N
+        if (state.last_decoded.decoded && !disc_info_strings.empty())
+            disc_info_strings.back() += std::format("Field {} ", state.last_decoded.field_parity + 1);
         if (!state.last_decoded.film_status.empty()) {
             std::string film_line = state.last_decoded.film_status;
             // The detail changes per field -- unreadable at speed, so only
