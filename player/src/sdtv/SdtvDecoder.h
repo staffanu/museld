@@ -77,7 +77,7 @@ private:
     double m_blanking_sq_avg;         // ... and of its square, for the wander σ
     double m_white_avg;               // EWMA of the white flag level, -1 until first seen
     long m_white_flag_frames;         // frames whose white flag qualified
-    float m_level_offset_v;           // rescale applied by the copy shader:
+    float m_level_offset_v;           // rescale applied by the copy shader (offset = this frame's blanking):
     float m_level_scale;              // out = (v - offset) * scale
     std::array<double, SdtvFrame::NoiseEstimate::c_luma_hist_bins> m_luma_hist; // decaying sum of the per-frame histograms
     double m_black_peak_v;            // its dark peak, volts above blanking (the disc's black setup); -1 until seeded

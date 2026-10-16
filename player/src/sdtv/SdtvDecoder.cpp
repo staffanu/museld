@@ -293,14 +293,20 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
                     : m_black_auto_ire;
 
         // Level calibration for the copy shader's rescale to blanking = 0,
-        // white = 1: the offset (0 IRE) tracks the measured back porch level,
-        // and the gain (100 IRE) comes from the white flag when the disc
-        // provides one -- after a settling count, since a single flagged frame
-        // is no reference.  Without a flag the nominal 0.7 V span stays.
+        // white = 1: the offset (0 IRE) is this frame's own back porch level
+        // (the median over 422 lines, so its noise is far below a line's),
+        // not a running average: a capture of a Pioneer PAL demo disc had
+        // its whole baseband wandering +-4 IRE at 2.5 Hz (the FM carrier, as
+        // sync tip and porch moved together), and an average over ten frames
+        // lagged that into a visible flicker.  The gain (100 IRE) comes from
+        // the white flag when the disc provides one -- after a settling
+        // count, since a single flagged frame is no reference, and against
+        // the averaged blanking it was measured against.  Without a flag the
+        // nominal 0.7 V span stays.
         if (m_noise.sigma_blanking >= 0)
-            m_level_offset_v = (float)m_blanking_avg;
+            m_level_offset_v = noise_estimate.blanking_level;
         if (m_white_flag_frames >= 30)
-            m_level_scale = std::clamp(1.0f / ((float)m_white_avg - m_level_offset_v), 1.1f, 1.9f);
+            m_level_scale = std::clamp(1.0f / (float)(m_white_avg - m_blanking_avg), 1.1f, 1.9f);
         m_noise_psd_windows += SdtvFrame::AccumulateNoisePsd(input_block->video_data->data<float>(),
                                                              m_noise_psd.data(), 3.0f * m_noise.sigma_blanking, m_standard);
         if (m_frame_no % 30 == 0 && m_noise.sigma_blanking > 0) {
