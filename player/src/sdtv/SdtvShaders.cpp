@@ -60,6 +60,7 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
                                                   vk::BufferUsageFlagBits::eStorageBuffer, eHostNone)),
   m_row_blanking(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.total_lines), sizeof(float),
                                            vk::BufferUsageFlagBits::eStorageBuffer, eHostWrite)),
+  m_raw_deemphasized(createVulkanBuffer(standard.total_lines, standard.samples_per_line)),
   m_chroma_taps(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.y_buf_width + 2 * VideoStandard::c_chroma_tap_halo, standard.field_lines), 4 * 2 /* f16vec4 */,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostNone))
 {
@@ -74,7 +75,7 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
           spirv("pack_dropout_bits"), Size(standard.dropout_bit_words, standard.total_lines)));
   m_extend_dropouts_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_extend_dropouts",
-          {eBuffer, eBuffer}, sizeof(uint32_t) * 0,
+          {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 0,
           spirv("extend_dropouts"), Size(standard.samples_per_line, standard.total_lines)));
   m_conceal_composite_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_conceal_composite",
@@ -82,10 +83,14 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
           spirv("conceal_composite"), Size(standard.samples_per_line, standard.total_lines)));
   // one-dimensional over the flattened frame: the causal filter runs on in
   // scan order across row ends
+  // Two descriptor sets: the pass over the unconcealed composite for the
+  // dropout corroboration and the real one are recorded into the same
+  // command buffer, and a set is updated in place (see m_detect_motion_algo)
   m_deemphasis_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_deemphasis",
           {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 1,
-          spirv("deemphasis"), Size((standard.samples_per_line * standard.total_lines + 3) / 4 /* PER_INVOCATION */)));
+          spirv("deemphasis"), Size((standard.samples_per_line * standard.total_lines + 3) / 4 /* PER_INVOCATION */),
+          /* descriptor sets */ 2));
   m_chroma_taps_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_chroma_taps",
           {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 1,
@@ -119,24 +124,29 @@ std::shared_ptr<musevk::VulkanBuffer> SdtvShaders::createVulkanBuffer(unsigned i
 }
 
 void SdtvShaders::extendDropouts(musevk::CommandBuffer &sq, std::shared_ptr<musevk::VulkanBuffer> const &dropout_input,
+  std::shared_ptr<musevk::VulkanBuffer> const &video_input, const std::vector<float> &row_blanking_v, float level_scale,
   std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane) {
+  // The previous frame's first stage was waited for before this one is
+  // recorded (SdtvDecoder::next), so the row buffer is free to overwrite
+  if (row_blanking_v.size() != (size_t)m_standard.total_lines)
+    throw std::logic_error("extendDropouts: one blanking level per row expected");
+  memcpy(m_row_blanking->data<float>(), row_blanking_v.data(), row_blanking_v.size() * sizeof(float));
+  m_row_blanking->synchronizeHostWrites(sq);
+
+  // the unconcealed composite de-emphasised, for the corroboration
+  m_deemphasis_algo->updateBufferDescriptorsInSet(1, {video_input, m_raw_deemphasized, m_row_blanking});
+  sq.enqueueComputeShader<uint32_t>(m_deemphasis_algo, { std::bit_cast<uint32_t>(level_scale) }, 1);
+
   m_pack_dropout_bits_algo->updateBufferDescriptorsInSet(0, {dropout_input, m_dropout_bits});
   sq.enqueueComputeShader<uint32_t>(m_pack_dropout_bits_algo, {});
-  m_extend_dropouts_algo->updateBufferDescriptorsInSet(0, {m_dropout_bits, dropout_plane});
+  m_extend_dropouts_algo->updateBufferDescriptorsInSet(0, {m_dropout_bits, dropout_plane, m_raw_deemphasized});
   sq.enqueueComputeShader<uint32_t>(m_extend_dropouts_algo, {});
 }
 
 void SdtvShaders::copyToFrame(musevk::CommandBuffer &sq, std::shared_ptr<musevk::VulkanBuffer> const &video_input,
   std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane, std::shared_ptr<musevk::VulkanBuffer> const &buffer,
-  DropoutMode dropout_mode, const std::vector<float> &row_blanking_v, float level_scale) {
-
-  // The previous frame's first stage was waited for before this one is
-  // recorded (SdtvDecoder::next), so the row buffer is free to overwrite
-  if (row_blanking_v.size() != (size_t)m_standard.total_lines)
-    throw std::logic_error("copyToFrame: one blanking level per row expected");
-  memcpy(m_row_blanking->data<float>(), row_blanking_v.data(), row_blanking_v.size() * sizeof(float));
-  m_row_blanking->synchronizeHostWrites(sq);
-
+  DropoutMode dropout_mode, float level_scale) {
+  // m_row_blanking was uploaded by extendDropouts for this frame
   m_conceal_composite_algo->updateBufferDescriptorsInSet(0, {video_input, dropout_plane, m_concealed_composite,
       m_movement_buffers[m_current_movement_buffer_index], m_future_movement_buffer, m_row_blanking});
   sq.enqueueComputeShader<uint32_t>(m_conceal_composite_algo,

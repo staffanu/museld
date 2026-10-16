@@ -382,6 +382,11 @@ bool SdtvFrameReader::readInputBlock(std::unique_ptr<SdtvInputBlock> const &outp
             fwrite(dst, sizeof(float), c_input_sub_buffer_size, f);
             fclose(f);
         }
+        // and the dropout flags of the same blocks, one byte per sample, to <path>.do
+        if (FILE *f = fopen((std::string(dump_path) + ".do").c_str(), first ? "wb" : "ab")) {
+            fwrite(m_input_dropout_buffer + (size_t)slot * c_input_sub_buffer_size, 1, c_input_sub_buffer_size, f);
+            fclose(f);
+        }
         if (--dump_blocks_left == 0)
             m_log.info(eInput, std::format("Demodulated video dump complete: {}", dump_path));
     }

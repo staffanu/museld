@@ -137,8 +137,24 @@ void SdtvRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> analytic_buffer_im = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
+    // Debug aid: MUSELD_DUMP_DROPOUT=<prefix> appends what the dropout detector
+    // sees, one entry per raw input sample: <prefix>.env.f32 (the 9-sample box
+    // of the squared envelope), <prefix>.demod.f32 (the raw quadrature output
+    // the slew test reads) and <prefix>.do.u8 (the flags, per decimated
+    // sample, delayed like the video) -- the first 32 blocks, or
+    // MUSELD_DUMP_DROPOUT_BLOCKS of them.  The buffers it reads are then
+    // host readable.
+    static const char *dropout_dump_prefix = getenv("MUSELD_DUMP_DROPOUT");
+    int dropout_dump_blocks_left = 0;
+    bool dropout_dump_started = false;
+    if (dropout_dump_prefix != nullptr) {
+        const char *blocks = getenv("MUSELD_DUMP_DROPOUT_BLOCKS");
+        dropout_dump_blocks_left = blocks != nullptr ? atoi(blocks) : 32;
+    }
+    const HostAccess detector_access = dropout_dump_prefix != nullptr ? HostAccess::eHostRead : HostAccess::eHostNone;
+
     shared_ptr<VulkanBuffer> lowpass_in_buffer = make_unique<musevk::VulkanBuffer>(
-            m_vulkan_manager, Size(lowpass_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+            m_vulkan_manager, Size(lowpass_in_buffer_size), sizeof(float), buffer_usage_flags, detector_access);
 
     shared_ptr<VulkanBuffer> equalization_in_buffer = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(decimated_lowpass_in_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
@@ -153,7 +169,7 @@ void SdtvRfDemodulator::demodulate() {
             m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
     shared_ptr<VulkanBuffer> local_envelope_buffer = make_unique<musevk::VulkanBuffer>(
-            m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
+            m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, detector_access);
 
     // The dropout detector's carrier reference: the envelope summed over blocks of
     // c_envelope_block samples, and the prefix sum of those, so that the mean over
@@ -470,6 +486,10 @@ void SdtvRfDemodulator::demodulate() {
         // Ensure data can be read from the host later
         block->video_data->synchronizeForHostRead(*command_buffer);
         block->dropouts->synchronizeForHostRead(*command_buffer);
+        if (dropout_dump_blocks_left > 0) {
+            local_envelope_buffer->synchronizeForHostRead(*command_buffer);
+            lowpass_in_buffer->synchronizeForHostRead(*command_buffer);
+        }
 
         // After filtering, we need to copy the last data from the input buffers to their start,
         // since the filter output is shorter than the input.  The same is true for the demodulation input,
@@ -511,6 +531,26 @@ void SdtvRfDemodulator::demodulate() {
 
         command_buffer->wait();
         auto t_after_gpu_wait = timing_clock::now();
+
+        if (dropout_dump_blocks_left > 0) {
+            const char *mode = dropout_dump_started ? "ab" : "wb";
+            dropout_dump_started = true;
+            const std::string prefix(dropout_dump_prefix);
+            if (FILE *f = fopen((prefix + ".env.f32").c_str(), mode)) {
+                fwrite(local_envelope_buffer->data<float>() + 1, sizeof(float), c_sample_block_size, f);
+                fclose(f);
+            }
+            if (FILE *f = fopen((prefix + ".demod.f32").c_str(), mode)) {
+                fwrite(lowpass_in_buffer->data<float>() + lowpass_filter_def.size() - 1, sizeof(float), c_sample_block_size, f);
+                fclose(f);
+            }
+            if (FILE *f = fopen((prefix + ".do.u8").c_str(), mode)) {
+                fwrite(block->dropouts->data<uint8_t>(), 1, c_video_block_size, f);
+                fclose(f);
+            }
+            if (--dropout_dump_blocks_left == 0)
+                m_log.info(eInput, std::format("Dropout detector dump complete: {}", prefix));
+        }
 
         read_ms += ms_between(t_loop_start, t_after_read);
         acquire_ms += ms_between(t_after_read, t_after_acquire);

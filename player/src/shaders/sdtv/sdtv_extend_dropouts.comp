@@ -25,17 +25,40 @@ layout(set = 0, binding = 0) buffer readonly dropout_bits_buffer {
 layout(set = 0, binding = 1) buffer writeonly dropout_out_buffer {
     uint8_t dropout_out[][SDTV_TOTAL_WIDTH];
 };
+// The de-emphasised composite of the same frame before concealment
+// (blanking 0, white 1, clamped to -0.5..1.5 like the frame), for the
+// corroboration below
+layout(set = 0, binding = 2) buffer readonly deemphasized_buffer {
+    float16_t deemphasized[][SDTV_TOTAL_WIDTH];
+};
+
+// A flag is kept only where the demodulated video shows the damage: a
+// sample within ten columns pinned outside the signal's range after
+// de-emphasis, where picture content stays within -0.1 and 1.35 and
+// dropout garbage reaches the clamps.  (The raw composite is no use for
+// this: its pre-emphasis overshoots on every sharp edge.)  On a noisy PAL
+// disc (The Big Day) the RF detector's two measures, the envelope dip
+// against the neighbouring lines and the slew count, read the same on real
+// dropouts and on bright detail over a weak carrier, and three flags in
+// five were on clean picture; in a frame of the hang-glider shot this test
+// kept the one real dropout and none of the 199 false flags.  Damage the
+// demodulator renders inside the range stays unflagged, and is then no
+// worse than a false flag repaired away.
+bool video_damaged(uint row, int col) {
+    for (int dc = -10; dc <= 10; dc++) {
+        float v = float(deemphasized[row][uint(clamp(col + dc, 0, SDTV_TOTAL_WIDTH - 1))]);
+        if (v < -0.3 || v > 1.45)
+            return true;
+    }
+    return false;
+}
 
 uint word(uint row, int w) {
     return (w < 0 || w >= SDTV_DROPOUT_BIT_WORDS) ? 0u : dropout_bits[row][w];
 }
-
 uint pick(uvec4 words, int k) {
     return k == 0 ? words.x : k == 1 ? words.y : k == 2 ? words.z : k == 3 ? words.w : 0u;
 }
-
-// The flags of the n (1..32) columns from column first upwards, bit k for
-// column first + k.  words holds the four consecutive words from base_word.
 uint window(uvec4 words, int base_word, int first, int n) {
     int off = first - base_word * 32;
     int k = off >> 5;
@@ -91,5 +114,9 @@ void main() {
         soft = last <= min(count, 24);
     }
 
+    if ((core || soft) && !video_damaged(row, col)) {
+        core = false;
+        soft = false;
+    }
     dropout_out[row][col] = uint8_t(core ? 1 : soft ? 2 : 0);
 }
