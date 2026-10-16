@@ -300,7 +300,8 @@ on files and http input, not on live streams or the 16.2 MHz baseband reader.
 
 **Stop code**: The picture stop code of NTSC
 CAV discs (`82CFFF`, IEC 60857 10.1.4) pauses playback on the frame it marks, once per stop;
-the P key turns that off.  If `--write` or `--export-frame` was given, picture stops are ignored.
+the P key turns that off.  If `--write`, `--export-frame` or `--no-keys` was given, picture
+stops are ignored.
 
 **NTSC level calibration**: video levels are calibrated automatically against references in the
 signal. Black (0 IRE) tracks the measured back porch blanking level; the gain (100 IRE) is taken
@@ -470,9 +471,10 @@ harmless since the flag changes on program boundaries.
 The `--ac3` track (or the A key) runs the AC3-RF QPSK demodulator on the same audio worker
 thread; the recovered AC3 sync frames are decoded to PCM with libavcodec. On DTS laserdiscs
 the EFM track carries a DTS bitstream instead of PCM: museld watches the decoded EFM
-samples for DTS sync words and, once seen, bypasses the PCM processing (concealment,
-de-emphasis and pop detection would corrupt the bitstream — and playing it as PCM is loud
-noise) and feeds the bytes to libavcodec's DTS decoder. Both need an FFmpeg build
+samples for DTS sync words and, once they arrive at the density of a DTS stream (eight
+within a second; PCM produces a chance match about once a minute), bypasses the PCM 
+processing (concealment, de-emphasis, and pop detection) and feeds the bytes to
+libavcodec's DTS decoder, until four seconds pass without a sync word. Both need an FFmpeg build
 (`--write` capable); without it the tracks are selectable but silent. Compressed frames
 that fail to decode (dropouts) become silence of the same duration, keeping A/V sync.
 

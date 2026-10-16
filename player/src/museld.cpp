@@ -649,13 +649,14 @@ static void runPlayer(Logger &log,
                     state.search_action_pending = false;
                     runChapterSearchAction();
                 }
-            } else if (state.honor_picture_stops && !vfw && !export_frame_filename && !state.paused
+            } else if (state.honor_picture_stops && !vfw && !export_frame_filename && !no_keys && !state.paused
                        && state.last_decoded.decoded && state.last_decoded.disc_info
                        && state.last_decoded.disc_info->pictureStop()
                        && state.last_decoded.field_parity == 1 // the frame is complete on screen
                        && state.last_picture_stop_offset != state.last_decoded.disc_info_input_offset) {
                 // The disc asks for a still here (IEC 60857 10.1.4); once per
-                // stop, so resuming plays on through it
+                // stop, so resuming plays on through it.  Not under --no-keys:
+                // a still that no key can release would hang the run
                 state.last_picture_stop_offset = state.last_decoded.disc_info_input_offset;
                 state.paused = true;
                 state.osd_text = "PICTURE STOP";
@@ -1631,7 +1632,8 @@ int main(int argc, char *argv[]) {
     });
     options.flag("--no-keys", "Ignore the keyboard and open the window without taking input focus, "
                               "for runs made beside other work (measurements, scripts): nothing typed "
-                              "elsewhere can pause or change the decode; the close button still quits",
+                              "elsewhere can pause or change the decode; the close button still quits.  "
+                              "Picture stops are ignored, since no key could release them",
                  [&] () -> void {
         no_keys = true;
     });

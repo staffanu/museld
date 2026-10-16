@@ -70,8 +70,7 @@ SdtvDecoder::SdtvDecoder(
   m_pal_v_flip(getenv("MUSELD_PAL_VFLIP") != nullptr && atoi(getenv("MUSELD_PAL_VFLIP")) != 0),
   m_ac3_pcm_decoder(log, CompressedAudioDecoder::Codec::eAc3),
   m_dts_pcm_decoder(log, CompressedAudioDecoder::Codec::eDts),
-  m_dts_sync_count(0),
-  m_dts_sync_age_frames(0),
+  m_dts_detector(),
   m_pending_audio(),
   m_pending_audio_mode(MODE_UNKNOWN),
   m_temporal_distance(video_standard.ntsc_chroma ? 1 : 2),
@@ -109,35 +108,15 @@ bool SdtvDecoder::initialize() {
     return true;
 }
 
-// DTS laserdiscs put a DTS bitstream where the EFM track normally carries PCM.
-// Look for the DTS sync word in consecutive 16-bit words of the sample stream
-// (L and R flattened, as on the disc): 0x7FFE 0x8001 for a 16-bit stream,
-// 0x1FFF 0xE800 for the 14-bit-in-16 packing DTS discs use, plus their
-// byte-swapped forms.  A hit is essentially unambiguous (a 32-bit match), but
-// two are required before latching so a chance pattern in PCM cannot flip a
-// frame into bitstream mode; once latched, it takes ~4 s without any sync word
-// (a video frame holds at most a few DTS frames) to fall back to PCM.
+// DTS laserdiscs put a DTS bitstream where the EFM track normally carries PCM;
+// DtsSyncDetector tells the two apart by the density of DTS sync words.
 bool SdtvDecoder::detectDtsBitstream(const std::vector<TwoChannelSampleWithErasureFlags> &raw_samples) {
-    int syncs = 0;
-    uint16_t prev = 0;
-    for (const auto &s : raw_samples)
-        for (int ch = 0; ch < 2; ch++) {
-            const auto w = (uint16_t)s.samples[ch];
-            if ((prev == 0x7ffe && w == 0x8001) || (prev == 0x1fff && w == 0xe800) ||
-                (prev == 0xfe7f && w == 0x0180) || (prev == 0xff1f && w == 0x00e8))
-                syncs++;
-            prev = w;
-        }
-    if (syncs > 0) {
-        if (m_dts_sync_count < 2 && m_dts_sync_count + syncs >= 2)
-            m_log.info(eAudio, "DTS bitstream detected on the EFM track");
-        m_dts_sync_count = std::min(m_dts_sync_count + syncs, 1000);
-        m_dts_sync_age_frames = 0;
-    } else if (m_dts_sync_count > 0 && ++m_dts_sync_age_frames > 120) {
-        m_log.info(eAudio, "DTS sync words gone; treating the EFM track as PCM again");
-        m_dts_sync_count = 0;
-    }
-    return m_dts_sync_count >= 2;
+    const bool was_dts = m_dts_detector.active();
+    const bool is_dts = m_dts_detector.update(raw_samples);
+    if (is_dts != was_dts)
+        m_log.info(eAudio, is_dts ? "DTS bitstream detected on the EFM track"
+                                  : "DTS sync words gone; treating the EFM track as PCM again");
+    return is_dts;
 }
 
 // For NTSC, enable_non_linear is not implemented
