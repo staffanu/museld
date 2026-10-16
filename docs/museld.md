@@ -378,7 +378,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | E | Cycle the EFM adaptive filter size: 3 → 5 → 9 → 17 → 35 → 71 taps → off → 3 (RF input only, see `--efm-filter-size`). The filter restarts from identity at each change. |
 | B | Cycle the audio channels heard: stereo → left only → right only (bilingual discs, or the left-only analog track on AC3 discs; `--write` output always keeps stereo) |
 | X | Cycle CX noise reduction for the NTSC analog audio: auto (follow the VBI flag, the default) → off → on; `--cx` sets the initial mode. Shown in parentheses when the audio playing is not the analog track (the setting is remembered but inaudible). The V info line shows the CX status: the disc's flag in auto mode, or e.g. "CX off forced (disc on)" when overridden. |
-| V | Toggle disc code / chapter / frame display, plus the NTSC film mode and black level status |
+| V | Toggle disc code / chapter / frame display (the frame number is followed by the field on screen, 1 or 2), plus the NTSC film mode and black level status |
 | J | NTSC: cycle the black level: auto → NTSC-M (7.5 IRE) → NTSC-J (0 IRE), see `--black-level` |
 | C | Show cursor coordinates and input-file offsets (see below) |
 | L | Toggle non-linear de-emphasis processing |
