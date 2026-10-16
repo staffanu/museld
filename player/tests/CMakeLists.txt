@@ -9,6 +9,7 @@ add_executable(museld-tests
     InputProbeTest.cpp
     Eia608DecoderTest.cpp
     NtscCadenceTrackerTest.cpp
+    DtsSyncDetectorTest.cpp
     PrefetchingInputReaderTest.cpp
     SrtParserTest.cpp
     DisplayGeometryTest.cpp
