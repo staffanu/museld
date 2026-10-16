@@ -98,10 +98,15 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
           "sdtv_decode_single_field",
           {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 9,
           spirv("decode_single_field"), Size(standard.y_buf_width, standard.field_lines)));
+  // One descriptor set per motion set: on PAL the comb and the weave masks
+  // are both recorded into the same command buffer, and a descriptor set
+  // is updated in place, so sharing one would have both dispatches run
+  // with the bindings of the second -- the comb masks then stayed zero, and
+  // the dropout concealment, which is gated on motion, never fired on PAL.
   m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_detect_motion",
           {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 5,
-          spirv("detect_motion"), Size(standard.y_buf_width, standard.field_lines * 2)));
+          spirv("detect_motion"), Size(standard.y_buf_width, standard.field_lines * 2), /* descriptor sets */ 2));
   m_combine_still_and_moving_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_combine_still_and_moving",
           {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eImage, eBuffer, eBuffer, eBuffer},
@@ -186,14 +191,15 @@ void SdtvShaders::detectMotion(CommandBuffer &sq, MotionSet set,
     auto &future = set == MotionSet::eComb ? m_future_movement_buffer : m_weave_future_movement_buffer;
     int &current = set == MotionSet::eComb ? m_current_movement_buffer_index : m_current_weave_buffer_index;
     int out = 1 - current; // the other buffer holds the previous mask
-    m_detect_motion_algo->updateBufferDescriptorsInSet(0,
+    const int descriptor_set = set == MotionSet::eComb ? 0 : 1;
+    m_detect_motion_algo->updateBufferDescriptorsInSet(descriptor_set,
         {frame_next, frame0, frame1, frame2, m_raw_past_buffer, m_raw_future_buffer,
          buffers[current], buffers[out], future});
     for (uint32_t phase : {1u, 2u})
         sq.enqueueComputeShader<uint32_t>(m_detect_motion_algo,
             { phase, use_prev_movement ? 1u : 0u,
               std::bit_cast<uint32_t>(motion_none), std::bit_cast<uint32_t>(motion_full),
-              box_aligned ? 1u : 0u });
+              box_aligned ? 1u : 0u }, descriptor_set);
     current = out;
 }
 

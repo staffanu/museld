@@ -118,6 +118,25 @@ float16_t comb_luma_next(uint fl, uint nl, uint fc) {
     return 0.25hf * next_frame[fl - 1][fc] + 0.5hf * next_frame[fl][fc] + 0.25hf * next_frame[nl][fc];
 }
 
+// A dropout's hole in the demodulated signal is pinned to the de-emphasis
+// clamp (-0.5 / 1.5), but its lowpass and de-emphasis tails run on for
+// some fifteen samples at levels that are dark yet legal, and the pixel-wise
+// illegal-level rescue left them standing as a dark dash on either side of
+// the repaired middle (The Big Day, picture 3580).  So a pixel within fourteen
+// samples of two pinned samples is rescued with the hole.  The raw
+// composite is tested, not the luma: one load per position, and no legal
+// signal comes within 0.05 of the clamps (saturated chroma reaches -0.33).
+bool hole_nearby(uint frame_line, uint frame_col) {
+    int pinned = 0;
+    for (int dx = 4; dx <= 14; dx += 2) {
+        float16_t l = input_frame[frame_line][uint(max(int(frame_col) - dx, 0))];
+        float16_t r = input_frame[frame_line][uint(min(int(frame_col) + dx, SDTV_TOTAL_WIDTH - 1))];
+        pinned += (l < -0.45hf || l > 1.45hf) ? 1 : 0;
+        pinned += (r < -0.45hf || r > 1.45hf) ? 1 : 0;
+    }
+    return pinned >= 2;
+}
+
 #include "sdtv/sdtv_comb_taps.h"
 
 // A neighbour frame's spatial luma: its composite less the band around fsc
@@ -311,7 +330,7 @@ void main() {
             outside_p += (y < float16_t(level_floor) || y > float16_t(level_ceiling)) ? 1 : 0;
         }
         float16_t motion_p = max(past_motion[mask_row][col], future_motion[mask_row][col]);
-        if (dropout_mode != 1 && outside_p >= 3 && motion_p > 0.1hf) {
+        if (dropout_mode != 1 && (outside_p >= 3 || hole_nearby(frame_line, frame_col)) && motion_p > 0.1hf) {
             if (dropout_mode == 2) {
                 pal_painted = true;
             } else {
@@ -431,7 +450,7 @@ void main() {
     // threshold flicker on high-contrast static detail (subtitle strokes
     // overshoot the ceiling on noise) from being "rescued" into smear.
     float16_t motion_here = max(past_motion[mask_row][col], future_motion[mask_row][col]);
-    if (dropout_mode != 1 && outside >= 3 && motion_here > 0.1hf) {
+    if (dropout_mode != 1 && (outside >= 3 || hole_nearby(frame_line, frame_col)) && motion_here > 0.1hf) {
         if (dropout_mode == 2) {
             painted = true;
         } else {
