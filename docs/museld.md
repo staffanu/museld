@@ -235,10 +235,24 @@ cue that appeared late is kept up correspondingly longer. Translating into a
 language whose script the bundled font does not cover may need
 `--subtitle-font`.
 
-**Dropouts** (RF input): the default is to conceal detected dropouts by averaging the surrounding
-picture lines. `--no-dropout` leaves them untouched; `--highlight-dropout` paints them red
-(dropout in the luminance area) or green (dropout in the color area). The D key cycles between
-the three modes during playback.
+**Dropouts** (RF input): the default is to conceal detected dropouts. `--no-dropout` leaves them
+untouched; `--highlight-dropout` paints them red (dropout in the luminance area) or green
+(dropout in the color area). The D key cycles between the three modes during playback.
+
+A flag from the RF detector is kept only where the demodulated video shows the damage, a sample
+within ten columns pinned outside the signal range after de-emphasis: on a noisy PAL disc the
+envelope dips and slews on bright detail over a weak carrier just as on real dropouts, and three
+flags in five were on clean picture before this check. On NTSC and PAL a defect is a pixel the RF detector flagged, or one whose level is illegal (far
+below blanking or above peak white, which a demodulator produces where the carrier faltered too
+briefly for the detector), including the tails such a hole leaves. The repair is temporal where
+the surroundings are still -- the same pixel of the stiller neighbour frame, decoded in place --
+and spatial otherwise: the average of the neighbouring lines for a flagged pixel, the nearest
+healthy line for an illegal level. Whether the surroundings are still is read from the motion
+masks on the nearest clean lines above and below, never at the pixel itself, which the defect
+makes look like motion whatever the scene does. An illegal level that does not differ from the
+neighbouring frames is left alone: that is picture content, typically a title stroke overshooting
+on noise. (The Big Day PAL capture in the stu sample set has hundreds of small sky dropouts, and
+the hang-glider shot at pictures 3577-3700 exercises both repairs.)
 
 Both MUSE and NTSC detect dropouts from the RF envelope (`detect_dropouts_envelope.comp`), the way
 hardware players do: a dropout is a collapse of the carrier amplitude, whatever the demodulated

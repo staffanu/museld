@@ -29,15 +29,21 @@ public:
 
   void operator=(const SdtvShaders &) = delete;
 
+  // The detector's flags, padded, bridged and extended into the plane the
+  // decoder reads -- and kept only where the composite, de-emphasised
+  // (a pass of its own, before concealment), shows the damage.  Uploads
+  // the frame's row blanking levels, which copyToFrame then shares.
   void extendDropouts(musevk::CommandBuffer &sq,
                       std::shared_ptr<musevk::VulkanBuffer> const &dropout_input,
+                      std::shared_ptr<musevk::VulkanBuffer> const &video_input,
+                      const std::vector<float> &row_blanking_v, float level_scale,
                       std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane);
 
   void copyToFrame(musevk::CommandBuffer &sq,
                    std::shared_ptr<musevk::VulkanBuffer> const &video_input,
                    std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane,
                    std::shared_ptr<musevk::VulkanBuffer> const &buffer,
-                   DropoutMode dropout_mode, const std::vector<float> &row_blanking_v, float level_scale);
+                   DropoutMode dropout_mode, float level_scale);
 
   // Filter the raw frame data for luma and color using notch and bandpass filters respectively
   // Also fills in the color burst phase information
@@ -106,6 +112,8 @@ private:
   std::shared_ptr<musevk::VulkanBuffer> m_concealed_composite;
   // the per-row blanking levels of the frame being copied (total_lines floats, written by the host)
   std::shared_ptr<musevk::VulkanBuffer> m_row_blanking;
+  // the unconcealed composite de-emphasised, for corroborating the dropout flags
+  std::shared_ptr<musevk::VulkanBuffer> m_raw_deemphasized;
 
   // per-column chroma estimates for the field being decoded, between the
   // chroma taps and the single field shader (field_lines rows of

@@ -207,6 +207,17 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
 - `MUSELD_DUMP_TIMEBASE=<prefix>` — `<prefix>.curve.f64`: (line k, input sample
   position of its start) per finalized line; `<prefix>.meas.f64`: the accepted sync
   measurements. Use together with a demod dump **from the same run**.
+- `MUSELD_DUMP_DEMOD` also writes `<path>.do`, the detector's dropout flags of the same blocks
+  as the reader's ring holds them, one byte per decimated sample.
+- `MUSELD_DUMP_DROPOUT=<prefix>` with `MUSELD_DUMP_DROPOUT_BLOCKS=<n>` (default 32) — what the
+  dropout detector sees, per raw input sample: `<prefix>.env.f32` (the 9-sample box of the squared
+  envelope), `<prefix>.demod.f32` (the raw quadrature output its slew test reads) and
+  `<prefix>.do.u8` (its flags per decimated sample). The flags are delayed like the video, two to
+  four decimated samples after the envelope dip. To judge the detector, classify its flag runs by
+  whether the de-emphasised video is pinned outside the signal range there (the frame dump's
+  `<path>` file, not `.raw`: pre-emphasis overshoots on every sharp edge): on The Big Day that
+  separated real dropouts from bright detail where the envelope ratio and the slew count could not,
+  and `sdtv_extend_dropouts.comp` now keeps a flag only on that evidence.
 - `MUSELD_DUMP_VBI_FAIL=<path>` — each VBI code line that failed to slice, as 910
   floats (the 4 fsc frame-buffer row).
 - `MUSELD_DUMP_FRAME=<path>` — one whole frame buffer (the de-emphasized, rescaled
