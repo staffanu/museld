@@ -7,6 +7,7 @@
 
 #include <array>
 #include <optional>
+#include <vector>
 #include <utility>
 
 #include "logging/Logger.h"
@@ -54,6 +55,17 @@ public:
     // and near the blanking level; max_sigma gates out VBI lines carrying
     // signal.  Returns the number of windows added.
     static int AccumulateNoisePsd(float const *data, double *psd, float max_sigma, const VideoStandard &standard);
+
+    // The blanking level of every row, from its back porch window, for a
+    // per-line black clamp: rows without a usable porch (the broad pulses,
+    // the white flag, a dropout across the window) are interpolated from
+    // the nearest rows that have one, and the result is median filtered and
+    // then box smoothed over neighbouring rows, which are consecutive in
+    // time.  frame_level is the frame's own blanking level, which gates
+    // what counts as a porch.  out gets total_lines values in the reader's
+    // voltage units.
+    static void RowBlankingLevels(float const *data, float frame_level, const VideoStandard &standard,
+                                  std::vector<float> &out);
 
     void set_frame_no(int frame_no, int64_t input_offset, double input_samples_per_sample);
     [[nodiscard]] int64_t getInputOffset() const;

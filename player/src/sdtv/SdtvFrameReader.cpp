@@ -83,6 +83,7 @@ SdtvFrameReader::SdtvFrameReader(
           m_sync_fall_frac(0),
           m_sync_rise_idx(0),
           m_blank_level(c_blank_nominal),
+          m_blank_local(c_blank_nominal),
           m_lattice_valid(false),
           m_lat_t(0),
           m_p_run(0),
@@ -456,6 +457,15 @@ void SdtvFrameReader::syncPass(const float *data, int64_t stream_base, int count
                 const float level = bp[bp_count / 2];
                 if (level > 0.15f && level < 0.6f)
                     m_blank_level += 0.02f * (level - m_blank_level);
+                // The threshold follows the porch just measured, not the
+                // slow average: a CAV capture with heavy eccentricity (the
+                // WOW demo disc) had its carrier, and the whole baseband,
+                // moving +-4 IRE over each rotation, and the average's lag
+                // put the 50% crossings +-50 ns off in step with it -- the
+                // two fields displaced by a pixel against each other.  The
+                // average remains the sanity check: a porch far from it
+                // (a dropout) is not used.
+                m_blank_local = std::abs(level - m_blank_level) < 0.07f ? level : m_blank_level;
             }
             m_sync_rise_idx = m_sync_dec_count;
             if ((is_hsync || is_broad) && m_sync_dec_count - m_sync_fall_idx < c_sync_filt_ring - 24) {
@@ -466,7 +476,7 @@ void SdtvFrameReader::syncPass(const float *data, int64_t stream_base, int count
                     tip_buf[j] = filt(m_sync_fall_idx + 1 + j);
                 nth_element(tip_buf, tip_buf + tn / 2, tip_buf + tn);
                 const float tip = tn > 0 ? tip_buf[tn / 2] : 0.f;
-                const float th = 0.5f * (tip + m_blank_level);
+                const float th = 0.5f * (tip + m_blank_local);
                 int64_t j = m_sync_fall_idx;
                 int steps = 0;
                 while (j > 0 && filt(j - 1) < th && ++steps < 16)

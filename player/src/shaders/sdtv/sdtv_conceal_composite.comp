@@ -15,7 +15,6 @@
 
 layout(push_constant) uniform PushConstants {
     uint dropout_mode;  // 0: normal, 1: disabled, 2: highlight
-    float level_offset; // measured blanking level in reader voltage units
 };
 
 layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
@@ -45,6 +44,12 @@ layout(set = 0, binding = 3) buffer readonly past_motion_buffer {
 
 layout(set = 0, binding = 4) buffer readonly future_motion_buffer {
     float16_t future_motion[][SDTV_Y_BUF_WIDTH];
+};
+
+// The blanking level of each row in reader voltage units, measured on its
+// back porch (SdtvFrame::RowBlankingLevels)
+layout(set = 0, binding = 5) buffer readonly row_blanking_buffer {
+    float row_blanking[];
 };
 
 float motion_at(int r, int c) {
@@ -125,5 +130,5 @@ void main() {
     // peak-to-peak), which must not ring into the colour burst either.
     // Only columns before the burst can see the pulse, so the picture is
     // unaffected.
-    concealed_out[row][col] = col < SDTV_SYNC_END ? level_offset : composite_sample(int(row), int(col));
+    concealed_out[row][col] = col < SDTV_SYNC_END ? row_blanking[row] : composite_sample(int(row), int(col));
 }

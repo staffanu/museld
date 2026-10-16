@@ -5,6 +5,7 @@
 #define MUSECPP_SDTVSHADERS_H
 
 #include <array>
+#include <vector>
 #include <string>
 
 #include "musevk/VulkanManager.h"
@@ -36,7 +37,7 @@ public:
                    std::shared_ptr<musevk::VulkanBuffer> const &video_input,
                    std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane,
                    std::shared_ptr<musevk::VulkanBuffer> const &buffer,
-                   DropoutMode dropout_mode, float level_offset_v, float level_scale);
+                   DropoutMode dropout_mode, const std::vector<float> &row_blanking_v, float level_scale);
 
   // Filter the raw frame data for luma and color using notch and bandpass filters respectively
   // Also fills in the color burst phase information
@@ -103,6 +104,8 @@ private:
   // the dropout-concealed raw composite, between the conceal and the
   // de-emphasis shader (total_lines rows of samples_per_line floats)
   std::shared_ptr<musevk::VulkanBuffer> m_concealed_composite;
+  // the per-row blanking levels of the frame being copied (total_lines floats, written by the host)
+  std::shared_ptr<musevk::VulkanBuffer> m_row_blanking;
 
   // per-column chroma estimates for the field being decoded, between the
   // chroma taps and the single field shader (field_lines rows of

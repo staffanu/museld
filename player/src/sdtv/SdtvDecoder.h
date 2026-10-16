@@ -79,6 +79,7 @@ private:
     long m_white_flag_frames;         // frames whose white flag qualified
     float m_level_offset_v;           // rescale applied by the copy shader (offset = this frame's blanking):
     float m_level_scale;              // out = (v - offset) * scale
+    std::vector<float> m_row_blanking_v; // the offset per row: the frame's blanking level, refined per line (SdtvFrame::RowBlankingLevels)
     std::array<double, SdtvFrame::NoiseEstimate::c_luma_hist_bins> m_luma_hist; // decaying sum of the per-frame histograms
     double m_black_peak_v;            // its dark peak, volts above blanking (the disc's black setup); -1 until seeded
     double m_black_lowest_v;          // the lowest significant dark peak (letterbox mattes, fades); -1 until seeded
