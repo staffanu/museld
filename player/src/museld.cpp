@@ -70,7 +70,12 @@ class VideoFileWriter {}; // stub for non-libav builds; never instantiated
 
 using namespace std;
 
+// The description of the most recent GLFW error, for the message of the
+// exception thrown when initialization or window creation fails
+static std::string g_last_glfw_error;
+
 void glfw_error_callback(int error, const char* description) {
+    g_last_glfw_error = description;
     fprintf(stderr, "Error %d: %s\n", error, description); // FIXME: use logging framework
 }
 
@@ -983,7 +988,13 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   double initial_seek_seconds,
                   std::optional<int> start_chapter) {
     glfwSetErrorCallback(glfw_error_callback);
-    glfwInit();
+    g_last_glfw_error.clear();
+    if (!glfwInit())
+        // No display, or none of the platforms GLFW was built with: stop here
+        // instead of cascading into "not initialized" errors and a Vulkan
+        // instance with no presentable device.  A failed glfwInit leaves
+        // nothing to terminate.
+        throw runtime_error(std::format("Cannot initialize GLFW (no usable display?): {}", g_last_glfw_error));
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
     if (no_keys) {
@@ -1026,6 +1037,12 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         window = glfwCreateWindow(mode->width, mode->height, title, monitor, nullptr);
     } else {
         window = glfwCreateWindow(window_w, window_h, title, nullptr, nullptr);
+    }
+    if (!window) {
+        // The Teardown guard below does not exist yet, so terminate here
+        const string reason = g_last_glfw_error;
+        glfwTerminate();
+        throw runtime_error(std::format("Cannot create the {} window: {}", title, reason));
     }
     glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
