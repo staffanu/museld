@@ -15,60 +15,99 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   `player/third_party/ethadc` (never put that directory itself on the include path).
 - **SDL3 in place of GLFW** (branch `sdl3`): window, Vulkan surface, keys, full screen.
   Frame exports are byte-identical to the GLFW build.  GLFW had no tvOS; SDL3 has.
+- **The tvOS build** (branch `sdl3`, `player/CMakePresets.json`): presets `tvos-device`
+  and `tvos-simulator`, Xcode generator, `CMAKE_SYSTEM_NAME=tvOS`, deployment target
+  17.0, no `-march`, no FFmpeg/OCR/CLI.  Everything is built into the app or linked
+  statically, fetched at configure time: SDL3 3.4.18 (the existing fallback), libogg
+  1.3.6 + libFLAC 1.5.0 (`.ldf` files are *Ogg* FLAC, so `WITH_OGG` is needed; the
+  `museld_find_flac()` macro in `src/CMakeLists.txt` picks pkg-config or this), the
+  Khronos Vulkan headers 1.4.350, and MoltenVK 1.4.2's static xcframework from its
+  GitHub release (172 MB `MoltenVK-all.tar`; `MUSELD_MOLTENVK_XCFRAMEWORK` points at
+  another, e.g. the LunarG SDK's).  `AudioPlayback.cpp` compiles as Objective-C++ on
+  tvOS (miniaudio's AVAudioSession code).  The bundle is flat: `shaders/` and `fonts/`
+  land next to the executable, so `get_executable_dir()` needed no change.
+- **Vulkan without a loader**: vulkan.hpp's static dispatcher binds straight to
+  MoltenVK.  `VK_KHR_portability_enumeration` and its instance flag are the *loader's*
+  and MoltenVK refuses them, hence `MUSELD_VULKAN_NO_LOADER` (tvOS only;
+  `portability_subset` stays).  The surface is made from the window's Metal layer
+  (`SDL_Metal_CreateView` + `vkCreateMetalSurfaceEXT`) on all Apple platforms, with
+  `VK_USE_PLATFORM_METAL_EXT` defined for the museld target; macOS frame exports are
+  unchanged by this.
+- **App shell**: `SDL_main.h` on Apple (tvOS entry point), `SDL_INIT_GAMEPAD` with the
+  Siri Remote / controller buttons mapped onto the keys in `InputController`
+  (select, play/pause, Start → Space; Menu, Back → quit; touch surface/d-pad → arrows;
+  Y → audio track; shoulders → subtitle slots), `WILL_ENTER_BACKGROUND` /
+  `DID_ENTER_FOREGROUND` pausing the decoder and skipping all GPU work
+  (`PlayerState::in_background`), `SDL_EVENT_TERMINATING` as quit.  SDL's UIKit runner
+  keeps the process in its run loop after `main` returns, so `main` ends through
+  `leave()`, which calls `exit()` on tvOS.  Info.plist template in
+  `player/cmake/tvOS-Info.plist.in` (local network usage description, full screen).
+  The Xcode scheme is generated; its launch arguments are museld's command line
+  (`MUSELD_TVOS_LAUNCH_ARGUMENTS`, a `;`-separated list).  Signing is automatic with
+  `MUSELD_DEVELOPMENT_TEAM`; both belong in `player/CMakeUserPresets.json`
+  (git-ignored), inheriting the presets.
+- **Simulator result** (tvOS 27 simulator on an M2): the app installs and runs, the
+  content probe and the whole CPU side work (`--probe` agrees with the macOS build,
+  the NTSC decoder logs sane SNR and levels at ~15 frames/s), MoltenVK creates the
+  device and the swap chain -- but every GPU output is black, the OSD text included,
+  with no MoltenVK error.  The simulator's Metal is an Apple 2 family GPU with no
+  shared textures, which likely breaks the mapped-memory image uploads; it is not the
+  hardware and this was not pursued.  Test on the device.
+
+- **Runs on the Apple TV** (2026-10-17, the A1842 on tvOS 26.6): picture and sound,
+  playing `.ldf` captures over HTTP from a Mac.  Signing is the free Apple ID's
+  Personal Team (its ID differs from the one in the signing certificate; Xcode's
+  Signing tab shows it), and the device is registered to the team by building the
+  *scheme* with the Apple TV as destination once (`xcodebuild -scheme museld
+  -destination id=<udid> -allowProvisioningUpdates -allowProvisioningDeviceRegistration`
+  in the build directory); after that `cmake --build --preset my-tvos-device` signs.
+  Install and run with `xcrun devicectl device install app --device <udid> <app>` and
+  `xcrun devicectl device process launch --console --terminate-existing --device <udid>
+  se.ulfberg.museld <options> <input>`.  Found on the device, all fixed:
+  - the A10X allows 512 compute threads per workgroup, museld assumed 1024: the
+    linear workgroup now halves down to `maxComputeWorkGroupInvocations`, and
+    `envelope_prefix.comp` sizes its per-thread array from `gl_WorkGroupSize`;
+  - miniaudio's default audio session category is PlayAndRecord, which tvOS refuses,
+    and it fell back to its null device silently: `AudioPlayback` asks for the
+    playback category and forwards miniaudio's log to the audio category;
+  - a remote's select and play/pause buttons arrive as *Return* key presses (an
+    HDMI-CEC remote for certain; the Siri Remote also when tvOS translates it rather
+    than SDL seeing it as a gamepad), the directions as arrow keys, back as Escape, so
+    Return pauses too.  No gamepad was seen with the CEC remote; the Siri Remote
+    gamepad mapping is still untested.
+- **Measured on the A1842**, NTSC 40 MHz over HTTP: about 24 frames/s of 30.  The
+  demodulator block takes 16 ms for a 13 ms budget, 13 of them waiting for the GPU
+  (2 ms HTTP read + FLAC); the reader's input wait is 37 ms per 33 ms frame as a
+  consequence; the decoder itself is 22 ms per frame, GPU-bound too.  Audio underruns
+  follow from that.
 
 ## To do, in order
 
-### 1. Cross-compile the core
+### 1. On the device
 
-A CMake preset for tvOS: `CMAKE_SYSTEM_NAME=tvOS`, `CMAKE_OSX_ARCHITECTURES=arm64`,
-`CMAKE_OSX_SYSROOT=appletvos`, the Xcode generator (signing and deployment need it),
-`MUSELD_ARCH` empty, `USE_LIBAV=OFF`, `USE_OCR=OFF`, `BUILD_AC3RF_DECODE=OFF`.  Expect to
-touch: the `-mmacosx-version-min=15.0` flag (macOS only), `pkg_check_modules(FLAC)` (no
-pkg-config for tvOS: build libFLAC from source with FetchContent, as the SDL3 fallback in
-`src/CMakeLists.txt` already does for SDL; both projects support tvOS), and anything
-using APIs tvOS lacks (`system()`, `fork`, `getenv` of the shell kind).  The AVX code is
-behind x86 guards and the NEON path exists.  miniaudio's Core Audio backend covers tvOS.
-cpp-httplib and the ethadc receiver are plain BSD sockets.
+- Subtitles have not been *seen* on the device yet.  `render_subtitle.comp` was the
+  one pipeline the A10X refused ("XPC_ERROR_CONNECTION_INTERRUPTED" from Metal's
+  compiler service): a read-write rgba32f image, which Metal GPU family 3 only allows
+  in 32-bit single-channel formats.  It binds the frame twice now, read-only and
+  write-only, and compiles.  Showing a file was the problem: `--subtitles-file` opens
+  local files only, and a file put into the app's data container with `devicectl
+  device copy to` is there but the app's stat of it fails with "Operation not
+  permitted".  A leading `~/` in file arguments is expanded (`expandHome`) for when
+  that works.  The disc's own CC track would show without any file.
+- Speed: the GPU side of the NTSC demodulator and decoder, see the measurements.
+- The Siri Remote as a gamepad (needs the original remote), and Menu/back quitting the
+  app: fine for development, but a tvOS app is not supposed to exit itself; a
+  settings screen that stays in the app replaces this later.
+- A `--seek` and `--pause` from the Xcode scheme work; a settings screen, an app icon
+  and a top-shelf image are for later.
 
-### 2. Vulkan through MoltenVK, no loader
+### 2. Measure the rest
 
-tvOS cannot load a Vulkan loader from outside the bundle: link MoltenVK statically
-(`MoltenVK.xcframework` from the LunarG Vulkan SDK has tvOS slices; or build it from
-source).  `vulkan.hpp`'s dynamic dispatcher is given MoltenVK's `vkGetInstanceProcAddr`
-directly.  The surface comes from `SDL_Metal_CreateView` / `SDL_Metal_GetLayer` and
-`vkCreateMetalSurfaceEXT` (extension `VK_EXT_metal_surface`), not `SDL_Vulkan_CreateSurface`,
-which wants to dlopen a Vulkan library -- do this on macOS as well, under `__APPLE__`, which
-also removes the libvulkan dlopen the macOS packages rely on (docs/packaging.md).
-`VK_KHR_portability_enumeration` / `portability_subset` apply as on macOS (VulkanManager.h).
-The SPIR-V shaders (`src/shaders/*.spv`) and the subtitle font go into the bundle as
-resources (`MACOSX_PACKAGE_LOCATION Resources`); `get_executable_dir()` in museld.cpp
-resolves to the bundle, so the lookup needs only the Resources subdirectory added.
-
-### 3. App shell
-
-- `#include <SDL3/SDL_main.h>` in museld.cpp: on Apple platforms `main` becomes the UIKit
-  entry point; elsewhere it is unchanged.  SDL3 pumps the UIKit run loop from
-  `SDL_PollEvent`, so the blocking main loop (`runPlayer`) can stay.
-- `SDL_EVENT_WILL_ENTER_BACKGROUND` / `DID_ENTER_FOREGROUND`: pause decoding and stop
-  submitting GPU work in the background, or tvOS kills the app.  Handle in
-  `InputController::poll`, which already owns the event queue.
-- Siri Remote: SDL presents it as a gamepad (`SDL_INIT_GAMEPAD`, `SDL_EVENT_GAMEPAD_BUTTON_DOWN`,
-  touch surface as axes/d-pad).  Map onto the existing actions: play/pause -> Space,
-  d-pad left/right -> seek, select -> pause, Menu -> quit (SDL lets Menu exit the app
-  unless `SDL_HINT_TV_REMOTE_AS_JOYSTICK` / the back-button hints say otherwise).
-- No command line on tvOS, but Xcode scheme *launch arguments* arrive as `argv`, so for
-  testing the app is launched with the same options as on the desktop, e.g.
-  `--log P3 udp://:5000` or `http://nas/video/capture.ldf`.  A settings screen is later.
-- Info.plist: `NSLocalNetworkUsageDescription` (and `NSBonjourServices` if ever used),
-  `UIRequiresFullScreen`, no `NSAppTransportSecurity` needed for raw sockets.
-
-### 4. Measure on the A1842
-
-`--log P3` per-stage timing.  Order: the UDP receive thread alone with `ethadc-tx`
-at 62.5 MHz (42,000 datagrams/s is CPU work on an A10X); NTSC from a file over HTTP;
-live NTSC over UDP; MUSE.  Raise nothing to real time until the demodulator keeps up.
-On the receiving side the socket buffer is the first thing to lose packets; the
-`udp://` input logs what it got.
+`--log P3` per-stage timing.  Still to do: the UDP receive thread alone with
+`ethadc-tx` at 62.5 MHz (42,000 datagrams/s is CPU work on an A10X); live NTSC over
+UDP; MUSE.  Raise nothing to real time until the demodulator keeps up.  On the
+receiving side the socket buffer is the first thing to lose packets; the `udp://`
+input logs what it got.
 
 ## Gotchas already met
 
@@ -79,3 +118,7 @@ On the receiving side the socket buffer is the first thing to lose packets; the
   couple of seconds of the stream meanwhile, which is harmless for a live source.
 - The pixel aspect is 1.0 under SDL (no EDID size available); it measured 1.000 on
   every display tried under GLFW.
+- After a CMakeLists change, the first `cmake --build` with the Xcode generator
+  regenerates the project but finishes compiling with the old one; build twice, or
+  run `cmake --preset …` first.
+- `cmake --build --preset` must run from `player/` (where `CMakePresets.json` is).
