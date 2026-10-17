@@ -16,11 +16,13 @@ public:
     std::optional<int> clv_picture_number,
     std::optional<int> cav_picture_number,
     std::optional<bool> cx_enabled,
-    double frames_per_second);
+    double frames_per_second,
+    const char *standard_name); // "NTSC" or "PAL", shown first on the overlay
 
     std::vector<std::string> asStrings() const override;
     std::optional<double> playbackTimeSeconds() const override;
     std::optional<int> chapter() const override { return m_chapter; }
+    [[nodiscard]] bool cavPictureInherited() const { return m_cav_picture_inherited; }
     bool isLeadIn() const override { return m_is_lead_in; }
     bool isLeadOut() const override { return m_is_lead_out; }
     bool pictureStop() const override { return m_is_stop_code; }
@@ -46,9 +48,11 @@ private:
     std::optional<int> m_clv_time_seconds;
     std::optional<int> m_clv_picture_number;
     std::optional<int> m_cav_picture_number;
+    bool m_cav_picture_inherited = false; // carried over from the previous frame, see inheritDiscFlags
     std::optional<bool> m_cx_enabled;
     std::optional<bool> m_cx_override;
     double m_frames_per_second; // for picture number to time
+    const char *m_standard_name;
 };
 
 #endif //MUSECPP_VBIDATA_H

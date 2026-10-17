@@ -10,7 +10,8 @@ VbiData::VbiData(bool is_lead_in, bool is_lead_out, bool is_clv, bool is_stop_co
     std::optional<int> clv_picture_number,
     std::optional<int> cav_picture_number,
     std::optional<bool> cx_enabled,
-    double frames_per_second)
+    double frames_per_second,
+    const char *standard_name)
 : DiscInfo(),
   m_is_lead_in(is_lead_in),
   m_is_lead_out(is_lead_out),
@@ -21,7 +22,8 @@ VbiData::VbiData(bool is_lead_in, bool is_lead_out, bool is_clv, bool is_stop_co
   m_clv_picture_number(clv_picture_number),
   m_cav_picture_number(cav_picture_number),
   m_cx_enabled(cx_enabled),
-  m_frames_per_second(frames_per_second) {
+  m_frames_per_second(frames_per_second),
+  m_standard_name(standard_name) {
 }
 
 void VbiData::inheritDiscFlags(const VbiData &previous) {
@@ -31,10 +33,21 @@ void VbiData::inheritDiscFlags(const VbiData &previous) {
     m_chapter = previous.m_chapter;
   if (!m_is_clv && previous.m_is_clv && !m_cav_picture_number.has_value())
     m_is_clv = true;
+  // A CAV film disc numbers film frames, on the first field of each, and
+  // film frames alternate three and two fields long under 3:2 pulldown: the
+  // video frame made of a film frame's second and third fields carries no
+  // number (one frame in five), and belongs to the previous frame's.  Only
+  // a number the previous frame read itself is carried, so a gap longer
+  // than that frame (a still, a lead-in) shows none rather than a stale one.
+  if (!m_is_clv && !m_cav_picture_number.has_value() && previous.m_cav_picture_number.has_value()
+      && !previous.m_cav_picture_inherited) {
+    m_cav_picture_number = previous.m_cav_picture_number;
+    m_cav_picture_inherited = true;
+  }
 }
 
 std::vector<std::string> VbiData::asStrings() const {
-  std::string string1 = m_is_clv ? "CLV " : "CAV ";
+  std::string string1 = std::format("{} {}", m_standard_name, m_is_clv ? "CLV " : "CAV ");
   if (m_cx_override.has_value()) {
     string1 += std::format("CX {} forced ", m_cx_override.value() ? "on" : "off");
     if (m_cx_enabled.has_value() && m_cx_enabled != m_cx_override)

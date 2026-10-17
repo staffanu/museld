@@ -277,7 +277,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // until the first measurement, which comes with the first picture.
         // Like the other automatic detections (CX, film cadence) the choice
         // is logged and shown in the disc info overlay, not announced.
-        if (m_black_peak_min_v >= 0) {
+        if (m_black_peak_min_v >= 0 && m_standard.has_black_setup) {
             const double held_ire = m_black_peak_min_v * m_level_scale * 100.0;
             const float choice = held_ire < 4.0 ? 0.0f : held_ire > 5.0 ? 7.5f : m_black_auto_ire;
             if (choice != m_black_auto_ire) {
@@ -347,11 +347,11 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
                 }
                 m_log.info(eDecoder, std::format(
                         "picture black: dark peak at {} IRE (lowest peak {}), held minimum {} IRE "
-                        "(NTSC-M discs peak at 7.5, NTSC-J at 0; {:.1f}% of the picture below 13 IRE); "
-                        "black level in effect {:.1f} IRE",
+                        "({}{:.1f}% of the picture below 13 IRE); black level in effect {:.1f} IRE",
                         m_black_peak_v >= 0 ? std::format("{:.1f}", m_black_peak_v * m_level_scale * 100.0) : "none",
                         m_black_lowest_v >= 0 ? std::format("{:.1f}", m_black_lowest_v * m_level_scale * 100.0) : "none",
                         m_black_peak_v >= 0 ? std::format("{:.1f}", m_black_peak_min_v * m_level_scale * 100.0) : "none",
+                        m_standard.has_black_setup ? "NTSC-M discs peak at 7.5, NTSC-J at 0; " : "",
                         total > 0 ? 100.0 * dark / total : 0.0,
                         m_black_ire));
             }
@@ -506,7 +506,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // The setting (and the automatic choice under it) and the disc's
         // measured black; short, the overlay line has room for ~35 characters
         out.level_status = !m_standard.has_black_setup
-                ? std::format("Black: at blanking, disc {}",
+                ? std::format("Black: 0 IRE, disc {}",
                               m_black_peak_min_v >= 0
                                   ? std::format("{:.1f}", m_black_peak_min_v * m_level_scale * 100.0)
                                   : std::string("?"))
@@ -597,6 +597,8 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
             if (m_prev_vbi && !input_block->timebase_restarted
                 && input_block->seek_generation == m_prev_vbi_seek_generation)
                 vbi->inheritDiscFlags(*m_prev_vbi);
+            if (vbi->cavPictureInherited())
+                m_log.debug(eDecoder, std::format("VBI frame {}: picture number carried over from the previous frame", m_frame_no));
             m_prev_vbi = vbi;
             m_prev_vbi_seek_generation = input_block->seek_generation;
         }

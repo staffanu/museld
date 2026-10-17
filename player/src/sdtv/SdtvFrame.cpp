@@ -434,7 +434,8 @@ void SdtvFrame::processVbi() {
                                           cx_enabled ? (*cx_enabled ? "on" : "off") : "-"));
     }
     m_vbi_data = std::make_shared<VbiData>(is_lead_in, is_lead_out, is_clv, is_stop_code, chapter,
-        clv_time_seconds, clv_picture_number, cav_picture_number, cx_enabled, m_standard.framesPerSecond());
+        clv_time_seconds, clv_picture_number, cav_picture_number, cx_enabled, m_standard.framesPerSecond(),
+        m_standard.name);
 
     if (m_log.isEnabled(eDebug, eDecoder)) {
         auto strings = m_vbi_data->asStrings();
