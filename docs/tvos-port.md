@@ -85,15 +85,16 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
 
 ### 1. On the device
 
-- Subtitles have not been *seen* on the device yet.  `render_subtitle.comp` was the
-  one pipeline the A10X refused ("XPC_ERROR_CONNECTION_INTERRUPTED" from Metal's
-  compiler service): a read-write rgba32f image, which Metal GPU family 3 only allows
-  in 32-bit single-channel formats.  It binds the frame twice now, read-only and
-  write-only, and compiles.  Showing a file was the problem: `--subtitles-file` opens
-  local files only, and a file put into the app's data container with `devicectl
-  device copy to` is there but the app's stat of it fails with "Operation not
-  permitted".  A leading `~/` in file arguments is expanded (`expandHome`) for when
-  that works.  The disc's own CC track would show without any file.
+- Subtitles are seen on the device.  `render_subtitle.comp` was the one pipeline the
+  A10X refused ("XPC_ERROR_CONNECTION_INTERRUPTED" from Metal's compiler service): a
+  read-write rgba32f image, which Metal GPU family 3 only allows in 32-bit
+  single-channel formats; it binds the frame twice now, read-only and write-only.
+  Verified with the line-21 captions of the White Squall excerpt and `--cc`, which
+  puts the CC track in the primary slot from the start (a TV remote has no `[` key).
+  An .srt file cannot be handed to the app yet: `--subtitles-file` opens local files
+  only, and a file put into the app's data container with `devicectl device copy to`
+  is there but the app's stat of it fails with "Operation not permitted".  A leading
+  `~/` in file arguments is expanded (`expandHome`) for when that works.
 - Speed: the GPU side of the NTSC demodulator and decoder, see the measurements.
 - The Siri Remote as a gamepad (needs the original remote), and Menu/back quitting the
   app: fine for development, but a tvOS app is not supposed to exit itself; a
