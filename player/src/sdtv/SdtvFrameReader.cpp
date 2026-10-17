@@ -932,6 +932,17 @@ bool SdtvFrameReader::consumeFinalized(std::unique_ptr<SdtvInputBlock> const &ou
                 if (ntsc_line == 1) {
                     m_frame_start_offset = inputOffsetOfStreamPos(t0);
                     m_frame_period = t1 - t0;
+                    if (m_frame_partial) {
+                        // The audio gathered since the anchoring belongs to
+                        // the partial frame dropped here, not to this one:
+                        // delivered with it, every anchor and reset would
+                        // leave a frame's worth of audio queued ahead of the
+                        // picture (the player drains such a backlog faster
+                        // than playback can absorb, and discards for seconds)
+                        output_block->efm_data.clear();
+                        output_block->analog_data.clear();
+                        output_block->ac3_frames.clear();
+                    }
                     m_frame_partial = false;
                 }
                 resampleLine(output_block, (int)ntsc_line, t0, t1);
