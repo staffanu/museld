@@ -317,6 +317,12 @@ CAV discs (`82CFFF`, IEC 60857 10.1.4) pauses playback on the frame it marks, on
 the P key turns that off.  If `--write`, `--export-frame` or `--no-keys` was given, picture
 stops are ignored.
 
+**Picture numbers on film discs**: a CAV disc mastered from film numbers film frames, on the first
+field of each, and under 3:2 pulldown film frames alternate three and two fields long, so one video
+frame in five (a film frame's second and third fields) carries no number on the disc. The overlay
+shows the previous frame's number for it, which is the film frame it belongs to; a longer gap
+shows none.
+
 **NTSC level calibration**: video levels are calibrated automatically against references in the
 signal. Black (0 IRE) is clamped to the back porch blanking level of every line (a keyed
 clamp): the FM carrier, and with it the whole baseband, can wander with the disc's eccentricity
@@ -378,7 +384,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | E | Cycle the EFM adaptive filter size: 3 → 5 → 9 → 17 → 35 → 71 taps → off → 3 (RF input only, see `--efm-filter-size`). The filter restarts from identity at each change. |
 | B | Cycle the audio channels heard: stereo → left only → right only (bilingual discs, or the left-only analog track on AC3 discs; `--write` output always keeps stereo) |
 | X | Cycle CX noise reduction for the NTSC analog audio: auto (follow the VBI flag, the default) → off → on; `--cx` sets the initial mode. Shown in parentheses when the audio playing is not the analog track (the setting is remembered but inaudible). The V info line shows the CX status: the disc's flag in auto mode, or e.g. "CX off forced (disc on)" when overridden. |
-| V | Toggle disc code / chapter / frame display (the frame number is followed by the field on screen, 1 or 2), plus the NTSC film mode and black level status |
+| V | Toggle disc code / chapter / frame display (while paused, the frame number is followed by the field on screen, 1 or 2), plus the NTSC film mode and black level status |
 | J | NTSC: cycle the black level: auto → NTSC-M (7.5 IRE) → NTSC-J (0 IRE), see `--black-level` |
 | C | Show cursor coordinates and input-file offsets (see below) |
 | L | Toggle non-linear de-emphasis processing |
