@@ -72,6 +72,10 @@ struct EthadcByteSource::Impl {
     }
 
     void onStream(const ethadc::StreamInfo &info) {
+        {
+            std::scoped_lock<std::mutex> lock(m_info_mutex);
+            m_info = StreamInfo{ethadc::format_info(info.format).name, (double)info.sample_rate};
+        }
         if (m_log)
             m_log->info(eInput, std::format("ethadc stream {}: {} samples at {:.4g} MHz, {} bytes per packet",
                                             m_streams++ == 0 ? "started" : "restarted",
@@ -141,7 +145,14 @@ struct EthadcByteSource::Impl {
         return -1;
     }
 
+    std::optional<StreamInfo> streamInfo() {
+        std::scoped_lock<std::mutex> lock(m_info_mutex);
+        return m_info;
+    }
+
     Logger *m_log;
+    std::mutex m_info_mutex;
+    std::optional<StreamInfo> m_info; // set by the receiver thread on the first packet
     int m_streams = 0;
     uint64_t m_reported_lost = 0, m_reported_overflow = 0;
     std::atomic<bool> m_stop{false};
@@ -165,18 +176,17 @@ int64_t EthadcByteSource::seek(int64_t, int) {
     return -1;
 }
 
-std::optional<EthadcByteSource::StreamInfo> EthadcByteSource::probe(const std::string &url,
-                                                                    std::chrono::milliseconds timeout) {
-    std::optional<StreamInfo> info;
-    ethadc::StreamReassembler reassembler(
-            ethadc::ReassemblerOptions{}, [](const uint8_t *, size_t) {},
-            [&](const ethadc::StreamInfo &stream) {
-                info = StreamInfo{ethadc::format_info(stream.format).name, (double)stream.sample_rate};
-            });
-    ethadc::StreamReceiver receiver(configFor(url), reassembler);
-    const auto deadline = ethadc::Clock::now() + timeout;
-    receiver.run([&](ethadc::TimePoint now) { return !info && now < deadline; });
-    return info;
+std::optional<EthadcByteSource::StreamInfo> EthadcByteSource::waitForStream(std::chrono::milliseconds timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    for (;;) {
+        if (auto info = m_impl->streamInfo())
+            return info;
+        if (m_impl->m_error)
+            std::rethrow_exception(m_impl->m_error);
+        if (m_impl->m_ring.closed() || std::chrono::steady_clock::now() >= deadline)
+            return std::nullopt;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
 }
 
 #else // _WIN32: the vendored receiver uses POSIX sockets, which MinGW does not have
@@ -199,7 +209,7 @@ int64_t EthadcByteSource::seek(int64_t, int) {
     return -1;
 }
 
-std::optional<EthadcByteSource::StreamInfo> EthadcByteSource::probe(const std::string &, std::chrono::milliseconds) {
+std::optional<EthadcByteSource::StreamInfo> EthadcByteSource::waitForStream(std::chrono::milliseconds) {
     return std::nullopt;
 }
 

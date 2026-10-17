@@ -52,8 +52,8 @@ void processFile(Logger &logger, Operation input_type,
     double target_sample_frequency, bool analog_cx, double analog_output_frequency) {
 
     reader->initialize();
-    if (initial_seek_seconds != 0)
-        reader->seek((int64_t)(input_sample_frequency * initial_seek_seconds));
+    if (initial_seek_seconds != 0 && !reader->seek((int64_t)(input_sample_frequency * initial_seek_seconds)))
+        throw std::runtime_error(std::format("Cannot seek to {} s in the input", initial_seek_seconds));
     auto *input_buffer = new float[block_size];
 
     switch (input_type) {
@@ -235,11 +235,11 @@ int main(int argc, char *argv[]) {
 
     auto usage = [&options] (std::ostream &out, int status) -> void {
         options.printHelp(out, "ac3rf-efm-decode [options] [<input_file> ...]");
-        out << "\nInput is read from stdin when no file is given, and the output is written to\n"
-               "stdout unless --output-filename says otherwise.  Several input files can be given,\n"
-               "with options in between; each one is decoded with the options in effect where it\n"
-               "appears.  An argument starting with ! is ignored, which is practical for disabling\n"
-               "an option in a saved command line.\n";
+        out << "\nInput is read from stdin when no file is given (or when the file is named \"-\"),\n"
+               "and the output is written to stdout unless --output-filename says otherwise.\n"
+               "Several input files can be given, with options in between; each one is decoded\n"
+               "with the options in effect where it appears.  An argument starting with ! is\n"
+               "ignored, which is practical for disabling an option in a saved command line.\n";
         exit(status);
     };
 
@@ -263,6 +263,10 @@ int main(int argc, char *argv[]) {
                                    "transitions (implies --input-format u8)", [&] () -> void {
         input_format_option = std::make_optional(eUint8);
         operation = EfmTValues;
+        // One byte per T value, about a million per second of audio: the
+        // default block of a million left anything shorter unread (a partial
+        // block at the end is dropped), so take them in small steps
+        block_size = 4096;
     });
     options.option("--resample", "HZ", "Resample the input to HZ and write it as raw u8; no audio "
                                        "is decoded", [&] () -> void {
@@ -418,7 +422,7 @@ int main(int argc, char *argv[]) {
                 option->action();
             } else if (it->find("!", 0) == 0) {
                 it++; // used to ignore options (to easily enable/disable options in debug settings etc.)
-            } else if (it->find("-", 0) == 0) {
+            } else if (*it != "-" && it->find("-", 0) == 0) {
                 std::cerr << "Unknown option: " << *it << std::endl;
                 usage(std::cerr, EXIT_FAILURE);
             } else {
@@ -439,8 +443,11 @@ int main(int argc, char *argv[]) {
                 log.debug(eApplication, std::format("ac3rf-decode version {}", AC3RF_DECODE_VERSION));
                 log.info(eApplication, std::format("Processing input file {}", filename));
                 processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
-                    [&] { auto r = makeInputReader(filename, input_format, block_size);
-                          r->setDcBlocking(true); // RF carries no legitimate DC
+                    [&] { auto r = makeInputReader(filename, input_format, block_size, &log);
+                          // RF carries no legitimate DC; t-values are small
+                          // integers whose mean is the data
+                          if (operation != EfmTValues)
+                              r->setDcBlocking(true);
                           return r; }(), block_size, out_fd, use_simd,
                     efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,
                     efm_t_values_output_filename, efm_circ_debug_filename, concealment_impl, target_sample_frequency,
@@ -455,7 +462,7 @@ int main(int argc, char *argv[]) {
                 throw std::runtime_error("Input format must be given for stdin");
 
             log.info(eApplication, std::format("Processing stdin"));
-            auto stdin_reader = makeStdinInputReader(input_format_option.value(), block_size);
+            auto stdin_reader = makeInputReader("-", input_format_option.value(), block_size, &log);
             processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
                 std::move(stdin_reader), block_size, out_fd, use_simd,
                 efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,

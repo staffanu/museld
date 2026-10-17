@@ -5,13 +5,21 @@
 #define AC3RF_DECODE_LDFINPUTREADER_H
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include "InputReader.h"
 #include <FLAC++/decoder.h>
 
+class Logger;
+
+// Reads FLAC-compressed captures, in a plain FLAC stream or wrapped in Ogg.  The
+// container is read from the first bytes of the stream: the extensions do not tell
+// them apart reliably (plain FLAC .ldf files exist alongside the usual Ogg ones), so
+// `format` only decides the case where the stream starts with neither signature.
 class LdfInputReader : public InputReader, private FLAC::Decoder::Stream  {
 public:
-    LdfInputReader(std::unique_ptr<ByteSource> source, uint32_t block_size, InputFormat format);
+    LdfInputReader(std::unique_ptr<ByteSource> source, uint32_t block_size, InputFormat format,
+                   Logger *log = nullptr);
 
     LdfInputReader(const LdfInputReader &) = delete;
     LdfInputReader &operator=(const LdfInputReader &) = delete;
@@ -21,9 +29,12 @@ public:
     ~LdfInputReader() override;
 
     void initialize() override;
-    void seek(int64_t no_samples) override;
+    bool seek(int64_t no_samples) override;
     int readFloats(float *f) override;
     int bitsPerSample() const override { return m_bits_per_sample; }
+    bool signedSamples() const override { return true; } // FLAC samples always are
+    // From STREAMINFO; -1 when the encoder left it at zero (a streamed encode)
+    int64_t sampleCount() override;
 
 private:
     // libFLAC invokes the callbacks below from its own C frames, which must not be unwound
@@ -35,6 +46,11 @@ private:
     void recordError(std::string message);
     void throwIfFailed() const;
     void processSingleChecked();
+    InputFormat detectContainer();
+    void fillPushback(size_t wanted);
+    void patchStreamInfoTotal();
+    int64_t sampleCountFromOggGranule();
+    int64_t sampleCountFromLastFrame();
 
     FLAC__StreamDecoderReadStatus read_callback(FLAC__byte buffer[], size_t *bytes) override;
     FLAC__StreamDecoderWriteStatus write_callback(const ::FLAC__Frame *frame, const FLAC__int32 *const buffer[]) override;
@@ -46,12 +62,23 @@ private:
     bool eof_callback() override;
 
     InputFormat m_format;
+    Logger *m_log;
+    // The stream head read ahead of libFLAC by initialize() -- the signature, then
+    // the whole STREAMINFO for patchStreamInfoTotal() -- handed back through
+    // read_callback before anything further is read from the source
+    uint8_t m_pushback[128] = {};
+    size_t m_pushback_size = 0;
+    size_t m_pushback_read = 0;
     int m_bits_per_sample = 0;
     uint32_t m_flac_allocated_size = 0;
     uint32_t m_flac_used_size = 0;
     uint32_t m_flac_block_read_count = 0;
     uint16_t *m_decoded_samples = nullptr;
     uint64_t m_sample_position = 0;
+    int64_t m_total_samples = -1;      // from STREAMINFO, 0 when the encoder did not know
+    int m_streaminfo_blocksize = 0;    // STREAMINFO maximum block size: the fixed block size
+    InputFormat m_container = eFlac;   // as detected
+    std::optional<int64_t> m_sample_count_estimate; // sampleCount()'s answer, computed once
     std::string m_failure; // empty until a callback fails; see recordError
 };
 

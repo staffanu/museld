@@ -40,13 +40,20 @@ public:
     virtual bool isLive() const = 0;
 };
 
-// Input names are file paths or URLs:
+// Input names are file paths, "-" for the standard input, or URLs:
 //   http://host[:port]/path   a file on a web server, fetched with range requests
 //   udp://[address]:port      the ethadc capture stream, received on that port
 bool inputIsUrl(const std::string &name);
 bool inputIsNetworkStream(const std::string &name); // udp://
-// A fifo, stdin ("-" is not special here; see openStdinByteSource) or a network stream.
+bool inputIsStdin(const std::string &name);         // "-"
+// Whether stdin is something to read samples from: a pipe, a socket or a
+// file redirected in -- not a terminal, /dev/null or a closed descriptor.
+bool stdinCarriesInput();
+// A fifo, a pipe on stdin or a network stream.
 bool inputIsLive(const std::string &name);
+// Whether the name can be opened at all: a file that exists, or a name that
+// is not a file (stdin, a URL).
+bool inputExists(const std::string &name);
 // The size of the input in bytes, or -1 when unknown (a live input, or a
 // server that does not say).
 int64_t inputSize(const std::string &name);
@@ -56,7 +63,8 @@ int64_t inputSize(const std::string &name);
 // cannot be opened.
 std::unique_ptr<ByteSource> openByteSource(const std::string &name, Logger *log = nullptr);
 
-// The standard input, treated as live.
+// The standard input: live when it is a pipe or a socket, a plain seekable
+// source when a file is redirected in.
 std::unique_ptr<ByteSource> openStdinByteSource();
 
 #endif //AC3RF_DECODE_BYTESOURCE_H

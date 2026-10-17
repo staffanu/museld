@@ -9,9 +9,14 @@ add_executable(museld-tests
     InputProbeTest.cpp
     Eia608DecoderTest.cpp
     NtscCadenceTrackerTest.cpp
+    PalCadenceTrackerTest.cpp
+    DtsSyncDetectorTest.cpp
     PrefetchingInputReaderTest.cpp
     SrtParserTest.cpp
     DisplayGeometryTest.cpp
+    ChapterSearchTest.cpp
+    LdfInputReaderTest.cpp
+    ../src/ChapterSearch.cpp
     ../src/subtitles/Eia608Decoder.cpp
     ../src/bch/BchDecoder.cpp
     ../src/InputProbe.cpp
@@ -22,7 +27,9 @@ add_executable(museld-tests
     ../src/input/LdsInputReader.cpp
     ../src/input/LdfInputReader.cpp
     ../src/input/PrefetchingInputReader.cpp
-    ../src/ntsc/NtscCadenceTracker.cpp
+    ../src/input/PreparedInput.cpp
+    ../src/sdtv/NtscCadenceTracker.cpp
+    ../src/sdtv/PalCadenceTracker.cpp
     ../src/subtitles/SrtParser.cpp
     ../src/DisplayGeometry.cpp
 )

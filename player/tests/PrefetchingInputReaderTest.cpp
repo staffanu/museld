@@ -25,10 +25,11 @@ public:
 
     void initialize() override { initialized = true; }
 
-    void seek(off_t no_samples) override {
+    bool seek(int64_t no_samples) override {
         std::scoped_lock<std::mutex> lock(m_source_mutex);
         REQUIRE(m_position + no_samples >= 0); // the adapter clamps before forwarding
         m_position += no_samples;
+        return true;
     }
 
     int readFloats(float *f) override {
@@ -46,6 +47,7 @@ public:
     }
 
     int bitsPerSample() const override { return 12; }
+    bool signedSamples() const override { return false; }
 
     void setDcBlocking(bool enabled) override { dc_blocking = enabled; }
 

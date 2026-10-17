@@ -33,8 +33,8 @@ single CPU thread.
 
 | Option | Description |
 |---|---|
-| `--input-format <fmt>` | Input sample type: `u8`, `s8`, `u16`, `s16`, `u16be`, `s16be`, `lds`, `flac`, `ldf`. Auto-detected from the filename extension, or failing that from the file contents (or, for a `udp://` stream, from its packets). |
-| `--input-type <type>` | Input type: `muse-rf`, `ntsc-rf`, `muse-16`, `muse-os`, or `auto` (the default): detect the type from the file contents. |
+| `--input-format <fmt>` | Input sample type: `u8`, `s8`, `u16`, `s16`, `u16be`, `s16be`, `lds`, `flac`, `ldf`. Auto-detected from the filename extension, or failing that from the file contents (or, for a `udp://` stream, from its packets). `flac` is plain FLAC and `ldf` FLAC in an Ogg container, but the two are told apart by the file's first bytes, so a plain FLAC `.ldf` (or an Ogg `.flac`, `.oga` or `.ogg`) plays without a flag. |
+| `--input-type <type>` | Input type: `muse-rf`, `ntsc-rf`, `pal-rf`, `muse-16`, `muse-os`, or `auto` (the default): detect the type from the file contents. |
 | `--sample-freq <Hz>` | Sets the input sample rate. Measured from the file contents when omitted. |
 | `--probe` | Print what content-based detection finds for each following input file (sample format, RF type, sample rate, and a ready-to-paste option line) instead of decoding it. |
 
@@ -42,6 +42,11 @@ The input types:
 
 - `muse-rf` — RF from the disc surface (or a player's RF tap) of a MUSE Hi-Vision laserdisc, typically captured at 62.5 MHz.
 - `ntsc-rf` — RF of a standard NTSC laserdisc, typically a DomesDay Duplicator capture at 40 MHz.
+- `pal-rf` — RF of a PAL laserdisc, decoded in colour (spatial and temporal combs, as NTSC),
+  with the Philips code (chapter, CLV time, picture number), the analog or EFM track
+  (`--efm`; PAL discs carry one or the other) and `--write`
+  (colour metadata tagged BT.470BG; 50 frames/s, one per field, or 25 with `--full-frames-only`,
+  as 59.94/29.97 for NTSC). See `docs/pal-decoding.md`.
 - `muse-16` — MUSE baseband resampled to exactly one sample per pixel at 16.2 MHz, phase locked to the line structure (480 samples per line). This is museld's own intermediate format, produced with `--write-muse16` (see below); `--sample-freq` does not apply.
 - `muse-os` — MUSE baseband (a player's output, before any resampling) captured at an arbitrary rate, e.g. an oscilloscope capture at 50 MHz. The resampling DPLL locks to it like to RF, but skips the FM demodulation.
 
@@ -50,8 +55,17 @@ finds: the input type, the sample rate (unless `--sample-freq` was given -- and 
 `--input-type` the rate is measured under that type, which works even for captures the classifier
 finds ambiguous), and the sample format (when the extension is not recognized). Files whose
 measurements are ambiguous are refused rather than guessed at; `--probe` shows the numbers behind
-the verdict. Reading from a pipe cannot use detection, so fifo input needs explicit
-`--input-type` and `--sample-freq`.
+the verdict. The three are independent: whatever `--input-type`, `--sample-freq` and
+`--input-format` (or the extension) give is used as given and never measured, and only the rest
+is detected.
+
+Detection works on live input too (a pipe, a fifo, the `udp://` stream): the samples are read
+window after window until the verdict is clear, so museld can be started before the disc plays
+and waits through whatever comes before. What detection reads from a live input is not played;
+it is at most a second of a signal that keeps coming (a few seconds when the sample format has to
+be found by trying every format, as for a capture whose carrier sits high in the band, like NTSC
+at 30 MHz). A file is instead sampled at a few positions
+spread over its length, which keeps a lead-in or a dropout from deciding.
 
 ### Network input
 
@@ -63,14 +77,17 @@ The input can be a URL instead of a file:
 | `udp://[address]:port` | The live [ethadc](https://github.com/staffanu/ethadc) capture stream, received on that port (bound on all interfaces unless an address is given). The sample format and rate come from the stream's packets; the input type is detected from the first samples unless `--input-type` says. Packets that never arrive are concealed by holding the last sample; the losses are reported in the input log (`--log I3`). `ethadc-tx` from that repository replays a capture file as such a stream, for testing without the hardware. |
 
 A network stream is live like a fifo: `--seek` does not apply, and the player has to keep up.
-A file over http is not: it plays like a local file, including seeking with the arrow keys.
+Its packets say what it carries, so an `--input-format` or `--sample-freq` that disagrees with
+them is refused rather than applied. A file over http is not live: it plays like a local file,
+including seeking with the arrow keys.
 
 Detection reads a few short stretches spread across the file
 and takes well under a second: the sample format is whichever interpretation of the bytes looks
 like a band-limited signal, the line period in samples comes from the periodicity of the FM
-carrier's instantaneous frequency, and NTSC against MUSE is decided by the carrier's mean
-cycles-per-line and the 2.3 MHz NTSC analog audio carrier. The line period then fixes the sample
-rate (NTSC lines at 15.734 kHz, MUSE at 33.75 kHz), snapped to a common capture rate when one is
+carrier's instantaneous frequency; standard definition against MUSE is decided by the carrier's
+mean cycles-per-line, and NTSC against PAL by the lines between vertical sync groups (262.5 or
+312.5), with the 2.3 MHz NTSC analog audio carrier as the tie breaker. The line period then fixes
+the sample rate (NTSC lines at 15.734 kHz, PAL at 15.625, MUSE at 33.75), snapped to a common capture rate when one is
 within about a percent.
 
 ```console
@@ -104,10 +121,27 @@ museld muse.ldf --no-dropout
 
 An argument disabled with a leading `!` is not reported, since ignoring it is the point.
 
-If an input file is a FIFO (named pipe), museld assumes the data is produced in real time, e.g. by
-a capture program such as picostream. Playback speed then follows the incoming data rate: an empty
-pipe means waiting rather than end of file, a field is dropped if the input buffers fill up, and
-the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO input.
+### Piped input
+
+The input can be piped in. `-` names the standard input, and when no file is given at all and
+stdin is a pipe or a redirected file, that is played too, with the options that came last:
+
+```
+capture-program | museld -
+capture-program | museld --input-type ntsc-rf --sample-freq 40e6 --input-format s16
+museld < capture.lds
+```
+
+This is also the way to feed museld from a capture program on Windows, which has no `mkfifo`.
+A pipe (or a FIFO given by name, as made by `mkfifo`) is live: museld assumes the data is produced
+in real time, e.g. by a capture program such as picostream, and playback follows the incoming
+data rate. An empty pipe means waiting rather than end of file (a FIFO is even waited through
+its writer going away and coming back; a pipe on stdin ends when its writer does), a field is
+dropped if the input buffers fill up, and the OS pipe buffer size is increased (Linux). Seeking
+is not possible with live input, and `--seek` is refused. A file redirected into stdin is not
+live: it plays like a file named on the command line, seeking included. Being live has nothing
+to do with speed: a file piped through `cat` arrives faster than real time and loses the fields
+the decoder cannot keep up with, so play files by name.
 
 ## Playback options
 
@@ -118,12 +152,14 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--efm-filter-size <n>` | Number of taps in the adaptive FIR filter ahead of the EFM timing detector (default 3, 0 disables it). Try 9 or 11 when a distorted signal causes many errors; the same setting as `ac3rf-efm-decode --adaptive-filter-size`. The E key cycles it during playback. |
 | `--no-video` / `--no-audio` | Disable video or audio output |
 | `--no-sync` | Display frames as fast as possible (benchmark mode) |
+| `--no-keys` | Ignore the keyboard and open the window without taking input focus. For runs made beside other work (measurements, scripts): nothing typed into another window can pause or change the decode. The window's close button still quits. |
 | `--full-frames-only` | Skip every other field update (reduces CPU/GPU load) |
 | `--all-fields` | Update display at 60 Hz (default) |
 | `--full-screen` | Start full screen (at the monitor's current mode; the picture is scaled to it) |
 | `--aspect <mode>` | How the picture is fitted to the window — same as the F key. `normal` (default) keeps its shape, 16:9 for MUSE and 4:3 for NTSC, with black bars where the window is wider or taller; `zoom` fills the window and crops what overflows, which shows a letterboxed film full width on a wide screen; `squeeze` is for anamorphic NTSC discs, whose 4:3 frame holds a 16:9 picture squeezed horizontally; `stretch` fills the window ignoring the shape |
 | `--overscan <percent>` | How much of the edges to hide, as a TV does — same as the O key. `0` (default) shows the standard picture: for NTSC the part of the decoded image that is exactly 4:3, which leaves out the blanking margins at the sides (black on most discs). A percentage hides that much more in each dimension, half on either side (`5` shows the central 95 %). `full` shows the whole decoded image, margins included |
 | `--seek <seconds>` | Seek to position before starting playback |
+| `--chapter <n>` | Start playing at chapter `n`, found by searching the capture for its chapter codes (see below); after `--seek`, if given |
 | `--pause` | Start paused |
 | `--export-frame <file>` | Save one decoded frame as PNG to `<file>` and quit. Combine with `--export-frame-at` to give the decoder (sync lock, adaptive equaliser, motion detection) a warm-up run from the `--seek` position. |
 | `--export-frame-at <seconds>` | Stream position of the frame saved by `--export-frame` (absolute, same units as `--seek` — not a delay after it). Default: the first decoded frame. |
@@ -136,7 +172,7 @@ the OS pipe buffer size is increased (Linux). Seeking is not possible with FIFO 
 | `--benchmark-shaders` | Print GPU shader timing statistics |
 | `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |
 | `--field-interpolation <mode>` | Initial de-interlacing mode: `normal` (motion-adaptive), `intra-field`, or `inter-frame` — same as keys 1/2/3 |
-| `--no-3d-comb` | NTSC: start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4 |
+| `--no-3d-comb` | Start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4. On PAL the key also switches the U/V line averaging (the PAL delay-line step) |
 | `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
 | `--black-level <mode>` | NTSC: where the disc puts black — `auto` (default) reads it off the picture, `m` forces NTSC-M (US discs: 7.5 IRE above blanking), `j` forces NTSC-J (Japanese discs: black at blanking). Same as the J key. Wrong in the M direction, a Japanese disc loses its darkest 7.5 IRE; wrong in the J direction, a US disc shows black as dark grey and slightly desaturated |
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
@@ -199,10 +235,24 @@ cue that appeared late is kept up correspondingly longer. Translating into a
 language whose script the bundled font does not cover may need
 `--subtitle-font`.
 
-**Dropouts** (RF input): the default is to conceal detected dropouts by averaging the surrounding
-picture lines. `--no-dropout` leaves them untouched; `--highlight-dropout` paints them red
-(dropout in the luminance area) or green (dropout in the color area). The D key cycles between
-the three modes during playback.
+**Dropouts** (RF input): the default is to conceal detected dropouts. `--no-dropout` leaves them
+untouched; `--highlight-dropout` paints them red (dropout in the luminance area) or green
+(dropout in the color area). The D key cycles between the three modes during playback.
+
+A flag from the RF detector is kept only where the demodulated video shows the damage, a sample
+within ten columns pinned outside the signal range after de-emphasis: on a noisy PAL disc the
+envelope dips and slews on bright detail over a weak carrier just as on real dropouts, and three
+flags in five were on clean picture before this check. On NTSC and PAL a defect is a pixel the RF detector flagged, or one whose level is illegal (far
+below blanking or above peak white, which a demodulator produces where the carrier faltered too
+briefly for the detector), including the tails such a hole leaves. The repair is temporal where
+the surroundings are still -- the same pixel of the stiller neighbour frame, decoded in place --
+and spatial otherwise: the average of the neighbouring lines for a flagged pixel, the nearest
+healthy line for an illegal level. Whether the surroundings are still is read from the motion
+masks on the nearest clean lines above and below, never at the pixel itself, which the defect
+makes look like motion whatever the scene does. An illegal level that does not differ from the
+neighbouring frames is left alone: that is picture content, typically a title stroke overshooting
+on noise. (The Big Day PAL capture in the stu sample set has hundreds of small sky dropouts, and
+the hang-glider shot at pictures 3577-3700 exercises both repairs.)
 
 Both MUSE and NTSC detect dropouts from the RF envelope (`detect_dropouts_envelope.comp`), the way
 hardware players do: a dropout is a collapse of the carrier amplitude, whatever the demodulated
@@ -247,15 +297,44 @@ missed repeats when the cadence breaks (film/video splices), and any frame whose
 is missing falls back to the motion-adaptive path on its own. Lock transitions are logged at
 `--log D3`. Key 5 switches between auto and off; it is only active in the `normal` de-interlacing
 mode with all fields decoded. The disc code overlay (V key) shows the state: `Telecine: off`,
-`Telecine: searching` (watching, nothing detected), or `Telecine: 3:2 locked`. When paused,
+`Telecine: searching` (watching, nothing detected), or `Telecine: 3:2 locked`. PAL film discs
+carry a 2:2 cadence instead, one film frame per video frame with no repeated field, so the
+evidence is which of the two adjacent-field pairings weaves without combing while the picture
+moves: the frame's own two fields, or the previous frame's second field with this frame's first.
+Four moving frames that agree lock it (`Telecine: 2:2 locked`, with the pairing `F1+F2` or
+`F2+F1` shown when paused), stills neither lock nor unlock, video-sourced material combs in both
+pairings and never locks, and two contradicting moving frames in a row, as at a cut on an odd
+field, unlock it until the new pairing has shown itself. When paused,
 the locked line also shows what the displayed field is, e.g. `Telecine: 3:2 locked A weave` — the letter is the film
 frame within the (A1A2)(A3B1)(B2C1)(C2C3)(D1D2) pulldown cycle the output currently shows (step
 with N to watch its 3, 2, 3, 2 rhythm), `hold` marks the fields that re-show the previous film
 frame, and `adapt` a locked frame whose missing repeat made it fall back to the motion-adaptive
 path.
 
+**Chapters**: laserdisc frames carry their chapter number (the VBI codes for NTSC/PAL, the
+line 564 disc code for MUSE) on discs that have chapters.  A chapter index exists only on some
+discs, in the lead-in, which captures usually leave out, and `museld` doesn't read it.  The Up
+and Down keys, and `--chapter`, therefore search iteratively for the chapter boundary: this
+typically takes less than a second.  Down goes to the start of the current chapter, or, within
+the first seconds of it, to the chapter before.  The search needs the input's length, and works
+on files and http input, not on live streams or the 16.2 MHz baseband reader.
+
+**Stop code**: The picture stop code of NTSC
+CAV discs (`82CFFF`, IEC 60857 10.1.4) pauses playback on the frame it marks, once per stop;
+the P key turns that off.  If `--write`, `--export-frame` or `--no-keys` was given, picture
+stops are ignored.
+
+**Picture numbers on film discs**: a CAV disc mastered from film numbers film frames, on the first
+field of each, and under 3:2 pulldown film frames alternate three and two fields long, so one video
+frame in five (a film frame's second and third fields) carries no number on the disc. The overlay
+shows the previous frame's number for it, which is the film frame it belongs to; a longer gap
+shows none.
+
 **NTSC level calibration**: video levels are calibrated automatically against references in the
-signal. Black (0 IRE) tracks the measured back porch blanking level; the gain (100 IRE) is taken
+signal. Black (0 IRE) is clamped to the back porch blanking level of every line (a keyed
+clamp): the FM carrier, and with it the whole baseband, can wander with the disc's eccentricity
+(+-7 IRE within one rotation on one CAV capture, which lit one field against the other under a
+per-frame offset) or over seconds (a PAL capture flickered at 2.5 Hz). The gain (100 IRE) is taken
 from the white flag — a flat 100 IRE line in the vertical interval that most discs carry — when
 one is found, and stays at the nominal FM deviation mapping otherwise. Where black sits above
 blanking is a property of the disc's standard rather than of the signal: NTSC-M (US) discs put it
@@ -290,6 +369,8 @@ also given, which is the mode to use for batch rendering.
 
 ## Keyboard shortcuts during playback
 
+All of these are off with `--no-keys`, which also keeps the window from taking the keyboard focus when it opens.
+
 | Key | Action |
 |---|---|
 | Q / Escape | Quit |
@@ -298,6 +379,8 @@ also given, which is the mode to use for batch rendering.
 | Space | Pause / resume |
 | N | Step one field forward (while paused) |
 | Left / Right | Seek ±10 seconds |
+| Up / Down | Next / previous chapter (see Chapters above) |
+| P | Toggle honouring the picture stop codes (on by default) |
 | 1 | Normal field interpolation (motion detection) |
 | 2 | Force intra-field interpolation (treat everything as motion) |
 | 3 | Force inter-frame interpolation (treat everything as still) |
@@ -308,7 +391,7 @@ also given, which is the mode to use for batch rendering.
 | E | Cycle the EFM adaptive filter size: 3 → 5 → 9 → 17 → 35 → 71 taps → off → 3 (RF input only, see `--efm-filter-size`). The filter restarts from identity at each change. |
 | B | Cycle the audio channels heard: stereo → left only → right only (bilingual discs, or the left-only analog track on AC3 discs; `--write` output always keeps stereo) |
 | X | Cycle CX noise reduction for the NTSC analog audio: auto (follow the VBI flag, the default) → off → on; `--cx` sets the initial mode. Shown in parentheses when the audio playing is not the analog track (the setting is remembered but inaudible). The V info line shows the CX status: the disc's flag in auto mode, or e.g. "CX off forced (disc on)" when overridden. |
-| V | Toggle disc code / chapter / frame display, plus the NTSC film mode and black level status (TOC reading is not implemented) |
+| V | Toggle disc code / chapter / frame display (while paused, the frame number is followed by the field on screen, 1 or 2), plus the NTSC film mode and black level status |
 | J | NTSC: cycle the black level: auto → NTSC-M (7.5 IRE) → NTSC-J (0 IRE), see `--black-level` |
 | C | Show cursor coordinates and input-file offsets (see below) |
 | L | Toggle non-linear de-emphasis processing |
@@ -370,7 +453,7 @@ of components.
 ### Data flow — MUSE
 
 ```
-RF capture (62.5 MHz) → MuseRfDemodulator → ResamplingFrameReader (DPLL, 16.2 MHz)
+RF capture (any rate; 62.5 MHz typical) → MuseRfDemodulator → ResamplingFrameReader (DPLL, 16.2 MHz)
   → FrameBuffer → Vulkan GPU shaders (de-emphasis, gamma, color decode, motion detection)
   → SDL3 window + miniaudio
 ```
@@ -381,8 +464,8 @@ run on the main thread. The GPU pipeline has two stages separated by a semaphore
 ### Data flow — NTSC
 
 ```
-RF capture (40 MHz) → NtscRfDemodulator → NtscFrameReader (timebase, resampling to 4 fsc)
-  → NtscFrame → Vulkan GPU shaders (sync burst detection, color filtering, field decode)
+RF capture (any rate; 30, 40 and 62.5 MHz tested) → SdtvRfDemodulator → SdtvFrameReader (timebase, resampling to 4 fsc)
+  → SdtvFrame → Vulkan GPU shaders (sync burst detection, color filtering, field decode)
   → SDL3 window
 ```
 
@@ -418,9 +501,10 @@ harmless since the flag changes on program boundaries.
 The `--ac3` track (or the A key) runs the AC3-RF QPSK demodulator on the same audio worker
 thread; the recovered AC3 sync frames are decoded to PCM with libavcodec. On DTS laserdiscs
 the EFM track carries a DTS bitstream instead of PCM: museld watches the decoded EFM
-samples for DTS sync words and, once seen, bypasses the PCM processing (concealment,
-de-emphasis and pop detection would corrupt the bitstream — and playing it as PCM is loud
-noise) and feeds the bytes to libavcodec's DTS decoder. Both need an FFmpeg build
+samples for DTS sync words and, once they arrive at the density of a DTS stream (eight
+within a second; PCM produces a chance match about once a minute), bypasses the PCM 
+processing (concealment, de-emphasis, and pop detection) and feeds the bytes to
+libavcodec's DTS decoder, until four seconds pass without a sync word. Both need an FFmpeg build
 (`--write` capable); without it the tracks are selectable but silent. Compressed frames
 that fail to decode (dropouts) become silence of the same duration, keeping A/V sync.
 
@@ -451,11 +535,11 @@ DTS: EFM stereo samples → DTS sync detection → byte stream → libavcodec dc
 - **Motion vectors**: MUSE specifies motion compensation in control data (3+4 bits), but these bits are
   always zero on every disc tested. It is unclear whether this feature was ever used on MUSE laserdiscs.
 - **Non-linear de-emphasis**: Unclear whether it has already been applied on baseband (player output) input; use the L key to toggle.
-- **Direct USB input**: Currently requires an external capture program writing to a FIFO (e.g., picostream).
+- **Direct USB input**: Currently requires an external capture program writing to a pipe or a FIFO (e.g., picostream).
 - **Picture filters**: Most filters were computed early in the project; picture quality could probably be improved by spending more time on them.
 - **Motion detection**: The algorithm is quite simplistic and could probably be improved.
 - **LD MUSE vs BS MUSE**: Available documentation describes the satellite broadcasting standard. MUSE decoders have separate inputs for the two signals, so presumably there is some difference, but it is unknown what it is.
-- **Input detection on fifos, live MUSE/NTSC switching**: For the decoder-box use case (fifo from a capture device to the TV), detection should run on the live stream and the player should switch type when the disc changes. Needs the per-type reader/demodulator/decoder pipeline setup refactored so it can be swapped mid-playback; the detection itself is the easy part.
+- **Live MUSE/NTSC switching**: For the decoder-box use case (a pipe from a capture device to the TV), the player should switch type when the disc changes. Detection runs on live input now (window after window, and the player keeps whether the type was given or detected), but the per-type reader/demodulator/decoder pipeline setup has to be refactored so it can be torn down and rebuilt mid-playback.
 - **Subtitle OCR** (experimental; see the option section above):
   - The full release packages include ONNX Runtime but not the PP-OCR models, which have to be downloaded separately (see above); the minimal packages are built without OCR (see docs/packaging.md).
   - `--ocr-translate` speaks plain HTTP only; hosted TLS endpoints would need an OpenSSL-enabled cpp-httplib build.

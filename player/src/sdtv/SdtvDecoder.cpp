@@ -1,0 +1,835 @@
+// Copyright 2023-2026 Staffan Ulfberg
+// This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
+
+#include <algorithm>
+#include <string>
+#include <map>
+#include <chrono>
+#include <cmath>
+#include <format>
+#include "musevk/VulkanManager.h"
+#include "musevk/TimestampQueryPool.h"
+#include "SdtvDecoder.h"
+#include "FrameReader.h"
+#include "SdtvInputBlock.h"
+#include "SdtvShaders.h"
+#include "util/RobustNoise.h"
+#include "musevk/HalfFloatUtil.h"
+
+using namespace std;
+
+SdtvDecoder::SdtvDecoder(
+        Logger &log, FrameReader<SdtvInputBlock> &reader, musevk::VulkanManager &manager,
+        musevk::CommandPool &command_pool, std::string const &executable_dir,
+        bool decode_video, bool decode_all_fields, bool decode_audio,
+        float tint_degrees, float saturation,
+        musevk::TimestampQueryPool *timestamp_query_pool,
+        const VideoStandard &video_standard)
+: Decoder(),
+  m_log(log),
+  m_reader(reader),
+  m_manager(manager),
+  m_standard(video_standard),
+  m_shaders(SdtvShaders(log, executable_dir, manager, command_pool, video_standard)),
+  m_decode_video(decode_video),
+  m_decode_all_fields(decode_all_fields),
+  m_decode_audio(decode_audio),
+  m_timestamp_query_pool(timestamp_query_pool),
+  m_eq{1, 0},
+  m_noise{-1, -1, -1, -1},
+  m_blanking_avg(0),
+  m_blanking_sq_avg(0),
+  m_white_avg(-1),
+  m_white_flag_frames(0),
+  m_level_offset_v(0.3f),
+  m_level_scale(1.0f / 0.7f),
+  m_luma_hist{},
+  m_black_peak_v(-1),
+  m_black_lowest_v(-1),
+  m_black_auto_ire(7.5f),
+  m_black_ire(7.5f),
+  m_black_peak_min_v(-1),
+  m_prev_burst_phase(std::numeric_limits<double>::quiet_NaN()),
+  m_burst_coherence_avg(-1),
+  m_noise_psd{},
+  m_noise_psd_windows(0),
+  m_first_stage_complete_semaphore(manager.getDevice().createSemaphore(vk::SemaphoreCreateInfo())),
+  m_reset_timestamp_query_pool_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
+  m_first_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
+  m_second_stage_command_buffer(command_pool.createCommandBuffer(timestamp_query_pool)),
+  m_timestamp_statistics(),
+  m_frame_no(-1),
+  m_field_index(0),
+  m_total_elapsed_time_us(0),
+  m_cadence(log),
+  m_cadence22(log),
+  m_field_buffer_frame_no{-100, -100},
+  m_efm_decoder(log, std::nullopt, std::nullopt),
+  m_efm_pcm_processor(log),
+  // Calibration aid until a colour PAL capture settles the V-switch
+  // convention: MUSELD_PAL_VFLIP=1 inverts the derived switch
+  m_pal_v_flip(getenv("MUSELD_PAL_VFLIP") != nullptr && atoi(getenv("MUSELD_PAL_VFLIP")) != 0),
+  m_ac3_pcm_decoder(log, CompressedAudioDecoder::Codec::eAc3),
+  m_dts_pcm_decoder(log, CompressedAudioDecoder::Codec::eDts),
+  m_dts_detector(),
+  m_pending_audio(),
+  m_pending_audio_mode(MODE_UNKNOWN),
+  m_temporal_distance(video_standard.ntsc_chroma ? 1 : 2),
+  m_frames() {
+    // 185.8 degrees is the structural 180 (see sdtv_decode_single_field.comp)
+    // plus the offset calibrated against the Video Essentials colorbars
+    // (sRGB-linearized bar measurements null the mean hue error); the residual
+    // is source-dependent (differential phase of the player and disc), which
+    // is what --tint adjusts.
+    float a = ((float)video_standard.chroma_rotation_deg + tint_degrees) * (float)M_PI / 180.0f;
+    m_rot_re = saturation * sinf(a);
+    m_rot_im = saturation * cosf(a);
+}
+
+SdtvDecoder::~SdtvDecoder() {
+    while (!m_frames.empty()) {
+        delete m_frames.back();
+        m_frames.pop_back();
+    }
+    m_manager.getDevice().destroy(m_first_stage_complete_semaphore);
+}
+
+bool SdtvDecoder::initialize() {
+    // Newest read frame (the lookahead) at index 0, the displayed frame at
+    // index d, and its history behind it -- pretend they all exist already
+    // so the first reads decode blank frames instead of special cases
+    for (int i = 0; i < 3 * m_temporal_distance + 1; i++)
+        m_frames.push_back(new SdtvFrame(m_log, -i, m_manager, m_standard));
+    m_frame_seek_generation.assign(m_frames.size(), 0);
+
+    m_frame_no = 0;
+    m_field_index = 0;
+    m_total_elapsed_time_us = 0;
+
+    return true;
+}
+
+// DTS laserdiscs put a DTS bitstream where the EFM track normally carries PCM;
+// DtsSyncDetector tells the two apart by the density of DTS sync words.
+bool SdtvDecoder::detectDtsBitstream(const std::vector<TwoChannelSampleWithErasureFlags> &raw_samples) {
+    const bool was_dts = m_dts_detector.active();
+    const bool is_dts = m_dts_detector.update(raw_samples);
+    if (is_dts != was_dts)
+        m_log.info(eAudio, is_dts ? "DTS bitstream detected on the EFM track"
+                                  : "DTS sync words gone; treating the EFM track as PCM again");
+    return is_dts;
+}
+
+// For NTSC, enable_non_linear is not implemented
+bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
+    const AudioTrack audio_track = controls.audio_track;
+    const bool use_3d_comb = controls.use_3d_comb;
+    const FieldInterpolationMode field_interpolation_mode = controls.field_interpolation_mode;
+    const bool redo_last_field = controls.redo_last_field;
+    const DropoutMode dropout_mode = controls.dropout_mode;
+    const bool output_yuv = controls.output_yuv;
+
+    out.audio_sample_count = 0;
+    out.ac3_frames.clear();
+    out.decoded = false;
+    out.cc_bytes.reset();
+
+    if (redo_last_field) // undo the field advance from the previous call
+        m_field_index = (m_field_index + 1) % 2;
+
+    auto t0 = chrono::high_resolution_clock::now();
+
+    // A metadata probe only needs the first stage (the frame copy the VBI
+    // slicer reads) of the frame just read; the displayed picture is left
+    // alone and the audio is skipped.  The EFM and AC3 side data of the
+    // skipped blocks is dropped with them.
+    const bool decode_video = m_decode_video && !controls.metadata_only;
+    const bool decode_audio = m_decode_audio && !controls.metadata_only;
+
+    // Closes the current timing section: adds the time since the previous mark
+    // to the given bucket.  Skipped code between two marks just leaves the
+    // earlier bucket at zero.
+    auto t_prev = t0;
+    auto section_ms = [&t_prev](double &acc) {
+        auto now = chrono::high_resolution_clock::now();
+        acc += chrono::duration<double, std::milli>(now - t_prev).count();
+        t_prev = now;
+    };
+
+    std::unique_ptr<SdtvInputBlock> input_block = nullptr;
+    InputStatus input_status = InputStatus::eNormal;
+    if (m_field_index == 0 && !redo_last_field) {
+        tie(input_block, input_status) = m_reader.getNextInputBuffer();
+        switch (input_status) {
+            case InputStatus::eEof:
+                return false;
+            case InputStatus::eTimeout:
+                m_log.info(eDecoder, "Input timeout");
+                return true; // out.decoded stays false: nothing was decoded
+            default:
+                assert(input_block != nullptr);
+                break;
+        }
+    }
+    section_ms(m_sec_input_ms);
+    out.decoded = true;
+
+    m_first_stage_command_buffer->begin();
+
+    if (m_timestamp_query_pool != nullptr)
+        m_timestamp_query_pool->reset(*m_first_stage_command_buffer);
+
+    if (input_block != nullptr) {
+        auto frame = m_frames.back();
+        m_frames.pop_back();
+        m_frames.push_front(frame);
+        std::rotate(m_frame_seek_generation.rbegin(), m_frame_seek_generation.rbegin() + 1,
+                    m_frame_seek_generation.rend());
+
+        frame->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_video_sample);
+        m_frame_seek_generation[0] = input_block->seek_generation;
+
+        if (input_block->timebase_restarted && m_black_peak_v >= 0) {
+            // A new disc: its black is measured afresh
+            m_luma_hist.fill(0);
+            m_black_peak_v = m_black_lowest_v = m_black_peak_min_v = -1;
+            m_black_auto_ire = 7.5f;
+            m_log.info(eDecoder, "black level: signal re-acquired, measuring the disc's black afresh");
+        }
+
+        auto noise_estimate = SdtvFrame::EstimateNoise(input_block->video_data->data<float>(), m_standard);
+        if (m_noise.sigma_blanking < 0) {
+            m_noise = noise_estimate;
+            m_blanking_avg = noise_estimate.blanking_level;
+            m_blanking_sq_avg = (double)noise_estimate.blanking_level * noise_estimate.blanking_level;
+        } else {
+            m_noise.sigma_blanking = m_noise.sigma_blanking * 0.9f + noise_estimate.sigma_blanking * 0.1f;
+            if (noise_estimate.sigma_sync >= 0)
+                m_noise.sigma_sync = m_noise.sigma_sync * 0.9f + noise_estimate.sigma_sync * 0.1f;
+            m_blanking_avg = m_blanking_avg * 0.9 + noise_estimate.blanking_level * 0.1;
+            m_blanking_sq_avg = m_blanking_sq_avg * 0.9 + (double)noise_estimate.blanking_level * noise_estimate.blanking_level * 0.1;
+        }
+        // Frame-to-frame burst phase coherence: the subcarrier inverts once
+        // per frame, so the mean burst phase should advance by exactly pi.
+        // The deviation is the sampling phase error the 3D comb sees.
+        if (!std::isnan(m_prev_burst_phase) && m_standard.ntsc_chroma) {
+            double err = std::abs(std::remainder(noise_estimate.burst_phase - m_prev_burst_phase - M_PI, 2 * M_PI));
+            m_burst_coherence_avg = m_burst_coherence_avg < 0 ? err : m_burst_coherence_avg * 0.9 + err * 0.1;
+        }
+        m_prev_burst_phase = noise_estimate.burst_phase;
+
+        if (noise_estimate.white_flag_level >= 0) {
+            m_white_avg = m_white_avg < 0 ? noise_estimate.white_flag_level
+                                          : m_white_avg * 0.9 + noise_estimate.white_flag_level * 0.1;
+            m_white_flag_frames++;
+        }
+
+        // The disc's black: the peak of the dark end of the luma histogram,
+        // accumulated over the last few seconds, and that peak's minimum,
+        // decaying back over a couple of minutes -- a bright scene has its
+        // darkest greys where it likes, while every fade, cut to a dark
+        // shot or letterbox matte puts the peak at the disc's black setup,
+        // and those come far more often than the decay forgets them.  The
+        // decay is only so a spurious low (a dropout burst) washes out; a
+        // disc change resets the whole thing above.
+        {
+            using NE = SdtvFrame::NoiseEstimate;
+            double total = 0;
+            for (int i = 0; i < NE::c_luma_hist_bins; i++) {
+                m_luma_hist[i] = 0.98 * m_luma_hist[i] + noise_estimate.luma_hist[i];
+                total += m_luma_hist[i];
+            }
+            // 3-bin smoothed argmax over the dark end (below ~13 IRE); a
+            // peak needs some mass behind it, else the picture has no black
+            const int dark_end = (int)((0.09f - NE::c_luma_hist_min) / NE::c_luma_hist_bin);
+            int best = -1;
+            double best_count = 0.005 * total;
+            for (int i = 1; i < std::min(dark_end, NE::c_luma_hist_bins - 1); i++) {
+                const double c = m_luma_hist[i - 1] + m_luma_hist[i] + m_luma_hist[i + 1];
+                if (c > best_count) {
+                    best_count = c;
+                    best = i;
+                }
+            }
+            if (best >= 0) {
+                // The lowest local peak with a quarter of the main one's
+                // mass: mattes and fades sit at the true black even when
+                // the picture's own shadows never get there
+                m_black_lowest_v = -1;
+                for (int i = 1; i <= best; i++) {
+                    const double c = m_luma_hist[i - 1] + m_luma_hist[i] + m_luma_hist[i + 1];
+                    if (c >= 0.25 * best_count && c >= m_luma_hist[i - 2 < 0 ? 0 : i - 2] + m_luma_hist[i - 1] + m_luma_hist[i]
+                        && c >= m_luma_hist[i] + m_luma_hist[i + 1] + m_luma_hist[i + 2 < NE::c_luma_hist_bins ? i + 2 : i + 1]) {
+                        m_black_lowest_v = NE::c_luma_hist_min + (i + 0.5) * NE::c_luma_hist_bin;
+                        break;
+                    }
+                }
+                m_black_peak_v = NE::c_luma_hist_min + (best + 0.5) * NE::c_luma_hist_bin;
+                m_black_peak_min_v = m_black_peak_min_v < 0
+                        ? m_black_peak_v
+                        : std::min(m_black_peak_v, m_black_peak_min_v + 0.00025 * (m_black_peak_v - m_black_peak_min_v));
+            }
+        }
+
+        // The automatic choice reads the held black with hysteresis: below
+        // 4 IRE the disc is NTSC-J, and it stays so until the held value
+        // decays back above 5 -- which takes minutes without a single
+        // black in the picture, so it does not flap.  M is the placeholder
+        // until the first measurement, which comes with the first picture.
+        // Like the other automatic detections (CX, film cadence) the choice
+        // is logged and shown in the disc info overlay, not announced.
+        if (m_black_peak_min_v >= 0 && m_standard.has_black_setup) {
+            const double held_ire = m_black_peak_min_v * m_level_scale * 100.0;
+            const float choice = held_ire < 4.0 ? 0.0f : held_ire > 5.0 ? 7.5f : m_black_auto_ire;
+            if (choice != m_black_auto_ire) {
+                m_black_auto_ire = choice;
+                m_log.info(eDecoder, std::format("black level: the disc's black measures {:.1f} IRE, automatic choice {}",
+                                                 held_ire, choice > 3.75f ? "NTSC-M (7.5 IRE)" : "NTSC-J (0 IRE)"));
+            }
+        }
+        // PAL has no setup: black is at blanking whatever the mode says
+        m_black_ire = !m_standard.has_black_setup ? 0.0f
+                    : controls.black_level == BlackLevelMode::eM ? 7.5f
+                    : controls.black_level == BlackLevelMode::eJ ? 0.0f
+                    : m_black_auto_ire;
+
+        // Level calibration for the copy shader's rescale to blanking = 0,
+        // white = 1: the offset (0 IRE) is this frame's own back porch level
+        // (the median over 422 lines, so its noise is far below a line's),
+        // not a running average: a capture of a Pioneer PAL demo disc had
+        // its whole baseband wandering +-4 IRE at 2.5 Hz (the FM carrier, as
+        // sync tip and porch moved together), and an average over ten frames
+        // lagged that into a visible flicker.  The gain (100 IRE) comes from
+        // the white flag when the disc provides one -- after a settling
+        // count, since a single flagged frame is no reference, and against
+        // the averaged blanking it was measured against.  Without a flag the
+        // nominal 0.7 V span stays.
+        if (m_noise.sigma_blanking >= 0)
+            m_level_offset_v = noise_estimate.blanking_level;
+        // ... and the shaders clamp each line on its own back porch around
+        // that: the WOW disc's eccentricity moved the carrier by +-7 IRE
+        // within a rotation, one field against the other.
+        SdtvFrame::RowBlankingLevels(input_block->video_data->data<float>(), m_level_offset_v, m_standard, m_row_blanking_v);
+        if (m_white_flag_frames >= 30)
+            m_level_scale = std::clamp(1.0f / (float)(m_white_avg - m_blanking_avg), 1.1f, 1.9f);
+        m_noise_psd_windows += SdtvFrame::AccumulateNoisePsd(input_block->video_data->data<float>(),
+                                                             m_noise_psd.data(), 3.0f * m_noise.sigma_blanking, m_standard);
+        if (m_frame_no % 30 == 0 && m_noise.sigma_blanking > 0) {
+            // 100 IRE = the blanking-to-white span of 0.7 voltage units.  These
+            // sigmas are measured on the raw demodulated baseband, before the
+            // frame-domain de-emphasis.
+            constexpr float ire = 100.0f / 0.7f;
+            double wander_var = m_blanking_sq_avg - m_blanking_avg * m_blanking_avg;
+            m_log.info(eDecoder, std::format(
+                    "noise: SNR {:.1f} dB over the 100 IRE range "
+                    "(σ = {:.2f} IRE at blanking, {} at sync tip; blanking wander σ = {:.2f} IRE)",
+                    20.0f * log10(0.7f / m_noise.sigma_blanking),
+                    m_noise.sigma_blanking * ire,
+                    m_noise.sigma_sync >= 0 ? std::format("{:.2f}", m_noise.sigma_sync * ire) : "n/a (pilot)",
+                    sqrt(max(0.0, wander_var)) * ire));
+            if (m_standard.ntsc_chroma)
+                m_log.info(eDecoder, std::format(
+                        "burst: line phase sigma {:.1f} deg, frame-to-frame coherence error {:.1f} deg (EWMA)",
+                        noise_estimate.burst_phase_sigma * 180.0 / M_PI,
+                        m_burst_coherence_avg * 180.0 / M_PI));
+            m_log.info(eDecoder, std::format(
+                    "levels: blanking {:.3f} V, white flag {}, rescale gain {:.3f} (nominal {:.3f})",
+                    m_blanking_avg,
+                    m_white_avg < 0 ? "not seen"
+                                    : std::format("{:.3f} V ({} frames)", m_white_avg, m_white_flag_frames),
+                    m_level_scale, 1.0f / 0.7f));
+            {
+                using NE = SdtvFrame::NoiseEstimate;
+                double total = 0, dark = 0;
+                for (int i = 0; i < NE::c_luma_hist_bins; i++) {
+                    total += m_luma_hist[i];
+                    if (NE::c_luma_hist_min + (i + 0.5) * NE::c_luma_hist_bin < 0.09f)
+                        dark += m_luma_hist[i];
+                }
+                m_log.info(eDecoder, std::format(
+                        "picture black: dark peak at {} IRE (lowest peak {}), held minimum {} IRE "
+                        "({}{:.1f}% of the picture below 13 IRE); black level in effect {:.1f} IRE",
+                        m_black_peak_v >= 0 ? std::format("{:.1f}", m_black_peak_v * m_level_scale * 100.0) : "none",
+                        m_black_lowest_v >= 0 ? std::format("{:.1f}", m_black_lowest_v * m_level_scale * 100.0) : "none",
+                        m_black_peak_v >= 0 ? std::format("{:.1f}", m_black_peak_min_v * m_level_scale * 100.0) : "none",
+                        m_standard.has_black_setup ? "NTSC-M discs peak at 7.5, NTSC-J at 0; " : "",
+                        total > 0 ? 100.0 * dark / total : 0.0,
+                        m_black_ire));
+            }
+            if (m_noise_psd_windows > 0) {
+                // Band-limit to the video bandwidth (4.2 MHz for System M,
+                // 5 MHz for PAL), apply the frame-domain de-emphasis response
+                // (|D|² of the bilinear transform of D(s) = (1 + s 120 ns) /
+                // (1 + s 320 ns) at the frame buffer's sampling rate, as in
+                // sdtv_deemphasis.comp), and weight with the Rec. 567 unified
+                // network (BT.1439 Annex 2 §3: τ = 245 ns, a = 4.5).  IEC
+                // 60857 12.2.2 requires ≥ 30 dB unweighted at the video
+                // output, i.e. the after-de-emphasis figure.
+                const double fs = m_standard.sampling_frequency;
+                const double kb = 2 * fs, t1 = 120e-9, t2 = 320e-9;
+                const double b0 = (1 + kb * t1) / (1 + kb * t2), b1 = (1 - kb * t1) / (1 + kb * t2),
+                             a1 = (1 - kb * t2) / (1 + kb * t2);
+                constexpr double tau = 245e-9, aw = 4.5;
+                double total = 0, band = 0, deemphasized = 0, weighted = 0;
+                for (int k = 0; k < 256; k++) {
+                    double f = std::min(k, 256 - k) / 256.0 * fs;
+                    double p = m_noise_psd[k] / m_noise_psd_windows;
+                    total += p;
+                    if (f <= m_standard.luma_bandwidth_hz) {
+                        band += p;
+                        double cosw = cos(2 * M_PI * f / fs);
+                        double d2 = (b0 * b0 + b1 * b1 + 2 * b0 * b1 * cosw) / (1 + a1 * a1 + 2 * a1 * cosw);
+                        deemphasized += p * d2;
+                        double wt = 2 * M_PI * f * tau;
+                        weighted += p * d2 * (1 + wt * wt / (aw * aw)) / (1 + (1 + 1 / aw) * (1 + 1 / aw) * wt * wt);
+                    }
+                }
+                total /= 256;
+                band /= 256;
+                deemphasized /= 256;
+                weighted /= 256;
+                m_log.info(eDecoder, std::format(
+                        "noise spectrum: SNR {:.1f} dB unweighted in {:.1f} MHz, {:.1f} dB after de-emphasis, "
+                        "{:.1f} dB Rec. 567-weighted (spectrum total σ = {:.2f} IRE)",
+                        20.0 * log10(0.7 / sqrt(band)), m_standard.luma_bandwidth_hz / 1e6,
+                        20.0 * log10(0.7 / sqrt(deemphasized)),
+                        20.0 * log10(0.7 / sqrt(weighted)),
+                        sqrt(total) * ire));
+            }
+        }
+
+        section_ms(m_sec_noise_ms); // the noise/level estimation reads the mapped input block on the CPU
+
+        // The input block data was written by the host, so make sure it is visible on the GPU
+        input_block->video_data->synchronizeHostWrites(*m_first_stage_command_buffer);
+        input_block->dropout_data->synchronizeHostWrites(*m_first_stage_command_buffer);
+
+        m_shaders.extendDropouts(*m_first_stage_command_buffer, input_block->dropout_data, input_block->video_data,
+                                 m_row_blanking_v, m_level_scale, frame->dropout_data());
+        m_shaders.copyToFrame(*m_first_stage_command_buffer, input_block->video_data, frame->dropout_data(),
+            frame->data(), dropout_mode, m_level_scale);
+        frame->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
+
+        m_shaders.detectColorBurstPhase(*m_first_stage_command_buffer, frame);
+
+        // Directional motion masks for the frame about to be displayed
+        // (m_frames[d]), with the just-read frame as lookahead and the
+        // history at the comb's frame spacing.  Thresholds scale with the
+        // measured noise; 0.55 approximates how much the frame-domain
+        // de-emphasis attenuates the raw blanking sigma.
+        const int d = m_temporal_distance;
+        float sigma_c = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.55f : 0.01f;
+        m_shaders.detectMotion(*m_first_stage_command_buffer, SdtvShaders::MotionSet::eComb,
+                               frame->data(), m_frames[d]->data(), m_frames[2 * d]->data(), m_frames[3 * d]->data(),
+                               m_frame_no > 1, max(0.012f, 4.0f * sigma_c), max(0.04f, 10.0f * sigma_c), false);
+        // The de-interlacer needs frame-to-frame motion, which the comb's
+        // spacing hides on PAL (a pattern that inverts every frame is
+        // identical two frames apart): a second set from the consecutive
+        // frames, with the two-frame differences boxed since no PAL frame
+        // pair at that spacing is phase aligned
+        if (d > 1)
+            m_shaders.detectMotion(*m_first_stage_command_buffer, SdtvShaders::MotionSet::eWeave,
+                                   m_frames[d - 1]->data(), m_frames[d]->data(), m_frames[d + 1]->data(), m_frames[d + 2]->data(),
+                                   m_frame_no > 1, max(0.012f, 4.0f * sigma_c), max(0.04f, 10.0f * sigma_c), true);
+    }
+    m_first_stage_command_buffer->submit({}, {}, {m_first_stage_complete_semaphore});
+
+    // if not decoding all fields, we only decode on field 0 (when we read the data), but
+    // actually decode the second field.  For field 1, the same field will be shown again.
+    // Always begin the batch here since it will wait for the first stage semaphore to complete
+    // (or it won't be unsignaled)
+    m_second_stage_command_buffer->begin();
+    if (decode_video && (m_decode_all_fields || m_field_index == 0)) {
+        int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
+
+        const int d = m_temporal_distance;
+        out.last_frame_buffer_input_offset = m_frames[d]->getInputOffset();
+        out.input_samples_per_muse_sample = m_frames[d]->getInputSamplesPerSdtvSample();
+        out.field_parity = decoded_field_index;
+
+        // The illegal-level bounds in the decode shader are scaled from the
+        // measured noise; the copy shader's calibrated rescale puts blanking
+        // at exactly 0, so they need no offset.  The 0.52 approximates how
+        // much the comb and the de-emphasis attenuate the measured raw
+        // blanking noise.
+        float sigma_out = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.52f : 0.02f;
+        float level_floor = -max((float)m_standard.rescue_floor, 2.5f * sigma_out);
+        float level_ceiling = 1.4f;
+        // With a film cadence locked, the field's pairing is known exactly:
+        // weave unconditionally when the previously decoded field belongs to
+        // the same film frame, and when this field starts a new film frame
+        // (whose other half is not decoded yet), show the previous film
+        // frame once more -- that is what its 3:2 timing asks for anyway,
+        // at the cost of one field of latency.
+        const bool film_mode = controls.film_mode && m_standard.has_film_cadence;
+        auto action = NtscCadenceTracker::FieldAction::eAdaptive;
+        if (film_mode && m_decode_all_fields
+            && field_interpolation_mode == FieldInterpolationMode::eNormal) {
+            int displayed = m_frame_no - d;
+            action = m_standard.film_pulldown == 3 ? m_cadence.actionForField(displayed, decoded_field_index)
+                                                   : m_cadence22.actionForField(displayed, decoded_field_index);
+            // A weave reads the partner field from the other parity's buffer
+            // set; a starvation-skipped field decode leaves that buffer older
+            // than the cadence assumes.  (Holds read only the held output
+            // image, which is always just "the previous output".)
+            if (action == NtscCadenceTracker::FieldAction::eWeave) {
+                bool partner_ok = decoded_field_index == 0
+                        ? m_field_buffer_frame_no[1] == displayed - 1
+                        : m_field_buffer_frame_no[0] == displayed;
+                if (!partner_ok)
+                    action = NtscCadenceTracker::FieldAction::eAdaptive;
+            }
+        }
+
+        // Status line for the disc info overlay (V key).  The letter is the
+        // film frame within the (A1A2)(A3B1)(B2C1)(C2C3)(D1D2) cycle the
+        // output shows -- its runs of 3, 2, 3, 2 fields make the pulldown
+        // rhythm visible; a hold re-shows the previous film frame.
+        if (!film_mode || !m_decode_all_fields
+            || field_interpolation_mode != FieldInterpolationMode::eNormal) {
+            out.film_status = m_standard.has_film_cadence ? "Telecine: off" : "Telecine: n/a";
+            out.film_status_detail.clear();
+        } else if (int phase = m_standard.film_pulldown == 3 ? m_cadence.phaseForFrame(m_frame_no - d)
+                                                               : m_cadence22.phaseForFrame(m_frame_no - d); phase < 0) {
+            out.film_status = "Telecine: searching";
+            out.film_status_detail.clear();
+        } else if (m_standard.film_pulldown == 2) {
+            // The pairing the lock found, and what this field does for it
+            out.film_status = "Telecine: 2:2 locked";
+            out.film_status_detail = std::format("{} {}", phase == 0 ? "F1+F2" : "F2+F1",
+                    action == NtscCadenceTracker::FieldAction::eAdaptive ? "adapt"
+                    : action == NtscCadenceTracker::FieldAction::eWeave ? "weave" : "hold");
+        } else {
+            out.film_status = "Telecine: 3:2 locked";
+            if (action == NtscCadenceTracker::FieldAction::eAdaptive) {
+                out.film_status_detail = "adapt"; // locked, but this frame's repeat is missing
+            } else {
+                static constexpr char c_film_frame[5][2] = {
+                        {'D', 'A'}, {'A', 'A'}, {'B', 'B'}, {'C', 'C'}, {'C', 'D'}};
+                out.film_status_detail = std::format("{} {}",
+                        c_film_frame[phase][decoded_field_index],
+                        action == NtscCadenceTracker::FieldAction::eWeave ? "weave" : "hold");
+            }
+        }
+
+        // The setting (and the automatic choice under it) and the disc's
+        // measured black; short, the overlay line has room for ~35 characters
+        out.level_status = !m_standard.has_black_setup
+                ? std::format("Black: 0 IRE, disc {}",
+                              m_black_peak_min_v >= 0
+                                  ? std::format("{:.1f}", m_black_peak_min_v * m_level_scale * 100.0)
+                                  : std::string("?"))
+                : std::format("Black: {}{} {:.1f} IRE, disc {}",
+                              controls.black_level == BlackLevelMode::eAuto ? "auto " : "",
+                              m_black_ire > 3.75f ? "M" : "J", m_black_ire,
+                              m_black_peak_min_v >= 0
+                                  ? std::format("{:.1f}", m_black_peak_min_v * m_level_scale * 100.0)
+                                  : std::string("?"));
+
+        // Selector noise floor: |cs - ct| accumulated over the 19-sample
+        // window is ~sigma per sample for plain noise; 15 sigma keeps noise
+        // from flipping the comb choice on flat areas.
+        m_shaders.decodeSingleField(*m_second_stage_command_buffer, m_frames[d]->get_field(decoded_field_index),
+                                    m_frames[2 * d]->data(), m_frames[0]->data(),
+                                    m_frames[2 * d]->burst_phase_data(), m_frames[0]->burst_phase_data(),
+                                    m_frames[2 * d]->dropout_data(), m_frames[0]->dropout_data(),
+                                    dropout_mode, use_3d_comb, m_rot_re, m_rot_im, level_floor, level_ceiling,
+                                    15.0f * sigma_out, m_pal_v_flip);
+        m_field_buffer_frame_no[decoded_field_index] = m_frame_no - d;
+        if (action == NtscCadenceTracker::FieldAction::eHold) {
+            // Re-show the previous film frame from the held copy of the last
+            // combine output.  The YUV buffers are left as they are, so
+            // --write repeats the previous frame -- which is exactly the 3:2
+            // presentation.  The field itself was still decoded above: the
+            // next field's weave needs it.
+            m_shaders.restoreHeldOutput(*m_second_stage_command_buffer);
+        } else {
+            // Weaving the still parts needs the previous field's decode,
+            // which only exists when all fields are decoded
+            m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
+                    field_interpolation_mode == FieldInterpolationMode::eForceIntraField || !m_decode_all_fields,
+                    field_interpolation_mode == FieldInterpolationMode::eForceInterFrame
+                            || action == NtscCadenceTracker::FieldAction::eWeave,
+                    decoded_field_index, output_yuv, m_black_ire / 100.0f);
+            // Keep a clean copy (no OSD or subtitles drawn yet) for a
+            // following hold to re-show
+            m_shaders.saveCombinedOutput(*m_second_stage_command_buffer);
+        }
+    }
+
+    m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});
+    section_ms(m_sec_record_ms);
+
+    m_first_stage_command_buffer->wait();
+    section_ms(m_sec_gpu1_wait_ms);
+
+    if (input_block != nullptr) {
+        // Debug aid: MUSELD_DUMP_FRAME=<path> writes one frame buffer (the
+        // de-emphasized, rescaled composite: total_lines rows of
+        // samples_per_line float32, blanking 0, white 1) for offline
+        // analysis -- the first frame after MUSELD_DUMP_FRAME_NO (default
+        // 30) -- and the reader's raw line-locked composite of the same frame
+        // (sync tip 0, blanking ~0.3, white ~1, no de-emphasis) to <path>.raw
+        if (static const char *dump = getenv("MUSELD_DUMP_FRAME"); dump != nullptr) {
+            static const char *no = getenv("MUSELD_DUMP_FRAME_NO");
+            static int dump_frame = no != nullptr ? atoi(no) : 30;
+            if (dump_frame >= 0 && m_frame_no >= dump_frame) {
+                dump_frame = -1;
+                if (FILE *f = fopen((std::string(dump) + ".raw").c_str(), "wb")) {
+                    fwrite(input_block->video_data->data<float>(), sizeof(float),
+                           (size_t)m_standard.samples_per_line * m_standard.total_lines, f);
+                    fclose(f);
+                }
+                // and the detector's dropout flags of the same frame, one byte per sample, to <path>.do
+                if (FILE *f = fopen((std::string(dump) + ".do").c_str(), "wb")) {
+                    fwrite(input_block->dropout_data->data<uint8_t>(), 1,
+                           (size_t)m_standard.samples_per_line * m_standard.total_lines, f);
+                    fclose(f);
+                }
+                if (FILE *f = fopen(dump, "wb")) {
+                    const int16_t *p = m_frames[0]->data()->data<int16_t>();
+                    const size_t n = (size_t)m_standard.samples_per_line * m_standard.total_lines;
+                    std::vector<float> row(n);
+                    for (size_t i = 0; i < n; i++)
+                        row[i] = HalfFloatUtil::half_to_float(p[i]);
+                    fwrite(row.data(), sizeof(float), n, f);
+                    fclose(f);
+                    m_log.info(eDecoder, std::format("Frame {} dumped to {}", m_frame_no, dump));
+                }
+            }
+        }
+        m_frames[0]->processVbi();
+        if (auto vbi = m_frames[0]->getVbiData()) {
+            // The flags carry over between consecutive frames only: not
+            // across a signal loss, and not across a seek, where the chapter
+            // of the abandoned position would be reported for the new one
+            if (m_prev_vbi && !input_block->timebase_restarted
+                && input_block->seek_generation == m_prev_vbi_seek_generation)
+                vbi->inheritDiscFlags(*m_prev_vbi);
+            if (vbi->cavPictureInherited())
+                m_log.debug(eDecoder, std::format("VBI frame {}: picture number carried over from the previous frame", m_frame_no));
+            m_prev_vbi = vbi;
+            m_prev_vbi_seek_generation = input_block->seek_generation;
+        }
+        // A new frame was read, so this pair has not been delivered before.
+        // It leads the displayed frame (m_frames[1]) by one frame time, which
+        // is well inside the caption timing tolerance.
+        out.cc_bytes = m_frames[0]->getClosedCaptionBytes();
+
+        // Drive the analog audio's CX expansion from the VBI status, unless
+        // the user forces it.  The demodulator runs a few frames ahead of the
+        // VBI decode, but the flag changes on program boundaries, so the
+        // latency does not matter.
+        switch (controls.analog_cx) {
+            case CxMode::eOff:
+                m_reader.setAnalogCx(false);
+                break;
+            case CxMode::eOn:
+                m_reader.setAnalogCx(true);
+                break;
+            case CxMode::eAuto:
+                if (auto cx = m_frames[0]->getVbiData()->cxEnabled(); cx.has_value())
+                    m_reader.setAnalogCx(cx.value());
+                break;
+        }
+        section_ms(m_sec_vbi_ms); // processVbi reads the mapped frame buffer on the CPU
+
+        // Film cadence evidence: the per-field differences between the frame
+        // just read and its predecessor (both synchronized for host reads, as
+        // the VBI processing needs).  The decision this feeds is always about
+        // the DISPLAYED frame m_frames[1], so running one frame behind the
+        // read costs nothing.
+        if (decode_video && m_decode_all_fields && m_frame_no > 1 && m_standard.has_film_cadence) {
+            // Predicted per-sample sigma of the frame buffer data: the raw
+            // blanking sigma through the calibrated rescale and the ~0.55
+            // attenuation of the frame-domain de-emphasis
+            float sigma = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.55f : -1.0f;
+            if (m_standard.film_pulldown == 3) {
+                auto diffs = NtscCadenceTracker::MeasureFieldDiffs(
+                        m_frames[0]->data()->data<int16_t>(), m_frames[1]->data()->data<int16_t>());
+                m_cadence.update(m_frame_no, diffs.d0, diffs.d1, sigma);
+            } else {
+                auto combs = PalCadenceTracker::MeasureCombs(
+                        m_frames[0]->data()->data<int16_t>(), m_frames[1]->data()->data<int16_t>());
+                m_cadence22.update(m_frame_no, combs.same, combs.across, sigma);
+            }
+        }
+        section_ms(m_sec_cadence_ms); // MeasureFieldDiffs reads two mapped frame buffers on the CPU
+    }
+
+    if (decode_audio && m_field_index == 0) {
+        // Deliver the audio held from the previous read (it belongs to the
+        // frame being displayed), then decode and hold this block's audio --
+        // one read further back where the display lags the read by two
+        // frames (PAL), see m_audio_hold below.
+        // AC3/DTS decode in whole compressed frames, so a delivery can exceed
+        // the per-field cap now and then; the remainder carries over.
+        out.audio_mode = m_pending_audio_mode;
+        // AC3/DTS decode in whole compressed frames (32 ms for AC3), so
+        // uncapped delivery would jitter by a full frame against the video
+        // clock -- past the file writer's sync dead band.  Capping just above
+        // the nominal per-video-frame rate keeps about one compressed frame
+        // queued as a jitter buffer, and the small surplus drains any larger
+        // backlog instead of letting it become permanent latency.
+        const int cap = m_pending_audio_mode == MODE_AC3 ? 48000 * m_standard.fps_den / m_standard.fps_num + 16
+                      : m_pending_audio_mode == MODE_DTS ? 44100 * m_standard.fps_den / m_standard.fps_num + 16
+                      : MAX_AUDIO_OUTPUT_SAMPLES;
+        const int delivered = std::min((int)m_pending_audio.size(), cap);
+        for (int i = 0; i < delivered; i++)
+            out.audio_samples[out.audio_sample_count++] = m_pending_audio[i];
+        m_pending_audio.erase(m_pending_audio.begin(), m_pending_audio.begin() + delivered);
+        out.ac3_frames = std::move(m_pending_ac3_frames);
+        m_pending_ac3_frames.clear();
+
+        // Any leftovers belong to m_pending_audio_mode; a mode change (track
+        // switch, DTS detection flipping) must not deliver them under the new
+        // mode's label and sample rate
+        auto beginMode = [this](AudioMode mode) {
+            if (mode != m_pending_audio_mode) {
+                m_pending_audio.clear();
+                m_audio_hold.clear();
+            }
+            m_pending_audio_mode = mode;
+        };
+        std::vector<AudioFrame> batch; // this read's audio
+        auto pendStereo = [&batch](const auto &samples) {
+            for (const auto &s : samples) {
+                AudioFrame f{};
+                f.samples[0] = s.samples[0];
+                f.samples[1] = s.samples[1];
+                batch.push_back(f);
+            }
+        };
+        if (audio_track == AudioTrack::eEfm && input_block != nullptr) {
+            auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
+            if (detectDtsBitstream(raw)) {
+                // A DTS disc's EFM track is a bitstream, not PCM: concealment,
+                // de-emphasis and pop detection would corrupt it (and playing
+                // it as PCM is loud noise), so hand the raw bytes to the DTS
+                // decoder instead
+                beginMode(MODE_DTS);
+                m_dts_bitstream.clear();
+                for (const auto &s : raw)
+                    for (int ch = 0; ch < 2; ch++) { // L then R, little endian: the disc's frame order
+                        m_dts_bitstream.push_back((uint8_t)(s.samples[ch] & 0xff));
+                        m_dts_bitstream.push_back((uint8_t)((uint16_t)s.samples[ch] >> 8));
+                    }
+                const auto pcm = m_dts_pcm_decoder.decode(m_dts_bitstream.data(), m_dts_bitstream.size());
+                batch.insert(batch.end(), pcm.begin(), pcm.end());
+            } else {
+                beginMode(MODE_EFM);
+                pendStereo(m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis()));
+            }
+        } else if (audio_track == AudioTrack::eAc3 && input_block != nullptr) {
+            beginMode(MODE_AC3);
+            for (const auto &frame : input_block->ac3_frames) {
+                const auto pcm = m_ac3_pcm_decoder.decode(frame.data(), frame.size());
+                batch.insert(batch.end(), pcm.begin(), pcm.end());
+            }
+            m_pending_ac3_frames = input_block->ac3_frames; // originals for the file writer
+        } else if (input_block != nullptr && !input_block->analog_data.empty()) {
+            beginMode(MODE_ANALOG);
+            pendStereo(input_block->analog_data);
+        } else {
+            beginMode(MODE_UNKNOWN);
+        }
+        // The batch joins the delivery FIFO after d - 1 further reads, so
+        // that it reaches the output together with its own frame
+        m_audio_hold.push_back(std::move(batch));
+        while ((int)m_audio_hold.size() > m_temporal_distance - 1) {
+            m_pending_audio.insert(m_pending_audio.end(), m_audio_hold.front().begin(), m_audio_hold.front().end());
+            m_audio_hold.pop_front();
+        }
+    }
+    section_ms(m_sec_audio_ms);
+
+    if (input_block != nullptr)
+        m_reader.returnBuffer(input_block); // EFM audio uses the buffer, so we cannot return it until now
+
+    if (m_second_stage_command_buffer->isSubmitted())
+        m_second_stage_command_buffer->wait();
+    section_ms(m_sec_gpu2_wait_ms);
+
+    if (m_timestamp_query_pool != nullptr)
+        m_timestamp_statistics.add_timestamps(m_timestamp_query_pool->getTimestamps());
+
+    auto t1 = chrono::high_resolution_clock::now();
+    long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
+    m_total_elapsed_time_us += time_us;
+    m_log.info(ePerformance, std::format("Field {} elapsed time {} ms; {} ms/frame",
+                                         m_field_index, time_us / 1000,
+                                         m_frame_no != 0 ? m_total_elapsed_time_us / 1000 / m_frame_no : -1));
+
+    if (m_field_index == 0 && ++m_timed_frames == c_timing_report_frames) {
+        const double frame_budget_ms = m_standard.frameDurationMs();
+        const int n = c_timing_report_frames;
+        m_log.info(ePerformance, std::format(
+                "decoder avg/frame (budget {:.2f} ms): input {:.2f} ms, noise {:.2f} ms, record {:.2f} ms, "
+                "gpu1 wait {:.2f} ms, vbi {:.2f} ms, cadence {:.2f} ms, audio {:.2f} ms, gpu2 wait {:.2f} ms, "
+                "total {:.2f} ms",
+                frame_budget_ms, m_sec_input_ms / n, m_sec_noise_ms / n, m_sec_record_ms / n,
+                m_sec_gpu1_wait_ms / n, m_sec_vbi_ms / n, m_sec_cadence_ms / n, m_sec_audio_ms / n,
+                m_sec_gpu2_wait_ms / n,
+                (m_sec_input_ms + m_sec_noise_ms + m_sec_record_ms + m_sec_gpu1_wait_ms + m_sec_vbi_ms
+                 + m_sec_cadence_ms + m_sec_audio_ms + m_sec_gpu2_wait_ms) / n));
+        m_sec_input_ms = m_sec_noise_ms = m_sec_record_ms = m_sec_gpu1_wait_ms = 0;
+        m_sec_vbi_ms = m_sec_cadence_ms = m_sec_audio_ms = m_sec_gpu2_wait_ms = 0;
+        m_timed_frames = 0;
+    }
+
+    if (input_status == InputStatus::eBuffersFilled)
+        m_field_index = 0; // skip second field -- next field will be from the next frame
+    else
+        m_field_index = (m_field_index + 1) % 2;
+
+    // The displayed frame's VBI data, m_temporal_distance frames behind the read.  A probe
+    // reports the frame just read instead: it is what the seek produced,
+    // and waiting a frame for it to move up would double the probe's cost.
+    if (controls.metadata_only) {
+        out.disc_info = m_frames[0]->getVbiData();
+        out.disc_info_input_offset = m_frames[0]->getInputOffset();
+        out.seek_generation = m_frame_seek_generation[0];
+    } else {
+        out.disc_info = m_frames[m_temporal_distance]->getVbiData();
+        out.disc_info_input_offset = m_frames[m_temporal_distance]->getInputOffset();
+        out.seek_generation = m_frame_seek_generation[m_temporal_distance];
+    }
+    // Let the disc info overlay show what the CX expander actually does when
+    // the user forces it away from the VBI flag
+    if (auto vbi = m_frames[m_temporal_distance]->getVbiData())
+        vbi->setCxOverride(controls.analog_cx == CxMode::eAuto
+            ? std::nullopt
+            : std::make_optional(controls.analog_cx == CxMode::eOn));
+
+    return true;
+}
+
+Decoder::SourceDimensions SdtvDecoder::getSourceDimensions() const {
+    return {m_standard.y_buf_width, m_standard.field_lines * 2, m_standard.y_buf_width, m_standard.field_lines};
+}
+
+std::optional<Decoder::PixelFileOffsets> SdtvDecoder::computePixelFileOffsets(
+        int field_x, int field_y, int field_parity,
+        int64_t buffer_file_offset, double input_samples_per_muse_sample) const {
+    // Composite frame buffer coordinates: field rows start at line
+    // field_start_y (field2_offset later for the second field), picture
+    // columns at field_start_x on the line-locked grid.  The composite
+    // carries no separate chroma samples, so cr/cb are left unset and only
+    // the Y offset is reported.
+    const int64_t field_first = m_standard.field_start_y + (int64_t)m_standard.field2_offset * field_parity;
+    const int64_t line = field_first + field_y;
+    const int64_t width = m_standard.samples_per_line;
+    PixelFileOffsets r;
+    r.field_start = buffer_file_offset + (int64_t)(field_first * width * input_samples_per_muse_sample);
+    r.y = buffer_file_offset
+            + (int64_t)((line * width + m_standard.field_start_x + field_x) * input_samples_per_muse_sample);
+    return r;
+}
+
+void SdtvDecoder::outputBenchmarkResults() {
+    m_timestamp_statistics.print_stats(3);
+}
+
+ResultImages SdtvDecoder::getResultImages() {
+    return m_shaders.getResultImages();
+}

@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <cmath>
 #include <cstdint>
 #include <fcntl.h>
 #include <unistd.h>
@@ -20,13 +21,13 @@ using namespace std;
 
 ResamplingFrameReader::ResamplingFrameReader(
         Logger &log, const std::string &executable_dir, musevk::VulkanManager &vulkan_manager,
-        const std::string &filename, InputFormat input_format, double sample_rate,
+        PreparedInput input, double sample_rate,
         double initial_seek_seconds, bool demodulate, bool benchmark_shaders, bool efm_enabled,
         int efm_adaptive_filter_size, const std::optional<std::string> &output_filename)
-        : FrameReader(log, filename,
-                      inputIsLive(filename),
+        : FrameReader(log, input.name(),
+                      input.isLive(),
                       initial_seek_seconds, output_filename),
-          m_input_format(input_format),
+          m_input(std::move(input)),
           m_demodulate(demodulate),
           m_input_reader(nullptr),
           m_sample_rate(demodulate ? sample_rate / MuseDemodulatedBlock::c_video_decimation_rate : sample_rate),
@@ -52,66 +53,29 @@ ResamplingFrameReader::ResamplingFrameReader(
           m_frame_start_offset(0),
           m_error_sum(0) {
     if (m_demodulate) {
-        m_demodulator = new MuseRfDemodulator(log, executable_dir, m_filename, (float)sample_rate, vulkan_manager,
-                                              m_input_format, benchmark_shaders, efm_enabled,
+        m_demodulator = new MuseRfDemodulator(log, executable_dir, std::move(m_input), (float)sample_rate, vulkan_manager,
+                                              benchmark_shaders, efm_enabled,
                                               efm_adaptive_filter_size);
         // The demodulator already scales output to MUSE 0..255 range.
         m_input_scale = 1.f;
         m_input_offset = 0.f;
-    } else {
-        // File mode: scale incoming float samples (which carry the native value range of the input
-        // format) to the ~0..255 range that downstream sync detection expects.
-        switch (m_input_format) {
-            case eUint8:
-                m_input_scale = 1.f;
-                m_input_offset = 0.f;
-                break;
-            case eSint8:
-                m_input_scale = 1.f;
-                m_input_offset = 128.f;
-                break;
-            case eUint16:
-            case eUint16BE:
-                m_input_scale = 1.f / 256.f;
-                m_input_offset = 0.f;
-                break;
-            case eSint16:
-            case eSint16BE:
-                m_input_scale = 1.f / 256.f;
-                m_input_offset = 128.f;
-                break;
-            case eLds:
-                m_input_scale = 1.f / 4.f;
-                m_input_offset = 0.f;
-                break;
-            case eFlac:
-            case eFlacOgg:
-                // Bit depth only known after initialize(); deferred to initialize().
-                m_input_scale = 0.f;
-                m_input_offset = 0.f;
-                break;
-            default:
-                throw runtime_error(std::format("ResamplingFrameReader: unsupported input format {}", (int)m_input_format));
-        }
     }
+    // File mode: the scale and offset come from the reader once it is open, see initialize()
 }
 
 bool ResamplingFrameReader::initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) {
     if (m_demodulator == nullptr) {
-        m_input_reader = makeInputReader(m_filename, m_input_format, c_input_sub_buffer_size, &m_log);
+        m_input_reader = m_input.open(c_input_sub_buffer_size, &m_log);
         m_input_reader->initialize();
-        if (m_input_scale == 0.f) {
-            int bps = m_input_reader->bitsPerSample();
-            if (bps == 8) {
-                m_input_scale = 1.f;
-                m_input_offset = 128.f;
-            } else if (bps == 16) {
-                m_input_scale = 1.f / 256.f;
-                m_input_offset = 128.f;
-            } else {
-                throw runtime_error(std::format("ResamplingFrameReader: unexpected FLAC bits per sample {}", bps));
-            }
-        }
+        // File mode: the reader hands out the file's own sample codes, so map them to
+        // the ~0..255 range that downstream sync detection expects from their width
+        // and signedness (a 10-bit lds code 0..1023 becomes 0..255, a signed 16-bit
+        // one -32768..32767 becomes 0..255 as well)
+        const int bits = m_input_reader->bitsPerSample();
+        m_input_scale = std::ldexp(1.f, 8 - bits);
+        m_input_offset = m_input_reader->signedSamples() ? 128.f : 0.f;
+        m_log.info(eInput, std::format("Input samples: {} bits, {}", bits,
+                                       m_input_reader->signedSamples() ? "signed" : "unsigned"));
     } else {
         m_demodulator->initialize(MuseDemodulatedBlock::recommendedNumberOfBlockBuffers((float)m_sample_rate * MuseDemodulatedBlock::c_video_decimation_rate));
     }
@@ -161,17 +125,24 @@ void ResamplingFrameReader::cleanup() {
     m_input_reader.reset();
 }
 
-void ResamplingFrameReader::seek(double seconds) {
+// With the RF demodulator the seek only moves its input: the PLL is unlocked
+// on the reader thread when the first block after the seek arrives (readInput
+// sees its generation change), so nothing here races the thread.
+bool ResamplingFrameReader::seek(double seconds) {
     if (!m_input_is_realtime) {
         if (m_demodulator != nullptr) {
-            m_demodulator->seek(seconds);
+            if (!m_demodulator->seek(seconds))
+                return false;
+            discardFilledBuffers();
+            return true;
         } else {
             std::unique_lock<std::mutex> lock(m_mutex);
 
             int64_t samples_to_seek = (int64_t) (seconds * 16.2e6 * m_input_samples_per_sample);
             m_log.info(eInput, std::format("Seeking relative time {} s, {} samples.",
                                            seconds, samples_to_seek));
-            m_input_reader->seek(samples_to_seek);
+            if (!m_input_reader->seek(samples_to_seek))
+                return false;
 
             // discard content in existing input buffers
             move(m_filled_input_buffers.begin(), m_filled_input_buffers.end(),
@@ -181,6 +152,21 @@ void ResamplingFrameReader::seek(double seconds) {
         }
         setUnlocked(); // do not wait to discover that we lost sync
     }
+    return true;
+}
+
+std::optional<uint32_t> ResamplingFrameReader::seekToInputSample(int64_t sample) {
+    // The baseband path keeps no input offsets, so only the RF path can
+    if (m_input_is_realtime || m_demodulator == nullptr)
+        return std::nullopt;
+    const auto generation = m_demodulator->seekToSample(sample);
+    if (generation)
+        discardFilledBuffers();
+    return generation;
+}
+
+int64_t ResamplingFrameReader::inputSampleCount() const {
+    return m_demodulator != nullptr ? m_demodulator->inputSampleCount() : -1;
 }
 
 void ResamplingFrameReader::threadFunc() {
@@ -218,6 +204,7 @@ void ResamplingFrameReader::threadFunc() {
         }
 
         output_block->input_offset = m_frame_start_offset;
+        output_block->seek_generation = m_seek_generation;
         output_block->input_samples_per_muse_sample = m_input_samples_per_sample * m_input_samples_decimation_rate;
         std::unique_lock<std::mutex> lock(m_mutex);
         m_cv_filled.notify_one();
@@ -261,6 +248,10 @@ bool ResamplingFrameReader::readInput(std::unique_ptr<MuseInputBlock> const &out
         if (block == nullptr) {
             m_log.info(eInput, "ResamplingFrameReader: no more demodulated blocks");
             return false;
+        }
+        if (block->seek_generation != m_seek_generation) {
+            m_seek_generation = block->seek_generation;
+            setUnlocked(); // do not wait to discover that we lost sync
         }
         memcpy(read_ptr, block->video_data->data<float>(), MuseDemodulatedBlock::c_video_block_size * sizeof(float));
         memcpy(dropout_read_ptr, block->dropouts->data<uint8_t>(), MuseDemodulatedBlock::c_video_block_size * sizeof(uint8_t));

@@ -12,23 +12,25 @@
 
 class Logger;
 
-// Open the input `name` -- a file, a fifo or a URL (see ByteSource.h) -- and return an
-// InputReader for `format`.  On Linux, if the file is a fifo the pipe buffer is bumped to
-// 1 MiB.  `log` may be null; the network sources report on themselves through it.
+// Open the input `name` -- a file, a fifo, "-" for stdin or a URL (see ByteSource.h) -- and
+// return an InputReader for `format`.  On Linux, if the file is a fifo the pipe buffer is
+// bumped to 1 MiB.  `log` may be null; the network sources report on themselves through it.
 std::unique_ptr<InputReader> makeInputReader(
     const std::string &name, InputFormat format, uint32_t block_size, Logger *log = nullptr);
 
-// Return an InputReader for STDIN_FILENO. Seeking is silently ignored.
-std::unique_ptr<InputReader> makeStdinInputReader(InputFormat format, uint32_t block_size);
+// The same over a source that is already open; the reader owns it from here.
+std::unique_ptr<InputReader> makeInputReader(
+    std::unique_ptr<ByteSource> source, InputFormat format, uint32_t block_size, Logger *log = nullptr);
 
 // What a udp:// stream's packets say about it: the sample format and rate ride in every
-// packet's header.  Waits up to `timeout_seconds` for one; nullopt if none came.  Throws
+// packet's header.  Waits up to `timeout_seconds` for the first one on an open udp://
+// source; nullopt if none came, or if `source` is not such a stream.  Throws
 // std::runtime_error when the stream carries a format museld cannot read.
 struct NetworkStreamInfo {
     InputFormat format;
     double sample_frequency;
 };
-std::optional<NetworkStreamInfo> probeNetworkStream(const std::string &name, double timeout_seconds);
+std::optional<NetworkStreamInfo> networkStreamInfo(ByteSource &source, double timeout_seconds);
 
 // Match the well-known input file extensions to a format. Returns nullopt for unknown extensions.
 std::optional<InputFormat> inputFormatFromFilename(const std::string &filename);

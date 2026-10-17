@@ -1,0 +1,114 @@
+// Copyright 2024-2026 Staffan Ulfberg
+// This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
+
+#ifndef MUSECPP_SDTVRFDEMODULATOR_H
+#define MUSECPP_SDTVRFDEMODULATOR_H
+
+#include <cstdint>
+#include <fcntl.h>
+#include <unistd.h>
+#include <fstream>
+#include <format>
+#include <cassert>
+#include <complex>
+#include <array>
+#include <algorithm>
+#include <thread>
+#include <atomic>
+#include <deque>
+#include <condition_variable>
+#include "logging/Logger.h"
+#include "AudioDefs.h"
+#include "RfDemodulator.h"
+#include "musevk/VulkanManager.h"
+#include "ac3/Ac3Decoder.h"
+#include "ac3/Ac3RfDemodulator.h"
+#include "efm/EfmDemodulator.h"
+#include "analog/AnalogAudioDemodulator.h"
+#include "VideoStandard.h"
+
+namespace SdtvRfDemodulatorConstants {
+    static constexpr int c_sample_block_size = 512 * 1024;
+    static constexpr int c_video_decimation_rate = 2;
+    static constexpr int c_audio_decimation_rate = 4;
+
+    static constexpr int c_video_block_size = c_sample_block_size / c_video_decimation_rate;
+    static constexpr int c_audio_block_size = c_sample_block_size / c_audio_decimation_rate;
+}
+
+struct SdtvDemodulatedBlock {
+    explicit SdtvDemodulatedBlock(musevk::VulkanManager &vulkan_manager)
+    : input_offset(0) {
+        video_data = std::make_unique<musevk::VulkanBuffer>(
+                vulkan_manager, musevk::Size(SdtvRfDemodulatorConstants::c_video_block_size), sizeof(float),
+                vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);
+        dropouts = std::make_unique<musevk::VulkanBuffer>(
+                vulkan_manager, musevk::Size(SdtvRfDemodulatorConstants::c_video_block_size), sizeof(uint8_t),
+                vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, musevk::HostAccess::eHostRead);;
+        audio_data = std::make_unique<musevk::VulkanBuffer>(
+                vulkan_manager, musevk::Size(SdtvRfDemodulatorConstants::c_audio_block_size), sizeof(float),
+                vk::BufferUsageFlagBits::eStorageBuffer, musevk::HostAccess::eHostRead);
+    }
+
+    int64_t input_offset; // the number of samples in the input before this block
+    uint32_t seek_generation = 0; // the demodulator's seek count when the block's input was read
+    std::shared_ptr<musevk::VulkanBuffer> video_data;
+    std::shared_ptr<musevk::VulkanBuffer> dropouts; // 1-to-1 with the video_data array. 0 or 1 for now, but could indicate how certain we are in the future
+    std::vector<float> raw_input; // raw input samples staged for the audio worker thread; empty when no audio demodulator is enabled
+    bool efm_wanted = false;      // which decoders the worker runs on raw_input
+    bool analog_wanted = false;
+    bool ac3_wanted = false;
+    std::vector<float> efm_data;
+    std::vector<TwoChannelSample> analog_data; // 48 kHz stereo from the analog FM carriers
+    std::vector<std::array<uint8_t, 1536>> ac3_frames; // raw AC3 sync frames from the AC3-RF carrier
+    std::shared_ptr<musevk::VulkanBuffer> audio_data;
+};
+
+class SdtvRfDemodulator : public RfDemodulator<SdtvDemodulatedBlock> {
+public:
+    SdtvRfDemodulator(Logger &log, std::string executable_dir, PreparedInput input, float sample_frequency,
+                      musevk::VulkanManager &vulkan_manager, bool benchmark_shaders,
+                      AudioTrack audio_track, int efm_adaptive_filter_size, const VideoStandard &video_standard);
+    SdtvRfDemodulator(const SdtvRfDemodulator&) = delete;
+    void operator=(const SdtvRfDemodulator&) = delete;
+
+    // Join the demodulator thread while demodulate() and m_efm_demodulator
+    // still exist; the base destructor's cleanup() would be too late.
+    ~SdtvRfDemodulator() {
+        cleanup();
+    }
+
+    // The three audio sources are alternatives; enable the selected one only
+    void setAudioTrack(AudioTrack track) {
+        m_efm_enabled = track == AudioTrack::eEfm;
+        m_analog_enabled = track == AudioTrack::eDefault;
+        m_ac3_enabled = track == AudioTrack::eAc3;
+    }
+    // CX expansion for the analog audio, driven by the VBI status decoded downstream
+    void setAnalogCx(bool enabled) { m_analog_cx = enabled; }
+    // Taps in the EFM timing recovery's adaptive filter (0 disables it); applied at the next block
+    void setEfmAdaptiveFilterSize(int size) { m_efm_demodulator.setAdaptiveFilterSize(size); }
+    [[nodiscard]] int efmAdaptiveFilterSize() const { return m_efm_demodulator.adaptiveFilterSize(); }
+
+    // enough buffers for two frames
+    [[nodiscard]] int numberOfBlockBuffers() const {
+        return std::max(2, (int)(2 * m_sample_frequency / m_video_standard.framesPerSecond()
+                                 / SdtvRfDemodulatorConstants::c_sample_block_size));
+    }
+
+protected:
+    void demodulate() override;
+
+private:
+    const VideoStandard &m_video_standard;
+    EfmDemodulator m_efm_demodulator;
+    AnalogAudioDemodulator m_analog_demodulator;
+    Ac3RfDemodulator m_ac3_demodulator;
+    Ac3Decoder m_ac3_decoder;
+    std::atomic<bool> m_efm_enabled;
+    std::atomic<bool> m_analog_enabled;
+    std::atomic<bool> m_ac3_enabled;
+    std::atomic<bool> m_analog_cx;
+};
+
+#endif //MUSECPP_SDTVRFDEMODULATOR_H
