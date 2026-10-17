@@ -18,6 +18,10 @@ enum class AudioChannelMode { eStereo, eLeft, eRight };
 struct PlayerState {
     bool paused = false;
     int paused_countdown = 0;
+    // The app is in the background (tvOS): paused, and nothing is submitted
+    // to the GPU or presented until it is back in front
+    bool in_background = false;
+    bool paused_before_background = false;
     Decoder::FieldInterpolationMode field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
     bool redo_last_field = false;
     bool export_frame = false;

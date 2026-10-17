@@ -15,9 +15,16 @@
 #  include <windows.h>
 #elif defined(__APPLE__)
 #  include <mach-o/dyld.h>
+#  include <TargetConditionals.h>
 #endif
 
 #include <SDL3/SDL.h>
+#ifdef __APPLE__
+// tvOS: main() becomes the UIKit entry point, and SDL runs the application
+// delegate around it (the Xcode scheme's launch arguments arrive as argv).
+// No effect on macOS.
+#  include <SDL3/SDL_main.h>
+#endif
 
 #include "musevk/TimestampQueryPool.h"
 #include "musevk/VulkanManager.h"
@@ -698,40 +705,46 @@ static void runPlayer(Logger &log,
                                             state.last_decoded.audio_samples);
             }
 
-            auto swap_chain_image = manager.acquireNextImage(image_available_semaphore);
-            // (after the acquire: it may have recreated the swap chain at a new size)
-            const vk::Extent2D swap_extent = manager.getSwapChainExtent();
-            const DisplayGeometry geometry = computeDisplayGeometry({
-                    state.aspect_mode, state.picture_format, state.full_image, state.overscan,
-                    state.zoom_factor, state.zoom_center.first, state.zoom_center.second,
-                    FrameBlitter::displayPixelAspect(window, log), (int)swap_extent.width, (int)swap_extent.height});
-            if (static DisplayGeometry logged{}; std::memcmp(&logged, &geometry, sizeof geometry) != 0) {
-                logged = geometry;
-                log.info(eVideo, std::format("Picture: image columns {:.1f}..{:.1f}, rows {:.1f}..{:.1f} shown at {},{}..{},{} of {}x{}",
-                                             geometry.src_x0, geometry.src_x1, geometry.src_y0, geometry.src_y1,
-                                             geometry.dst_x0, geometry.dst_y0, geometry.dst_x1, geometry.dst_y1,
-                                             swap_extent.width, swap_extent.height));
+            if (state.in_background) {
+                // tvOS: GPU work in the background gets the app killed.  Idle
+                // until the events bring it back (decoding is paused as well).
+                SDL_Delay(50);
+            } else {
+                auto swap_chain_image = manager.acquireNextImage(image_available_semaphore);
+                // (after the acquire: it may have recreated the swap chain at a new size)
+                const vk::Extent2D swap_extent = manager.getSwapChainExtent();
+                const DisplayGeometry geometry = computeDisplayGeometry({
+                        state.aspect_mode, state.picture_format, state.full_image, state.overscan,
+                        state.zoom_factor, state.zoom_center.first, state.zoom_center.second,
+                        FrameBlitter::displayPixelAspect(window, log), (int)swap_extent.width, (int)swap_extent.height});
+                if (static DisplayGeometry logged{}; std::memcmp(&logged, &geometry, sizeof geometry) != 0) {
+                    logged = geometry;
+                    log.info(eVideo, std::format("Picture: image columns {:.1f}..{:.1f}, rows {:.1f}..{:.1f} shown at {},{}..{},{} of {}x{}",
+                                                 geometry.src_x0, geometry.src_x1, geometry.src_y0, geometry.src_y1,
+                                                 geometry.dst_x0, geometry.dst_y0, geometry.dst_x1, geometry.dst_y1,
+                                                 swap_extent.width, swap_extent.height));
+                }
+                state.visible_x0 = geometry.src_x0;
+                state.visible_y0 = geometry.src_y0;
+                state.visible_x1 = geometry.src_x1;
+                state.visible_y1 = geometry.src_y1;
+                state.shown_x0 = (double)geometry.dst_x0 / swap_extent.width;
+                state.shown_y0 = (double)geometry.dst_y0 / swap_extent.height;
+                state.shown_x1 = (double)geometry.dst_x1 / swap_extent.width;
+                state.shown_y1 = (double)geometry.dst_y1 / swap_extent.height;
+
+                command_buffer->begin();
+                state.last_cursor_string = osd.render(*command_buffer, images, state, decoder, window, text_renderer);
+                if (subtitle_primary_overlay)
+                    subtitle_primary_overlay->render(*command_buffer, images, state, decoder,
+                                                     state.subtitle_primary);
+                if (subtitle_secondary_overlay)
+                    subtitle_secondary_overlay->render(*command_buffer, images, state, decoder,
+                                                       state.subtitle_secondary);
+                blitter.present(*command_buffer, images, geometry, swap_chain_image, image_available_semaphore);
+
+                manager.present(swap_chain_image);
             }
-            state.visible_x0 = geometry.src_x0;
-            state.visible_y0 = geometry.src_y0;
-            state.visible_x1 = geometry.src_x1;
-            state.visible_y1 = geometry.src_y1;
-            state.shown_x0 = (double)geometry.dst_x0 / swap_extent.width;
-            state.shown_y0 = (double)geometry.dst_y0 / swap_extent.height;
-            state.shown_x1 = (double)geometry.dst_x1 / swap_extent.width;
-            state.shown_y1 = (double)geometry.dst_y1 / swap_extent.height;
-
-            command_buffer->begin();
-            state.last_cursor_string = osd.render(*command_buffer, images, state, decoder, window, text_renderer);
-            if (subtitle_primary_overlay)
-                subtitle_primary_overlay->render(*command_buffer, images, state, decoder,
-                                                 state.subtitle_primary);
-            if (subtitle_secondary_overlay)
-                subtitle_secondary_overlay->render(*command_buffer, images, state, decoder,
-                                                   state.subtitle_secondary);
-            blitter.present(*command_buffer, images, geometry, swap_chain_image, image_available_semaphore);
-
-            manager.present(swap_chain_image);
 
             if (state.paused_countdown != 0 && --state.paused_countdown == 0) {
                 state.paused = true;
@@ -826,7 +839,9 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   double export_frame_after_seconds,
                   double write_duration_seconds,
                   double initial_seek_seconds) {
-    if (!SDL_Init(SDL_INIT_VIDEO))
+    // Gamepads for the Siri Remote (and any controller): InputController maps
+    // their buttons onto the keys
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
         throw runtime_error(std::format("SDL_Init: {}", SDL_GetError()));
 
     // The decoded image size (also the size of a written video file), where
@@ -851,7 +866,13 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     // Full screen is the desktop's mode, borderless -- no mode switch; the
     // blit scales.  The window keeps its windowed size underneath, which is
     // what Tab returns to.
+#ifdef __APPLE__
+    // A Metal layer, from which VulkanManager makes the surface itself; no
+    // SDL_Vulkan (it would dlopen a Vulkan library, which tvOS does not have)
+    SDL_WindowFlags window_flags = SDL_WINDOW_METAL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#else
     SDL_WindowFlags window_flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#endif
     if (full_screen)
         window_flags |= SDL_WINDOW_FULLSCREEN;
     SDL_Window *window = SDL_CreateWindow(title, window_w, window_h, window_flags);
@@ -1081,6 +1102,30 @@ static void printProbeResult(const std::string &filename, const InputProbeResult
                         inputFormatName(*r.format), type, r.sample_frequency / 1e6) << endl;
 }
 
+// A leading "~/" stands for the home directory.  There is no shell to expand
+// it on tvOS, where the app's own data container (what devicectl copies files
+// into) is only reachable that way; harmless elsewhere.
+static string expandHome(const string &path) {
+    if (path.rfind("~/", 0) != 0)
+        return path;
+    const char *home = getenv("HOME");
+    if (home == nullptr || *home == '\0')
+        return path;
+    return string(home) + path.substr(1);
+}
+
+// How main() ends.  On tvOS, SDL's entry point keeps the process in the UIKit
+// run loop after main returns (an iOS app does not normally end), with the
+// window showing the last frame and the output unflushed; museld's main is the
+// whole program, so leave for real.
+static int leave(int status) {
+#if defined(__APPLE__) && TARGET_OS_TV
+    std::exit(status);
+#else
+    return status;
+#endif
+}
+
 int main(int argc, char *argv[]) {
     auto log_selection = StreamLogger::c_log_warn;
     std::string executable_dir = get_executable_dir(argv[0]);
@@ -1132,8 +1177,8 @@ int main(int argc, char *argv[]) {
     bool ocr_write = false;
     bool cc_write = false;
 
-    const vector<string> args(argv + 1, argv + argc);
-    auto it = args.cbegin();
+    vector<string> args(argv + 1, argv + argc); // not const: expandHome rewrites the file arguments
+    auto it = args.begin();
 
     CliOptions options;
 
@@ -1339,7 +1384,7 @@ int main(int argc, char *argv[]) {
     });
     options.option("--subtitles-file", "FILE", "Start with the SRT subtitles in FILE as the "
                                                "primary track (implies --subtitles)", [&] () -> void {
-        subtitles_file = *(it++);
+        subtitles_file = expandHome(*(it++));
         if (!filesystem::exists(*subtitles_file)) {
             cerr << "Subtitle file not found: " << *subtitles_file << endl;
             exit(EXIT_FAILURE);
@@ -1522,6 +1567,7 @@ int main(int argc, char *argv[]) {
                 cerr << "Unknown option: " << *it << endl;
                 usage(cerr, EXIT_FAILURE);
             } else {
+                *it = expandHome(*it);
                 input_file_given = true;
                 trailing_options.clear(); // these applied to this file
                 if (initial_seek_seconds != 0 && inputIsLive(*it)) {
@@ -1770,8 +1816,8 @@ int main(int argc, char *argv[]) {
     } catch (const exception &x) {
         StreamLogger log(StreamLogger::c_log_all, std::cerr, true);
         log.error(eApplication, x.what());
-        return EXIT_FAILURE;
+        return leave(EXIT_FAILURE);
     }
 
-    return EXIT_SUCCESS;
+    return leave(EXIT_SUCCESS);
 }

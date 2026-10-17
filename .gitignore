@@ -13,3 +13,4 @@ ldconv/build-*/
 ldconv/build/
 .claude/
 .cache/
+CMakeUserPresets.json

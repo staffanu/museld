@@ -15,6 +15,37 @@ bool InputController::checkKey(int scancode) const {
     return m_pressed.contains(scancode);
 }
 
+// Gamepad buttons act as keys.  The Siri Remote is SDL's micro gamepad:
+// select is SOUTH, play/pause is WEST, Menu is EAST, the touch surface the
+// d-pad; a game controller adds the rest.
+int InputController::gamepadButtonScancode(int button) {
+    switch (button) {
+        case SDL_GAMEPAD_BUTTON_SOUTH:          // select / A
+        case SDL_GAMEPAD_BUTTON_WEST:           // play-pause / X
+        case SDL_GAMEPAD_BUTTON_START:
+            return SDL_SCANCODE_SPACE;
+        case SDL_GAMEPAD_BUTTON_EAST:           // Menu / B
+        case SDL_GAMEPAD_BUTTON_BACK:
+            return SDL_SCANCODE_ESCAPE;
+        case SDL_GAMEPAD_BUTTON_NORTH:          // Y
+            return SDL_SCANCODE_A;              // audio track
+        case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
+            return SDL_SCANCODE_LEFT;
+        case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
+            return SDL_SCANCODE_RIGHT;
+        case SDL_GAMEPAD_BUTTON_DPAD_UP:
+            return SDL_SCANCODE_UP;
+        case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
+            return SDL_SCANCODE_DOWN;
+        case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER:
+            return SDL_SCANCODE_LEFTBRACKET;    // subtitle tracks
+        case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:
+            return SDL_SCANCODE_RIGHTBRACKET;
+        default:
+            return 0;
+    }
+}
+
 bool InputController::poll(SDL_Window *window,
                            PlayerState &state,
                            ReaderControls &reader,
@@ -31,11 +62,49 @@ bool InputController::poll(SDL_Window *window,
         switch (event.type) {
             case SDL_EVENT_QUIT:
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+            case SDL_EVENT_TERMINATING:
                 quit = true;
                 break;
             case SDL_EVENT_KEY_DOWN:
-                if (!event.key.repeat)
+                if (!event.key.repeat) {
                     m_pressed.insert(event.key.scancode);
+                    m_log.debug(eApplication, std::format("Key: {}", SDL_GetScancodeName(event.key.scancode)));
+                }
+                break;
+            // Gamepads deliver button events only once opened
+            case SDL_EVENT_GAMEPAD_ADDED:
+                if (SDL_Gamepad *gamepad = SDL_OpenGamepad(event.gdevice.which))
+                    m_log.info(eApplication, std::format("Gamepad: {}", SDL_GetGamepadName(gamepad)));
+                else
+                    m_log.warn(eApplication, std::format("SDL_OpenGamepad: {}", SDL_GetError()));
+                break;
+            case SDL_EVENT_GAMEPAD_REMOVED:
+                if (SDL_Gamepad *gamepad = SDL_GetGamepadFromID(event.gdevice.which))
+                    SDL_CloseGamepad(gamepad);
+                break;
+            case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
+                const int scancode = gamepadButtonScancode(event.gbutton.button);
+                if (scancode)
+                    m_pressed.insert(scancode);
+                m_log.debug(eApplication, std::format("Gamepad button: {} -> {}",
+                                                      SDL_GetGamepadStringForButton((SDL_GamepadButton)event.gbutton.button),
+                                                      scancode ? SDL_GetScancodeName((SDL_Scancode)scancode) : "nothing"));
+                break;
+            }
+            // tvOS: the app leaves the screen (Menu, the TV button, a call).
+            // Pause, and the main loop stops presenting until it is back.
+            case SDL_EVENT_WILL_ENTER_BACKGROUND:
+                if (!state.in_background) {
+                    state.in_background = true;
+                    state.paused_before_background = state.paused;
+                    state.paused = true;
+                }
+                break;
+            case SDL_EVENT_DID_ENTER_FOREGROUND:
+                if (state.in_background) {
+                    state.in_background = false;
+                    state.paused = state.paused_before_background;
+                }
                 break;
             default:
                 break;
@@ -50,7 +119,10 @@ bool InputController::poll(SDL_Window *window,
         if (!SDL_SetWindowFullscreen(window, full_screen))
             m_log.warn(eApplication, std::format("SDL_SetWindowFullscreen: {}", SDL_GetError()));
     }
-    if (checkKey(SDL_SCANCODE_SPACE)) {
+    // Return as well as Space: on tvOS a remote's select and play/pause
+    // buttons (an HDMI-CEC remote, or the Siri Remote through tvOS's own
+    // translation) arrive as Return key presses
+    if (checkKey(SDL_SCANCODE_SPACE) || checkKey(SDL_SCANCODE_RETURN)) {
         state.paused = !state.paused;
         state.osd_text = state.paused ? "PAUSE" : "PLAY";
     }

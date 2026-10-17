@@ -102,6 +102,55 @@ install(FILES
 )
 
 # ============================================================================
+# libFLAC++ for the .ldf input: the system package where there is one, built
+# from source where there is none (tvOS).  Sets MUSELD_FLAC_INCLUDE_DIRS and
+# MUSELD_FLAC_LIBRARIES.
+# ============================================================================
+
+macro(museld_find_flac)
+    if(NOT DEFINED MUSELD_FLAC_LIBRARIES)
+        if(MUSELD_TVOS)
+            message(STATUS "Building libogg and libFLAC from source into the app")
+            include(FetchContent)
+            # .ldf files are FLAC in an Ogg container (ld-compress), so libogg
+            # first; FLAC links the Ogg::ogg target when it already exists
+            set(INSTALL_DOCS OFF CACHE BOOL "" FORCE)
+            set(INSTALL_PKG_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+            set(INSTALL_CMAKE_PACKAGE_MODULE OFF CACHE BOOL "" FORCE)
+            set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+            FetchContent_Declare(Ogg
+                URL https://github.com/xiph/ogg/releases/download/v1.3.6/libogg-1.3.6.tar.xz
+                DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+            FetchContent_MakeAvailable(Ogg)
+            set(BUILD_CXXLIBS ON CACHE BOOL "" FORCE)
+            set(BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+            set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+            set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+            set(BUILD_DOCS OFF CACHE BOOL "" FORCE)
+            set(BUILD_UTILS OFF CACHE BOOL "" FORCE)
+            set(WITH_OGG ON CACHE BOOL "" FORCE)
+            set(WITH_FORTIFY_SOURCE OFF CACHE BOOL "" FORCE)
+            set(WITH_STACK_PROTECTOR OFF CACHE BOOL "" FORCE)
+            set(INSTALL_MANPAGES OFF CACHE BOOL "" FORCE)
+            set(INSTALL_PKGCONFIG_MODULES OFF CACHE BOOL "" FORCE)
+            set(INSTALL_CMAKE_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+            set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+            FetchContent_Declare(FLAC
+                URL https://github.com/xiph/flac/releases/download/1.5.0/flac-1.5.0.tar.xz
+                DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+            FetchContent_MakeAvailable(FLAC)
+            set(MUSELD_FLAC_INCLUDE_DIRS "")
+            set(MUSELD_FLAC_LIBRARIES FLAC::FLAC++)
+        else()
+            find_package(PkgConfig REQUIRED)
+            pkg_check_modules(FLAC REQUIRED flac++)
+            set(MUSELD_FLAC_INCLUDE_DIRS ${FLAC_INCLUDE_DIRS})
+            set(MUSELD_FLAC_LIBRARIES ${FLAC_LINK_LIBRARIES})
+        endif()
+    endif()
+endmacro()
+
+# ============================================================================
 # ac3rf-efm-decode — CLI executable (adds input readers on top of the library)
 # ============================================================================
 
@@ -120,8 +169,7 @@ if(BUILD_AC3RF_DECODE)
     endif()
     configure_file(Version.h.in Version.h @ONLY)
 
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(FLAC REQUIRED flac++)
+    museld_find_flac()
 
     add_executable(ac3rf-efm-decode
         ac3rf-efm-decode.cpp
@@ -137,13 +185,13 @@ if(BUILD_AC3RF_DECODE)
         input/PrefetchingInputReader.cpp input/PrefetchingInputReader.h
     )
 
-    target_include_directories(ac3rf-efm-decode PRIVATE ${FLAC_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR}
+    target_include_directories(ac3rf-efm-decode PRIVATE ${MUSELD_FLAC_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/httplib
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party)
     target_link_options(ac3rf-efm-decode PRIVATE "-L/usr/local/lib")
     target_link_libraries(ac3rf-efm-decode
         PRIVATE ac3rf
-        PRIVATE ${FLAC_LINK_LIBRARIES}
+        PRIVATE ${MUSELD_FLAC_LIBRARIES}
     )
     if(WIN32)
         # cpp-httplib (the http:// input) uses Winsock
@@ -160,7 +208,9 @@ if(BUILD_MUSE)
     # tvOS, which is where museld is headed).  Distributions older than 2025
     # have no package for it, so fall back to building it into museld from a
     # release tarball; that needs the X11/Wayland development headers.
-    find_package(SDL3 CONFIG QUIET)
+    if(NOT MUSELD_TVOS)
+        find_package(SDL3 CONFIG QUIET)
+    endif()
     if(SDL3_FOUND)
         message(STATUS "Using the installed SDL3 ${SDL3_VERSION}")
     else()
@@ -172,11 +222,48 @@ if(BUILD_MUSE)
         set(SDL_TESTS OFF CACHE BOOL "" FORCE)
         set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
         FetchContent_Declare(SDL3
-            URL https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.2.24.tar.gz
+            URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz
             DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
         FetchContent_MakeAvailable(SDL3)
     endif()
-    find_package(Vulkan REQUIRED)
+
+    if(MUSELD_TVOS)
+        # No Vulkan loader on tvOS: the headers from Khronos, and MoltenVK
+        # linked statically from its release download (or an xcframework of
+        # your own, e.g. the LunarG SDK's, through MUSELD_MOLTENVK_XCFRAMEWORK).
+        # vulkan.hpp's static dispatcher then binds directly to MoltenVK.
+        include(FetchContent)
+        set(VULKAN_HEADERS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+        set(VULKAN_HEADERS_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(VulkanHeaders
+            URL https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.350.tar.gz
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+        FetchContent_MakeAvailable(VulkanHeaders)
+
+        set(MUSELD_MOLTENVK_XCFRAMEWORK "" CACHE PATH
+            "A static MoltenVK.xcframework with tvOS slices; empty downloads the MoltenVK release")
+        if(MUSELD_MOLTENVK_XCFRAMEWORK)
+            set(MOLTENVK_XCFRAMEWORK "${MUSELD_MOLTENVK_XCFRAMEWORK}")
+        else()
+            FetchContent_Declare(MoltenVK
+                URL https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.2/MoltenVK-all.tar
+                DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+            FetchContent_MakeAvailable(MoltenVK)
+            set(MOLTENVK_XCFRAMEWORK "${moltenvk_SOURCE_DIR}/MoltenVK/static/MoltenVK.xcframework")
+        endif()
+        if(CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
+            set(MOLTENVK_SLICE tvos-arm64_x86_64-simulator)
+        else()
+            set(MOLTENVK_SLICE tvos-arm64_arm64e)
+        endif()
+        set(MOLTENVK_LIBRARY "${MOLTENVK_XCFRAMEWORK}/${MOLTENVK_SLICE}/libMoltenVK.a")
+        if(NOT EXISTS "${MOLTENVK_LIBRARY}")
+            message(FATAL_ERROR "MoltenVK for tvOS not found: ${MOLTENVK_LIBRARY}")
+        endif()
+        message(STATUS "Linking MoltenVK statically: ${MOLTENVK_LIBRARY}")
+    else()
+        find_package(Vulkan REQUIRED)
+    endif()
 
     set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules" ${CMAKE_MODULE_PATH})
 
@@ -193,8 +280,7 @@ if(BUILD_MUSE)
         message("USE_LIBAV is off; not building video file writer support.")
     endif()
 
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(FLAC REQUIRED flac++)
+    museld_find_flac()
 
     add_executable(museld
         museld.cpp
@@ -282,7 +368,7 @@ if(BUILD_MUSE)
 
     target_include_directories(museld PRIVATE
         ${Vulkan_INCLUDE_DIRS}
-        ${FLAC_INCLUDE_DIRS}
+        ${MUSELD_FLAC_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/stb
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/miniaudio
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/httplib
@@ -296,16 +382,37 @@ if(BUILD_MUSE)
         target_include_directories(museld PRIVATE ${LIBAV_INCLUDE_DIR})
     endif()
 
-    target_link_options(museld PRIVATE "-L/usr/local/lib")
     target_link_libraries(museld
         PRIVATE ac3rf
         PRIVATE SDL3::SDL3
-        PRIVATE Vulkan::Vulkan
-        PRIVATE ${CMAKE_DL_LIBS}
-        PRIVATE ${FLAC_LINK_LIBRARIES}
+        PRIVATE ${MUSELD_FLAC_LIBRARIES}
     )
+    if(MUSELD_TVOS)
+        target_compile_definitions(museld PRIVATE MUSELD_VULKAN_NO_LOADER)
+        target_link_libraries(museld
+            PRIVATE Vulkan::Headers
+            PRIVATE "${MOLTENVK_LIBRARY}"
+            # MoltenVK's
+            PRIVATE "-framework Metal" "-framework QuartzCore" "-framework IOSurface"
+                    "-framework CoreGraphics" "-framework Foundation" "-framework UIKit"
+            # miniaudio's (no runtime linking on Apple's mobile platforms)
+            PRIVATE "-framework CoreFoundation" "-framework CoreAudio" "-framework AudioToolbox"
+                    "-framework AVFoundation"
+        )
+    else()
+        target_link_options(museld PRIVATE "-L/usr/local/lib")
+        target_link_libraries(museld
+            PRIVATE Vulkan::Vulkan
+            PRIVATE ${CMAKE_DL_LIBS}
+        )
+    endif()
     if(HAVE_LIBAV)
         target_link_libraries(museld PRIVATE ${LIBAV_LIBRARIES})
+    endif()
+    if(APPLE)
+        # The window surface is made from the window's Metal layer
+        # (VulkanManager::createSurface), on macOS as on tvOS
+        target_compile_definitions(museld PRIVATE VK_USE_PLATFORM_METAL_EXT)
     endif()
 
     # Compile GLSL compute shaders to SPIR-V
@@ -340,6 +447,43 @@ if(BUILD_MUSE)
     )
     add_custom_target(SubtitleFontAsset DEPENDS ${MUSELD_FONT_DST})
     add_dependencies(museld SubtitleFontAsset)
+
+    if(MUSELD_TVOS)
+        # miniaudio's AVAudioSession code is Objective-C
+        set_source_files_properties(AudioPlayback.cpp PROPERTIES LANGUAGE OBJCXX)
+
+        # The app bundle.  Signing: a free Apple ID's team suffices to run on
+        # your own Apple TV (CMakeUserPresets.json is the place for the team
+        # ID; the Xcode scheme's launch arguments are museld's command line).
+        set(MUSELD_BUNDLE_IDENTIFIER "se.ulfberg.museld" CACHE STRING "Bundle identifier of the tvOS app")
+        set(MUSELD_DEVELOPMENT_TEAM "" CACHE STRING "Apple developer team ID that signs the tvOS app")
+        set(MUSELD_TVOS_LAUNCH_ARGUMENTS "" CACHE STRING
+            "museld's command line when launched from the Xcode scheme, as a ;-separated list")
+        set_target_properties(museld PROPERTIES
+            MACOSX_BUNDLE TRUE
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/tvOS-Info.plist.in"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "${MUSELD_BUNDLE_IDENTIFIER}"
+            MACOSX_BUNDLE_BUNDLE_NAME museld
+            MACOSX_BUNDLE_BUNDLE_VERSION 1
+            MACOSX_BUNDLE_SHORT_VERSION_STRING 0.1
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${MUSELD_BUNDLE_IDENTIFIER}"
+            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY 3
+            XCODE_ATTRIBUTE_CODE_SIGN_STYLE Automatic
+            XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${MUSELD_DEVELOPMENT_TEAM}"
+            "XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED[sdk=appletvsimulator*]" NO
+            XCODE_GENERATE_SCHEME TRUE
+            XCODE_SCHEME_ARGUMENTS "${MUSELD_TVOS_LAUNCH_ARGUMENTS}"
+        )
+
+        # The shaders and the font ride in the bundle.  A tvOS bundle is flat:
+        # "Resources" is the bundle root, next to the executable, so the
+        # lookup relative to the executable's directory is the desktop's.
+        target_sources(museld PRIVATE ${SPIRV_BINARY_FILES} ${MUSELD_FONT_DST})
+        set_source_files_properties(${SPIRV_BINARY_FILES} PROPERTIES
+            GENERATED TRUE MACOSX_PACKAGE_LOCATION Resources/shaders)
+        set_source_files_properties(${MUSELD_FONT_DST} PROPERTIES
+            GENERATED TRUE MACOSX_PACKAGE_LOCATION Resources/fonts)
+    endif()
 endif()
 
 # ============================================================================

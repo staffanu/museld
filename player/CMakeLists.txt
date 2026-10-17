@@ -3,6 +3,16 @@ project(museld LANGUAGES CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# The Apple TV build (CMakePresets.json, docs/tvos-port.md): Xcode generator,
+# everything built in or linked statically, museld as an app bundle.
+if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+    set(MUSELD_TVOS ON)
+    # miniaudio's AVAudioSession code is Objective-C (AudioPlayback.cpp)
+    enable_language(OBJCXX)
+else()
+    set(MUSELD_TVOS OFF)
+endif()
+
 # The threading library is linked explicitly. On glibc/Linux libpthread symbols
 # are pulled in transitively, but FreeBSD (and a strict linker generally) needs
 # an explicit -lpthread, so link Threads::Threads into the targets that use it.

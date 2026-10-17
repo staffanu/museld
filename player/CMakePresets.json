@@ -1,0 +1,52 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "tvos-base",
+      "hidden": true,
+      "displayName": "tvOS (base)",
+      "description": "Apple TV build through Xcode: every dependency built in or linked statically (docs/tvos-port.md)",
+      "generator": "Xcode",
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "tvOS",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "17.0",
+        "MUSELD_ARCH": "",
+        "USE_LIBAV": "OFF",
+        "USE_OCR": "OFF",
+        "BUILD_AC3RF_DECODE": "OFF",
+        "BUILD_TESTING": "OFF"
+      }
+    },
+    {
+      "name": "tvos-device",
+      "inherits": "tvos-base",
+      "displayName": "tvOS device",
+      "binaryDir": "${sourceDir}/build-tvos-device",
+      "cacheVariables": { "CMAKE_OSX_SYSROOT": "appletvos" }
+    },
+    {
+      "name": "tvos-simulator",
+      "inherits": "tvos-base",
+      "displayName": "tvOS simulator",
+      "binaryDir": "${sourceDir}/build-tvos-simulator",
+      "cacheVariables": { "CMAKE_OSX_SYSROOT": "appletvsimulator" }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "tvos-device",
+      "configurePreset": "tvos-device",
+      "configuration": "Release",
+      "targets": [ "museld" ],
+      "nativeToolOptions": [ "-allowProvisioningUpdates" ]
+    },
+    {
+      "name": "tvos-simulator",
+      "configurePreset": "tvos-simulator",
+      "configuration": "Release",
+      "targets": [ "museld" ]
+    }
+  ]
+}
