@@ -42,10 +42,22 @@ lines, the noise measurement windows, and the feature flags (`ntsc_chroma`,
 are compiled once per standard, as `ntsc_*.spv` and as `pal_*.spv` with `-DSDTV_PAL`; the
 `SDTV_*` geometry macros in `shaders/muse/muse.h` take the PAL values there.  Naming:
 `Sdtv…` is what both standards share, `Ntsc…`/`Pal…` only what belongs to one of them
-(`NtscCadenceTracker`).
+(`NtscCadenceTracker` for 3:2, `PalCadenceTracker` for 2:2; `VideoStandard::film_pulldown`
+picks the tracker).
 
-Things that are NTSC-only and simply gated off on PAL: the 3:2 film cadence tracker
-(PAL film is 2:2 and the per-pixel weave masks handle it), the automatic NTSC-M/J black
+Film mode exists on both standards but looks for a different cadence.  NTSC film is 3:2,
+so the `NtscCadenceTracker` finds the repeated field.  PAL film is 2:2, one film frame per
+video frame with no repeated field, so the `PalCadenceTracker` instead measures how well
+each field weaves with both of its neighbours and votes per frame on which pairing is the
+film frame: the frame's own two fields (`F1+F2`) or the previous frame's second field with
+this frame's first (`F2+F1`).  Four moving frames that agree lock it, stills neither lock
+nor unlock, video-sourced material combs in both pairings and never locks, and two
+contradicting moving frames in a row unlock it.  Locked, the field that pairs within the
+frame weaves and the other holds, as on NTSC.  The OSD shows `Telecine: 2:2 locked` with
+the pairing while paused.  Locks on Empire D515 at frame 10, LD-V4400 at 49, ESB at 433,
+Pioneer94 at 142; never on The Big Day, which is video.
+
+Things that are NTSC-only and simply gated off on PAL: the automatic NTSC-M/J black
 level, the white flag, line-21 closed captions and `--cc-write`, AC3-RF.  `--tint` and
 `--saturation` apply to both.
 
