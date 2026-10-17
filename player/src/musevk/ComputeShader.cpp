@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <algorithm>
 #include <cstdint>
 #include <format>
 #include "ComputeShader.h"
@@ -64,6 +65,15 @@ namespace musevk {
 
         m_local_workgroup_size = m_workgroup_size.y_size == 1 && m_workgroup_size.z_size == 1 ?
                 c_default_linear_workgroup_size : c_default_workgroup_size;
+        // The linear default of 1024 threads is what desktop GPUs and Apple's M-series
+        // allow; an Apple A10X (Apple TV 4K 2017) allows 512.  Halve down to what the
+        // device takes: the shaders size themselves from gl_WorkGroupSize, and the ones
+        // that tile the workgroup (envelope_block_sums) need a power of two.
+        const uint32_t max_invocations = std::min(limits.maxComputeWorkGroupInvocations,
+                                                  limits.maxComputeWorkGroupSize[0]);
+        while (m_local_workgroup_size.x_size * m_local_workgroup_size.y_size * m_local_workgroup_size.z_size
+               > max_invocations && m_local_workgroup_size.x_size > 1)
+            m_local_workgroup_size.x_size /= 2;
 
         m_buffers.resize(max_descriptor_sets);
         createShaderModule();

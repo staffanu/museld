@@ -57,7 +57,8 @@ SubtitleOverlay::SubtitleOverlay(Logger &log,
     m_shader = std::make_shared<musevk::ComputeShader>(
         m_vulkan_manager,
         "render_subtitle",
-        std::vector<musevk::MemoryObjectType>{musevk::eBuffer, musevk::eBuffer, musevk::eImage},
+        // the frame image twice: read-only and write-only bindings (see the shader)
+        std::vector<musevk::MemoryObjectType>{musevk::eBuffer, musevk::eBuffer, musevk::eImage, musevk::eImage},
         sizeof(PushBlock),
         musevk::VulkanUtil::loadSpirv(executable_dir, "render_subtitle.comp"),
         musevk::Size(0));
@@ -186,9 +187,9 @@ void SubtitleOverlay::render(musevk::CommandBuffer &command_buffer,
     // The atlas buffer is replaced whenever live OCR text adds glyphs
     // (SubtitleFont::refreshAtlasIfDirty), so it is part of the staleness check
     auto current = m_shader->getBuffersForDescriptorSet(0);
-    if (current.size() != 3 || current[1] != m_font->atlasBuffer() || current[2] != img) {
+    if (current.size() != 4 || current[1] != m_font->atlasBuffer() || current[2] != img || current[3] != img) {
         m_shader->updateBufferDescriptorsInSet(0,
-            {m_quad_buffer, m_font->atlasBuffer(), img});
+            {m_quad_buffer, m_font->atlasBuffer(), img, img});
     }
 
     m_shader->updateWorkgroup(musevk::Size(max_x, max_y));

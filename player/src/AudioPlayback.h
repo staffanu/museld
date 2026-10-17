@@ -39,6 +39,8 @@ private:
     double m_read_frac; // fractional part of the read position, callback thread only
     AudioMode m_current_mode;
     int m_channels_used;
+    void *m_ma_log;   // ma_log (an anonymous-struct typedef, so not named here):
+                      // miniaudio's own messages, forwarded to m_log
     ma_context *m_context;
     ma_device *m_device;
 
