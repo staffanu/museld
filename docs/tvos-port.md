@@ -75,11 +75,19 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
     than SDL seeing it as a gamepad), the directions as arrow keys, back as Escape, so
     Return pauses too.  No gamepad was seen with the CEC remote; the Siri Remote
     gamepad mapping is still untested.
-- **Measured on the A1842**, NTSC 40 MHz over HTTP: about 24 frames/s of 30.  The
-  demodulator block takes 16 ms for a 13 ms budget, 13 of them waiting for the GPU
-  (2 ms HTTP read + FLAC); the reader's input wait is 37 ms per 33 ms frame as a
-  consequence; the decoder itself is 22 ms per frame, GPU-bound too.  Audio underruns
-  follow from that.
+- **Measured on the A1842.**  NTSC 40 MHz over HTTP: about 24 frames/s of 30, the
+  demodulator block at 16 ms for a 13 ms budget, 13 of them waiting for the GPU
+  (2 ms HTTP read + FLAC); the decoder 22 ms per frame.  A 62.5 MHz raw capture ran
+  at 8.6 frames/s: the GPU chain's cost grows with the square of the sample rate (FIR
+  taps and samples both follow it).  Two changes since: the tvOS window is 1080p
+  rather than the 4K-density layer (the final blit cost 7-10 ms per frame there),
+  and captures above 50 MHz are decimated by 2 before the band-pass
+  (`SdtvRfDemodulator`, `pre_decimation`), the chain then running as for a 31.25 MHz
+  capture with the video rate unchanged.  That took the 62.5 MHz excerpt to 19.9
+  frames/s, the demodulator's GPU wait from 28 to 9.3 ms per 8.4 ms block, with the
+  decoded SNR equal or slightly better on macOS and the 40 MHz path bit-identical.
+  Per-shader GPU timestamps are useless under MoltenVK (one resolve at the end: the
+  first shader gets the whole chain, the rest read the 37 us granularity).
 
 ## To do, in order
 
@@ -95,7 +103,9 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   only, and a file put into the app's data container with `devicectl device copy to`
   is there but the app's stat of it fails with "Operation not permitted".  A leading
   `~/` in file arguments is expanded (`expandHome`) for when that works.
-- Speed: the GPU side of the NTSC demodulator and decoder, see the measurements.
+- Speed: still short of real time (40 MHz: 24 of 30 frames/s; 62.5 MHz: 20 of 30).
+  The demodulator's GPU work is at the block budget; the analog audio demodulation on
+  the CPU is at 5.6 of 8.4 ms per block; the decoder at 22 of 33 ms per frame.
 - The Siri Remote as a gamepad (needs the original remote), and Menu/back quitting the
   app: fine for development, but a tvOS app is not supposed to exit itself; a
   settings screen that stays in the app replaces this later.
