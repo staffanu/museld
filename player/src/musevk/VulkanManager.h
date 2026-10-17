@@ -99,12 +99,14 @@ namespace musevk {
         };
         const std::vector<const char *> c_instance_extensions = {
 //                VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(MUSELD_VULKAN_NO_LOADER)
+                // The loader's portability extension: MoltenVK itself (linked
+                // in on tvOS) does not know it and refuses the instance
                 VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
 #endif
         };
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(MUSELD_VULKAN_NO_LOADER)
         vk::InstanceCreateFlagBits c_instance_create_flags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
 #else
         vk::InstanceCreateFlagBits c_instance_create_flags = {};
@@ -126,6 +128,7 @@ namespace musevk {
 #endif
         Logger &m_log;
         SDL_Window *m_window;
+        void *m_metal_view = nullptr; // Apple: the SDL_MetalView the surface is made from
         bool m_no_sync;
         std::unique_ptr<MemoryAllocator> m_memory_allocator;
 

@@ -6,7 +6,11 @@
 #include <limits>
 #include <set>
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_vulkan.h>
+#ifdef __APPLE__
+#  include <SDL3/SDL_metal.h>
+#else
+#  include <SDL3/SDL_vulkan.h>
+#endif
 #include <vulkan/vulkan.hpp>
 #include <format>
 #include "VulkanManager.h"
@@ -58,6 +62,12 @@ namespace musevk {
         }
         m_instance.destroy(m_surface);
         m_surface = nullptr;
+#ifdef __APPLE__
+        if (m_metal_view) {
+            SDL_Metal_DestroyView(m_metal_view);
+            m_metal_view = nullptr;
+        }
+#endif
         if (enableValidationLayers) {
             vk::detail::DispatchLoaderDynamic dynamic_loader(m_instance, vkGetInstanceProcAddr);
             m_instance.destroyDebugUtilsMessengerEXT(m_debug_messenger, nullptr, dynamic_loader);
@@ -142,14 +152,22 @@ namespace musevk {
         vk::ApplicationInfo appInfo("Muse Decoder", VK_MAKE_VERSION(1, 0, 0), "No Engine", VK_MAKE_VERSION(1, 0, 0), VK_API_VERSION_1_2);
         vk::InstanceCreateInfo createInfo(c_instance_create_flags, &appInfo);
 
-        // The surface extensions for this window system (VK_KHR_surface plus
-        // the platform's: xcb/wayland, win32, or EXT_metal_surface through MoltenVK)
+        // The surface extensions for this window system
+#ifdef __APPLE__
+        // Apple platforms do not go through SDL_Vulkan, which would dlopen a
+        // Vulkan library: the surface is made from the window's Metal layer
+        // (createSurface).  tvOS has no library to load -- MoltenVK is linked
+        // into the app -- and this way macOS works the same.
+        vector<const char *> extensions{VK_KHR_SURFACE_EXTENSION_NAME, VK_EXT_METAL_SURFACE_EXTENSION_NAME};
+#else
+        // VK_KHR_surface plus the platform's: xcb/wayland or win32
         Uint32 sdl_extension_count = 0;
         const char *const *sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&sdl_extension_count);
         if (sdl_extensions == nullptr)
             throw runtime_error(std::format("SDL_Vulkan_GetInstanceExtensions: {}", SDL_GetError()));
 
         vector<const char *> extensions(sdl_extensions, sdl_extensions + sdl_extension_count);
+#endif
         extensions.insert(extensions.cend(), c_instance_extensions.cbegin(), c_instance_extensions.cend());
 
         auto debugUtilsMessengerCreateInfo = createDebugMessengerCreateInfo();
@@ -209,10 +227,23 @@ namespace musevk {
     }
 
     void VulkanManager::createSurface() {
+#ifdef __APPLE__
+        // VK_EXT_metal_surface on the window's CAMetalLayer (see createInstance)
+        m_metal_view = SDL_Metal_CreateView(m_window);
+        if (m_metal_view == nullptr)
+            throw runtime_error(std::format("SDL_Metal_CreateView: {}", SDL_GetError()));
+        auto *layer = static_cast<const CAMetalLayer *>(SDL_Metal_GetLayer(m_metal_view));
+        if (layer == nullptr)
+            throw runtime_error("SDL_Metal_GetLayer returned no layer");
+        vk::MetalSurfaceCreateInfoEXT create_info({}, layer);
+        vk::detail::DispatchLoaderDynamic dynamic_loader(m_instance, vkGetInstanceProcAddr);
+        m_surface = m_instance.createMetalSurfaceEXT(create_info, nullptr, dynamic_loader);
+#else
         VkSurfaceKHR surface;
         if (!SDL_Vulkan_CreateSurface(m_window, static_cast<VkInstance>(m_instance), nullptr, &surface))
             throw runtime_error(std::format("failed to create window surface: {}", SDL_GetError()));
         m_surface = vk::SurfaceKHR(surface);
+#endif
     }
 
     void VulkanManager::pickPhysicalDevice() {

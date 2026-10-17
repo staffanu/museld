@@ -58,6 +58,8 @@ private:
     // Whether the key (an SDL_Scancode: the physical key, whatever the
     // layout) was pressed since the last poll; key repeat does not count
     bool checkKey(int scancode) const;
+    // The key a gamepad button (an SDL_GamepadButton) stands for, or 0
+    static int gamepadButtonScancode(int button);
 
     Logger &m_log;
     std::set<int> m_pressed; // scancodes pressed since the last poll
