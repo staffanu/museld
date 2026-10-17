@@ -61,11 +61,15 @@ is detected.
 
 Detection works on live input too (a pipe, a fifo, the `udp://` stream): the samples are read
 window after window until the verdict is clear, so museld can be started before the disc plays
-and waits through whatever comes before. What detection reads from a live input is not played;
-it is at most a second of a signal that keeps coming (a few seconds when the sample format has to
-be found by trying every format, as for a capture whose carrier sits high in the band, like NTSC
-at 30 MHz). A file is instead sampled at a few positions
-spread over its length, which keeps a lead-in or a dropout from deciding.
+and waits through whatever comes before. A weak verdict is waited out: a disc still spinning up
+shows faint line structure whose period moves a few percent per window (the GGV1011's capture
+starts that way, and a verdict taken there would miss the sample rate by 6 %), so detection
+goes on until the structure is clear or the line period has held still for eight windows, and
+after some 150 windows (about 20 s) it warns and takes the best it saw. What detection reads
+from a live input is not played; it is at most a second of a clear signal that keeps coming (a
+few seconds when the sample format has to be found by trying every format, as for a capture
+whose carrier sits high in the band, like NTSC at 30 MHz). A file is instead sampled at a few
+positions spread over its length, which keeps a lead-in or a dropout from deciding.
 
 ### Network input
 
