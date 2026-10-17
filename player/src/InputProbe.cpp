@@ -965,17 +965,18 @@ constexpr uint32_t c_live_block_samples = 1 << 16;
 constexpr int c_live_report_every = 10;
 // A line lock this strong needs no second window (clean RF measures 0.9+)
 constexpr double c_live_clear_strength = 0.6;
-// A verdict below that is waited out: a locked disc shows 0.8-0.97 even on a
-// rotted copy (NYCSTM 0.88), while a capture that starts as the disc spins up
-// (the GGV1011's does) shows 0.28 with a line period that moves 1-3 % per
-// window, from 2414 samples through the 2560 of the locked disc to 2617, and
-// a verdict taken there misses the capture rate by 6 %.  A weak verdict is
-// taken once the period has held still for c_live_steady_windows consecutive
-// windows to c_live_steady_period (a locked disc with content that keeps the
-// line-to-line correlation low: the GGV1011's line patterns read 0.31 at
-// 2560.0 for 20 windows before the picture arrived), and after
-// c_live_max_weak_windows without either the strongest one so far is taken,
-// with a warning.  A window is 0.1-0.2 s of a 40 MHz stream.
+// A verdict below that is waited out: a locked disc with a picture shows
+// 0.8-0.97 even on a rotted copy (NYCSTM 0.88).  The GGV1011's capture opens
+// on black pictures and the player seeking, where the line-to-line
+// correlation is 0.28 and the autocorrelation peak wanders 1-3 % per window
+// (2414 samples through the true 2560 to 2617, with the disc locked all
+// along, as the timebase dump shows); a verdict taken there missed the
+// capture rate by 6 %.  A weak verdict is taken once the period has held
+// still for c_live_steady_windows consecutive windows to c_live_steady_period
+// (the GGV1011's black stretch settles at 2560.0 for 20 windows at 0.31
+// before the picture arrives), and after c_live_max_weak_windows without
+// either the strongest one so far is taken, with a warning.  A window is
+// 0.1-0.2 s of a 40 MHz stream.
 constexpr int c_live_steady_windows = 8;
 constexpr double c_live_steady_period = 0.002;
 constexpr int c_live_max_weak_windows = 150;
@@ -1075,8 +1076,8 @@ InputProbeResult probeLive(Logger &log, PreparedInput &input, optional<InputForm
             prev_period = 0;
         }
         // A clear verdict is taken as it is; a weak one (the signal begins
-        // in this window, or the disc is still spinning up) is waited out
-        // until the line period holds still
+        // in this window, or the content gives the line period little to
+        // lock on) is waited out until the line period holds still
         if (have_result && (result.line_strength >= c_live_clear_strength || steady))
             break;
         if (have_result && weak_windows >= c_live_max_weak_windows) {
