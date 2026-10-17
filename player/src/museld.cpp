@@ -105,6 +105,9 @@ struct SubtitleSetup {
     bool ntsc_cc = false;
     // Non-empty: save the CC cues at exit as <stem>.CC.srt (--cc-write)
     std::string cc_write_stem;
+    // Start with the CC track in the primary slot (--cc): the captions show
+    // from the start without the [ key, which a TV remote does not have
+    bool cc_show = false;
 };
 
 // Applies live text updates (from the OCR worker or the closed caption
@@ -457,6 +460,8 @@ static void runPlayer(Logger &log,
                 state.subtitle_primary = subtitle_setup.primary_index >= 0
                     ? subtitle_setup.primary_index
                     : (ocr_en_track_index >= 0 ? ocr_en_track_index : ocr_track_index);
+                if (state.subtitle_primary < 0 && subtitle_setup.cc_show && cc_track_index >= 0)
+                    state.subtitle_primary = cc_track_index;
                 subtitle_tracks = std::move(tracks);
                 subtitle_font = std::move(font);
             } catch (const std::exception &x) {
@@ -1362,6 +1367,7 @@ int main(int argc, char *argv[]) {
     string ocr_target_language = "English";
     bool ocr_write = false;
     bool cc_write = false;
+    bool cc_show = false;
 
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -1653,6 +1659,10 @@ int main(int argc, char *argv[]) {
                                "--subtitles finds them on the next playback", [&] () -> void {
         cc_write = true;
     });
+    options.flag("--cc", "Show the line-21 closed captions of an NTSC disc from the start "
+                         "(the CC track is otherwise selected with the [ key)", [&] () -> void {
+        cc_show = true;
+    });
     options.option("--subtitle-font", "FILE", "TrueType font for the subtitles (default: the "
                                               "bundled Noto Sans JP)", [&] () -> void {
         subtitle_font_path = *(it++);
@@ -1917,10 +1927,11 @@ int main(int argc, char *argv[]) {
                 subtitle_setup.ocr_write_stem =
                         (input_path.parent_path() / input_path.stem()).string();
             }
+            subtitle_setup.cc_show = cc_show;
+            if ((cc_write || cc_show) && file_input_type != eNtscRf)
+                cerr << std::format("Warning: {} does nothing here: closed captions exist only on NTSC discs",
+                                    cc_write ? "--cc-write" : "--cc") << endl;
             if (cc_write) {
-                if (file_input_type != eNtscRf)
-                    cerr << "Warning: --cc-write does nothing here: closed captions "
-                            "exist only on NTSC discs" << endl;
                 const filesystem::path input_path(name);
                 subtitle_setup.cc_write_stem =
                         (input_path.parent_path() / input_path.stem()).string();
