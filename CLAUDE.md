@@ -22,7 +22,7 @@ geometry of the line-locked frame buffer, frame rate, RF carrier, VBI lines, noi
 once per standard, as `ntsc_*.spv` and as `pal_*.spv` with `-DSDTV_PAL` (the `SDTV_*` macros in
 `shaders/muse/muse.h` take the PAL values there).  Names: `Sdtv…` is what both standards share
 (`SdtvFrameReader`, `SdtvDecoder`, ...), `Ntsc…`/`Pal…` only what belongs to one of them
-(`NtscCadenceTracker`).  `--input-type pal-rf` plays PAL discs in colour: a 3-line comb over
+(`NtscCadenceTracker` for 3:2, `PalCadenceTracker` for 2:2).  `--input-type pal-rf` plays PAL discs in colour: a 3-line comb over
 the ±90° neighbours, a line-pair burst reference for the swinging burst with the V switch voted
 over five lines, the delay-line U/V average and a temporal comb over frames N ± 2 (the decoder
 keeps 3d + 1 frames with d = 2 on PAL and shows frame N two reads behind), the pilot-refined
@@ -169,7 +169,7 @@ cd player/build-debug && ctest -V
 
 Tests are only built when `-DBUILD_TESTING=ON` is passed. They are in `player/tests/`
 (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`, `FilterSimdParityTest.cpp`, `InputProbeTest.cpp`,
-`NtscCadenceTrackerTest.cpp`, `PrefetchingInputReaderTest.cpp`, `SrtParserTest.cpp`,
+`NtscCadenceTrackerTest.cpp`, `PalCadenceTrackerTest.cpp`, `PrefetchingInputReaderTest.cpp`, `SrtParserTest.cpp`,
 `DisplayGeometryTest.cpp`). On macOS
 the Homebrew Catch2 is not ASan-instrumented, so run them with
 `ASAN_OPTIONS=detect_container_overflow=0` to avoid a false container-overflow abort at startup.

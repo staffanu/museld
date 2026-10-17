@@ -62,6 +62,7 @@ SdtvDecoder::SdtvDecoder(
   m_field_index(0),
   m_total_elapsed_time_us(0),
   m_cadence(log),
+  m_cadence22(log),
   m_field_buffer_frame_no{-100, -100},
   m_efm_decoder(log, std::nullopt, std::nullopt),
   m_efm_pcm_processor(log),
@@ -465,7 +466,8 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         if (film_mode && m_decode_all_fields
             && field_interpolation_mode == FieldInterpolationMode::eNormal) {
             int displayed = m_frame_no - d;
-            action = m_cadence.actionForField(displayed, decoded_field_index);
+            action = m_standard.film_pulldown == 3 ? m_cadence.actionForField(displayed, decoded_field_index)
+                                                   : m_cadence22.actionForField(displayed, decoded_field_index);
             // A weave reads the partner field from the other parity's buffer
             // set; a starvation-skipped field decode leaves that buffer older
             // than the cadence assumes.  (Holds read only the held output
@@ -487,9 +489,16 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
             || field_interpolation_mode != FieldInterpolationMode::eNormal) {
             out.film_status = m_standard.has_film_cadence ? "Telecine: off" : "Telecine: n/a";
             out.film_status_detail.clear();
-        } else if (int phase = m_cadence.phaseForFrame(m_frame_no - d); phase < 0) {
+        } else if (int phase = m_standard.film_pulldown == 3 ? m_cadence.phaseForFrame(m_frame_no - d)
+                                                               : m_cadence22.phaseForFrame(m_frame_no - d); phase < 0) {
             out.film_status = "Telecine: searching";
             out.film_status_detail.clear();
+        } else if (m_standard.film_pulldown == 2) {
+            // The pairing the lock found, and what this field does for it
+            out.film_status = "Telecine: 2:2 locked";
+            out.film_status_detail = std::format("{} {}", phase == 0 ? "F1+F2" : "F2+F1",
+                    action == NtscCadenceTracker::FieldAction::eAdaptive ? "adapt"
+                    : action == NtscCadenceTracker::FieldAction::eWeave ? "weave" : "hold");
         } else {
             out.film_status = "Telecine: 3:2 locked";
             if (action == NtscCadenceTracker::FieldAction::eAdaptive) {
@@ -631,13 +640,19 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // the DISPLAYED frame m_frames[1], so running one frame behind the
         // read costs nothing.
         if (decode_video && m_decode_all_fields && m_frame_no > 1 && m_standard.has_film_cadence) {
-            auto diffs = NtscCadenceTracker::MeasureFieldDiffs(
-                    m_frames[0]->data()->data<int16_t>(), m_frames[1]->data()->data<int16_t>());
             // Predicted per-sample sigma of the frame buffer data: the raw
             // blanking sigma through the calibrated rescale and the ~0.55
             // attenuation of the frame-domain de-emphasis
             float sigma = m_noise.sigma_blanking >= 0 ? m_noise.sigma_blanking * m_level_scale * 0.55f : -1.0f;
-            m_cadence.update(m_frame_no, diffs.d0, diffs.d1, sigma);
+            if (m_standard.film_pulldown == 3) {
+                auto diffs = NtscCadenceTracker::MeasureFieldDiffs(
+                        m_frames[0]->data()->data<int16_t>(), m_frames[1]->data()->data<int16_t>());
+                m_cadence.update(m_frame_no, diffs.d0, diffs.d1, sigma);
+            } else {
+                auto combs = PalCadenceTracker::MeasureCombs(
+                        m_frames[0]->data()->data<int16_t>(), m_frames[1]->data()->data<int16_t>());
+                m_cadence22.update(m_frame_no, combs.same, combs.across, sigma);
+            }
         }
         section_ms(m_sec_cadence_ms); // MeasureFieldDiffs reads two mapped frame buffers on the CPU
     }

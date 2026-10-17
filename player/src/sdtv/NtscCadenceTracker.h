@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include "CadenceAction.h"
 #include "logging/Logger.h"
 
 // Detects the 3:2 pulldown cadence of film-sourced content from the frame
@@ -28,7 +29,7 @@ public:
     //   eHold:     the field starts a new film frame whose other half is not
     //              decoded yet; show the previous film frame once more (the
     //              weave of the two previously decoded fields).
-    enum class FieldAction { eAdaptive, eWeave, eHold };
+    using FieldAction = CadenceFieldAction;
 
     struct FieldDiffs {
         float d0; // field 0 mean |difference| against the previous frame

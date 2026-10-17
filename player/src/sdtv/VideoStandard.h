@@ -89,7 +89,8 @@ struct VideoStandard {
     // the filtered luma beside a sharp white line legally undershoots by the
     // channel's ringing, and that must stay above it
     double rescue_floor;
-    bool has_film_cadence;        // 3:2 pulldown
+    bool has_film_cadence;        // film-sourced discs carry a cadence the de-interlacer can lock to
+    int film_pulldown;            // 3: NTSC's 3:2 (NtscCadenceTracker), 2: PAL's 2:2 (PalCadenceTracker)
     double luma_bandwidth_hz;     // for the SNR report
 
     // The chroma demodulation window reaches this far past the picture

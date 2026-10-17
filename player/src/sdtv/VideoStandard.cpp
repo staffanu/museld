@@ -53,6 +53,7 @@ const VideoStandard &VideoStandard::ntsc() {
         .has_white_flag = true,
         .rescue_floor = 0.02,
         .has_film_cadence = true,
+        .film_pulldown = 3,
         .luma_bandwidth_hz = 4.2e6,
     };
     return s;
@@ -130,7 +131,8 @@ const VideoStandard &VideoStandard::pal() {
         // with the 0.02 minimum the rescue repainted them after every cut,
         // while the motion masks' persistence still read the pattern as moving
         .rescue_floor = 0.08,
-        .has_film_cadence = false,
+        .has_film_cadence = true,
+        .film_pulldown = 2,
         .luma_bandwidth_hz = 5.0e6,
     };
     return s;

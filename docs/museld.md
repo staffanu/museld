@@ -297,7 +297,14 @@ missed repeats when the cadence breaks (film/video splices), and any frame whose
 is missing falls back to the motion-adaptive path on its own. Lock transitions are logged at
 `--log D3`. Key 5 switches between auto and off; it is only active in the `normal` de-interlacing
 mode with all fields decoded. The disc code overlay (V key) shows the state: `Telecine: off`,
-`Telecine: searching` (watching, nothing detected), or `Telecine: 3:2 locked`. When paused,
+`Telecine: searching` (watching, nothing detected), or `Telecine: 3:2 locked`. PAL film discs
+carry a 2:2 cadence instead, one film frame per video frame with no repeated field, so the
+evidence is which of the two adjacent-field pairings weaves without combing while the picture
+moves: the frame's own two fields, or the previous frame's second field with this frame's first.
+Four moving frames that agree lock it (`Telecine: 2:2 locked`, with the pairing `F1+F2` or
+`F2+F1` shown when paused), stills neither lock nor unlock, video-sourced material combs in both
+pairings and never locks, and two contradicting moving frames in a row, as at a cut on an odd
+field, unlock it until the new pairing has shown itself. When paused,
 the locked line also shows what the displayed field is, e.g. `Telecine: 3:2 locked A weave` — the letter is the film
 frame within the (A1A2)(A3B1)(B2C1)(C2C3)(D1D2) pulldown cycle the output currently shows (step
 with N to watch its 3, 2, 3, 2 rhythm), `hold` marks the fields that re-show the previous film
