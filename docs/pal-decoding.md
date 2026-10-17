@@ -145,7 +145,12 @@ the switch, a calibration aid.
 key's only meaning on PAL) a line's U and V are averaged with the previous line's: 3 dB less
 chroma noise, and a differential phase error, which lands on V with opposite signs on
 consecutive lines, cancels instead of showing as Hanover bars.  R−G noise on the GGV1011
-modulated staircase 10.3 → 6.9, line alternation on the NYCSTM 1.05 → 0.41.
+modulated staircase 10.3 → 6.9, line alternation on the NYCSTM 1.05 → 0.41.  Where a pixel
+takes the temporal path, the previous line's estimate comes from its own column taps through
+the same selector, not from its spatial comb alone: that put half the comb's vertical-detail
+leak back (the ringed sculpture in Empire D515 at 24:01, line-to-line chroma alternation 4.5
+against 3.5 on a flat wall, 1.7 since), and on moving content the two gated estimates average
+their residues as well.
 
 **Temporal (3D) comb.**  The subcarrier advances 270° per frame and the V switch flips (625
 is odd), so frames N ± 1 do not cancel; N ± 2 do (chroma inverted, V switch matching), and
