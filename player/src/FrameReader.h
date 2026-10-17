@@ -56,6 +56,9 @@ public:
     // keep its probes inside the file
     [[nodiscard]] virtual double inputSampleRate() const { return 0; }
     [[nodiscard]] virtual int64_t inputSampleCount() const { return -1; }
+    // A pipe, fifo or udp:// stream: it cannot be positioned and has a
+    // transport of its own (see PlayerState::honor_picture_stops)
+    [[nodiscard]] bool inputIsLive() const { return m_input_is_realtime; }
     virtual void setEfmEnabled(bool) {}
     // Which audio source to demodulate.  MUSE readers know two sources, so the
     // default maps the track onto the EFM on/off switch; the NTSC reader

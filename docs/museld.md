@@ -322,7 +322,10 @@ on files and http input, not on live streams or the 16.2 MHz baseband reader.
 **Stop code**: The picture stop code of NTSC
 CAV discs (`82CFFF`, IEC 60857 10.1.4) pauses playback on the frame it marks, once per stop;
 the P key turns that off.  If `--write`, `--export-frame` or `--no-keys` was given, picture
-stops are ignored.
+stops are ignored.  On a live input (a pipe, fifo or udp:// stream) they start off, since
+the source has a transport of its own: a disc player feeding museld stops on the code
+itself, and a pause in museld on top of it would need its own release, and again on every
+frame while the player sits on its still.  P turns them on.
 
 **Picture numbers on film discs**: a CAV disc mastered from film numbers film frames, on the first
 field of each, and under 3:2 pulldown film frames alternate three and two fields long, so one video
@@ -380,7 +383,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | N | Step one field forward (while paused) |
 | Left / Right | Seek ±10 seconds |
 | Up / Down | Next / previous chapter (see Chapters above) |
-| P | Toggle honouring the picture stop codes (on by default) |
+| P | Toggle honouring the picture stop codes (on by default for files, off for live input) |
 | 1 | Normal field interpolation (motion detection) |
 | 2 | Force intra-field interpolation (treat everything as motion) |
 | 3 | Force inter-frame interpolation (treat everything as still) |
