@@ -11,6 +11,9 @@
 #include <vector>
 #include <iostream>
 #include <filesystem>
+#ifdef __APPLE__
+#  include <TargetConditionals.h>
+#endif
 #include "MuseRfDemodulator.h"
 #include "filter/FirFilterStage.h"
 #include "filter/RaisedCosine.h"
@@ -156,8 +159,17 @@ void MuseRfDemodulator::demodulate() {
     // Create shaders.  Each FIR pipeline is specialized to its exact tap count and decimation
     // (fir_filter.comp), so the band-pass, the decimating low-pass and the root raised cosine
     // are three pipelines of the same shader.
-    constexpr uint32_t c_fir_outputs_per_invocation = 2;
-    auto fir_dispatch_size = [](uint32_t output_size) {
+    // As in SdtvRfDemodulator: 2 measured fastest on an Apple M2, 1 on the Apple
+    // TV's A10X (measured on the NTSC chain; the same shader and similar taps
+    // here), MUSELD_FIR_OUTPUTS overrides for measuring
+#if defined(__APPLE__) && TARGET_OS_TV
+    uint32_t c_fir_outputs_per_invocation = 1;
+#else
+    uint32_t c_fir_outputs_per_invocation = 2;
+#endif
+    if (const char *env = getenv("MUSELD_FIR_OUTPUTS"); env != nullptr && atoi(env) > 0)
+        c_fir_outputs_per_invocation = atoi(env);
+    auto fir_dispatch_size = [c_fir_outputs_per_invocation](uint32_t output_size) {
         return Size((output_size + c_fir_outputs_per_invocation - 1) / c_fir_outputs_per_invocation);
     };
 

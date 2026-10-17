@@ -15,6 +15,9 @@
 #include <algorithm>
 #include "SdtvRfDemodulator.h"
 #include "filter/FirFilterStage.h"
+#ifdef __APPLE__
+#  include <TargetConditionals.h>
+#endif
 #include "filter/WindowedSinc.h"
 #include "musevk/VulkanUtil.h"
 #include "musevk/TimestampQueryPool.h"
@@ -232,8 +235,19 @@ void SdtvRfDemodulator::demodulate() {
     // Create shaders.  Each FIR pipeline is specialized to its exact tap count and decimation
     // (fir_filter.comp), so the band-pass, the decimating low-pass and the cleanup low-pass
     // are three pipelines of the same shader.
-    constexpr uint32_t c_fir_outputs_per_invocation = 2;
-    auto fir_dispatch_size = [](uint32_t output_size) {
+    // 2 measured fastest on an Apple M2 (fir_filter.comp), 1 on the Apple TV 4K's
+    // A10X (the 40 MHz block's GPU time 14.7 -> 9.7 ms, 2 and 4 within 10% of each
+    // other); MUSELD_FIR_OUTPUTS overrides it for measuring other GPUs
+#if defined(__APPLE__) && TARGET_OS_TV
+    uint32_t c_fir_outputs_per_invocation = 1;
+#else
+    uint32_t c_fir_outputs_per_invocation = 2;
+#endif
+    if (const char *env = getenv("MUSELD_FIR_OUTPUTS"); env != nullptr && atoi(env) > 0) {
+        c_fir_outputs_per_invocation = atoi(env);
+        m_log.info(ePerformance, std::format("FIR outputs per invocation: {}", c_fir_outputs_per_invocation));
+    }
+    auto fir_dispatch_size = [c_fir_outputs_per_invocation](uint32_t output_size) {
         return Size((output_size + c_fir_outputs_per_invocation - 1) / c_fir_outputs_per_invocation);
     };
 
