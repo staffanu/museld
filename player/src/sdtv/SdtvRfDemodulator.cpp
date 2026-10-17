@@ -54,6 +54,25 @@ SdtvRfDemodulator::SdtvRfDemodulator(Logger &log, std::string executable_dir, Pr
 void SdtvRfDemodulator::demodulate() {
     assert(c_sample_block_size % c_video_decimation_rate == 0);
 
+    // The GPU chain's cost grows with the square of the sample rate (the FIR
+    // tap counts follow the rate, and so does the sample count), and a 62.5
+    // MHz capture carries nothing above the band-pass that a 31.25 MHz one
+    // could not: so a fast capture is decimated by 2 before the band-pass,
+    // and the chain from there on runs at demod_rate as if the capture had
+    // been made at that rate.  The video output rate stays the input rate / 2
+    // (the decimating low-pass then decimates by 1), so the frame reader and
+    // the block sizes it knows are unaffected; the audio demodulators read
+    // the raw input.  On an Apple A10X this took the demodulator from 28 ms
+    // to about 10 ms per 8.4 ms block of a 62.5 MHz capture.
+    const int pre_decimation = m_sample_frequency > 50e6f ? 2 : 1;
+    const float demod_rate = m_sample_frequency / pre_decimation;
+    const int demod_block = c_sample_block_size / pre_decimation;
+    const int video_decimation = c_video_decimation_rate / pre_decimation;
+    static_assert(c_video_decimation_rate == 2, "pre_decimation assumes the video rate is half the input rate");
+    if (pre_decimation > 1)
+        m_log.info(eInput, std::format("Demodulating at {:.4g} MHz: the {:.4g} MHz input is decimated by {} before the band-pass",
+                                       demod_rate / 1e6, m_sample_frequency / 1e6, pre_decimation));
+
     CommandPool command_pool(m_vulkan_manager);
     std::unique_ptr<musevk::TimestampQueryPool> timestamp_query_pool = m_benchmark_shaders
             ? std::make_unique<musevk::TimestampQueryPool>(m_vulkan_manager.getPhysicalDevice(), m_vulkan_manager.getDevice(), 40)
@@ -73,8 +92,8 @@ void SdtvRfDemodulator::demodulate() {
     // (3.5 to 13.5 MHz for NTSC).  Reverse because the FIR shader correlates rather than convolves.
     std::vector<std::complex<float>> bandpass_filter_def =
             WindowedSinc::complex_band_pass<float>(
-                    WindowedSinc::rectangular_ntaps(m_sample_frequency, (float)m_video_standard.rf_bandpass_transition_hz),
-                    m_sample_frequency, (float)m_video_standard.rf_bandpass_low_hz, (float)m_video_standard.rf_bandpass_high_hz);
+                    WindowedSinc::rectangular_ntaps(demod_rate, (float)m_video_standard.rf_bandpass_transition_hz),
+                    demod_rate, (float)m_video_standard.rf_bandpass_low_hz, (float)m_video_standard.rf_bandpass_high_hz);
     std::reverse(bandpass_filter_def.begin(), bandpass_filter_def.end());
 
     std::vector<float> bandpass_filter_re_coeffs;
@@ -92,7 +111,7 @@ void SdtvRfDemodulator::demodulate() {
     // FIR lowpass filter for the demodulated signal
     const float video_lowpass = (float)m_video_standard.video_lowpass_hz;
     std::vector<float> lowpass_filter_def =
-            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(m_sample_frequency, 2e6), m_sample_frequency, video_lowpass);
+            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(demod_rate, 2e6), demod_rate, video_lowpass);
     std::reverse(lowpass_filter_def.begin(), lowpass_filter_def.end()); // symmetric, but the shader correlates
 
     shared_ptr<VulkanBuffer> lowpass_filter =
@@ -110,14 +129,31 @@ void SdtvRfDemodulator::demodulate() {
     shared_ptr<VulkanBuffer> decimated_lowpass_filter =
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(decimated_lowpass_filter_def.size()), decimated_lowpass_filter_def);
 
-    // Create buffers for data
-    const int input_buffer_size = c_sample_block_size + (int)bandpass_filter_def.size() - 1;
-    const int analytic_buffer_size = c_sample_block_size + 1;
-    const int lowpass_in_buffer_size = c_sample_block_size + (int)lowpass_filter_def.size() - 1;
+    // The pre-decimation low-pass (pre_decimation > 1 only): passes the RF
+    // band, and stops what would alias into it from above demod_rate / 2
+    std::vector<float> predecimation_filter_def;
+    if (pre_decimation > 1) {
+        const float band_top = (float)m_video_standard.rf_bandpass_high_hz;
+        const float transition = demod_rate / 2 - band_top;
+        predecimation_filter_def = WindowedSinc::low_pass<float>(
+                WindowedSinc::rectangular_ntaps(m_sample_frequency, transition), m_sample_frequency, band_top + transition / 2);
+        std::reverse(predecimation_filter_def.begin(), predecimation_filter_def.end()); // symmetric, but the shader correlates
+    }
+    shared_ptr<VulkanBuffer> predecimation_filter = predecimation_filter_def.empty() ? nullptr :
+            VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(predecimation_filter_def.size()), predecimation_filter_def);
+
+    // Create buffers for data.  Each FIR input buffer starts with the filter's
+    // history: the last taps - 1 samples of the previous block (recycled at the
+    // end of every block), so the block's outputs line up with its inputs.
+    const int input_history = (int)(pre_decimation > 1 ? predecimation_filter_def.size() : bandpass_filter_def.size()) - 1;
+    const int input_buffer_size = c_sample_block_size + input_history;
+    const int demod_input_buffer_size = demod_block + (int)bandpass_filter_def.size() - 1;
+    const int analytic_buffer_size = demod_block + 1;
+    const int lowpass_in_buffer_size = demod_block + (int)lowpass_filter_def.size() - 1;
     const int decimated_lowpass_in_buffer_size = c_sample_block_size + (int)decimated_lowpass_filter_def.size() - 1;
 
     // We need to delay the output of the detected dropouts as much as the rest of the filter chain delays the video signal
-    const int dropout_delay = (int)lowpass_filter_def.size() / c_video_decimation_rate / 2 - 1;
+    const int dropout_delay = (int)lowpass_filter_def.size() / video_decimation / 2 - 1;
     const int dropout_buffer_size = c_video_block_size + dropout_delay;
 
     shared_ptr<VulkanBuffer> input_buffer = make_unique<musevk::VulkanBuffer>(
@@ -131,6 +167,11 @@ void SdtvRfDemodulator::demodulate() {
                                          (input_buffer->hostMappedMemoryProperties() & vk::MemoryPropertyFlagBits::eHostCached)
                                                  ? "" : " -- NOT host-cached: do not read from this mapping on the CPU"));
 
+    // What the band-pass reads: the input itself, or its decimated copy
+    shared_ptr<VulkanBuffer> demod_input_buffer = pre_decimation > 1 ? make_shared<musevk::VulkanBuffer>(
+            m_vulkan_manager, Size(demod_input_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone) : nullptr;
+    shared_ptr<VulkanBuffer> bandpass_in_buffer = pre_decimation > 1 ? demod_input_buffer : input_buffer;
+
     shared_ptr<VulkanBuffer> analytic_buffer_re = make_unique<musevk::VulkanBuffer>(
             m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
@@ -138,7 +179,8 @@ void SdtvRfDemodulator::demodulate() {
             m_vulkan_manager, Size(analytic_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostNone);
 
     // Debug aid: MUSELD_DUMP_DROPOUT=<prefix> appends what the dropout detector
-    // sees, one entry per raw input sample: <prefix>.env.f32 (the 9-sample box
+    // sees, one entry per demodulated sample (the raw input sample, unless
+    // pre-decimated): <prefix>.env.f32 (the 9-sample box
     // of the squared envelope), <prefix>.demod.f32 (the raw quadrature output
     // the slew test reads) and <prefix>.do.u8 (the flags, per decimated
     // sample, delayed like the video) -- the first 32 blocks, or
@@ -195,22 +237,29 @@ void SdtvRfDemodulator::demodulate() {
         return Size((output_size + c_fir_outputs_per_invocation - 1) / c_fir_outputs_per_invocation);
     };
 
+    shared_ptr<ComputeShader> predecimation_fir_shader = pre_decimation == 1 ? nullptr : unique_ptr<ComputeShader>(
+            new ComputeShader(m_vulkan_manager, "predecimation_fir",
+                              {predecimation_filter, input_buffer, demod_input_buffer}, 2 * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"),
+                              fir_dispatch_size(demod_block), 1,
+                              {(uint32_t)predecimation_filter_def.size(), (uint32_t)pre_decimation, c_fir_outputs_per_invocation}));
+
     shared_ptr<ComputeShader> bandpass_fir_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager, "bandpass_fir",
                               {eBuffer, eBuffer, eBuffer}, 2 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"),
-                              fir_dispatch_size(c_sample_block_size), 2,
+                              fir_dispatch_size(demod_block), 2,
                               {(uint32_t)bandpass_filter_def.size(), /* decimation */ 1, c_fir_outputs_per_invocation}));
 
-    bandpass_fir_shader->updateBufferDescriptorsInSet(0, {bandpass_filter_re, input_buffer, analytic_buffer_re});
-    bandpass_fir_shader->updateBufferDescriptorsInSet(1, {bandpass_filter_im, input_buffer, analytic_buffer_im});
+    bandpass_fir_shader->updateBufferDescriptorsInSet(0, {bandpass_filter_re, bandpass_in_buffer, analytic_buffer_re});
+    bandpass_fir_shader->updateBufferDescriptorsInSet(1, {bandpass_filter_im, bandpass_in_buffer, analytic_buffer_im});
 
     shared_ptr<ComputeShader> lowpass_fir_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager, "lowpass_fir",
                               {lowpass_filter, lowpass_in_buffer, equalization_in_buffer}, 2 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"),
                               fir_dispatch_size(c_video_block_size), 1,
-                              {(uint32_t)lowpass_filter_def.size(), c_video_decimation_rate, c_fir_outputs_per_invocation}));
+                              {(uint32_t)lowpass_filter_def.size(), (uint32_t)video_decimation, c_fir_outputs_per_invocation}));
 
     shared_ptr<ComputeShader> cleanup_fir_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager, "cleanup_fir",
@@ -222,7 +271,7 @@ void SdtvRfDemodulator::demodulate() {
     shared_ptr<ComputeShader> fm_quadrature_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager, "fm_quadrature",
                               {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer, envelope_buffer}, 7 * sizeof(float),
-                              VulkanUtil::loadSpirv(m_executable_dir, "fm_quadrature.comp"), Size(c_sample_block_size)));
+                              VulkanUtil::loadSpirv(m_executable_dir, "fm_quadrature.comp"), Size(demod_block)));
 
     constexpr uint32_t c_envelope_box_outputs = 4; // OUTPUTS in envelope_box.comp
     shared_ptr<ComputeShader> envelope_box_shader = unique_ptr<ComputeShader>(
@@ -381,7 +430,7 @@ void SdtvRfDemodulator::demodulate() {
         const bool efm_enabled = m_efm_enabled;
         const bool analog_enabled = m_analog_enabled;
         const bool ac3_enabled = m_ac3_enabled;
-        float *input_samples = input_buffer->data<float>() + bandpass_filter_def.size() - 1;
+        float *input_samples = input_buffer->data<float>() + input_history;
         input_staging.resize(c_sample_block_size);
         int64_t block_input_offset;
         uint32_t block_seek_generation;
@@ -411,7 +460,10 @@ void SdtvRfDemodulator::demodulate() {
         }
         auto t_after_acquire = timing_clock::now();
         // The first byte of the output lags the actual input due to three filters being applied
-        block->input_offset = block_input_offset - (bandpass_filter_def.size() + lowpass_filter_def.size()) / 2;
+        // (in input samples: the pre-decimation's own delay, and the others' at demod_rate)
+        block->input_offset = block_input_offset
+                - (pre_decimation > 1 ? (int64_t)(predecimation_filter_def.size() - 1) / 2 : 0)
+                - (int64_t)pre_decimation * (bandpass_filter_def.size() + lowpass_filter_def.size()) / 2;
         block->seek_generation = block_seek_generation;
 
         // Begin Vulkan command buffer and reset the timestamp query pool if we use one
@@ -422,17 +474,22 @@ void SdtvRfDemodulator::demodulate() {
         // Make the data available on the GPU; this is necessary in case we didn't find a memory type good for both host writes and shader reads
         input_buffer->synchronizeHostWrites(*command_buffer);
 
+        // A fast capture: down to demod_rate first (the output follows the band-pass's history)
+        if (predecimation_fir_shader)
+            command_buffer->enqueueComputeShader<uint32_t>(predecimation_fir_shader,
+                                                           {(uint32_t)demod_block, (uint32_t)bandpass_filter_def.size() - 1});
+
         // Run the input signal through the bandpass filter that also converts the signal to an analytic signal
-        command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {c_sample_block_size, /* out offset */ 1}, 0);
-        command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {c_sample_block_size, /* out offset */ 1}, 1);
+        command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {(uint32_t)demod_block, /* out offset */ 1}, 0);
+        command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {(uint32_t)demod_block, /* out offset */ 1}, 1);
 
         // Demodulate the analytic signal, and scale to [0, 1].
         command_buffer->enqueueComputeShader<float>(fm_quadrature_shader,
-                                                    {c_sample_block_size, (float)lowpass_filter_def.size() - 1,
-                                                     m_sample_frequency, (float)m_video_standard.rf_deviation_hz,
+                                                    {(float)demod_block, (float)lowpass_filter_def.size() - 1,
+                                                     demod_rate, (float)m_video_standard.rf_deviation_hz,
                                                      (float)m_video_standard.rf_center_hz, /* scale */ 0.5f, /* add */ 0.5f});
 
-        // Lowpass filter the demodulated signal, and down-sample (decimate by factor 2)
+        // Lowpass filter the demodulated signal, and down-sample to the video rate (by 2, unless the input was pre-decimated)
         command_buffer->enqueueComputeShader<uint32_t>(lowpass_fir_shader, {c_video_block_size, /* out offset */ 0});
 
         // Run the down-sampled signal through the cleanup lowpass and store in the output block
@@ -462,13 +519,13 @@ void SdtvRfDemodulator::demodulate() {
         // flagged on every pass).  The analytic signal, and so the envelope
         // buffers, are written with offset 1, and the flags are delayed like
         // the video to compensate the decimating lowpass.
-        const uint32_t line_period = (uint32_t)lround(m_sample_frequency / m_video_standard.line_hz);
-        const float slew_threshold = 1.0f * 40e6f / m_sample_frequency; // legal slew scales with the sample interval
+        const uint32_t line_period = (uint32_t)lround(demod_rate / m_video_standard.line_hz);
+        const float slew_threshold = 1.0f * 40e6f / demod_rate; // legal slew scales with the sample interval
         // carrier reference over ~205 us of whole envelope blocks, so a
         // maximum-length dropout cannot drag it down (32 blocks at 40 MHz)
-        const uint32_t window_blocks = (uint32_t)lround(205e-6 * m_sample_frequency / c_envelope_block);
+        const uint32_t window_blocks = (uint32_t)lround(205e-6 * demod_rate / c_envelope_block);
         command_buffer->enqueueComputeShader<uint32_t>(
-                detect_dropouts_shader, {SdtvRfDemodulatorConstants::c_video_block_size, 1u, (uint32_t)dropout_delay, c_video_decimation_rate,
+                detect_dropouts_shader, {SdtvRfDemodulatorConstants::c_video_block_size, 1u, (uint32_t)dropout_delay, (uint32_t)video_decimation,
                                          line_period,
                                          std::bit_cast<uint32_t>(0.49f), std::bit_cast<uint32_t>(0.25f),
                                          (uint32_t)lowpass_filter_def.size() - 1, std::bit_cast<uint32_t>(slew_threshold),
@@ -497,7 +554,9 @@ void SdtvRfDemodulator::demodulate() {
         auto enqueue_float_copy = [command_buffer](VulkanBuffer &buffer, uint32_t buffer_size, uint32_t floats_to_copy) -> void {
             command_buffer->enqueueCopyBuffer(buffer, buffer, (buffer_size - floats_to_copy) * sizeof(float), 0, floats_to_copy * sizeof(float));
         };
-        enqueue_float_copy(*input_buffer, input_buffer_size, bandpass_filter_def.size() - 1);
+        enqueue_float_copy(*input_buffer, input_buffer_size, input_history);
+        if (demod_input_buffer)
+            enqueue_float_copy(*demod_input_buffer, demod_input_buffer_size, bandpass_filter_def.size() - 1);
         enqueue_float_copy(*analytic_buffer_re, analytic_buffer_size, 1);
         enqueue_float_copy(*analytic_buffer_im, analytic_buffer_size, 1);
         enqueue_float_copy(*envelope_buffer, analytic_buffer_size, 1);
@@ -537,11 +596,11 @@ void SdtvRfDemodulator::demodulate() {
             dropout_dump_started = true;
             const std::string prefix(dropout_dump_prefix);
             if (FILE *f = fopen((prefix + ".env.f32").c_str(), mode)) {
-                fwrite(local_envelope_buffer->data<float>() + 1, sizeof(float), c_sample_block_size, f);
+                fwrite(local_envelope_buffer->data<float>() + 1, sizeof(float), demod_block, f);
                 fclose(f);
             }
             if (FILE *f = fopen((prefix + ".demod.f32").c_str(), mode)) {
-                fwrite(lowpass_in_buffer->data<float>() + lowpass_filter_def.size() - 1, sizeof(float), c_sample_block_size, f);
+                fwrite(lowpass_in_buffer->data<float>() + lowpass_filter_def.size() - 1, sizeof(float), demod_block, f);
                 fclose(f);
             }
             if (FILE *f = fopen((prefix + ".do.u8").c_str(), mode)) {
