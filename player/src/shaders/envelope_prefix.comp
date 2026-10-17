@@ -39,7 +39,7 @@ void main() {
     barrier();
 
     for (uint offset = 1; offset < block_count; offset *= 2) {
-        float v[MAX_BLOCKS / 1024 + 1];
+        float v[MAX_BLOCKS / gl_WorkGroupSize.x + 1];
         uint j = 0;
         for (uint i = lid; i < block_count; i += n)
             v[j++] = i >= offset ? s[i - offset] : 0.0;

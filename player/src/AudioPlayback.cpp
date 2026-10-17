@@ -61,10 +61,40 @@ AudioPlayback::AudioPlayback(Logger &log)
   m_read_frac(0),
   m_current_mode(MODE_UNKNOWN),
   m_channels_used(0),
+  m_ma_log(nullptr),
   m_context(nullptr),
   m_device(nullptr) {
+    // miniaudio's messages (why a backend was not initialized, mostly) go to
+    // the audio log category; miniaudio's levels map onto ours
+    auto *ma_logger = new ma_log;
+    if (ma_log_init(nullptr, ma_logger) != MA_SUCCESS) {
+        delete ma_logger;
+        ma_logger = nullptr;
+    } else {
+        ma_log_register_callback(ma_logger, ma_log_callback_init(
+                [](void *user_data, ma_uint32 level, const char *message) {
+                    auto &log = *static_cast<Logger *>(user_data);
+                    std::string text = std::string("miniaudio: ") + message;
+                    while (!text.empty() && (text.back() == '\n' || text.back() == '\r'))
+                        text.pop_back();
+                    if (level == MA_LOG_LEVEL_ERROR)
+                        log.error(eAudio, text);
+                    else if (level == MA_LOG_LEVEL_WARNING)
+                        log.warn(eAudio, text);
+                    else
+                        log.debug(eAudio, text);
+                }, &m_log));
+    }
+
+    m_ma_log = ma_logger;
+    ma_context_config context_config = ma_context_config_init();
+    context_config.pLog = ma_logger;
+    // iOS/tvOS: the output-only audio session category.  The default tries
+    // PlayAndRecord first, which an Apple TV has no microphone for.
+    context_config.coreaudio.sessionCategory = ma_ios_session_category_playback;
+
     m_context = new ma_context;
-    auto audio_status = ma_context_init(nullptr, 0, nullptr, m_context);
+    auto audio_status = ma_context_init(nullptr, 0, &context_config, m_context);
     if (audio_status != MA_SUCCESS) {
         delete m_context;
         m_context = nullptr;
@@ -90,6 +120,13 @@ AudioPlayback::~AudioPlayback() {
         m_context = nullptr;
         if (audio_status != MA_SUCCESS)
             m_log.error(eAudio, string("miniaudio: ") + ma_result_description(audio_status));
+    }
+
+    if (m_ma_log != nullptr) {
+        auto *ma_logger = static_cast<ma_log *>(m_ma_log);
+        ma_log_uninit(ma_logger);
+        delete ma_logger;
+        m_ma_log = nullptr;
     }
 }
 

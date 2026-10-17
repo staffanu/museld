@@ -42,13 +42,19 @@ layout(set = 0, binding = 1) buffer readonly AtlasBuffer {
     uint atlas[];
 };
 
-layout(set = 0, binding = 2, rgba32f) uniform image2D frame_out_image;
+// The same image bound twice, read-only and write-only, rather than one
+// read-write image: Metal on the Apple A10X (GPU family 3) allows read-write
+// textures only in the 32-bit single-channel formats, and its shader compiler
+// rejects a read-write rgba32f image.  Each invocation reads and writes only
+// its own pixel, so the two views never race.
+layout(set = 0, binding = 2, rgba32f) uniform readonly image2D frame_in_image;
+layout(set = 0, binding = 3, rgba32f) uniform writeonly image2D frame_out_image;
 
 void main() {
     uint x = gl_GlobalInvocationID.x;
     uint y = gl_GlobalInvocationID.y;
 
-    vec4 cur = imageLoad(frame_out_image, ivec2(x, y));
+    vec4 cur = imageLoad(frame_in_image, ivec2(x, y));
     vec3 c = cur.rgb;
     bool touched = false;
 
