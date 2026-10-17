@@ -1024,9 +1024,16 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     // Full screen is the desktop's mode, borderless -- no mode switch; the
     // blit scales.  The window keeps its windowed size underneath, which is
     // what Tab returns to.
-#ifdef __APPLE__
+#if defined(__APPLE__) && TARGET_OS_TV
     // A Metal layer, from which VulkanManager makes the surface itself; no
-    // SDL_Vulkan (it would dlopen a Vulkan library, which tvOS does not have)
+    // SDL_Vulkan (it would dlopen a Vulkan library, which tvOS does not have).
+    // Not high pixel density: on a 4K television that is a 3840x2160 swap
+    // chain, and the final blit into it cost an A10X 7-10 ms per frame.  The
+    // 1920x1080 layer is plenty for laserdisc material; the TV upscales.
+    SDL_WindowFlags window_flags = SDL_WINDOW_METAL | SDL_WINDOW_RESIZABLE;
+#elif defined(__APPLE__)
+    // A Metal layer, from which VulkanManager makes the surface itself; no
+    // SDL_Vulkan (it would dlopen a Vulkan library, as on tvOS there is none)
     SDL_WindowFlags window_flags = SDL_WINDOW_METAL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #else
     SDL_WindowFlags window_flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
