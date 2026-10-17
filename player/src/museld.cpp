@@ -998,6 +998,11 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         throw runtime_error(std::format("Cannot initialize GLFW (no usable display?): {}", g_last_glfw_error));
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    // A full screen window keeps its screen when another application takes
+    // the focus.  By default GLFW iconifies it instead, and on macOS the
+    // window then does not come back when the application is activated
+    // again: it sits minimized off screen until found in the Dock.
+    glfwWindowHint(GLFW_AUTO_ICONIFY, GLFW_FALSE);
     if (no_keys) {
         // a run made beside other work: the window must not take the
         // keyboard away from whatever the user is typing into
