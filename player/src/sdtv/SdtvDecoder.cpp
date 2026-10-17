@@ -670,14 +670,27 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // clock -- past the file writer's sync dead band.  Capping just above
         // the nominal per-video-frame rate keeps about one compressed frame
         // queued as a jitter buffer, and the small surplus drains any larger
-        // backlog instead of letting it become permanent latency.
-        const int cap = m_pending_audio_mode == MODE_AC3 ? 48000 * m_standard.fps_den / m_standard.fps_num + 16
-                      : m_pending_audio_mode == MODE_DTS ? 44100 * m_standard.fps_den / m_standard.fps_num + 16
-                      : MAX_AUDIO_OUTPUT_SAMPLES;
+        // backlog instead of letting it become permanent latency.  PCM gets
+        // the same cap: the surplus (16 samples, 0.8 %) stays within the 1 %
+        // the playback buffer's speed adjustment absorbs, where delivering
+        // MAX_AUDIO_OUTPUT_SAMPLES per frame overflowed it and discarded
+        // samples for seconds after any backlog.
+        const int rate = m_pending_audio_mode == MODE_DTS || m_pending_audio_mode == MODE_EFM ? 44100 : 48000;
+        const int nominal = rate * m_standard.fps_den / m_standard.fps_num;
+        const int cap = std::min(nominal + 16, MAX_AUDIO_OUTPUT_SAMPLES);
         const int delivered = std::min((int)m_pending_audio.size(), cap);
         for (int i = 0; i < delivered; i++)
             out.audio_samples[out.audio_sample_count++] = m_pending_audio[i];
         m_pending_audio.erase(m_pending_audio.begin(), m_pending_audio.begin() + delivered);
+        // A backlog beyond two frames is audio of frames that were never
+        // shown (lost at the input, or held across a reset): cut it in one
+        // piece, where the picture also jumps, rather than drain it over
+        // seconds at a surplus the playback cannot follow
+        if ((int)m_pending_audio.size() > 2 * nominal) {
+            const int drop = (int)m_pending_audio.size() - nominal;
+            m_log.info(eAudio, std::format("frame {}: dropping an audio backlog of {} samples", m_frame_no, drop));
+            m_pending_audio.erase(m_pending_audio.begin(), m_pending_audio.begin() + drop);
+        }
         out.ac3_frames = std::move(m_pending_ac3_frames);
         m_pending_ac3_frames.clear();
 
