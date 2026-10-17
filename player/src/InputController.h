@@ -39,6 +39,8 @@ struct ReaderControls {
     // True when the disc format can carry an AC3-RF track (NTSC), which adds
     // it to the A key's cycle
     bool has_ac3_audio = false;
+    // True for a pipe, fifo or udp:// stream (FrameReader::inputIsLive)
+    bool input_is_live = false;
     // Adaptive equalizer controls (MUSE only).  cycleEqMode returns a short label
     // for the new mode ("OFF"/"ADAPT"/"FROZEN") for OSD display.  Empty when the
     // decoder doesn't support adaptive equalization (NTSC).

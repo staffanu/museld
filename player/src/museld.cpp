@@ -386,6 +386,11 @@ static void runPlayer(Logger &log,
 
         PlayerState state;
         state.stream_start_seconds = initial_seek_seconds;
+        // A live source has a transport of its own: a disc player feeding
+        // museld stops on the picture stop itself, and a pause here on top
+        // of it would have to be released separately (and again on every
+        // frame while the player sits on its still).  P turns them on.
+        state.honor_picture_stops = !reader_controls.input_is_live;
         state.paused_countdown = start_paused ? 5 : 0;
         state.field_interpolation_mode = initial_field_interpolation_mode;
         state.use_3d_comb = initial_use_3d_comb;
@@ -1149,6 +1154,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 CompressedAudioDecoder::available() ? "AC3 AUDIO" : "AC3 AUDIO (NO FFMPEG)",
                 !is_muse, // has_analog_audio
                 !is_muse && video_standard->ntsc_chroma, // has_ac3_audio: AC3-RF exists on NTSC discs only
+                reader.inputIsLive(),
         };
         if (reader.efmAdaptiveFilterSize() >= 0) { // RF input: the reader runs an EFM demodulator
             reader_controls.efmFilterSize = [&reader]() { return reader.efmAdaptiveFilterSize(); };
