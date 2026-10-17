@@ -463,10 +463,34 @@ void main() {
             uv = pal_line_uv(pal_src, src_line, field_last, frame_col);
         }
         if (use_3d_comb != 0u && !pal_rescued && pal_src == 0) {
-            // the delay-line U/V average with the line above (its own
-            // spatial comb; the temporal estimate is per pixel here)
+            // the delay-line U/V average with the line above.  Where this
+            // pixel took the temporal path the neighbour gets the same
+            // treatment from its own column estimates: its spatial comb
+            // alone put half its vertical-detail leak back (the ringed
+            // sculpture in Empire D515 at 24:01 measured 4.5 of line-to-line
+            // chroma alternation against 3.5 on a flat wall, 1.7 with this),
+            // and on moving content the two gated estimates average their
+            // residues as well (every region of the Pioneer94 clip improved).
             const uint other = frame_line > field_first ? frame_line - 1 : frame_line + 1;
-            uv = 0.5 * (uv + pal_line_uv(0, other, field_last, frame_col));
+            vec2 uv_other = vec2(0.0);
+            if (pal_temporal) {
+                const uint orow = frame_line > field_first ? row - 1 : row + 1;
+                float16_t cs_o[19], pure_o[19], ct_o[19], c_o[19];
+                for (int n = 0; n < 19; n++) {
+                    f16vec4 taps = chroma_taps[orow][col + n];
+                    cs_o[n] = taps.x;
+                    pure_o[n] = taps.y;
+                    ct_o[n] = taps.z;
+                }
+                float16_t w_o = temporal_weight(cs_o, pure_o);
+                for (int n = 0; n < 19; n++)
+                    c_o[n] = mix(cs_o[n], ct_o[n], w_o);
+                vec2 bref_o; float vs_o;
+                uv_other = pal_reference(0, other, field_last, bref_o, vs_o) ? pal_demod(c_o, frame_col, bref_o, vs_o) : vec2(0.0);
+            } else {
+                uv_other = pal_line_uv(0, other, field_last, frame_col);
+            }
+            uv = 0.5 * (uv + uv_other);
         }
         float16_t Up = float16_t(uv.x), Vp = float16_t(uv.y);
         if (dropout_mode == 2 && pal_painted) {
