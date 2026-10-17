@@ -16,6 +16,7 @@
 #include "VbiData.h"
 #include "Decoder.h"
 #include "NtscCadenceTracker.h"
+#include "PalCadenceTracker.h"
 #include "SdtvFrame.h"
 #include "SdtvShaders.h"
 
@@ -113,6 +114,7 @@ private:
            m_sec_vbi_ms = 0, m_sec_cadence_ms = 0, m_sec_audio_ms = 0, m_sec_gpu2_wait_ms = 0;
     int m_timed_frames = 0;
     NtscCadenceTracker m_cadence;
+    PalCadenceTracker m_cadence22;      // the 2:2 counterpart, on PAL
     // Which displayed frame each per-parity field buffer set in SdtvShaders
     // currently holds: input starvation can skip a field decode, and a
     // cadence weave/hold must not touch a buffer one frame older than the

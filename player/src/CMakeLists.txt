@@ -239,6 +239,7 @@ if(BUILD_MUSE)
         sdtv/SdtvInputBlock.h
         sdtv/VideoStandard.cpp sdtv/VideoStandard.h
         sdtv/NtscCadenceTracker.cpp sdtv/NtscCadenceTracker.h
+        sdtv/PalCadenceTracker.cpp sdtv/PalCadenceTracker.h sdtv/CadenceAction.h
         sdtv/SdtvDecoder.cpp sdtv/SdtvDecoder.h
         sdtv/SdtvShaders.cpp sdtv/SdtvShaders.h
         sdtv/SdtvFrame.cpp sdtv/SdtvFrame.h
