@@ -103,9 +103,15 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   only, and a file put into the app's data container with `devicectl device copy to`
   is there but the app's stat of it fails with "Operation not permitted".  A leading
   `~/` in file arguments is expanded (`expandHome`) for when that works.
-- Speed: still short of real time (40 MHz: 24 of 30 frames/s; 62.5 MHz: 20 of 30).
-  The demodulator's GPU work is at the block budget; the analog audio demodulation on
-  the CPU is at 5.6 of 8.4 ms per block; the decoder at 22 of 33 ms per frame.
+- Speed: 40 MHz NTSC plays in real time with audio (the demodulator block at 13.3 ms
+  for a 13.1 ms budget, no audio underruns) after the FIR shader's outputs per
+  invocation went to 1 on tvOS: on the A10X it is the fastest by far (the 40 MHz
+  block's GPU time 14.7 -> 9.7 ms; the M2 wants 2).  `MUSELD_FIR_OUTPUTS=n` overrides
+  it for measuring (`devicectl ... --environment-variables '{"MUSELD_FIR_OUTPUTS":"4"}'`).
+  The 62.5 MHz raw excerpt is bound by the Mac's WiFi at ~20 frames/s now, not by the
+  GPU (its GPU wait fell from 9.4 to 6.6 ms per 8.4 ms block): measure it from a wired
+  server, or as FLAC.  Next in line: the analog audio demodulation on the CPU (7.7 of
+  13.1 ms per block at 40 MHz), and the decoder (18 of 33 ms per frame).
 - The Siri Remote as a gamepad (needs the original remote), and Menu/back quitting the
   app: fine for development, but a tvOS app is not supposed to exit itself; a
   settings screen that stays in the app replaces this later.
