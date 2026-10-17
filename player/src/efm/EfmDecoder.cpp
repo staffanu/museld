@@ -361,6 +361,20 @@ void EfmDecoder::handleSubcode() {
     }
 
     if (crc == 0) {
+        // The whole Q frame at debug level, once a second: control+ADR, TNO,
+        // index, track time, zero, absolute time (IEC 60908 17.5.1; ADR 4
+        // with the same layout on laserdiscs, IEC 60857 amendment 2) -- what
+        // a decoder that keys on the Q timecodes sees of this disc
+        if (m_log.isEnabled(eDebug, eAudio) && ++m_q_frames_logged % 75 == 1) {
+            uint8_t q[12] = {};
+            for (int i = 0; i < 96; i++)
+                if (get_bit(i, 'Q'))
+                    q[i / 8] |= (uint8_t)(0x80 >> (i % 8));
+            m_log.debug(eAudio, std::format(
+                "Subcode Q: ctrl/adr {:02x} tno {:02x} idx {:02x} time {:02x}:{:02x}:{:02x} zero {:02x} "
+                "abs {:02x}:{:02x}:{:02x} crc {:02x}{:02x}",
+                q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7], q[8], q[9], q[10], q[11]));
+        }
         std::optional<SubcodePUse> use;
         // Pre-emphasis
         if ((get_bit(0, 'Q')) == 0 && (get_bit(1, 'Q')) == 0) {

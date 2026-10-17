@@ -1,0 +1,157 @@
+// Copyright 2023-2026 Staffan Ulfberg
+// This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
+
+#ifndef MUSECPP_SDTVDECODER_H
+#define MUSECPP_SDTVDECODER_H
+
+#include <array>
+#include <deque>
+#include "musevk/TimestampStatistics.h"
+#include "CompressedAudioDecoder.h"
+#include "DtsSyncDetector.h"
+#include "efm/EfmDecoder.h"
+#include "efm/EfmPcmProcessor.h"
+#include "musevk/CommandPool.h"
+#include "SdtvInputBlock.h"
+#include "VbiData.h"
+#include "Decoder.h"
+#include "NtscCadenceTracker.h"
+#include "PalCadenceTracker.h"
+#include "SdtvFrame.h"
+#include "SdtvShaders.h"
+
+namespace musevk {
+    class TimestampQueryPool;
+}
+template<class InputBlock> class FrameReader;
+class Logger;
+class SdtvShaders;
+
+class SdtvDecoder : public Decoder {
+public:
+    /// \param decode_all_fields If false, skips decoding of the first field of each
+    /// frame individually, so next should be called 30 times per second instead of 60;
+    /// useful for slow hardware.
+    SdtvDecoder(
+            Logger &log, FrameReader<SdtvInputBlock> &reader, musevk::VulkanManager &manager,
+            musevk::CommandPool &command_pool, std::string const &executable_dir,
+            bool decode_video, bool decode_all_fields, bool decode_audio,
+            float tint_degrees, float saturation,
+            musevk::TimestampQueryPool *timestamp_query_pool,
+            const VideoStandard &video_standard);
+    ~SdtvDecoder();
+    SdtvDecoder(const SdtvDecoder&) = delete;
+    void operator=(const SdtvDecoder&) = delete;
+
+    [[nodiscard]] bool initialize() override;
+
+    // true if not eof.  In case of a read timeout also returns true so that we can check for key presses.
+    bool next(const DecodeControls &controls, DecodedField &out) override;
+
+    void outputBenchmarkResults() override;
+    ResultImages getResultImages() override;
+    SourceDimensions getSourceDimensions() const override;
+    std::optional<PixelFileOffsets> computePixelFileOffsets(
+            int field_x, int field_y, int field_parity,
+            int64_t buffer_file_offset, double input_samples_per_muse_sample) const override;
+
+private:
+    // Feeds the decoded EFM samples to the DTS detector and logs its
+    // decisions; returns true when the track carries a DTS bitstream
+    bool detectDtsBitstream(const std::vector<TwoChannelSampleWithErasureFlags> &raw_samples);
+
+    Logger &m_log;
+    FrameReader<SdtvInputBlock> &m_reader;
+    musevk::VulkanManager &m_manager;
+    const VideoStandard &m_standard;
+    SdtvShaders m_shaders;
+    const bool m_decode_video;
+    const bool m_decode_all_fields;
+    const bool m_decode_audio;
+    musevk::TimestampQueryPool *m_timestamp_query_pool; // if set we use it
+
+    std::pair<float, float> m_eq;
+    float m_rot_re; // chroma rotation/gain for the decode shader; set in the constructor
+    float m_rot_im;
+    SdtvFrame::NoiseEstimate m_noise; // EWMA-smoothed, reader voltage units
+    double m_blanking_avg;            // EWMA of the per-frame blanking level ...
+    double m_blanking_sq_avg;         // ... and of its square, for the wander σ
+    double m_white_avg;               // EWMA of the white flag level, -1 until first seen
+    long m_white_flag_frames;         // frames whose white flag qualified
+    float m_level_offset_v;           // rescale applied by the copy shader (offset = this frame's blanking):
+    float m_level_scale;              // out = (v - offset) * scale
+    std::vector<float> m_row_blanking_v; // the offset per row: the frame's blanking level, refined per line (SdtvFrame::RowBlankingLevels)
+    std::array<double, SdtvFrame::NoiseEstimate::c_luma_hist_bins> m_luma_hist; // decaying sum of the per-frame histograms
+    double m_black_peak_v;            // its dark peak, volts above blanking (the disc's black setup); -1 until seeded
+    double m_black_lowest_v;          // the lowest significant dark peak (letterbox mattes, fades); -1 until seeded
+    double m_black_peak_min_v;        // its minimum, decaying over minutes: the disc's black, held through bright scenes
+    float m_black_auto_ire;           // the automatic choice, 7.5 (NTSC-M) until the held black says NTSC-J
+    float m_black_ire;                // the black setup in effect this frame, from the mode and the automatic choice
+    std::shared_ptr<VbiData> m_prev_vbi; // last frame's VBI data, for the disc-level flags a frame may miss
+    uint32_t m_prev_vbi_seek_generation = 0;
+    // The seek generation of each frame in m_frames (same order), so the
+    // disc info handed out can say which seek it belongs to
+    std::vector<uint32_t> m_frame_seek_generation; // one per frame in m_frames
+    double m_prev_burst_phase;        // last frame's burst phase, NAN before the first
+    double m_burst_coherence_avg;     // EWMA of the frame-to-frame burst phase error, -1 until seeded
+    std::array<double, 256> m_noise_psd; // cumulative blank-VBI-line power spectrum
+    long m_noise_psd_windows;
+    vk::Semaphore m_first_stage_complete_semaphore;
+    std::shared_ptr<musevk::CommandBuffer> m_reset_timestamp_query_pool_command_buffer;
+    std::shared_ptr<musevk::CommandBuffer> m_first_stage_command_buffer;
+    std::shared_ptr<musevk::CommandBuffer> m_second_stage_command_buffer;
+    musevk::TimestampStatistics m_timestamp_statistics;
+    int m_frame_no;
+    int m_field_index; // 0 if a new frame needs to be read, 1 when we should process the second field
+    long m_total_elapsed_time_us;
+    // Per-section CPU timing of next(), accumulated over both fields and
+    // reported every c_timing_report_frames frames (ePerformance).  The two
+    // Vulkan fence waits and the host-side reads of mapped buffers (noise
+    // estimate, VBI, cadence diffs) get their own buckets, since their cost
+    // varies wildly between GPUs and drivers.
+    static constexpr int c_timing_report_frames = 128;
+    double m_sec_input_ms = 0, m_sec_noise_ms = 0, m_sec_record_ms = 0, m_sec_gpu1_wait_ms = 0,
+           m_sec_vbi_ms = 0, m_sec_cadence_ms = 0, m_sec_audio_ms = 0, m_sec_gpu2_wait_ms = 0;
+    int m_timed_frames = 0;
+    NtscCadenceTracker m_cadence;
+    PalCadenceTracker m_cadence22;      // the 2:2 counterpart, on PAL
+    // Which displayed frame each per-parity field buffer set in SdtvShaders
+    // currently holds: input starvation can skip a field decode, and a
+    // cadence weave/hold must not touch a buffer one frame older than the
+    // cadence assumes
+    std::array<int, 2> m_field_buffer_frame_no;
+    EfmDecoder m_efm_decoder;
+    EfmPcmProcessor m_efm_pcm_processor;
+    bool m_pal_v_flip;
+    // AC3 (from the AC3-RF track) and DTS (a bitstream in place of the EFM
+    // track's PCM) decoded to stereo; silent stubs in builds without FFmpeg
+    CompressedAudioDecoder m_ac3_pcm_decoder;
+    CompressedAudioDecoder m_dts_pcm_decoder;
+    std::vector<uint8_t> m_dts_bitstream; // per-frame staging of the EFM bytes for the DTS decoder
+    // DTS detection on the EFM track, deciding MODE_EFM (PCM) vs MODE_DTS
+    DtsSyncDetector m_dts_detector;
+    // Audio decoded from the newest read block, held back one frame so it
+    // stays in sync with the picture (which displays one frame behind the
+    // read for the 3D comb lookahead).  A FIFO: AC3 and DTS produce PCM in
+    // whole-frame quanta, so a delivery can leave a remainder for the next.
+    std::vector<AudioFrame> m_pending_audio;
+    AudioMode m_pending_audio_mode;
+    // Per-read audio batches held back beyond the one frame m_pending_audio
+    // gives, for a display latency of more than one frame (PAL: two)
+    std::deque<std::vector<AudioFrame>> m_audio_hold;
+    // The raw sync frames behind the pending MODE_AC3 audio, held back the
+    // same one frame, so the file writer can mux the original bitstream
+    std::vector<std::array<uint8_t, 1536>> m_pending_ac3_frames;
+    // The temporal comb's frame distance d: 1 on NTSC, where the subcarrier
+    // inverts from one frame to the next, 2 on PAL, where it takes two
+    // frames to invert (270 degrees per frame, and the V switch flips).
+    // m_frames holds 3d + 1 frames, the front (index 0) the newest received
+    // frame N + d (the lookahead), index d the frame being decoded, 2d and
+    // 3d its temporal history; the motion detector and the comb see frames
+    // at spacing d throughout, so their phase assumptions hold on both.
+    int m_temporal_distance;
+    std::deque<SdtvFrame *> m_frames;
+};
+
+
+#endif //MUSECPP_SDTVDECODER_H

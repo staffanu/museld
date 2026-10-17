@@ -11,7 +11,7 @@
 // invocation from a shared-memory tile): two outputs per invocation ran the
 // 25-tap band-pass 3x faster and the decimating 19-tap low-pass 2.5x faster.
 // Four and eight outputs per invocation were slower than two on that GPU for
-// these windows (the 24-tap de-emphasis in ntsc_deemphasis.comp is fastest at
+// these windows (the 24-tap de-emphasis in sdtv_deemphasis.comp is fastest at
 // four), so the count is a specialization constant and worth re-measuring
 // on other hardware.  The taps are accumulated with an explicit fma(), which
 // is what the driver made of the plain expression before, so the output is

@@ -86,6 +86,7 @@ private:
     // -3 means that we didn't see the sync sequence S0, S1
     // -2, -1 means that we are in the sync sequence
     int m_subcode_symbol_index;
+    int64_t m_q_frames_logged = 0; // Q frames with a good CRC, for the once-a-second debug dump
     std::array<ByteWithErasureFlag, 33> m_frame; // first byte is the control data
 
     // bits 7-0 correspond to P-W

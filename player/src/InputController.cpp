@@ -11,6 +11,42 @@
 #include "PlayerState.h"
 #include "logging/Logger.h"
 
+bool startChapterSearch(PlayerState &state, const ReaderControls &reader, Logger &log,
+                        ChapterSearch::Direction direction, std::optional<int> target_chapter) {
+    if (state.chapter_search)
+        return false; // one at a time
+    const auto &info = state.last_decoded.disc_info;
+    if (!info || !info->chapter()) {
+        state.osd_text = "NO CHAPTER CODE";
+        return false;
+    }
+    if (!reader.seekToInputSample || reader.samples_per_second <= 0) {
+        state.osd_text = "SEARCH NOT AVAIL";
+        return false;
+    }
+    const ChapterSearch::Reading here{state.last_decoded.disc_info_input_offset, info->chapter(),
+                                      info->isLeadIn(), info->isLeadOut()};
+    const ChapterSearch::Params params{reader.samples_per_second,
+                                       reader.input_sample_count ? reader.input_sample_count() : -1};
+    state.chapter_search = target_chapter
+            ? std::make_unique<ChapterSearch>(params, here, *target_chapter)
+            : std::make_unique<ChapterSearch>(params, here, direction);
+    state.search_action_pending = true;
+    // The search needs the decoder running; back to the pause when done.
+    // The OSD text is drawn into the displayed image, which the search
+    // leaves as it is, so re-decode it once first: that clears whatever
+    // text is on it before "SEARCH" goes on.
+    state.search_resume_paused = state.paused;
+    state.paused = false;
+    state.redo_last_field = true;
+    state.paused_countdown = 0;
+    log.info(eApplication, std::format("Chapter search: {} from chapter {} at input sample {}",
+                                       target_chapter ? std::format("chapter {}", *target_chapter)
+                                       : direction == ChapterSearch::Direction::eNext ? "next" : "previous",
+                                       *info->chapter(), here.offset));
+    return true;
+}
+
 bool InputController::checkKey(int scancode) const {
     return m_pressed.contains(scancode);
 }
@@ -110,7 +146,11 @@ bool InputController::poll(SDL_Window *window,
                 break;
         }
     }
-    if (quit || checkKey(SDL_SCANCODE_ESCAPE) || checkKey(SDL_SCANCODE_Q))
+    if (quit)
+        return false;
+    if (m_ignore_keys)
+        return true; // --no-keys: the events are pumped, the keys do nothing
+    if (checkKey(SDL_SCANCODE_ESCAPE) || checkKey(SDL_SCANCODE_Q))
         return false;
     if (checkKey(SDL_SCANCODE_TAB)) {
         // Full screen at the desktop's mode -- no mode switch, the picture is
@@ -164,13 +204,28 @@ bool InputController::poll(SDL_Window *window,
             }
         }
     }
+    // Up/Down: the next/previous chapter, found by probing the input (see
+    // ChapterSearch; the loop in runPlayer drives it).  Like Left/Right
+    // they pan instead while zoomed.
     if (checkKey(SDL_SCANCODE_UP)) {
-        state.zoom_center.second = std::max(0.5 / state.zoom_factor,
-                                            state.zoom_center.second - zoom_step / state.zoom_factor);
+        if (state.zoom_factor != 1) {
+            state.zoom_center.second = std::max(0.5 / state.zoom_factor,
+                                                state.zoom_center.second - zoom_step / state.zoom_factor);
+        } else {
+            startChapterSearch(state, reader, m_log, ChapterSearch::Direction::eNext);
+        }
     }
     if (checkKey(SDL_SCANCODE_DOWN)) {
-        state.zoom_center.second = std::min(1.0 - 0.5 / state.zoom_factor,
-                                            state.zoom_center.second + zoom_step / state.zoom_factor);
+        if (state.zoom_factor != 1) {
+            state.zoom_center.second = std::min(1.0 - 0.5 / state.zoom_factor,
+                                                state.zoom_center.second + zoom_step / state.zoom_factor);
+        } else {
+            startChapterSearch(state, reader, m_log, ChapterSearch::Direction::ePrevious);
+        }
+    }
+    if (checkKey(SDL_SCANCODE_P)) {
+        state.honor_picture_stops = !state.honor_picture_stops;
+        state.osd_text = state.honor_picture_stops ? "PICTURE STOPS ON" : "PICTURE STOPS OFF";
     }
 
     if (checkKey(SDL_SCANCODE_1)) {

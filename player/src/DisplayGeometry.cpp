@@ -31,6 +31,19 @@ PictureFormat PictureFormat::ntsc(int width, int height, int first_column) {
     return {width, height, pixel_aspect, center - picture_width / 2, center + picture_width / 2, true};
 }
 
+PictureFormat PictureFormat::pal(int width, int height, int first_column) {
+    // 1135 samples per line (line locked, 17.734375 MHz), where square
+    // pixels take 944 (14.75 MHz)
+    const double pixel_aspect = 944.0 / 1135.0;
+    const double samples_per_us = 1135.0 / 64.0;
+    // The active line: 52 us after a blanking interval of 12 us, of which
+    // 1.5 us (the front porch) precede the sync edge (ITU-R BT.470 System B/G)
+    const double center_us = (12.0 - 1.5) + 52.0 / 2;
+    const double center = center_us * samples_per_us - first_column + 0.5;
+    const double picture_width = height * (4.0 / 3.0) / pixel_aspect;
+    return {width, height, pixel_aspect, center - picture_width / 2, center + picture_width / 2, true};
+}
+
 PictureFormat PictureFormat::muse(int width, int height) {
     return {width, height, (16.0 / 9.0) / ((double)width / height), 0.0, (double)width, false};
 }

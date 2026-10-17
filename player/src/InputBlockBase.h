@@ -14,6 +14,7 @@ public:
     std::vector<float> efm_data;
     std::vector<TwoChannelSample> analog_data; // NTSC analog FM audio; empty elsewhere
     std::vector<std::array<uint8_t, 1536>> ac3_frames; // NTSC AC3-RF sync frames; empty elsewhere
+    uint32_t seek_generation = 0; // the reader's seek count when this frame's input was read
 
     virtual void writeToFile(int fd, void *buffer) = 0;
 

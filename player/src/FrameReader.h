@@ -42,7 +42,20 @@ public:
 
     std::pair<std::unique_ptr<InputBlock>, InputStatus> getNextInputBuffer();
     void returnBuffer(std::unique_ptr<InputBlock> &buffer);
-    virtual void seek(double seconds) = 0;
+    // Relative seek; false when the input refused it and nothing moved
+    // (live input ignores seeks and reports true)
+    virtual bool seek(double seconds) = 0;
+    // Positions the input at an absolute sample offset and returns the new
+    // seek generation (see InputBlockBase::seek_generation), or nullopt when
+    // the reader cannot: live input, the legacy readers without input
+    // offset bookkeeping, or a position the input refuses (then nothing
+    // moved).  The chapter search is built on this.
+    virtual std::optional<uint32_t> seekToInputSample(int64_t) { return std::nullopt; }
+    // The input's sample rate, and its length in samples (-1 when unknown);
+    // what the search needs to turn disc time into input offsets and to
+    // keep its probes inside the file
+    [[nodiscard]] virtual double inputSampleRate() const { return 0; }
+    [[nodiscard]] virtual int64_t inputSampleCount() const { return -1; }
     virtual void setEfmEnabled(bool) {}
     // Which audio source to demodulate.  MUSE readers know two sources, so the
     // default maps the track onto the EFM on/off switch; the NTSC reader
@@ -56,6 +69,18 @@ public:
     [[nodiscard]] virtual int efmAdaptiveFilterSize() const { return -1; }
 
 protected:
+    // Hands the frames already read but not yet collected back to the reader
+    // thread, for a seek: they are from the abandoned position, and every
+    // one of them would cost the consumer a decode before the first frame
+    // from the new position comes through
+    void discardFilledBuffers() {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        for (auto &b : m_filled_input_buffers)
+            m_vacant_input_buffers.push_back(std::move(b));
+        m_filled_input_buffers.clear();
+        m_cv_vacant.notify_one();
+    }
+
     // input_is_realtime is separate from input_is_fifo since we could have non-real-time input from a pipe
     // that is written to by someone that reads from a file (the example so far is reading from the FmDemodulator)
     FrameReader(Logger &log, const std::string &filename,

@@ -11,8 +11,8 @@
 #include "LdsInputReader.h"
 #include "PrefetchingInputReader.h"
 
-static std::unique_ptr<InputReader> makeInputReaderForSource(
-        std::unique_ptr<ByteSource> source, InputFormat format, uint32_t block_size) {
+std::unique_ptr<InputReader> makeInputReader(
+        std::unique_ptr<ByteSource> source, InputFormat format, uint32_t block_size, Logger *log) {
     switch (format) {
         case eUint8:    return std::make_unique<InputReaderImpl<uint8_t>>(std::move(source), block_size);
         case eSint8:    return std::make_unique<InputReaderImpl<int8_t>>(std::move(source), block_size);
@@ -26,29 +26,26 @@ static std::unique_ptr<InputReader> makeInputReaderForSource(
             // FLAC decoding costs milliseconds per block, too much to leave in series with
             // a real-time consumer's other work, so decode ahead on a separate thread.
             return std::make_unique<PrefetchingInputReader>(
-                std::make_unique<LdfInputReader>(std::move(source), block_size, format));
+                std::make_unique<LdfInputReader>(std::move(source), block_size, format, log));
     }
     throw std::runtime_error("Unsupported input format");
 }
 
 std::unique_ptr<InputReader> makeInputReader(
     const std::string &name, InputFormat format, uint32_t block_size, Logger *log) {
-    return makeInputReaderForSource(openByteSource(name, log), format, block_size);
+    return makeInputReader(openByteSource(name, log), format, block_size, log);
 }
 
-std::unique_ptr<InputReader> makeStdinInputReader(InputFormat format, uint32_t block_size) {
-    return makeInputReaderForSource(openStdinByteSource(), format, block_size);
-}
-
-std::optional<NetworkStreamInfo> probeNetworkStream(const std::string &name, double timeout_seconds) {
-    const auto info = EthadcByteSource::probe(
-            name, std::chrono::milliseconds((int64_t)(timeout_seconds * 1000)));
+std::optional<NetworkStreamInfo> networkStreamInfo(ByteSource &source, double timeout_seconds) {
+    auto *stream = dynamic_cast<EthadcByteSource *>(&source);
+    if (!stream)
+        return std::nullopt;
+    const auto info = stream->waitForStream(std::chrono::milliseconds((int64_t)(timeout_seconds * 1000)));
     if (!info)
         return std::nullopt;
     if (info->format_name == "s10p")
-        throw std::runtime_error(std::format(
-                "{}: the stream carries signed packed 10-bit samples (s10p), which museld cannot read yet",
-                name));
+        throw std::runtime_error(
+                "the stream carries signed packed 10-bit samples (s10p), which museld cannot read yet");
     return NetworkStreamInfo{inputFormatFromString(info->format_name), info->sample_frequency};
 }
 
@@ -60,9 +57,13 @@ std::optional<InputFormat> inputFormatFromFilename(const std::string &filename) 
     if (filename.ends_with(".u16be")) return eUint16BE;
     if (filename.ends_with(".s16be")) return eSint16BE;
     if (filename.ends_with(".lds"))   return eLds;
-    if (filename.ends_with(".flac"))  return eFlac;
+    // The FLAC reader tells plain FLAC from FLAC in Ogg by the stream's signature; these
+    // only say which to assume when the signature is missing
+    if (filename.ends_with(".flac"))     return eFlac;
     if (filename.ends_with(".flac.ldf")) return eFlac;
     if (filename.ends_with(".ldf"))      return eFlacOgg;
+    if (filename.ends_with(".oga"))      return eFlacOgg;
+    if (filename.ends_with(".ogg"))      return eFlacOgg;
     return std::nullopt;
 }
 

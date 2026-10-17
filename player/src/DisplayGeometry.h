@@ -19,6 +19,7 @@ struct PictureFormat {
 
     // first_column: the 4 fsc sample after the sync edge that column 0 holds
     static PictureFormat ntsc(int width, int height, int first_column);
+    static PictureFormat pal(int width, int height, int first_column);
     static PictureFormat muse(int width, int height);
 };
 

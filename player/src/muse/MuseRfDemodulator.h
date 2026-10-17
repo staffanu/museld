@@ -48,6 +48,7 @@ struct MuseDemodulatedBlock {
     }
 
     int64_t input_offset; // the number of samples in the input before this block
+    uint32_t seek_generation = 0; // the demodulator's seek count when the block's input was read
     std::shared_ptr<musevk::VulkanBuffer> video_data;
     std::shared_ptr<musevk::VulkanBuffer> dropouts; // 1-to-1 with the video_data array. 0 or 1 for now, but could indicate how certain we are in the future
     std::vector<float> efm_input; // raw input samples staged for the EFM worker thread; empty when EFM is disabled
@@ -56,8 +57,8 @@ struct MuseDemodulatedBlock {
 
 class MuseRfDemodulator : public RfDemodulator<MuseDemodulatedBlock> {
 public:
-    MuseRfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
-                      musevk::VulkanManager &vulkan_manager, InputFormat input_format, bool benchmark_shaders,
+    MuseRfDemodulator(Logger &log, std::string executable_dir, PreparedInput input, float sample_frequency,
+                      musevk::VulkanManager &vulkan_manager, bool benchmark_shaders,
                       bool efm_enabled, int efm_adaptive_filter_size);
     MuseRfDemodulator(const MuseRfDemodulator&) = delete;
     void operator=(const MuseRfDemodulator&) = delete;

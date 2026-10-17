@@ -14,6 +14,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <format>
 #include <stdexcept>
 #include "ByteSource.h"
@@ -40,9 +41,17 @@ public:
     virtual ~InputReader() = default;
 
     virtual void initialize() = 0;
-    virtual void seek(int64_t no_samples) = 0;
+    // Moves the position by no_samples (clamped at the start).  Returns false
+    // when the reader could not get there and stayed where it was -- a
+    // container that refuses the position -- so a caller can report it and
+    // carry on; an I/O error still throws.
+    virtual bool seek(int64_t no_samples) = 0;
     virtual int readFloats(float *f) = 0;
+    // The width and signedness of the samples as the file holds them.  The readers
+    // hand out the file's own codes as floats (less the DC estimate when enabled), so
+    // these two facts are all a consumer needs to map them into its working range.
     virtual int bitsPerSample() const = 0;
+    virtual bool signedSamples() const = 0;
 
     uint32_t block_size() const {
         return m_block_size;
@@ -67,6 +76,14 @@ public:
     // seeks are ignored and the player has to keep up.  See ByteSource::isLive.
     virtual bool isLive() const {
         return m_source && m_source->isLive();
+    }
+
+    // The number of samples in the input, or -1 when it is not known (a live
+    // source, or a container that does not say).  The chapter search uses it
+    // to keep its probes inside the file: a read past the end finishes the
+    // decoding threads for good.
+    virtual int64_t sampleCount() {
+        return -1;
     }
 
 protected:
@@ -154,9 +171,16 @@ public:
 
     void initialize() override {}
     int bitsPerSample() const override { return sizeof(T) * 8; }
+    bool signedSamples() const override { return std::is_signed_v<T>; }
 
-    void seek(int64_t no_samples) override {
+    bool seek(int64_t no_samples) override {
         seekBytes(no_samples * (int64_t)sizeof(*m_buffer));
+        return true;
+    }
+
+    int64_t sampleCount() override {
+        const int64_t bytes = m_source ? m_source->size() : -1;
+        return bytes < 0 ? -1 : bytes / (int64_t)sizeof(T);
     }
 
     int readFloats(float *f) override {
