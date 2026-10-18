@@ -120,7 +120,17 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
 - **MUSE runs on the A1842** (2026-10-18, Ursa Minor Blue side 1 at 62.5 MHz from the
   NAS): at about 64% of real time -- 5740 fields in 150 s -- the demodulator's GPU at
   11.3 ms per 8.4 ms block (no pre-decimation here: the MUSE RF band needs the rate),
-  the decoder about 37 ms per frame.  Start-up first died in the memory allocator
+  the decoder about 37 ms per frame.  The demodulator alone (`--no-video --no-audio
+  --no-sync`) needs 9.1 ms of GPU per 8.4 ms block, 108% of real time by itself, and
+  the two chains share the GPU: of the ~13.1 ms of GPU per 8.4 ms of content that the
+  64% implies, the demodulator is 70%, the decoder 30%.  Both demodulators read the
+  next block while the GPU works on the current one (the same structure in
+  `SdtvRfDemodulator` and `MuseRfDemodulator`), which gave MUSE playback 4% here.  A
+  third limit sits right beside the GPU's: decoding the 62.5 MHz 16-bit FLAC takes the
+  A10X's CPU about 10.6 ms per block on the prefetching reader's thread (125 MB/s of
+  samples), so a free-running MUSE demodulator waits for the FLAC decoder, not the GPU.
+  An s8 capture avoids it and fits gigabit Ethernet (62.5 MB/s); s16 raw does not.
+  Start-up first died in the memory allocator
   (fixed: a request above its 16 MB block size, which MoltenVK's requirements for the
   MUSE frame buffers are on the A10X).  Audio underruns throughout, as expected below
   real time.  This is the box's limit until the MUSE chain itself gets cheaper; a
