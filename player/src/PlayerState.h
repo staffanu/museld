@@ -69,7 +69,8 @@ struct PlayerState {
     Decoder::DecodedField last_decoded{};
 
     // Picture stops (the CAV still-frame code): pause on them unless the
-    // user turns it off with the P key; each stop pauses once
+    // user turns it off with the P key; each stop pauses once.  Off from
+    // the start on a live input, whose source stops by itself (runPlayer)
     bool honor_picture_stops = true;
     std::optional<int64_t> last_picture_stop_offset;
 

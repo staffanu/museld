@@ -965,6 +965,21 @@ constexpr uint32_t c_live_block_samples = 1 << 16;
 constexpr int c_live_report_every = 10;
 // A line lock this strong needs no second window (clean RF measures 0.9+)
 constexpr double c_live_clear_strength = 0.6;
+// A verdict below that is waited out: a locked disc with a picture shows
+// 0.8-0.97 even on a rotted copy (NYCSTM 0.88).  The GGV1011's capture opens
+// on black pictures and the player seeking, where the line-to-line
+// correlation is 0.28 and the autocorrelation peak wanders 1-3 % per window
+// (2414 samples through the true 2560 to 2617, with the disc locked all
+// along, as the timebase dump shows); a verdict taken there missed the
+// capture rate by 6 %.  A weak verdict is taken once the period has held
+// still for c_live_steady_windows consecutive windows to c_live_steady_period
+// (the GGV1011's black stretch settles at 2560.0 for 20 windows at 0.31
+// before the picture arrives), and after c_live_max_weak_windows without
+// either the strongest one so far is taken, with a warning.  A window is
+// 0.1-0.2 s of a 40 MHz stream.
+constexpr int c_live_steady_windows = 8;
+constexpr double c_live_steady_period = 0.002;
+constexpr int c_live_max_weak_windows = 150;
 
 // Reads `n` bytes from a live source, waiting for them; fewer at the end of
 // the stream.
@@ -1000,7 +1015,9 @@ InputProbeResult probeLive(Logger &log, PreparedInput &input, optional<InputForm
     vector<uint8_t> window;
     unique_ptr<InputReader> reader;
     bool have_result = false; // a verdict is in `result`
-    bool confirming = false;  // ...and this window is the one more it gets
+    int weak_windows = 0;     // windows read since a verdict below c_live_clear_strength
+    int steady_windows = 0;   // consecutive verdicts whose line period agreed with the previous
+    double prev_period = 0;
     for (int windows = 1; ; windows++) {
         if (!format) {
             window = readLiveWindow(input.source(), c_live_window_bytes);
@@ -1041,18 +1058,38 @@ InputProbeResult probeLive(Logger &log, PreparedInput &input, optional<InputForm
             classify(log, samples, verdict.best, attempt);
         const bool decided = need_type ? attempt.type != InputProbeResult::Type::eUnknown
                                        : attempt.line_period > 0;
-        if (decided && attempt.line_strength > result.line_strength) {
-            result = attempt;
-            have_result = true;
+        bool steady = false;
+        if (decided) {
+            steady_windows = prev_period > 0
+                             && abs(attempt.line_period - prev_period) / prev_period < c_live_steady_period
+                             ? steady_windows + 1 : 0;
+            prev_period = attempt.line_period;
+            steady = steady_windows >= c_live_steady_windows;
+            // The latest of a steady run is the locked disc; otherwise the
+            // strongest so far is the best guess
+            if (!have_result || steady || attempt.line_strength > result.line_strength) {
+                result = attempt;
+                have_result = true;
+            }
+        } else {
+            steady_windows = 0;
+            prev_period = 0;
         }
-        // The window the signal begins in is part lead-in, and measures the
-        // line period off a little; a weak first verdict is given one more
-        // window to improve on, a clear one is taken as it is
-        if (have_result && (result.line_strength >= c_live_clear_strength || confirming))
+        // A clear verdict is taken as it is; a weak one (the signal begins
+        // in this window, or the content gives the line period little to
+        // lock on) is waited out until the line period holds still
+        if (have_result && (result.line_strength >= c_live_clear_strength || steady))
             break;
+        if (have_result && weak_windows >= c_live_max_weak_windows) {
+            log.warn(eInput, std::format("Probe: no clear line structure in {} windows of the live input "
+                                         "(best correlation {:.2f}); going with it",
+                                         weak_windows, result.line_strength));
+            break;
+        }
         if (samples.ended())
             break;
-        confirming = have_result;
+        if (have_result)
+            weak_windows++;
         if (!have_result && windows % c_live_report_every == 0)
             log.warn(eInput, std::format("Probe: no recognizable signal in the live input yet "
                                          "({} windows read); waiting for more", windows));

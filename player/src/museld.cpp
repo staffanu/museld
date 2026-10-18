@@ -369,7 +369,7 @@ static void runPlayer(Logger &log,
                       double export_frame_after_seconds,
                       double write_duration_seconds,
                       double seconds_per_iteration,
-                      bool pace_by_clock,
+                      int pace_slack_fields,
                       double initial_seek_seconds,
                       std::optional<int> start_chapter) {
     vk::Device &device = manager.getDevice();
@@ -388,6 +388,11 @@ static void runPlayer(Logger &log,
 
         PlayerState state;
         state.stream_start_seconds = initial_seek_seconds;
+        // A live source has a transport of its own: a disc player feeding
+        // museld stops on the picture stop itself, and a pause here on top
+        // of it would have to be released separately (and again on every
+        // frame while the player sits on its still).  P turns them on.
+        state.honor_picture_stops = !reader_controls.input_is_live;
         state.paused_countdown = start_paused ? 5 : 0;
         state.field_interpolation_mode = initial_field_interpolation_mode;
         state.use_3d_comb = initial_use_3d_comb;
@@ -880,7 +885,7 @@ static void runPlayer(Logger &log,
                 manager.present(swap_chain_image);
             }
 
-            if (pace_by_clock) {
+            if (pace_slack_fields >= 0) {
                 auto stream_offset = [&](int64_t fields) {
                     return chrono::duration_cast<chrono::steady_clock::duration>(
                             chrono::duration<double>(fields * seconds_per_iteration));
@@ -889,8 +894,15 @@ static void runPlayer(Logger &log,
                 if (!state.paused && state.last_decoded.decoded) {
                     paced_fields++;
                     const auto due = pace_origin + stream_offset(paced_fields);
-                    if (due > now)
-                        std::this_thread::sleep_until(due);
+                    // Where the display's refresh sets the cadence the clock
+                    // only guards against it failing to (macOS stops blocking
+                    // on the refresh while the window is covered or minimized,
+                    // and the loop then runs at decode speed): it sleeps once
+                    // the loop is pace_slack_fields ahead of the stream clock,
+                    // never for the fraction of a field that 59.94 against
+                    // 60 Hz accumulates between refreshes
+                    if (due - now > stream_offset(pace_slack_fields))
+                        std::this_thread::sleep_until(due - stream_offset(pace_slack_fields));
                     else if (now - due > stream_offset(2))
                         pace_origin = now - stream_offset(paced_fields); // fell behind (the initial lock,
                                                                          // a stall): resume from here, no catch-up burst
@@ -1150,6 +1162,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 CompressedAudioDecoder::available() ? "AC3 AUDIO" : "AC3 AUDIO (NO FFMPEG)",
                 !is_muse, // has_analog_audio
                 !is_muse && video_standard->ntsc_chroma, // has_ac3_audio: AC3-RF exists on NTSC discs only
+                reader.inputIsLive(),
         };
         if (reader.efmAdaptiveFilterSize() >= 0) { // RF input: the reader runs an EFM demodulator
             reader_controls.efmFilterSize = [&reader]() { return reader.efmAdaptiveFilterSize(); };
@@ -1190,14 +1203,21 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                 ? 60.0 : 2 * video_standard->framesPerSecond();
         const double seconds_per_iteration = (decode_all_fields ? 1 : 2) / fields_per_second;
         // The display's refresh paces the loop at one field per refresh, which
-        // is real time only for ~60 Hz material on a ~60 Hz display; slower
-        // material (PAL) is paced by the clock instead
+        // is real time only for ~60 Hz material on a ~60 Hz display; there the
+        // clock only guards against the refresh failing to pace (a covered
+        // window on macOS), with a few fields of slack so the refresh keeps
+        // the cadence.  Slower material (PAL) is paced by the clock itself.
+        // --no-sync (-1) runs free.
         const SDL_DisplayMode *video_mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window));
         const double refresh_hz = video_mode != nullptr && video_mode->refresh_rate > 0 ? video_mode->refresh_rate : 60.0;
-        const bool pace_by_clock = !no_sync && fields_per_second < 0.97 * refresh_hz;
-        if (pace_by_clock)
-            log.info(eApplication, std::format("Pacing playback by the clock: {:.2f} fields/s on a {:.0f} Hz display",
-                                               fields_per_second, refresh_hz));
+        const bool refresh_paces = fields_per_second >= 0.97 * refresh_hz;
+        const int pace_slack_fields = no_sync ? -1 : refresh_paces ? 4 : 0;
+        if (!no_sync)
+            log.info(eApplication, refresh_paces
+                     ? std::format("Pacing playback by the display's {:.0f} Hz refresh, the clock as a guard: {:.2f} fields/s",
+                                   refresh_hz, fields_per_second)
+                     : std::format("Pacing playback by the clock: {:.2f} fields/s on a {:.0f} Hz display",
+                                   fields_per_second, refresh_hz));
 
         runPlayer(log, manager, *decoder, reader_controls, window, full_screen, no_keys, aspect_mode, picture_format,
                   full_image, overscan,
@@ -1208,7 +1228,7 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   vfw, audio_playback.get(), executable_dir,
                   subtitle_setup,
                   export_frame_filename, export_frame_after_seconds, write_duration_seconds, seconds_per_iteration,
-                  pace_by_clock, initial_seek_seconds, start_chapter);
+                  pace_slack_fields, initial_seek_seconds, start_chapter);
     }
 
 #ifdef HAVE_LIBAV

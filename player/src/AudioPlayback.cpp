@@ -163,8 +163,9 @@ void AudioPlayback::add_samples(AudioMode const &audio_mode, int const &sample_c
         m_audio_speed_adjust = clamp(error * c_speed_adjust_p_gain + m_speed_adjust_integral,
                                      -c_max_speed_adjust, c_max_speed_adjust);
 
-        m_log.debug(eAudio, std::format("Audio buffer size: {}, adjustment: {:.5f} (integral {:.5f})",
-                                        audio_buffer_size, (double)m_audio_speed_adjust, m_speed_adjust_integral));
+        m_log.debug(eAudio, std::format("Audio buffer size: {}, adjustment: {:.5f} (integral {:.5f}), adding {}",
+                                        audio_buffer_size, (double)m_audio_speed_adjust, m_speed_adjust_integral,
+                                        sample_count));
     }
 
     int discard_count = 0;

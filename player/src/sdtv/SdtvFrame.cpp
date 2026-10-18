@@ -157,12 +157,19 @@ void SdtvFrame::RowBlankingLevels(float const *data, float frame_level, const Vi
     // carrier, and with it the whole baseband, moving +-7 IRE over each
     // rotation, which is one frame, so that one field was 7 IRE brighter
     // than the other under a per-frame offset.
+    // The clamp follows that wander, one cycle per rotation, and nothing
+    // faster: a 16-sample porch is noisy (0.8-1.0 IRE per row on the stu
+    // captures), and smoothed over 12 rows (v0.5.1) it left bands of 0.45
+    // IRE rms moving frame to frame, more than the wander itself on the
+    // PAL discs (1.5-1.8 IRE peak to peak) and visible in the shadows.  Two
+    // 45-row boxes (a triangle 89 rows wide) leave 0.1-0.3 IRE and keep
+    // 98 % of a one-cycle-per-frame sinusoid, 93 % of a two-cycle one.
     const int width = standard.samples_per_line;
     const int rows = standard.total_lines;
     constexpr int c_window = 16;        // the same porch window as EstimateNoise
     constexpr float c_gate = 0.07f;     // 10 IRE: a porch further from the frame's level is not a porch
     constexpr int c_median = 7;         // rejects the three broad-pulse rows of a vertical interval in one go
-    constexpr int c_box = 5;
+    constexpr int c_box = 45;           // applied twice
     std::vector<float> raw(rows), med(rows), scratch;
     std::vector<bool> valid(rows);
     for (int row = 0; row < rows; row++) {
@@ -192,11 +199,14 @@ void SdtvFrame::RowBlankingLevels(float const *data, float frame_level, const Vi
         med[row] = RobustNoise::median(scratch);
     }
     out.resize(rows);
-    for (int row = 0; row < rows; row++) {
-        float sum = 0;
-        for (int k = -(c_box / 2); k <= c_box / 2; k++)
-            sum += med[std::clamp(row + k, 0, rows - 1)];
-        out[row] = sum / (float)c_box;
+    std::vector<float> &pass1 = raw; // reuse
+    for (const auto &[src, dst] : {std::pair{&med, &pass1}, std::pair{&pass1, &out}}) {
+        for (int row = 0; row < rows; row++) {
+            float sum = 0;
+            for (int k = -(c_box / 2); k <= c_box / 2; k++)
+                sum += (*src)[std::clamp(row + k, 0, rows - 1)];
+            (*dst)[row] = sum / (float)c_box;
+        }
     }
 }
 
