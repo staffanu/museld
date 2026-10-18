@@ -75,7 +75,7 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
           spirv("pack_dropout_bits"), Size(standard.dropout_bit_words, standard.total_lines)));
   m_extend_dropouts_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_extend_dropouts",
-          {eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 0,
+          {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 0,
           spirv("extend_dropouts"), Size(standard.samples_per_line, standard.total_lines)));
   m_conceal_composite_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_conceal_composite",
@@ -139,7 +139,7 @@ void SdtvShaders::extendDropouts(musevk::CommandBuffer &sq, std::shared_ptr<muse
 
   m_pack_dropout_bits_algo->updateBufferDescriptorsInSet(0, {dropout_input, m_dropout_bits});
   sq.enqueueComputeShader<uint32_t>(m_pack_dropout_bits_algo, {});
-  m_extend_dropouts_algo->updateBufferDescriptorsInSet(0, {m_dropout_bits, dropout_plane, m_raw_deemphasized, dropout_input});
+  m_extend_dropouts_algo->updateBufferDescriptorsInSet(0, {m_dropout_bits, dropout_plane, m_raw_deemphasized});
   sq.enqueueComputeShader<uint32_t>(m_extend_dropouts_algo, {});
 }
 

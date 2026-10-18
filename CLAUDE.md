@@ -208,10 +208,7 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   position of its start) per finalized line; `<prefix>.meas.f64`: the accepted sync
   measurements. Use together with a demod dump **from the same run**.
 - `MUSELD_DUMP_DEMOD` also writes `<path>.do`, the detector's dropout flags of the same blocks
-  as the reader's ring holds them, one byte per decimated sample: 1 is an envelope detection,
-  2 a discriminator glitch (a raw sample outside the range any legal signal reaches, usually a
-  phase step past pi at a one-sample amplitude notch on saturated colour; the extend shader
-  takes those without its video-damage corroboration).
+  as the reader's ring holds them, one byte per decimated sample.
 - `MUSELD_DUMP_DROPOUT=<prefix>` with `MUSELD_DUMP_DROPOUT_BLOCKS=<n>` (default 32) — what the
   dropout detector sees, per raw input sample: `<prefix>.env.f32` (the 9-sample box of the squared
   envelope), `<prefix>.demod.f32` (the raw quadrature output its slew test reads) and
