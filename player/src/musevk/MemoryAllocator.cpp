@@ -2,6 +2,9 @@
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
 #include <cstdint>
+#include <stdexcept>
+#include <format>
+#include <algorithm>
 #include <iostream>
 #include <vector>
 #include "MemoryAllocator.h"
@@ -64,17 +67,27 @@ namespace musevk {
             if (allocationOpt)
                 return allocationOpt.value();
         }
-        vk::MemoryAllocateInfo memoryAllocateInfo(ALLOCATION_BLOCK_SIZE, std::get<0>(allocation_key));
+        // A new block: the standard size, or one of the request's own size when that is
+        // larger (the MUSE frame buffers on the Apple TV's A10X, where MoltenVK's memory
+        // requirements for them exceed 16 MB; they fit the standard block on macOS)
+        const size_t needed = (memory_requirements.size + m_non_coherent_atom_size - 1)
+                              / m_non_coherent_atom_size * m_non_coherent_atom_size
+                              + memory_requirements.alignment;
+        const size_t block_size = std::max<size_t>(ALLOCATION_BLOCK_SIZE, needed);
+        vk::MemoryAllocateInfo memoryAllocateInfo(block_size, std::get<0>(allocation_key));
         auto device_memory = device.allocateMemory(memoryAllocateInfo);
 
         auto ptr = std::get<1>(allocation_key) ?
                    device.mapMemory(device_memory, 0, VK_WHOLE_SIZE, vk::MemoryMapFlags()) : nullptr;
 
-        MemoryBlock block {device, allocation_key, device_memory, ALLOCATION_BLOCK_SIZE, 0, {}, ptr, m_non_coherent_atom_size};
+        MemoryBlock block {device, allocation_key, device_memory, block_size, 0, {}, ptr, m_non_coherent_atom_size};
         auto allocationOpt = block.allocate(memory_requirements);
         blocks.push_back(block);
 
-        assert(allocationOpt);
+        if (!allocationOpt)
+            throw std::runtime_error(std::format(
+                    "MemoryAllocator: a request of {} bytes (alignment {}) does not fit a new block of {} bytes",
+                    (uint64_t)memory_requirements.size, (uint64_t)memory_requirements.alignment, (uint64_t)block_size));
         return allocationOpt.value();
     }
 
