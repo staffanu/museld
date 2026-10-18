@@ -128,8 +128,19 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   read the next block while the GPU works on the current one (the same structure in
   `SdtvRfDemodulator` and `MuseRfDemodulator`).  Halving the band-pass and low-pass
   taps (`MUSELD_FIR_TRANSITION_SCALE=2`, 29 -> 15 complex taps) saves only ~0.6 ms of
-  the 8.4, quartering ~1.5: the FIRs are maybe half of the chain, so half floats in
-  them would be part of a real-time MUSE on the A10X, not all of it.
+  the 8.4, quartering ~1.5.  A fused complex band-pass (one pass producing the real
+  and the imaginary output from one window load, in place of two fir_filter.comp
+  passes) was *slower* on the A10X, 8.4 -> 11.1 ms for the chain, whether the taps sat
+  in registers or were read from the buffer in the loop (8% faster on the M2, 1.15 ->
+  1.06 ms; not kept).  So neither the taps nor the per-invocation cost of the FIRs is
+  where the time goes: the tap-proportional part of the two FIRs is ~2 ms, and 5 ms or
+  more of the 8.4 are the other passes (the quadrature demodulation with its atan, the
+  envelope box, block sums and prefix scan, the dropout detector, the decimating
+  low-pass and the RRC).  This GPU wants small simple kernels (one output per
+  invocation won for the same reason).  The next measurement is an ablation: a hook
+  that skips a named pass, with `MUSELD_REPEAT_INPUT=1`, so each pass's cost is a
+  difference -- MoltenVK's timestamps cannot give it.  Half floats in the FIRs would
+  be worth 10% at most after this.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
