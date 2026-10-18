@@ -302,7 +302,9 @@ file's tail for FLAC: the last Ogg page's granule position, or the last frame he
 plain stream). STREAMINFO's sample count is only 36 bits (28 min at 40 MHz), so long captures
 have it at zero or wrapped, and libFLAC refuses seeks beyond a wrapped value: `LdfInputReader`
 zeroes the field in the bytes it hands libFLAC (re-checksumming the Ogg page), which makes it
-seek by stream length instead. A seek the input refuses returns false up the chain
+seek by stream length instead. A plain FLAC stream (no Ogg, no seek table) is the opposite case:
+libFLAC seeks it from the count and fails every seek without one, so there the count is kept
+when it is plausible for the file size and hidden only when wrapped (the Technidisc capture). A seek the input refuses returns false up the chain
 (`InputReader::seek`, `RfDemodulator::seekLocked`, `FrameReader::seek`) and nothing moves. Readers
 reset their timebase/PLL on the reader thread when a block's generation changes, never from
 the seeking thread, and the NTSC reader drops the partial frame after a reset. A probe costs
