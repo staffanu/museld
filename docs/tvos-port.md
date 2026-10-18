@@ -117,6 +117,17 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   bound by the Mac's WiFi at ~20 frames/s, not by the GPU: measure it from a wired
   server, or as FLAC.  Next in line for MUSE: the analog audio demodulation on the
   CPU (7.6 of 13.1 ms per block at 40 MHz), and the decoder (17.5 of 33 ms per frame).
+- **MUSE runs on the A1842** (2026-10-18, Ursa Minor Blue side 1 at 62.5 MHz from the
+  NAS): at about 64% of real time -- 5740 fields in 150 s -- the demodulator's GPU at
+  11.3 ms per 8.4 ms block (no pre-decimation here: the MUSE RF band needs the rate),
+  the decoder about 37 ms per frame.  Start-up first died in the memory allocator
+  (fixed: a request above its 16 MB block size, which MoltenVK's requirements for the
+  MUSE frame buffers are on the A10X).  Audio underruns throughout, as expected below
+  real time.  This is the box's limit until the MUSE chain itself gets cheaper; a
+  2021+ Apple TV (A12/A15) is the realistic MUSE target, as the plan said.
+- **Captures from the NAS**: `http://10.0.2.22/ld-captures/...` on the LAN, plain http
+  and no password (the web jail's vhosts.conf, see multivac's web.md 2026-10-18).  The
+  40 MHz Fight Club capture from there: real time, the http read under 1 ms per block.
 - The Apple TV sleeps after a while and then refuses to launch apps ("System is
   asleep - foreground app launch forbidden"): wake it with the remote first, or set
   Settings > General > Sleep After to Never while testing.
