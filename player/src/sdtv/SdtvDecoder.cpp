@@ -586,6 +586,11 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
                            (size_t)m_standard.samples_per_line * m_standard.total_lines, f);
                     fclose(f);
                 }
+                // and the per-row blanking offsets the shaders clamp it with, total_lines float32, to <path>.rows
+                if (FILE *f = fopen((std::string(dump) + ".rows").c_str(), "wb")) {
+                    fwrite(m_row_blanking_v.data(), sizeof(float), m_row_blanking_v.size(), f);
+                    fclose(f);
+                }
                 if (FILE *f = fopen(dump, "wb")) {
                     const int16_t *p = m_frames[0]->data()->data<int16_t>();
                     const size_t n = (size_t)m_standard.samples_per_line * m_standard.total_lines;
