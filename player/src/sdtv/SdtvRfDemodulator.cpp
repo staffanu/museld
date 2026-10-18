@@ -246,7 +246,7 @@ void SdtvRfDemodulator::demodulate() {
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager,
                               "detect_dropouts_envelope",
-                              {local_envelope_buffer, envelope_prefix, dropout_buffer, lowpass_in_buffer}, 12 * sizeof(uint32_t),
+                              {local_envelope_buffer, envelope_prefix, dropout_buffer, lowpass_in_buffer}, 14 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts_envelope.comp"), Size(SdtvRfDemodulatorConstants::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
@@ -478,7 +478,11 @@ void SdtvRfDemodulator::demodulate() {
                                          line_period,
                                          std::bit_cast<uint32_t>(0.49f), std::bit_cast<uint32_t>(0.25f),
                                          (uint32_t)lowpass_filter_def.size() - 1, std::bit_cast<uint32_t>(slew_threshold),
-                                         window_blocks, /* line_min_exceedances */ 8u, /* deep_min_exceedances */ 3u});
+                                         window_blocks, /* line_min_exceedances */ 8u, /* deep_min_exceedances */ 3u,
+                                         // glitch limits in the demodulator's output units (0.5 fm + 0.5):
+                                         // fm -6 and +10, i.e. 3.4 and 17 MHz on NTSC, 3.9 and 13 MHz on PAL;
+                                         // the legal signal stays within fm -2 and +5
+                                         std::bit_cast<uint32_t>(0.5f * -6.0f + 0.5f), std::bit_cast<uint32_t>(0.5f * 10.0f + 0.5f)});
 
         // Barrier: ensure all compute shader writes are visible to the subsequent transfer operations
         command_buffer->enqueueBarrier(vk::AccessFlagBits::eShaderWrite,

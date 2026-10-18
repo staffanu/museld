@@ -212,7 +212,7 @@ void MuseRfDemodulator::demodulate() {
     shared_ptr<ComputeShader> detect_dropouts_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager,
                               "detect_dropouts_envelope",
-                              {local_envelope_buffer, envelope_prefix, dropout_buffer, lowpass_in_buffer}, 12 * sizeof(uint32_t),
+                              {local_envelope_buffer, envelope_prefix, dropout_buffer, lowpass_in_buffer}, 14 * sizeof(uint32_t),
                               VulkanUtil::loadSpirv(m_executable_dir, "detect_dropouts_envelope.comp"), Size(MuseDemodulatedBlock::c_video_block_size)));
 
     // Clear the buffers -- we start storing data a bit into the buffer, so the first filter pass
@@ -426,7 +426,8 @@ void MuseRfDemodulator::demodulate() {
                                          std::bit_cast<uint32_t>(c_line_ratio_squared),
                                          std::bit_cast<uint32_t>(c_deep_ratio_squared),
                                          (uint32_t)lowpass_filter_size - 1, std::bit_cast<uint32_t>(slew_threshold),
-                                         window_blocks, /* line_min_exceedances */ 1u, /* deep_min_exceedances */ 0u});
+                                         window_blocks, /* line_min_exceedances */ 1u, /* deep_min_exceedances */ 0u,
+                                         /* no glitch limits for MUSE */ std::bit_cast<uint32_t>(-1e30f), std::bit_cast<uint32_t>(1e30f)});
 
         // Barrier: ensure all compute shader writes are visible to the subsequent transfer operations
         command_buffer->enqueueBarrier(vk::AccessFlagBits::eShaderWrite,
