@@ -27,6 +27,8 @@ layout(push_constant) uniform PushConstants {
     uint window_blocks; // carrier reference: mean envelope over this many BLOCK-sample blocks around the sample
     uint line_min_exceedances; // slew exceedances required to corroborate the line condition
     uint deep_min_exceedances; // ... and the deep condition (0: confident on its own)
+    float glitch_low;  // a demodulated sample outside [glitch_low, glitch_high] is a
+    float glitch_high; // discriminator glitch and flags its output sample on its own
 };
 
 layout(set = 0, binding = 0) buffer readonly local_envelope_buffer {
@@ -120,6 +122,33 @@ void main() {
         }
     }
 
-    dest[dest_offset + ix] = uint8_t((deep_low && exceedances >= int(deep_min_exceedances))
-                                     || (envelope_low && exceedances >= int(line_min_exceedances)) ? 1 : 0);
+    // Third condition, on its own: a demodulated value no legal signal can
+    // produce.  At a one-sample notch of the carrier amplitude (saturated
+    // colour whose lower chroma sideband has left the passband -- the green
+    // title text of the Technidisc Star Wars capture) the discriminator's
+    // phase step is garbage: a lag that reads as a frequency below the
+    // passband, or a catch-up of more than half a cycle that fm_quadrature.comp
+    // unwraps to 20 MHz and more.  Either is a speck after the video lowpass,
+    // dark or bright, and the envelope conditions above rarely see a notch
+    // this short.  The caller sets the limits well outside the range the
+    // legal signal and its pre-emphasis overshoot reach (NTSC: 3.4 and 17 MHz).
+    bool glitch = false;
+    {
+        int dc = int(demod_offset + ix * video_decimation_rate);
+        int limit = int(demod_offset + dest_size * video_decimation_rate) - 1;
+        int reach = int(video_decimation_rate);
+        for (int i = -reach; i <= reach; i++) {
+            float v = demodulated[clamp(dc + i, 0, limit)];
+            if (v < glitch_low || v > glitch_high)
+                glitch = true;
+        }
+    }
+
+    // A glitch flag is written as 2: it is certain on its own, and the
+    // consumer (sdtv_extend_dropouts.comp) exempts it from the corroboration
+    // it demands of the envelope flags, whose speck after de-emphasis stays
+    // within the picture's range.
+    dest[dest_offset + ix] = uint8_t(glitch ? 2
+                                     : (deep_low && exceedances >= int(deep_min_exceedances))
+                                       || (envelope_low && exceedances >= int(line_min_exceedances)) ? 1 : 0);
 }

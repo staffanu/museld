@@ -31,6 +31,11 @@ layout(set = 0, binding = 1) buffer writeonly dropout_out_buffer {
 layout(set = 0, binding = 2) buffer readonly deemphasized_buffer {
     float16_t deemphasized[][SDTV_TOTAL_WIDTH];
 };
+// The detector's flag bytes themselves (what sdtv_pack_dropout_bits.comp
+// packed): a 2 is a discriminator glitch, certain on its own
+layout(set = 0, binding = 3) buffer readonly dropout_in_buffer {
+    uint8_t dropout_in[][SDTV_TOTAL_WIDTH];
+};
 
 // A flag is kept only where the demodulated video shows the damage: a
 // sample within ten columns pinned outside the signal's range after
@@ -44,6 +49,18 @@ layout(set = 0, binding = 2) buffer readonly deemphasized_buffer {
 // kept the one real dropout and none of the 199 false flags.  Damage the
 // demodulator renders inside the range stays unflagged, and is then no
 // worse than a false flag repaired away.
+// A discriminator glitch (detect_dropouts_envelope.comp writes it as 2) within
+// the core pad: one raw sample of garbage at an amplitude notch, whose speck
+// after the lowpass and de-emphasis stays inside the picture's range (about
+// 1.2 on the green Technidisc title), so video_damaged would veto it, yet it
+// is certain -- no legal signal reaches the value that flagged it.
+bool glitch_near(uint row, int col) {
+    for (int dc = -4; dc <= 4; dc++)
+        if (dropout_in[row][uint(clamp(col + dc, 0, SDTV_TOTAL_WIDTH - 1))] == uint8_t(2))
+            return true;
+    return false;
+}
+
 bool video_damaged(uint row, int col) {
     for (int dc = -10; dc <= 10; dc++) {
         float v = float(deemphasized[row][uint(clamp(col + dc, 0, SDTV_TOTAL_WIDTH - 1))]);
@@ -114,7 +131,7 @@ void main() {
         soft = last <= min(count, 24);
     }
 
-    if ((core || soft) && !video_damaged(row, col)) {
+    if ((core || soft) && !video_damaged(row, col) && !glitch_near(row, col)) {
         core = false;
         soft = false;
     }
