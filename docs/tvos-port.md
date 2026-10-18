@@ -130,6 +130,14 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   A10X's CPU about 10.6 ms per block on the prefetching reader's thread (125 MB/s of
   samples), so a free-running MUSE demodulator waits for the FLAC decoder, not the GPU.
   An s8 capture avoids it and fits gigabit Ethernet (62.5 MB/s); s16 raw does not.
+  Measured with 38 s of the same disc as raw s8 on the NAS
+  (`blue1-fx3-62.5MHz-from120s-60s.s8`, made with `ldconv -s 120s -n 60s` from the
+  .ldf, whose header says 40 MHz, hence 38 s from 77 s in; the .s16 twin is there
+  too): the demodulator alone runs at the block budget, 8.5 ms per 8.4 ms (its GPU
+  about 7.5 ms, the read 1 ms), and full playback reaches 73% of real time, 21.8
+  frames/s, against 64% from FLAC.  What remains is GPU: the demodulator's ~8 ms plus
+  the decoder's ~3.4 ms per 8.4 ms block, so about 30% of the GPU work has to go for
+  real-time MUSE on the A10X.
   Start-up first died in the memory allocator
   (fixed: a request above its 16 MB block size, which MoltenVK's requirements for the
   MUSE frame buffers are on the A10X).  Audio underruns throughout, as expected below
