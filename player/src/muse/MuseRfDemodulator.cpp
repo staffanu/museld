@@ -187,7 +187,7 @@ void MuseRfDemodulator::demodulate() {
 
     shared_ptr<ComputeShader> fm_quadrature_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager, "fm_quadrature",
-                              {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer, envelope_buffer}, 7 * sizeof(float),
+                              {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer, envelope_buffer}, 8 * sizeof(float),
                               VulkanUtil::loadSpirv(m_executable_dir, "fm_quadrature.comp"), Size(MuseDemodulatedBlock::c_sample_block_size)));
 
     constexpr uint32_t c_envelope_box_outputs = 4; // OUTPUTS in envelope_box.comp
@@ -360,7 +360,8 @@ void MuseRfDemodulator::demodulate() {
         // With the current parameters (62.5MHz/12.5MHz/1.9MHz) the possible output swing is between -23.03 and +9.87.
         command_buffer->enqueueComputeShader<float>(fm_quadrature_shader,
                                                     {MuseDemodulatedBlock::c_sample_block_size, (float)lowpass_filter_size - 1,
-                                                     m_sample_frequency, c_frequency_deviation, c_center_frequency, /* scale */ 112.f, /* add */ 128.f});
+                                                     m_sample_frequency, c_frequency_deviation, c_center_frequency, /* scale */ 112.f, /* add */ 128.f,
+                                                     /* no phase unwrap: the MUSE spectrum reaches down to zero */ -1e30f});
 
         // Lowpass filter the demodulated signal, and down-sample (decimate by factor 2) before rrc filtering
         command_buffer->enqueueComputeShader<uint32_t>(

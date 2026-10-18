@@ -221,7 +221,7 @@ void SdtvRfDemodulator::demodulate() {
 
     shared_ptr<ComputeShader> fm_quadrature_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager, "fm_quadrature",
-                              {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer, envelope_buffer}, 7 * sizeof(float),
+                              {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer, envelope_buffer}, 8 * sizeof(float),
                               VulkanUtil::loadSpirv(m_executable_dir, "fm_quadrature.comp"), Size(c_sample_block_size)));
 
     constexpr uint32_t c_envelope_box_outputs = 4; // OUTPUTS in envelope_box.comp
@@ -426,11 +426,17 @@ void SdtvRfDemodulator::demodulate() {
         command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {c_sample_block_size, /* out offset */ 1}, 0);
         command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {c_sample_block_size, /* out offset */ 1}, 1);
 
-        // Demodulate the analytic signal, and scale to [0, 1].
+        // Demodulate the analytic signal, and scale to [0, 1].  A phase step that
+        // implies a negative instantaneous frequency (fm_out below
+        // -center / deviation) is a wrap past pi at an amplitude notch, and
+        // fm_quadrature.comp adds 2 pi to it: the passband starts at
+        // 2.3 MHz or above, so the analytic signal never steps backwards.
+        const float c_unwrap_below = -(float)(m_video_standard.rf_center_hz / m_video_standard.rf_deviation_hz);
         command_buffer->enqueueComputeShader<float>(fm_quadrature_shader,
                                                     {c_sample_block_size, (float)lowpass_filter_def.size() - 1,
                                                      m_sample_frequency, (float)m_video_standard.rf_deviation_hz,
-                                                     (float)m_video_standard.rf_center_hz, /* scale */ 0.5f, /* add */ 0.5f});
+                                                     (float)m_video_standard.rf_center_hz, /* scale */ 0.5f, /* add */ 0.5f,
+                                                     c_unwrap_below});
 
         // Lowpass filter the demodulated signal, and down-sample (decimate by factor 2)
         command_buffer->enqueueComputeShader<uint32_t>(lowpass_fir_shader, {c_video_block_size, /* out offset */ 0});
