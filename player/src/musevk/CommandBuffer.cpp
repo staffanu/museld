@@ -3,6 +3,9 @@
 
 #include <cstdint>
 #include <format>
+#include <cstdlib>
+#include <set>
+#include <string>
 #include "CommandBuffer.h"
 #include "VulkanBuffer.h"
 #include "TimestampQueryPool.h"
@@ -228,5 +231,28 @@ namespace musevk {
             m_device.invalidateMappedMemoryRanges({m_memory_ranges_to_invalidate});
             m_memory_ranges_to_invalidate.clear();
         }
+    }
+}
+
+namespace musevk {
+    bool CommandBuffer::passSkipped(const std::string &name) {
+        static const std::set<std::string> skipped = [] {
+            std::set<std::string> names;
+            if (const char *env = getenv("MUSELD_SKIP_PASS")) {
+                std::string list(env);
+                size_t start = 0;
+                while (start <= list.size()) {
+                    const size_t comma = list.find(',', start);
+                    const std::string item = list.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+                    if (!item.empty())
+                        names.insert(item);
+                    if (comma == std::string::npos)
+                        break;
+                    start = comma + 1;
+                }
+            }
+            return names;
+        }();
+        return !skipped.empty() && skipped.count(name) != 0;
     }
 }

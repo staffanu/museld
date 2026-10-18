@@ -1,0 +1,50 @@
+#version 450
+// fir_filter.comp without the register arrays, a measurement variant
+// (MUSELD_FIR_SHADER=fir_filter_direct.comp): every input sample and every tap
+// is read from its buffer in the inner loop, nothing is staged in a per-thread
+// array.  Same specialization constants as fir_filter.comp, one more push
+// constant (an input offset); outputs_per_invocation is honoured but each
+// output reads its own window.  Same fma() order, so the output is
+// bit-identical.  On the Apple TV 4K's A10X it is 5% faster than
+// fir_filter.comp at one output per invocation, and like it falls away with
+// more outputs per invocation (2: level, 4: +25%, 8: 3x); not the default
+// anywhere, since the M2 was not measured with it.
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint output_size;
+    uint output_offset;
+    uint input_offset;  // where this dispatch's first window starts (sub-block runs)
+};
+
+layout(set = 0, binding = 0) buffer readonly filter_buffer {
+    float fir_filter[];
+};
+
+layout(set = 0, binding = 1) buffer readonly input_buffer {
+    float input_data[];
+};
+
+layout(set = 0, binding = 2) buffer writeonly output_buffer {
+    float output_data[];
+};
+
+layout (constant_id = 4) const uint filter_size = 1;
+layout (constant_id = 5) const uint decimation_rate = 1;
+layout (constant_id = 6) const uint outputs_per_invocation = 4;
+
+void main() {
+    uint first_output = gl_GlobalInvocationID.x * outputs_per_invocation;
+    if (first_output >= output_size)
+        return;
+    for (uint o = 0; o < outputs_per_invocation; o++) {
+        const uint out_ix = first_output + o;
+        if (out_ix >= output_size)
+            break;
+        const uint base = input_offset + out_ix * decimation_rate;
+        float s = 0.f;
+        for (uint i = 0; i < filter_size; i++)
+            s = fma(fir_filter[i], input_data[base + i], s);
+        output_data[output_offset + out_ix] = s;
+    }
+}

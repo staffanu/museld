@@ -195,10 +195,17 @@ void MuseRfDemodulator::demodulate() {
         return Size((output_size + c_fir_outputs_per_invocation - 1) / c_fir_outputs_per_invocation);
     };
 
+    // Measurement hook: MUSELD_FIR_SHADER names another FIR shader (same interface
+    // as fir_filter.comp, e.g. fir_filter_direct.comp) for the three FIR passes
+    const char *fir_shader_env = getenv("MUSELD_FIR_SHADER");
+    const std::string fir_shader = fir_shader_env != nullptr && *fir_shader_env ? fir_shader_env : "fir_filter.comp";
+    if (fir_shader != "fir_filter.comp")
+        m_log.info(ePerformance, std::format("FIR shader: {} (measurement)", fir_shader));
+    const bool direct_fir = fir_shader == "fir_filter_direct.comp"; // three push constants, the third an input offset
     shared_ptr<ComputeShader> bandpass_fir_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager, "bandpass_fir",
-                              {eBuffer, eBuffer, eBuffer}, 2 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"),
+                              {eBuffer, eBuffer, eBuffer}, (direct_fir ? 3 : 2) * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, fir_shader),
                               fir_dispatch_size(MuseDemodulatedBlock::c_sample_block_size), 2,
                               {(uint32_t)bandpass_filter_size, /* decimation */ 1, c_fir_outputs_per_invocation}));
 
@@ -207,15 +214,15 @@ void MuseRfDemodulator::demodulate() {
 
     shared_ptr<ComputeShader> lowpass_fir_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager, "lowpass_fir",
-                              {lowpass_filter, lowpass_in_buffer, rrc_in_buffer}, 2 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"),
+                              {lowpass_filter, lowpass_in_buffer, rrc_in_buffer}, (direct_fir ? 3 : 2) * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, fir_shader),
                               fir_dispatch_size(MuseDemodulatedBlock::c_video_block_size), 1,
                               {(uint32_t)lowpass_filter_size, MuseDemodulatedBlock::c_video_decimation_rate, c_fir_outputs_per_invocation}));
 
     shared_ptr<ComputeShader> rrc_fir_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager, "rrc_fir",
-                              {eBuffer, eBuffer, eBuffer}, 2 * sizeof(uint32_t),
-                              VulkanUtil::loadSpirv(m_executable_dir, "fir_filter.comp"),
+                              {eBuffer, eBuffer, eBuffer}, (direct_fir ? 3 : 2) * sizeof(uint32_t),
+                              VulkanUtil::loadSpirv(m_executable_dir, fir_shader),
                               fir_dispatch_size(MuseDemodulatedBlock::c_video_block_size), 1,
                               {(uint32_t)rrc_filter_size, /* decimation */ 1, c_fir_outputs_per_invocation}));
 
@@ -421,8 +428,13 @@ void MuseRfDemodulator::demodulate() {
         bandpass_fir_shader->updateBufferDescriptorsInSet(1, {bandpass_filter_im, input_buffers[current], analytic_buffer_im});
 
         // Run the input signal through the bandpass filter that also converts the signal to an analytic signal
-        command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {MuseDemodulatedBlock::c_sample_block_size, /* out offset */ 1}, 0);
-        command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {MuseDemodulatedBlock::c_sample_block_size, /* out offset */ 1}, 1);
+        if (!direct_fir) {
+            command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {MuseDemodulatedBlock::c_sample_block_size, /* out offset */ 1}, 0);
+            command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {MuseDemodulatedBlock::c_sample_block_size, /* out offset */ 1}, 1);
+        } else {
+            command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {MuseDemodulatedBlock::c_sample_block_size, /* out offset */ 1, 0u}, 0);
+            command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {MuseDemodulatedBlock::c_sample_block_size, /* out offset */ 1, 0u}, 1);
+        }
 
         // Demodulate the analytic signal, and scale to the standard MUSE range
         // +/- 1 corresponds to the white/black level, which is 128+/-112 (16, 240) in MUSE
@@ -432,12 +444,19 @@ void MuseRfDemodulator::demodulate() {
                                                      m_sample_frequency, c_frequency_deviation, c_center_frequency, /* scale */ 112.f, /* add */ 128.f});
 
         // Lowpass filter the demodulated signal, and down-sample (decimate by factor 2) before rrc filtering
-        command_buffer->enqueueComputeShader<uint32_t>(
-                lowpass_fir_shader, {MuseDemodulatedBlock::c_video_block_size, /* out offset */ (uint32_t)rrc_filter_size - 1});
+        if (!direct_fir)
+            command_buffer->enqueueComputeShader<uint32_t>(
+                    lowpass_fir_shader, {MuseDemodulatedBlock::c_video_block_size, /* out offset */ (uint32_t)rrc_filter_size - 1});
+        else
+            command_buffer->enqueueComputeShader<uint32_t>(
+                    lowpass_fir_shader, {MuseDemodulatedBlock::c_video_block_size, /* out offset */ (uint32_t)rrc_filter_size - 1, 0u});
 
         // Run the down-sampled signal through the root raised cosine pulse-shaping filter and store in the output block
         rrc_fir_shader->updateBufferDescriptorsInSet(0, {rrc_filter, rrc_in_buffer, block->video_data});
-        command_buffer->enqueueComputeShader<uint32_t>(rrc_fir_shader, {MuseDemodulatedBlock::c_video_block_size, /* out offset */ 0});
+        if (!direct_fir)
+            command_buffer->enqueueComputeShader<uint32_t>(rrc_fir_shader, {MuseDemodulatedBlock::c_video_block_size, /* out offset */ 0});
+        else
+            command_buffer->enqueueComputeShader<uint32_t>(rrc_fir_shader, {MuseDemodulatedBlock::c_video_block_size, /* out offset */ 0, 0u});
 
         // The local envelope average per raw sample (the squared envelope itself
         // comes from fm_quadrature), read by the dropout detector at five
