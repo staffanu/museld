@@ -13,6 +13,7 @@
 #include <iostream>
 #include <filesystem>
 #include <algorithm>
+#include <array>
 #include "SdtvRfDemodulator.h"
 #include "filter/FirFilterStage.h"
 #ifdef __APPLE__
@@ -159,8 +160,16 @@ void SdtvRfDemodulator::demodulate() {
     const int dropout_delay = (int)lowpass_filter_def.size() / video_decimation / 2 - 1;
     const int dropout_buffer_size = c_video_block_size + dropout_delay;
 
-    shared_ptr<VulkanBuffer> input_buffer = make_unique<musevk::VulkanBuffer>(
-            m_vulkan_manager, Size(input_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostWrite);
+    // Two input buffers, alternating: the CPU reads and lays out block N + 1 in
+    // one while the GPU works on block N in the other (see the loop), so the
+    // read and the GPU chain overlap instead of taking turns.  The GPU only
+    // reads them; the FIR history in front of each block is written by the CPU
+    // along with the block, so the two never touch the same memory.
+    std::array<shared_ptr<VulkanBuffer>, 2> input_buffers;
+    for (auto &buffer : input_buffers)
+        buffer = make_shared<musevk::VulkanBuffer>(
+                m_vulkan_manager, Size(input_buffer_size), sizeof(float), buffer_usage_flags, HostAccess::eHostWrite);
+    shared_ptr<VulkanBuffer> input_buffer = input_buffers[0]; // the representative, where a fixed one is wanted
 
     // The CPU only writes to this mapping (the audio path stages its input separately), but log the
     // memory properties since a non-host-cached (write-combined) mapping would make any future
@@ -319,7 +328,8 @@ void SdtvRfDemodulator::demodulate() {
         timestamp_query_pool->reset(*command_buffer);
     float zero = 0.f;
     float one = 1.f;
-    command_buffer->enqueueFillBuffer(*input_buffer, 0);
+    for (auto &buffer : input_buffers)
+        command_buffer->enqueueFillBuffer(*buffer, 0);
     command_buffer->enqueueFillBuffer(*analytic_buffer_re, reinterpret_cast<uint32_t &>(one));
     command_buffer->enqueueFillBuffer(*analytic_buffer_im, reinterpret_cast<uint32_t &>(one));
     float two = 2.f; // the envelope of the (1, 1) analytic fill
@@ -419,9 +429,12 @@ void SdtvRfDemodulator::demodulate() {
     });
 
     // Per-section CPU timing of the demodulation loop, reported every c_timing_report_blocks
-    // blocks together with the real-time budget per block.  On a fifo the read time includes
-    // waiting for the capture device, so a large read share is expected there.  A large acquire
-    // share means the downstream stages (audio demod worker or the frame reader) cannot keep up.
+    // blocks together with the real-time budget per block.  The read of the next block runs
+    // while the GPU works on this one, so "gpu wait" is what remained of the GPU's time after
+    // it; the GPU's own time per block is read + gpu wait when the read is the shorter.  On a
+    // fifo the read time includes waiting for the capture device, so a large read share is
+    // expected there.  A large acquire share means the downstream stages (audio demod worker
+    // or the frame reader) cannot keep up.
     using timing_clock = std::chrono::steady_clock;
     constexpr int c_timing_report_blocks = 256;
     const double block_budget_ms = c_sample_block_size / (double)m_sample_frequency * 1e3;
@@ -438,20 +451,39 @@ void SdtvRfDemodulator::demodulate() {
     // few write-combining buffers flushing partial lines, which more than doubles the time a
     // compressed input spends here.  It also keeps the EFM path from reading back from the mapping.
     std::vector<float> input_staging;
+    // The FIR history carried from block to block: the last input_history samples of the
+    // previous block, laid out in front of the next block's samples
+    std::vector<float> history_samples(input_history, 0.f);
 
-    while (!m_stop_request) {
-        auto t_loop_start = timing_clock::now();
+    // Reads the next block into the staging buffer and lays it out, behind the history, in
+    // the given input buffer.  False at the end of the input.
+    auto read_block = [&](int which, int64_t &offset, uint32_t &generation) -> bool {
+        input_staging.resize(c_sample_block_size);
+        if (!readInput(input_staging.data(), c_sample_block_size, offset, generation))
+            return false;
+        float *dst = input_buffers[which]->data<float>();
+        memcpy(dst, history_samples.data(), input_history * sizeof(float));
+        memcpy(dst + input_history, input_staging.data(), c_sample_block_size * sizeof(float));
+        memcpy(history_samples.data(), input_staging.data() + c_sample_block_size - input_history,
+               input_history * sizeof(float));
+        return true;
+    };
+
+    // Block N is read before the GPU is given block N - 1 to work on, so the
+    // read of the first block stands alone; every later one overlaps the GPU
+    int current = 0;
+    int64_t block_input_offset = 0;
+    uint32_t block_seek_generation = 0;
+    auto t_loop_start = timing_clock::now();
+    bool have_block = read_block(current, block_input_offset, block_seek_generation);
+    double pending_read_ms = ms_between(t_loop_start, timing_clock::now());
+
+    while (!m_stop_request && have_block) {
+        t_loop_start = timing_clock::now();
         const bool efm_enabled = m_efm_enabled;
         const bool analog_enabled = m_analog_enabled;
         const bool ac3_enabled = m_ac3_enabled;
-        float *input_samples = input_buffer->data<float>() + input_history;
-        input_staging.resize(c_sample_block_size);
-        int64_t block_input_offset;
-        uint32_t block_seek_generation;
-        if (!readInput(input_staging.data(), c_sample_block_size, block_input_offset, block_seek_generation))
-            break;
-        memcpy(input_samples, input_staging.data(), c_sample_block_size * sizeof(float));
-        auto t_after_read = timing_clock::now();
+        auto t_after_read = t_loop_start;
 
         // First get a free output block to write to
         unique_ptr<SdtvDemodulatedBlock> block = nullptr;
@@ -486,7 +518,14 @@ void SdtvRfDemodulator::demodulate() {
             timestamp_query_pool->reset(*command_buffer);
 
         // Make the data available on the GPU; this is necessary in case we didn't find a memory type good for both host writes and shader reads
-        input_buffer->synchronizeHostWrites(*command_buffer);
+        input_buffers[current]->synchronizeHostWrites(*command_buffer);
+        // The chain reads this block's input buffer
+        if (predecimation_fir_shader) {
+            predecimation_fir_shader->updateBufferDescriptorsInSet(0, {predecimation_filter, input_buffers[current], demod_input_buffer});
+        } else {
+            bandpass_fir_shader->updateBufferDescriptorsInSet(0, {bandpass_filter_re, input_buffers[current], analytic_buffer_re});
+            bandpass_fir_shader->updateBufferDescriptorsInSet(1, {bandpass_filter_im, input_buffers[current], analytic_buffer_im});
+        }
 
         // A fast capture: down to demod_rate first (the output follows the band-pass's history)
         if (predecimation_fir_shader)
@@ -568,7 +607,6 @@ void SdtvRfDemodulator::demodulate() {
         auto enqueue_float_copy = [command_buffer](VulkanBuffer &buffer, uint32_t buffer_size, uint32_t floats_to_copy) -> void {
             command_buffer->enqueueCopyBuffer(buffer, buffer, (buffer_size - floats_to_copy) * sizeof(float), 0, floats_to_copy * sizeof(float));
         };
-        enqueue_float_copy(*input_buffer, input_buffer_size, input_history);
         if (demod_input_buffer)
             enqueue_float_copy(*demod_input_buffer, demod_input_buffer_size, bandpass_filter_def.size() - 1);
         enqueue_float_copy(*analytic_buffer_re, analytic_buffer_size, 1);
@@ -602,6 +640,15 @@ void SdtvRfDemodulator::demodulate() {
             block->raw_input.clear();
         auto t_after_audio = timing_clock::now();
 
+        // The next block, read and laid out in the other input buffer while the GPU
+        // works on this one.  The staging buffer was just reclaimed from the output
+        // block by the swap above.
+        const int next = 1 - current;
+        int64_t next_input_offset = 0;
+        uint32_t next_seek_generation = 0;
+        have_block = read_block(next, next_input_offset, next_seek_generation);
+        auto t_after_next_read = timing_clock::now();
+
         command_buffer->wait();
         auto t_after_gpu_wait = timing_clock::now();
 
@@ -625,16 +672,17 @@ void SdtvRfDemodulator::demodulate() {
                 m_log.info(eInput, std::format("Dropout detector dump complete: {}", prefix));
         }
 
-        read_ms += ms_between(t_loop_start, t_after_read);
+        read_ms += pending_read_ms + ms_between(t_after_audio, t_after_next_read);
+        pending_read_ms = 0;
         acquire_ms += ms_between(t_after_read, t_after_acquire);
         record_ms += ms_between(t_after_acquire, t_after_record);
         submit_ms += ms_between(t_after_record, t_after_submit);
         audio_ms += ms_between(t_after_submit, t_after_audio);
-        gpu_wait_ms += ms_between(t_after_audio, t_after_gpu_wait);
+        gpu_wait_ms += ms_between(t_after_next_read, t_after_gpu_wait);
         if (++timed_blocks == c_timing_report_blocks) {
             m_log.info(ePerformance, std::format(
-                    "demodulate avg/block (budget {:.2f} ms): read {:.2f} ms, acquire {:.2f} ms, "
-                    "record {:.2f} ms, submit {:.2f} ms, audio copy {:.2f} ms, gpu wait {:.2f} ms, total {:.2f} ms",
+                    "demodulate avg/block (budget {:.2f} ms): read {:.2f} ms (overlapping the GPU), acquire {:.2f} ms, "
+                    "record {:.2f} ms, submit {:.2f} ms, audio copy {:.2f} ms, gpu wait {:.2f} ms after the read, total {:.2f} ms",
                     block_budget_ms, read_ms / timed_blocks, acquire_ms / timed_blocks,
                     record_ms / timed_blocks, submit_ms / timed_blocks, audio_ms / timed_blocks,
                     gpu_wait_ms / timed_blocks,
@@ -649,9 +697,15 @@ void SdtvRfDemodulator::demodulate() {
         // Hand the block to the EFM worker, which forwards it to m_filled_blocks.  This must not
         // happen before command_buffer->wait() above, since the consumer reads video_data as soon
         // as the block appears in m_filled_blocks.
-        std::unique_lock<std::mutex> lock(efm.mutex);
-        efm.cv.notify_one();
-        efm.queue.push_back(std::move(block));
+        {
+            std::unique_lock<std::mutex> lock(efm.mutex);
+            efm.cv.notify_one();
+            efm.queue.push_back(std::move(block));
+        }
+
+        current = next;
+        block_input_offset = next_input_offset;
+        block_seek_generation = next_seek_generation;
     }
 
     // Let the EFM worker drain its queue before signalling end of stream
