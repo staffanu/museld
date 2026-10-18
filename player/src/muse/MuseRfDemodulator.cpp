@@ -57,11 +57,21 @@ void MuseRfDemodulator::demodulate() {
     // FIR band-pass filter to filter out noise over 22.5 MHz and also the pilot signal and EFM.
     // The pilot signal isn't completely suppressed but that doesn't seem to matter.
     // Match firdes' rectangular-window ntaps = (int)(21*Fs/(22*tw)) | 1
+    // MUSELD_FIR_TRANSITION_SCALE widens the band-pass and low-pass transition
+    // bands by that factor, which divides their tap counts by it: a measurement
+    // hook for how much of the demodulator's GPU time the FIR taps are (the
+    // picture degrades with it; not for playback)
+    float transition_scale = 1.f;
+    if (const char *env = getenv("MUSELD_FIR_TRANSITION_SCALE"); env != nullptr && atof(env) > 0) {
+        transition_scale = (float)atof(env);
+        m_log.info(ePerformance, std::format("FIR transition bands scaled by {} (measurement only)", transition_scale));
+    }
     std::vector<std::complex<float>> bandpass_filter_def =
-            WindowedSinc::complex_band_pass<float>(WindowedSinc::rectangular_ntaps(m_sample_frequency, 2e6),
+            WindowedSinc::complex_band_pass<float>(WindowedSinc::rectangular_ntaps(m_sample_frequency, 2e6 * transition_scale),
                                                    m_sample_frequency, 2.7e6, 22.3e6);
     std::reverse(bandpass_filter_def.begin(), bandpass_filter_def.end()); // shader correlates rather than convolves
     const int bandpass_filter_size = (int)bandpass_filter_def.size();
+    m_log.info(ePerformance, std::format("MUSE band-pass FIR: {} complex taps", bandpass_filter_size));
 
     std::vector<float> bandpass_filter_re_coeffs;
     std::transform(bandpass_filter_def.cbegin(), bandpass_filter_def.cend(), back_inserter(bandpass_filter_re_coeffs),
@@ -77,10 +87,11 @@ void MuseRfDemodulator::demodulate() {
 
     // FIR lowpass filter for the demodulated signal
     std::vector<float> lowpass_filter_def =
-            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(m_sample_frequency, 2e6),
+            WindowedSinc::low_pass<float>(WindowedSinc::rectangular_ntaps(m_sample_frequency, 2e6 * transition_scale),
                                           m_sample_frequency, 9.8e6);
     std::reverse(lowpass_filter_def.begin(), lowpass_filter_def.end()); // symmetric, but the shader correlates
     const int lowpass_filter_size = (int)lowpass_filter_def.size();
+    m_log.info(ePerformance, std::format("MUSE low-pass FIR: {} taps, decimating by {}", lowpass_filter_size, MuseDemodulatedBlock::c_video_decimation_rate));
 
     shared_ptr<VulkanBuffer> lowpass_filter =
             VulkanUtil::createDeviceBuffer(m_vulkan_manager, command_pool, Size(lowpass_filter_size), lowpass_filter_def);
@@ -338,11 +349,20 @@ void MuseRfDemodulator::demodulate() {
 
     // Reads the next block into the staging buffer and lays it out, behind the history, in
     // the given input buffer.  False at the end of the input.
+    // Measurement hook: with MUSELD_REPEAT_INPUT set, every block after the first
+    // reuses the first block's samples -- the copies into the mapped buffer without
+    // any input reading, which isolates the GPU chain's own time per block (with
+    // --no-video --no-audio --no-sync: "gpu wait" is then all of it)
+    static const bool repeat_input = getenv("MUSELD_REPEAT_INPUT") != nullptr;
     auto read_block = [&](int which, int64_t &offset, uint32_t &generation) -> bool {
         constexpr int block_size = MuseDemodulatedBlock::c_sample_block_size;
-        input_staging.resize(block_size);
-        if (!readInput(input_staging.data(), block_size, offset, generation))
-            return false;
+        if (repeat_input && input_staging.size() == (size_t)block_size) {
+            offset += block_size;
+        } else {
+            input_staging.resize(block_size);
+            if (!readInput(input_staging.data(), block_size, offset, generation))
+                return false;
+        }
         float *dst = input_buffers[which]->data<float>();
         memcpy(dst, history_samples.data(), input_history * sizeof(float));
         memcpy(dst + input_history, input_staging.data(), block_size * sizeof(float));

@@ -177,7 +177,7 @@ if(BUILD_AC3RF_DECODE)
         Version.h
         input/InputReader.h
         input/ByteSource.cpp input/ByteSource.h
-        input/HttpByteSource.cpp input/HttpByteSource.h
+        input/HttpByteSource.cpp input/HttpByteSource.h input/HttpClient.h
         input/EthadcByteSource.cpp input/EthadcByteSource.h
         input/InputReaderFactory.cpp input/InputReaderFactory.h
         input/LdsInputReader.cpp input/LdsInputReader.h
@@ -288,7 +288,7 @@ if(BUILD_MUSE)
         AudioDefs.h
         input/InputReader.h
         input/ByteSource.cpp input/ByteSource.h
-        input/HttpByteSource.cpp input/HttpByteSource.h
+        input/HttpByteSource.cpp input/HttpByteSource.h input/HttpClient.h
         input/EthadcByteSource.cpp input/EthadcByteSource.h
         input/InputReaderFactory.cpp input/InputReaderFactory.h
         input/LdsInputReader.cpp input/LdsInputReader.h

@@ -120,24 +120,23 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
 - **MUSE runs on the A1842** (2026-10-18, Ursa Minor Blue side 1 at 62.5 MHz from the
   NAS): at about 64% of real time -- 5740 fields in 150 s -- the demodulator's GPU at
   11.3 ms per 8.4 ms block (no pre-decimation here: the MUSE RF band needs the rate),
-  the decoder about 37 ms per frame.  The demodulator alone (`--no-video --no-audio
-  --no-sync`) needs 9.1 ms of GPU per 8.4 ms block, 108% of real time by itself, and
-  the two chains share the GPU: of the ~13.1 ms of GPU per 8.4 ms of content that the
-  64% implies, the demodulator is 70%, the decoder 30%.  Both demodulators read the
-  next block while the GPU works on the current one (the same structure in
-  `SdtvRfDemodulator` and `MuseRfDemodulator`), which gave MUSE playback 4% here.  A
-  third limit sits right beside the GPU's: decoding the 62.5 MHz 16-bit FLAC takes the
-  A10X's CPU about 10.6 ms per block on the prefetching reader's thread (125 MB/s of
-  samples), so a free-running MUSE demodulator waits for the FLAC decoder, not the GPU.
-  An s8 capture avoids it and fits gigabit Ethernet (62.5 MB/s); s16 raw does not.
-  Measured with 38 s of the same disc as raw s8 on the NAS
-  (`blue1-fx3-62.5MHz-from120s-60s.s8`, made with `ldconv -s 120s -n 60s` from the
-  .ldf, whose header says 40 MHz, hence 38 s from 77 s in; the .s16 twin is there
-  too): the demodulator alone runs at the block budget, 8.5 ms per 8.4 ms (its GPU
-  about 7.5 ms, the read 1 ms), and full playback reaches 73% of real time, 21.8
-  frames/s, against 64% from FLAC.  What remains is GPU: the demodulator's ~8 ms plus
-  the decoder's ~3.4 ms per 8.4 ms block, so about 30% of the GPU work has to go for
-  real-time MUSE on the A10X.
+  the decoder about 37 ms per frame.  Measured apart (`--no-video --no-audio
+  --no-sync`, and `MUSELD_REPEAT_INPUT=1` to run the GPU chain on one block over and
+  over with no input reading at all): the MUSE demodulator's GPU chain is 8.4 ms per
+  8.4 ms block, exactly the budget, and the decoder's GPU share about 3.4 ms per
+  block, from the 73% of real time that raw s8 playback reaches.  Both demodulators
+  read the next block while the GPU works on the current one (the same structure in
+  `SdtvRfDemodulator` and `MuseRfDemodulator`).  Halving the band-pass and low-pass
+  taps (`MUSELD_FIR_TRANSITION_SCALE=2`, 29 -> 15 complex taps) saves only ~0.6 ms of
+  the 8.4, quartering ~1.5: the FIRs are maybe half of the chain, so half floats in
+  them would be part of a real-time MUSE on the A10X, not all of it.
+  Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
+  gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
+  run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
+  three-core CPU enough that the GPU is starved of its driver's time and makes little
+  progress during the read, so s16 raw is out on this box; s8 at 62.5 MB/s is fine,
+  and a FLAC capture (about 66 MB/s of file) decodes on the reader's thread without
+  trouble -- the earlier reading that FLAC decoding was a limit was the 16 KiB pieces.
   Start-up first died in the memory allocator
   (fixed: a request above its 16 MB block size, which MoltenVK's requirements for the
   MUSE frame buffers are on the A10X).  Audio underruns throughout, as expected below

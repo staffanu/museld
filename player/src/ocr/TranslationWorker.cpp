@@ -7,7 +7,7 @@
 #include <format>
 #include <sstream>
 
-#include "httplib.h"
+#include "input/HttpClient.h" // httplib.h with its configuration
 #include "nlohmann/json.hpp"
 
 using json = nlohmann::json;
