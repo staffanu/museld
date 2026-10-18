@@ -183,6 +183,23 @@ void LdfInputReader::patchStreamInfoTotal() {
         total = total | (uint64_t)streaminfo[c_total_offset + k] << (8 * (4 - k));
     if (total == 0)
         return;
+    if (m_container == eFlac) {
+        // A plain FLAC stream without a seek table is seeked by libFLAC
+        // from the sample count (it bisects between the count and the
+        // file length), and with the count hidden every seek fails: so
+        // the count is left alone when it can be right, and hidden only
+        // when the file holds more bytes than that many samples could
+        // compress to.  FLAC does not expand RF (0.3-0.6 of the raw size
+        // on the captures here), so a ratio above 1.1 means a wrapped count.
+        const int bits_per_sample = (((streaminfo[12] & 0x01) << 4) | (streaminfo[13] >> 4)) + 1;
+        const int64_t size = m_source->size();
+        if (size > 0 && (double)size * 8.0 <= 1.1 * (double)total * (double)bits_per_sample) {
+            if (m_log)
+                m_log->debug(eInput, std::format("FLAC STREAMINFO sample count {} kept: plausible for {} bytes at {} bits",
+                                                 total, size, bits_per_sample));
+            return;
+        }
+    }
     streaminfo[c_total_offset] &= 0xF0;
     memset(streaminfo + c_total_offset + 1, 0, 4);
     if (m_container == eFlacOgg) {
