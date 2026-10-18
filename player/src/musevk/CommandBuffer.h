@@ -5,6 +5,8 @@
 #define MUSECPP_COMMANDBUFFER_H
 
 #include <cstdint>
+#include <set>
+#include <string>
 #include <vulkan/vulkan.hpp>
 #include "ComputeShader.h"
 #include "Queue.h"
@@ -68,10 +70,19 @@ namespace musevk {
                             vk::PipelineStageFlagBits srcStageMask,
                             vk::PipelineStageFlagBits dstStageMask);
 
+        // Measurement hook: MUSELD_SKIP_PASS=name,name,... names compute shaders
+        // (their ComputeShader names, e.g. fm_quadrature) that are not dispatched
+        // at all.  Their outputs stay whatever they were, so the picture is
+        // wrong; the point is the chain's time without them, pass by pass, which
+        // MoltenVK's timestamps cannot give (one resolve at the end).
+        static bool passSkipped(const std::string &name);
+
         template<typename T>
         void enqueueComputeShader(const std::shared_ptr<ComputeShader> &compute_shader,
                                   const std::vector<T> &pushConstants,
                                   int descriptor_set_index = 0) {
+            if (passSkipped(compute_shader->name()))
+                return;
             enqueueBarrier(vk::AccessFlagBits::eShaderWrite,
                            vk::AccessFlagBits::eShaderRead,
                            vk::PipelineStageFlagBits::eComputeShader,

@@ -137,10 +137,32 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   more of the 8.4 are the other passes (the quadrature demodulation with its atan, the
   envelope box, block sums and prefix scan, the dropout detector, the decimating
   low-pass and the RRC).  This GPU wants small simple kernels (one output per
-  invocation won for the same reason).  The next measurement is an ablation: a hook
-  that skips a named pass, with `MUSELD_REPEAT_INPUT=1`, so each pass's cost is a
-  difference -- MoltenVK's timestamps cannot give it.  Half floats in the FIRs would
-  be worth 10% at most after this.
+  invocation won for the same reason).
+- **The ablation** (`MUSELD_SKIP_PASS=name,...` leaves named passes out, with
+  `MUSELD_REPEAT_INPUT=1`; the chain's 8.4 ms on the A10X by subtraction): band-pass
+  (two passes) 4.0 ms, decimating low-pass 0.8, RRC 0.2, quadrature demodulation 0.4,
+  the envelope box, block sums, prefix scan and dropout detector 1.4 together.  So the
+  FIRs are 5.4 of the 8.4 after all, the band-pass alone half the chain, and the tap
+  experiment misled: the cost is per output, weakly per tap.  Everything tried on the
+  band-pass kernel was equal or worse: the fused complex pass (+2.7 ms), the input
+  read from a device-local copy instead of the mapped buffer (no change), an array-free
+  FIR reading samples and taps straight from the buffers (`fir_filter_direct.comp`,
+  `MUSELD_FIR_SHADER=`; 5% better, kept as a measurement variant), that FIR over
+  sub-blocks (worse by the dispatch count), and more outputs per thread with it (2:
+  level, 4: +25%, 8: 3x).  This GPU wants one output per thread and nothing else, and
+  then does about 7.6 G tap-samples/s on a 29-tap FIR, which is what the band-pass's
+  4 ms is.  Half floats are therefore not the lever either; fewer outputs are.
+- **What that points at**: the band-pass produces 512K complex outputs per block at
+  62.5 MHz and the low-pass then decimates by 2.  A complex band-pass that also shifts
+  the band to baseband (taps times e^{-j 2 pi fc n / fs}) has an output of 19.6 MHz
+  bandwidth that a 31.25 MHz complex rate holds, so the band-pass can decimate by 2
+  itself (the FIR shader's decimation constant): half its outputs (-2 ms), and the
+  quadrature demodulation, envelope and dropout passes run at half rate (-1 ms), the
+  low-pass no longer decimating.  The quadrature demodulation then sees phase steps
+  of +-2 pi 9.8/31.25 = +-2 rad, inside +-pi, with center_frequency 0.  Estimated
+  chain 5 ms per 8.4 ms block, which with the decoder's 3.4 would be real time on the
+  A10X.  It is the NTSC pre-decimation idea done inside the band-pass, where the MUSE
+  band is too wide to decimate the real input.  Not started.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
