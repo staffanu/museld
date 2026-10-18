@@ -61,11 +61,16 @@ is detected.
 
 Detection works on live input too (a pipe, a fifo, the `udp://` stream): the samples are read
 window after window until the verdict is clear, so museld can be started before the disc plays
-and waits through whatever comes before. What detection reads from a live input is not played;
-it is at most a second of a signal that keeps coming (a few seconds when the sample format has to
-be found by trying every format, as for a capture whose carrier sits high in the band, like NTSC
-at 30 MHz). A file is instead sampled at a few positions
-spread over its length, which keeps a lead-in or a dropout from deciding.
+and waits through whatever comes before. A weak verdict is waited out: black pictures or a
+player seeking give the line period little to lock on, and its estimate then wanders a few
+percent per window (the GGV1011's capture opens that way, and a verdict taken there missed the
+sample rate by 6 %), so detection goes on until the structure is clear or the line period has
+held still for eight windows, and after some 150 windows (about 20 s) it warns and takes the
+best it saw. What detection reads
+from a live input is not played; it is at most a second of a clear signal that keeps coming (a
+few seconds when the sample format has to be found by trying every format, as for a capture
+whose carrier sits high in the band, like NTSC at 30 MHz). A file is instead sampled at a few
+positions spread over its length, which keeps a lead-in or a dropout from deciding.
 
 ### Network input
 
@@ -151,7 +156,7 @@ the decoder cannot keep up with, so play files by name.
 | `--ac3` | NTSC: use the AC3-RF surround track (RF input only; decoding requires an FFmpeg build — without it the track is silent). All 5.1 channels go to the audio device, and `--write` files carry the original AC3 bitstream (stream copy, no transcode). |
 | `--efm-filter-size <n>` | Number of taps in the adaptive FIR filter ahead of the EFM timing detector (default 3, 0 disables it). Try 9 or 11 when a distorted signal causes many errors; the same setting as `ac3rf-efm-decode --adaptive-filter-size`. The E key cycles it during playback. |
 | `--no-video` / `--no-audio` | Disable video or audio output |
-| `--no-sync` | Display frames as fast as possible (benchmark mode) |
+| `--no-sync` | Display frames as fast as possible (benchmark mode). Without it playback runs at real time: the display's refresh sets the cadence when it matches the field rate (NTSC on a 60 Hz display), with the clock as a guard a few fields behind in case the refresh stops pacing (macOS does not block on it while the window is covered or minimized); slower material (PAL on 60 Hz) is paced by the clock itself |
 | `--no-keys` | Ignore the keyboard and open the window without taking input focus. For runs made beside other work (measurements, scripts): nothing typed into another window can pause or change the decode. The window's close button still quits. |
 | `--full-frames-only` | Skip every other field update (reduces CPU/GPU load) |
 | `--all-fields` | Update display at 60 Hz (default) |
@@ -322,7 +327,10 @@ on files and http input, not on live streams or the 16.2 MHz baseband reader.
 **Stop code**: The picture stop code of NTSC
 CAV discs (`82CFFF`, IEC 60857 10.1.4) pauses playback on the frame it marks, once per stop;
 the P key turns that off.  If `--write`, `--export-frame` or `--no-keys` was given, picture
-stops are ignored.
+stops are ignored.  On a live input (a pipe, fifo or udp:// stream) they start off, since
+the source has a transport of its own: a disc player feeding museld stops on the code
+itself, and a pause in museld on top of it would need its own release, and again on every
+frame while the player sits on its still.  P turns them on.
 
 **Picture numbers on film discs**: a CAV disc mastered from film numbers film frames, on the first
 field of each, and under 3:2 pulldown film frames alternate three and two fields long, so one video
@@ -380,7 +388,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | N | Step one field forward (while paused) |
 | Left / Right | Seek ±10 seconds |
 | Up / Down | Next / previous chapter (see Chapters above) |
-| P | Toggle honouring the picture stop codes (on by default) |
+| P | Toggle honouring the picture stop codes (on by default for files, off for live input) |
 | 1 | Normal field interpolation (motion detection) |
 | 2 | Force intra-field interpolation (treat everything as motion) |
 | 3 | Force inter-frame interpolation (treat everything as still) |
