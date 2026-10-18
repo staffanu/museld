@@ -12,7 +12,7 @@
 #include <stdexcept>
 #include <thread>
 #include <pthread.h>
-#include "httplib.h"
+#include "input/HttpClient.h" // httplib.h with its configuration
 #include "HttpByteSource.h"
 #include "logging/Logger.h"
 
@@ -46,6 +46,14 @@ ParsedUrl parseUrl(const std::string &url) {
 std::unique_ptr<httplib::Client> makeClient(const ParsedUrl &url) {
     auto client = std::make_unique<httplib::Client>(url.origin);
     client->set_keep_alive(true);
+    // A large socket receive buffer, beside the large receive pieces of
+    // input/HttpClient.h (the pieces are what measured; this is kept as cheap
+    // and plausible, its own effect being within the run-to-run variance of
+    // the NAS)
+    client->set_socket_options([](socket_t sock) {
+        const int bytes = 4 << 20;
+        setsockopt(sock, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char *>(&bytes), sizeof bytes);
+    });
     client->set_connection_timeout(std::chrono::seconds(5));
     client->set_read_timeout(std::chrono::seconds(15));
     client->set_write_timeout(std::chrono::seconds(5));
@@ -107,8 +115,9 @@ struct HttpByteSource::Impl {
         if (!ranges_ok)
             throw std::runtime_error(std::format("Cannot read {}: {}", url, error));
         if (m_log)
-            m_log->info(eInput, std::format("{}: {} bytes on {}", m_url.path,
-                                            m_size >= 0 ? std::to_string(m_size) : "unknown", m_url.origin));
+            m_log->info(eInput, std::format("{}: {} bytes on {} (received in pieces of {} KiB, {} MiB chunks, {} ahead)",
+                                            m_url.path, m_size >= 0 ? std::to_string(m_size) : "unknown", m_url.origin,
+                                            CPPHTTPLIB_RECV_BUFSIZ / 1024, c_chunk_bytes >> 20, c_chunks_ahead));
         m_producer = std::thread([this] { produce(); });
     }
 
