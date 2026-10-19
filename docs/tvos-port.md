@@ -323,6 +323,16 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   playback itself is at real time with 2 underruns in 100 s, which is the goal.  The
   FLAC capture from the NAS is unchanged, read-bound at 10.4 ms per block (the FLAC
   decoding on the reader's thread), 189 underruns in 100 s.
+- **The decoder alone** (2026-10-19, in progress): `--write-muse16` wrapped negative raw
+  levels (fixed, commit 17d7b8f), which is why the first attempt decoded in intra-field
+  mode.  With a correct dump (the ldf from 60 s, 24.5 s long, served from the Mac with
+  the range server) `--input-type muse-16 --no-sync --no-audio` runs the decoder and the
+  file-mode reader with no demodulator; the decoder's P3 line now reports its input
+  wait separately ("input wait"), so elapsed minus wait is the decoder's own time.  On
+  the M2: 2.2 ms per field, 104 frames/s.  The A10X run is pending: the Apple TV was
+  unreachable (devicectl "not able to fulfill the requested usage assertion", the box
+  asleep with its owner away).  Recipe: `python3 rangeserver.py <dir> 8765` on the Mac,
+  then launch museld on the box with `http://<mac>:8765/<dump>`.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the

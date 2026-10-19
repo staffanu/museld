@@ -108,8 +108,11 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     std::unique_ptr<MuseInputBlock> input_block = nullptr;
     InputStatus input_status = InputStatus::eNormal;
+    auto t_input_wait_start = chrono::high_resolution_clock::now();
+    long input_wait_us = 0; // the part of the elapsed time spent waiting for the reader
     if (m_field_index == 0 && !redo_last_field) {
         tie(input_block, input_status) = m_reader.getNextInputBuffer();
+        input_wait_us = chrono::duration_cast<chrono::microseconds>(chrono::high_resolution_clock::now() - t_input_wait_start).count();
         switch (input_status) {
             case InputStatus::eEof:
                 return false;
@@ -338,9 +341,10 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
     auto t1 = chrono::high_resolution_clock::now();
     long time_us = chrono::duration_cast<chrono::microseconds>(t1 - t0).count();
     m_total_elapsed_time_us += time_us;
-    m_log.info(ePerformance, std::format("Field {} elapsed time {} ms; {} ms/frame",
+    m_log.info(ePerformance, std::format("Field {} elapsed time {} ms; {} ms/frame; input wait {:.1f} ms",
                                          m_field_index, time_us / 1000,
-                                         m_frame_no != 0 ? m_total_elapsed_time_us / 1000 / m_frame_no : -1));
+                                         m_frame_no != 0 ? m_total_elapsed_time_us / 1000 / m_frame_no : -1,
+                                         input_wait_us / 1000.0));
 
     if (input_status == InputStatus::eBuffersFilled)
         m_field_index = 0; // skip second field -- next field will be from the next frame
