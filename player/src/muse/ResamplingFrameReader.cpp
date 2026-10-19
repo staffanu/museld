@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <fcntl.h>
@@ -197,7 +198,23 @@ void ResamplingFrameReader::threadFunc() {
             output_block->efm_data.clear();
         }
 
-        if (!process(output_block)) {
+        // Per-frame timing (--log P3, every 60 frames): the resampling itself against the
+        // waits for demodulated input inside it (readInput) -- which of the two paces the
+        // MUSE path on a slow CPU
+        const auto t_process_start = std::chrono::steady_clock::now();
+        m_input_wait_us = 0;
+        const bool processed = process(output_block);
+        const auto process_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - t_process_start).count();
+        m_timing_process_us += process_us - m_input_wait_us;
+        m_timing_input_wait_us += m_input_wait_us;
+        if (++m_timing_frames == 60) {
+            m_log.info(ePerformance, std::format("reader avg/frame: resampling {:.2f} ms, waiting for demodulated input {:.2f} ms",
+                                                 m_timing_process_us / 1e3 / m_timing_frames, m_timing_input_wait_us / 1e3 / m_timing_frames));
+            m_timing_frames = 0;
+            m_timing_process_us = m_timing_input_wait_us = 0;
+        }
+        if (!processed) {
             m_log.info(eInput, m_stop_request ? "ResamplingFrameReader: stop requested"
                                               : "ResamplingFrameReader: end of file");
             break;
@@ -244,7 +261,9 @@ bool ResamplingFrameReader::readInput(std::unique_ptr<MuseInputBlock> const &out
         return true;
     } else {
         m_input_samples_decimation_rate = MuseDemodulatedBlock::c_video_decimation_rate;
+        const auto t_wait_start = std::chrono::steady_clock::now();
         auto block = m_demodulator->getNextDemodulatedBlock();
+        m_input_wait_us += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t_wait_start).count();
         if (block == nullptr) {
             m_log.info(eInput, "ResamplingFrameReader: no more demodulated blocks");
             return false;

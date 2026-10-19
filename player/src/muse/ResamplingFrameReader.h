@@ -44,6 +44,10 @@ public:
 protected:
     void threadFunc() override;
 
+    // --log P3 timing, reader thread only (see threadFunc)
+    int64_t m_input_wait_us = 0, m_timing_process_us = 0, m_timing_input_wait_us = 0;
+    int m_timing_frames = 0;
+
 private:
     // takes output_block as parameter in order to fill in efm data when getting a new demodulated block
     bool resample(float *sample_out, uint8_t *dropout_out,

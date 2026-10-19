@@ -298,6 +298,31 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   this margin is 8 underruns.  The demodulator is now at its 8.4 ms budget: 29.6 of 30
   frames/s.  Also fixed: the shader's shared tap tile was 64 entries for a 65-tap filter.
   Next: the diamond filter (3.6 ms per field), the same kind of work.
+- **The diamond filter** (2026-10-19, done, uncommitted): `filter_diamond.comp` now has
+  the kernel's 16 nonzero taps as literals (the 7x7 kernel is fixed; at a missing
+  lattice point only the taps at odd Manhattan distance meet known pixels), no shared
+  tile or barrier, no tap buffer, and the edge reflection only on the three-pixel
+  border; the interior reads 16 pixels straight from the buffer.  The output is within
+  +-2 levels of the old shader's (fp16 summation order; 16% of the pixels differ by 1
+  or 2 on the 60 s frame).  A10X, real-time s8 playback with audio: decoder 8.4 ms per
+  field (was 12.1), demodulator 8.39 ms per block, its budget, 29.8 of 30 frames/s,
+  2 underruns in 100 s.
+- **Where the limit is now** (2026-10-19): unpaced (`--no-sync`) the s8 clip still runs
+  29.7 frames/s, and the same without video, so the display and the decoder are not it.
+  `ResamplingFrameReader` now logs its resampling time against its wait for demodulated
+  input per frame at `--log P3` ("reader avg/frame"): 9-10 ms of resampling per 33 ms
+  frame and, without video, 24 ms of waiting for the demodulator -- the reader thread
+  is not it either.  The demodulator sits at 8.4 ms per block whenever its input is
+  the real HTTP read, against 5.25 in repeat mode: with every GPU pass skipped
+  (`MUSELD_SKIP_PASS=bandpass_fir,...`) the read alone is 4.9 ms per block, 106 MB/s,
+  1.7x real time; the GPU chain alone is 5.25, 1.6x; together they give 8.4, so the
+  receive's CPU time and the GPU chain do not overlap on this box (the three-core
+  CPU serving the GPU driver and the TCP receive at once, as noted under Input).
+  So the ceiling is the pair, each 1.6-1.7x on its own, and real time is where they
+  meet.  Raising it means either less CPU per received byte or a cheaper chain; the
+  playback itself is at real time with 2 underruns in 100 s, which is the goal.  The
+  FLAC capture from the NAS is unchanged, read-bound at 10.4 ms per block (the FLAC
+  decoding on the reader's thread), 189 underruns in 100 s.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
