@@ -148,7 +148,7 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   read from a device-local copy instead of the mapped buffer (no change), an array-free
   FIR reading samples and taps straight from the buffers (`fir_filter_direct.comp`,
   `MUSELD_FIR_SHADER=`; 5% better here, and the default on tvOS since the decimating
-  band-pass below, whose 43 taps the blocked shader cannot hold), that FIR over
+  band-pass below, whose 35 taps the blocked shader cannot hold), that FIR over
   sub-blocks (worse by the dispatch count), and more outputs per thread with it (2:
   level, 4: +25%, 8: 3x).  This GPU wants one output per thread and nothing else, and
   then does about 7.6 G tap-samples/s on a 29-tap FIR, which is what the band-pass's
@@ -177,7 +177,7 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   the carrier at its low end into the top of the video band).  The band-pass is now a
   weighted least-squares design (`filter/LeastSquaresFir.h`): the image 50 dB and more
   down, the EFM region about what the rectangular design gave, the pass band flat
-  within 0.1 dB, 43 complex taps at 62.5 MHz.  (3) The discriminator's phase step
+  within 0.1 dB, 43 complex taps at 62.5 MHz (35 since, see below).  (3) The discriminator's phase step
   over one analytic sample averages the instantaneous frequency over that interval, a
   sinc 1 dB down at 8 MHz at 31.25 MHz (0.25 dB at 62.5), measured as 0.9 dB lost at
   7-8 MHz; the low-pass is a least-squares design to the inverse sinc, 23 taps.
@@ -197,10 +197,26 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   reader's thread plus the HTTP wait, the NAS giving 60-100 MB/s against the 66 MB/s
   the file needs) takes 10.3 ms per block with the GPU idle 0.7 ms after it, 82% of
   real time, 236 underruns in 100 s.  Candidates for the GPU's 1.2 ms:
-  a shorter band-pass (the specification has margin: 35 taps would cost about 0.5 ms
-  less), the decoder's GPU passes (unmeasured so far), the 1.6 ms of per-block
-  overhead in the chain's eleven dispatches and copies.  For FLAC the lever is the
-  input side: a local or faster source, or FLAC decoding off the reader thread.
+  a shorter band-pass (done, below), the decoder's GPU passes (unmeasured so far),
+  the 1.6 ms of per-block overhead in the chain's eleven dispatches and copies.  For
+  FLAC the lever is the input side: a local or faster source, or FLAC decoding off
+  the reader thread.
+- **The shorter band-pass** (2026-10-19, done): the least-squares specification had
+  margin.  `MUSELD_BANDPASS_TAPS=n` sets the count at run time for A/B.  Designs: 43
+  taps have 0.1 dB pass-band ripple and the image 50 dB and more down; 35 have 0.8 dB
+  ripple, the image 43 to 57 dB down and the EFM region as before; at 31 the image
+  rejection at DC is down to 29 dB.  The decoder's statistics on the blue1 capture
+  (Mac) agree: 35 taps equal 43 (SNR 33.85 dB, sigma 6.01 at level 239 and 5.73 at
+  16, 43.2 dB after de-emphasis), 31 lose the de-emphasis SNR (38.5 dB).  On the
+  A10X in repeat mode the chain is 5.25 ms per block at 35 taps against 6.37 at 43
+  (31: 5.62, 27: 5.07 -- the cost is not monotonic in the taps at this size).
+  Playing the raw s8 from the NAS with audio, back to back: 9.21 ms per block
+  (read 0.94, GPU wait 7.67), 27.1 frames/s, 45 underruns in 100 s, against 9.65 ms,
+  25.8 frames/s and 67 underruns at 43 taps.  (One 35-tap run read 5.5 ms per block
+  from the NAS and did worse, 21.9 frames/s; the NAS's speed varies run to run and
+  the rerun read 0.94 ms.)  35 taps is the default.  The GPU is still about 0.8 ms
+  over the budget per block with the decoder's 3.4 ms; what remains is the decoder's
+  passes and the per-block dispatch overhead.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
