@@ -43,6 +43,12 @@ private:
 
     static const std::array<uint16_t, 256> c_byte_to_channel_symbols_table;
     static std::array<uint16_t, 256> makeEfmChannelSymbolTable();
+    // The 512 candidates of estimateSymbol() (each byte in both polarities, in
+    // the order byte 0 as is, byte 0 inverted, byte 1, ...), as the three
+    // 5-bit groups of their 15 channel bits: the level before the symbol and
+    // its 14 bits, most significant first
+    static const std::array<std::array<uint8_t, 3>, 512> c_candidate_groups;
+    static std::array<std::array<uint8_t, 3>, 512> makeCandidateGroups();
 
     static const std::array<std::pair<int, bool>, 32> c_initial_delays;
     static std::array<std::pair<int, bool>, 32> makeInitialDelays();
