@@ -41,16 +41,15 @@ namespace WindowedSinc {
         return h;
     }
 
-    // Analytic band-pass: real low-pass with cutoff (high-low)/2 heterodyned to
-    // fc = (low+high)/2. Heterodyne is centered on the middle tap so the filter
-    // stays linear-phase. Note: the demodulator FIR shader correlates rather than
-    // convolves, so callers std::reverse() the result before uploading.
+    // The complex band-pass centred on `center` whose response is the given (odd
+    // length, symmetric) low-pass prototype's shifted up by `center`.  The
+    // heterodyne is centered on the middle tap so the filter stays linear-phase.
+    // Note: the demodulator FIR shader correlates rather than convolves, so
+    // callers std::reverse() the result before uploading.
     template<typename R>
-    static std::vector<std::complex<R>> complex_band_pass(
-        int ntaps, double Fs, double low_cutoff, double high_cutoff)
+    static std::vector<std::complex<R>> modulate(const std::vector<double> &lp, double Fs, double center)
     {
-        auto lp = low_pass<double>(ntaps, Fs, (high_cutoff - low_cutoff) / 2.0);
-        const double center = (high_cutoff + low_cutoff) / 2.0;
+        const int ntaps = (int)lp.size();
         const int M = (ntaps - 1) / 2;
         std::vector<std::complex<R>> h(ntaps);
         for (int k = 0; k < ntaps; ++k) {
@@ -59,6 +58,16 @@ namespace WindowedSinc {
                                    R(lp[k] * std::sin(phase)));
         }
         return h;
+    }
+
+    // Analytic band-pass: rectangular-window low-pass with cutoff (high-low)/2
+    // heterodyned to fc = (low+high)/2
+    template<typename R>
+    static std::vector<std::complex<R>> complex_band_pass(
+        int ntaps, double Fs, double low_cutoff, double high_cutoff)
+    {
+        return modulate<R>(low_pass<double>(ntaps, Fs, (high_cutoff - low_cutoff) / 2.0), Fs,
+                           (high_cutoff + low_cutoff) / 2.0);
     }
 
 }

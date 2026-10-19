@@ -147,22 +147,60 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   band-pass kernel was equal or worse: the fused complex pass (+2.7 ms), the input
   read from a device-local copy instead of the mapped buffer (no change), an array-free
   FIR reading samples and taps straight from the buffers (`fir_filter_direct.comp`,
-  `MUSELD_FIR_SHADER=`; 5% better, kept as a measurement variant), that FIR over
+  `MUSELD_FIR_SHADER=`; 5% better here, and the default on tvOS since the decimating
+  band-pass below, whose 43 taps the blocked shader cannot hold), that FIR over
   sub-blocks (worse by the dispatch count), and more outputs per thread with it (2:
   level, 4: +25%, 8: 3x).  This GPU wants one output per thread and nothing else, and
   then does about 7.6 G tap-samples/s on a 29-tap FIR, which is what the band-pass's
   4 ms is.  Half floats are therefore not the lever either; fewer outputs are.
-- **What that points at**: the band-pass produces 512K complex outputs per block at
-  62.5 MHz and the low-pass then decimates by 2.  A complex band-pass that also shifts
-  the band to baseband (taps times e^{-j 2 pi fc n / fs}) has an output of 19.6 MHz
-  bandwidth that a 31.25 MHz complex rate holds, so the band-pass can decimate by 2
-  itself (the FIR shader's decimation constant): half its outputs (-2 ms), and the
-  quadrature demodulation, envelope and dropout passes run at half rate (-1 ms), the
-  low-pass no longer decimating.  The quadrature demodulation then sees phase steps
-  of +-2 pi 9.8/31.25 = +-2 rad, inside +-pi, with center_frequency 0.  Estimated
-  chain 5 ms per 8.4 ms block, which with the decoder's 3.4 would be real time on the
-  A10X.  It is the NTSC pre-decimation idea done inside the band-pass, where the MUSE
-  band is too wide to decimate the real input.  Not started.
+- **The decimating band-pass** (2026-10-18, done): the band-pass's output is analytic
+  and 19.6 MHz wide (2.7 to 22.3 MHz), and a complex signal at 31.25 MHz holds any
+  31.25 MHz wide band, so the band-pass decimates by 2 itself (the FIR shader's
+  decimation constant, `analytic_decimation` in `MuseRfDemodulator`, 2 when fs/2 holds
+  the band with its transitions, i.e. above about 43 MHz, 1 below;
+  `MUSELD_ANALYTIC_DECIMATION=1` forces the old chain for A/B) and the quadrature
+  demodulation, the envelope passes and the dropout detector run at the analytic
+  rate, the low-pass no longer decimating.  Three things had to change with it, each
+  found by comparing the demodulated 16.2 MHz baseband (`--write-muse16`, aligned by
+  cross-correlation) and the decoder's noise statistics (`--log D3`: the clamp,
+  level-239 and level-16 sigmas, the SNR after de-emphasis) against the old chain on
+  blue1-fx3-62.5MHz.ldf:
+  (1) `fm_quadrature.comp` took atan of sample * conj(prev) and subtracted the
+  carrier's phase step afterwards, which wraps at 31.25 MHz (the carrier steps 2.51 rad
+  per sample, the top of the band 4.48); it now rotates the product by
+  e^{-j 2 pi fc / fs} (a constant from the caller, so no dependence on fc dividing fs)
+  before the atan.  (2) The rectangular-window band-pass is only 32 dB down at the
+  real input's negative-frequency image of the band, which folds across the band at
+  31.25 MHz and beat with the carrier into the picture at 6.25 MHz: 11% rms difference
+  in the baseband, all above 5 MHz.  A Kaiser design fixed that but let the EFM and
+  pilot below 2.7 MHz through, which tripled the level-16 line's noise (they beat with
+  the carrier at its low end into the top of the video band).  The band-pass is now a
+  weighted least-squares design (`filter/LeastSquaresFir.h`): the image 50 dB and more
+  down, the EFM region about what the rectangular design gave, the pass band flat
+  within 0.1 dB, 43 complex taps at 62.5 MHz.  (3) The discriminator's phase step
+  over one analytic sample averages the instantaneous frequency over that interval, a
+  sinc 1 dB down at 8 MHz at 31.25 MHz (0.25 dB at 62.5), measured as 0.9 dB lost at
+  7-8 MHz; the low-pass is a least-squares design to the inverse sinc, 23 taps.
+  Result: the baseband within +-0.4 dB of the old chain's across 0-9 MHz (the
+  remainder its own rectangular ripple), SNR 33.8 dB in both, level-239 sigma 5.96
+  vs 5.79, level-16 5.56 vs 5.08, SNR after de-emphasis 43.2 vs 43.3 dB.
+  On the A10X the chain then took 19 ms per block with `fir_filter.comp`: the GPU
+  cannot hold the 43-tap window and tap arrays in registers.  With the array-free
+  `fir_filter_direct.comp`, now the default on tvOS (the M2 prefers the blocked one:
+  1.3 vs 2.1 ms there), the chain is 6.4 ms per 8.4 ms block against 8.4 for the old
+  chain with the same shader: band-pass 2.75, low-pass 0.8, quadrature 0.3, the rest
+  (RRC, envelope passes, dropout detector, the copies and the dispatch overhead) 2.5.
+  Playing the raw s8 from the NAS with audio: 9.6 ms per block total, 26.0 frames/s
+  of 30 (was 73%), still 65 underruns in 100 s: the decoder's own GPU share (3.4 ms
+  per block) and the demodulator together are 1.2 ms over the budget.  The FLAC
+  capture from the NAS is no longer GPU-bound at all: the read (FLAC decoding on the
+  reader's thread plus the HTTP wait, the NAS giving 60-100 MB/s against the 66 MB/s
+  the file needs) takes 10.3 ms per block with the GPU idle 0.7 ms after it, 82% of
+  real time, 236 underruns in 100 s.  Candidates for the GPU's 1.2 ms:
+  a shorter band-pass (the specification has margin: 35 taps would cost about 0.5 ms
+  less), the decoder's GPU passes (unmeasured so far), the 1.6 ms of per-block
+  overhead in the chain's eleven dispatches and copies.  For FLAC the lever is the
+  input side: a local or faster source, or FLAC decoding off the reader thread.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
