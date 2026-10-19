@@ -24,9 +24,14 @@
 // -19.8 MHz: one raw sample that the video lowpass spread into a dark comet across
 // ten columns of the picture, and the de-emphasis gave a tail.  The analytic
 // signal of a bandpass that starts well above zero never steps backwards, so a
-// step below unwrap_below (in units of the deviation, the caller passes the fm_out
-// of zero frequency) is a wrap and gets 2 pi added, as ld-decode's np.unwrap does;
-// the lowpass then leaves a faint bright speck.  Replacing the wrapped sample by a
+// step that reads below zero is a wrap -- but a wrapped step is only known modulo
+// 2 pi, and the two readings (as is, or plus the sample rate) are both spikes the
+// lowpass spreads into the picture, one dark and one bright.  The caller passes
+// as unwrap_below (in units of the deviation) the fm_out of center - sample_rate/2,
+// halfway between: a step below it gets 2 pi added, nearer the carrier that way, and
+// one between it and zero stays a dip; neither is further than half the sample rate
+// from the carrier.  (ld-decode adds 2 pi to every negative step, and its brightest
+// specks come from the readings near zero.)  Replacing the wrapped sample by a
 // neighbour instead was tried and left half the hole: the phase it carried is
 // real.  A real dropout is noise with steps in both directions, and stays noise
 // for the dropout detector's slew test downstream.  The caller disables the
