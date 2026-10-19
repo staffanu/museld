@@ -94,15 +94,29 @@ void main() {
 #endif
 
     float t = clamp((float(fc) - float(SDTV_BURST_START + 16)) / float(SDTV_TOTAL_WIDTH), 0.0, 1.0); // from the middle of the burst
-    float16_t rp = rotated_prev_pair(frame_line, fc, lerp_rotation(rot_p0, rot_p1, t));
-    float16_t rn = rotated_next_pair(frame_line, fc, lerp_rotation(rot_n0, rot_n1, t));
-    float16_t pure = 0.5hf * (rp + rn);
+    f16vec2 r_p = lerp_rotation(rot_p0, rot_p1, t);
+    f16vec2 r_n = lerp_rotation(rot_n0, rot_n1, t);
+    float16_t rp = rotated_prev_pair(frame_line, fc, r_p);
+    float16_t rn = rotated_next_pair(frame_line, fc, r_n);
+
+    // A frame pair is only usable where the neighbour's subcarrier is
+    // inverted against this frame's, give or take the sampling phase: the
+    // pair difference then holds the chroma.  A player sitting on a still
+    // frame repeats the same disc frame, bursts and all, so the neighbour
+    // reads as in phase (a half-turn residual, cos of the half residual
+    // near zero) and the difference holds no chroma: the temporal estimate
+    // read white where The Abyss's blue end credits paused, dot crawl in
+    // the luma included.  Such a side counts as moving.  Normal captures
+    // sit within a few degrees; the limit is a third of a turn.
+    float16_t up = r_p.x > 0.5hf ? 1.hf : 0.hf;
+    float16_t un = r_n.x > 0.5hf ? 1.hf : 0.hf;
+    float16_t pure = up + un > 0.hf ? (up * rp + un * rn) / (up + un) : cs;
 
     // motion gating: each still side contributes its frame pair, a moving
     // column degenerates to the spatial comb
     uint mc = uint(clamp(int(fc) - SDTV_FIELD_START_X, 0, SDTV_Y_BUF_WIDTH - 1));
-    float16_t wp = 1.hf - past_motion[mask_row][mc];
-    float16_t wf = 1.hf - future_motion[mask_row][mc];
+    float16_t wp = (1.hf - past_motion[mask_row][mc]) * up;
+    float16_t wf = (1.hf - future_motion[mask_row][mc]) * un;
     float16_t sm = max(wp, wf);
     float16_t ct = sm <= 0.hf ? cs : mix(cs, (wp * rp + wf * rn) / (wp + wf), sm);
 
