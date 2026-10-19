@@ -217,6 +217,87 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   the rerun read 0.94 ms.)  35 taps is the default.  The GPU is still about 0.8 ms
   over the budget per block with the decoder's 3.4 ms; what remains is the decoder's
   passes and the per-block dispatch overhead.
+- **Packed integer input to the band-pass** (2026-10-19, tried, not kept): the
+  band-pass read its input as the capture holds it, four s8 (or two s16) samples per
+  word extracted with bitfieldExtract, a quarter of the float input's bytes.  A first
+  measurement looked like 0.9 ms per block of GPU time saved, and was an accounting
+  error: the demodulator's `gpu wait` is timed from the end of the next block's read,
+  which runs while the GPU works, and the experiment's host-side re-quantising loop
+  lengthened that read by the same 0.9 ms.  The GPU's time per block is read plus gpu
+  wait when the read is the shorter, and that sum was equal (8.53 against 8.57 ms in
+  real-time playback; the same on the M2).  Done properly -- the readers handing out
+  integers through `InputReader::readNative`, the prefetching reader queueing them, one
+  SPIR-V per sample format with the widths as glslc defines, the DC estimate taken out
+  per output as dc times the tap sum -- it measured, A10X in repeat mode with no read
+  to overlap, 5.27 ms per block against 4.86 for floats: the extraction costs ALU and
+  the bytes were never the limit, as the ablation had said.  Real-time s8 playback:
+  total 9.05 against 9.16 ms, the difference the reader's float conversion loop (read
+  0.69 against 0.92 ms), which overlaps the GPU anyway.  Quality was identical.  Not
+  worth the code; reverted, the diff kept outside the tree.  Lesson for the timing
+  lines: compare `total`, or read plus gpu wait, never gpu wait alone when the read
+  changes.  Half floats would be the same story: the FIR is arithmetic-bound here.
+- **The decoder's passes, ablated** (2026-10-19, measured, nothing changed yet): the same
+  `MUSELD_SKIP_PASS` hook on the MUSE decoder's shaders, real-time s8 playback with
+  audio, 60 s each; the decoder's `Field N elapsed time` (both command buffers' fence
+  waits, so its GPU time per field, which shares the GPU with the demodulator), the
+  demodulator's total per block, and the frame rate:
+
+  | skipped | decoder ms/field | demod ms/block | frames/s |
+  |---|---|---|---|
+  | nothing | 13.3 | 9.16 | 27.2 |
+  | apply_equalizer | 12.7 | 8.84 | 28.2 |
+  | apply_rescale_and_non_linear | 13.3 | 9.13 | 27.3 |
+  | apply_dropout_compensation | 13.3 | 9.16 | 27.3 |
+  | apply_deemphasis_and_gamma | 13.3 | 9.13 | 27.4 |
+  | copy_y_for_interpolation (5 dispatches) | 12.9 | 8.97 | 27.8 |
+  | diamond (4) | 9.7 | 8.42 | 29.6 |
+  | convert_sample_rate (5) | 8.1 | 8.42 | 29.7 |
+  | decode_c (4) | 13.2 | 9.18 | 27.2 |
+  | filter_c (4) | 13.4 | 9.22 | 27.1 |
+  | decode_c_single_field | 13.6 | 9.35 | 26.7 |
+  | detect_motion (4) | 12.7 | 8.91 | 28.0 |
+  | combine_still_and_moving | 12.0 | 8.49 | 29.4 |
+
+  Two passes are the decoder: the horizontal sample-rate conversions (5.2 ms per field)
+  and the diamond interpolation filters (3.6), and leaving out either one alone puts the
+  demodulator at its 8.4 ms budget and the playback at 29.6 of 30 frames/s.  The
+  per-pixel passes (rescale, dropout, de-emphasis, decode_c, filter_c) cost nothing
+  measurable even four dispatches at a time, so dispatch overhead is not the decoder's
+  problem.  What the two expensive passes do per output: `convert_horiz_sample_rate.comp`
+  runs the 65-tap 4:3 filter (which its comment says was sized for the audio path,
+  "performance doesn't matter much") over the two inter-frame luma fields, about 22
+  source taps per output with a bounds check, a global float16 load and a shared-memory
+  tap load each, plus three integer divisions per invocation by the upsampling factor,
+  a push constant; `filter_diamond.comp` visits 24 taps of the 7x7 kernel per output, 8
+  of them zero, each through a four-way edge reflection, and loads the kernel from a
+  shared tile behind a barrier.  Candidates, in order: a video-length 4:3 filter (about
+  25 taps, the 2:3 one has 23) and the upsampling factor as a specialization constant;
+  the diamond with its 16 nonzero taps as literals and the reflection only on the edge
+  rows and columns; the equalizer's identity case without the shared-memory FIR (0.6 ms
+  for a float-to-half conversion); the two pow() per channel in combine (1.3 ms).
+- **The 4:3 conversion** (2026-10-19, done, uncommitted): two changes, measured apart
+  with the `MUSELD_VIDEO_43_FILTER=audio` hook (the video through the audio's filter).
+  (1) `convert_horiz_sample_rate.comp` divided by the upsampling factor, a push constant,
+  three times per invocation; it is always 3 and is now a compile-time constant
+  (bit-identical output, checked on an exported frame).  (2) The inter-frame luma ran
+  through the audio's 65-tap filter: until 2024-08 the two shared a 31-tap rectangular
+  design, then the audio got its Kaiser (commit 2a6bf7b, "only used for the audio
+  signal") and the video came along.  The video now has its own 37-tap least-squares
+  filter to the same specification (`tools/muse-4to3-filter.py`; pass band to 0.125 of
+  the 3x rate, stop from 0.167, 34 dB and more down), the audio keeps its 65.  On the
+  detailed frame at 60 s of blue1 the two filters differ by 0.6 rms levels, within +-2
+  along edges, nothing visible.  A10X, real-time s8 playback with audio:
+
+  | | decoder ms/field | demod ms/block | frames/s | underruns/100 s |
+  |---|---|---|---|---|
+  | before (65 taps, divisions) | 13.3 | 9.16 | 27.2 | 41 |
+  | constant factor, 65 taps | 12.2 | 8.62 | 28.9 | 11 |
+  | constant factor, 37 taps | 12.1 | 8.47 | 29.6 | 3 |
+
+  The divisions were most of it; the taps are worth 0.15 ms per block more, which at
+  this margin is 8 underruns.  The demodulator is now at its 8.4 ms budget: 29.6 of 30
+  frames/s.  Also fixed: the shader's shared tap tile was 64 entries for a 65-tap filter.
+  Next: the diamond filter (3.6 ms per field), the same kind of work.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the

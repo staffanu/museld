@@ -7,7 +7,7 @@
 
 layout(push_constant) uniform PushConstants {
     uint filter_size; // assumed to be odd
-    uint upsample_factor_i;
+    uint upsample_factor_i; // must be UPSAMPLE (3): a compile-time constant here, so the divisions below are cheap
     uint downsample_factor;
     uint source_y_offset;
     uint source_x_offset;
@@ -40,7 +40,8 @@ layout(set = 0, binding = 2) buffer writeonly dest_buffer {
 // The dest_row_step_size and dest_col_step_size parameters are "applied" after filtering so the
 // invocation indices tell for what coordinates in the original filter output is computed.
 
-#define MAX_FILTER_SIZE 64 // at most the workgroup size
+#define MAX_FILTER_SIZE 96 // at most the workgroup size; the audio 4:3 filter has 65 taps
+#define UPSAMPLE 3
 shared float16_t shared_filter[MAX_FILTER_SIZE];
 
 void main() {
@@ -54,7 +55,7 @@ void main() {
     uint dest_col_filter_out = gl_GlobalInvocationID.x;
     uint dest_width_filter_out = source_width * upsample_factor_i / downsample_factor;
 
-    float16_t upsample_factor = float16_t(upsample_factor_i);
+    const float16_t upsample_factor = float16_t(UPSAMPLE);
 
     if (source_row >= source_height || dest_col_filter_out >= dest_width_filter_out)
         return;
@@ -66,9 +67,9 @@ void main() {
     int N = int(filter_size) / 2;
     int hiFreqIx = int(dest_col_filter_out * downsample_factor + phase);
     float16_t s = 0.hf;
-    for (int l = (hiFreqIx - N + int(upsample_factor_i) - 1) / int(upsample_factor_i); l <= (hiFreqIx + N) / int(upsample_factor_i); l++) {
+    for (int l = (hiFreqIx - N + UPSAMPLE - 1) / UPSAMPLE; l <= (hiFreqIx + N) / UPSAMPLE; l++) {
         float16_t v = l >= 0 && l < source_width ? source[(source_row + source_y_offset) * source_width + source_x_offset + l] : 128.hf;
-        s += v * shared_filter[upsample_factor_i * l - hiFreqIx + N];
+        s += v * shared_filter[UPSAMPLE * l - hiFreqIx + N];
     }
 
     dest[dest_row * dest_width + dest_col] = s * upsample_factor;

@@ -68,12 +68,36 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   -0.048220863875547020, -0.048790425225316521, -0.022812544748930134, 0.009264361317176931,
                   0.029017564543303277, 0.028343512638849419, 0.011535573644165619
           })),
+  m_filter_4_to_3_video_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
+          Size(37),
+          {
+                  // The 4:3 conversion of the inter-frame luma (makeFieldFromConsecutiveFrames), the
+                  // decoder's single most expensive pass on the Apple TV's A10X: two fields of
+                  // 1122 x 516 outputs per field, and its cost is the taps.  Until 2024-08 this and
+                  // the audio shared one 31-tap rectangular design (cutoff 0.125, transition 0.03);
+                  // the audio then got the 65-tap Kaiser below, and the video came along for
+                  // the ride (5.2 ms per field, the whole real-time deficit on the A10X).  This
+                  // is a weighted least-squares design to the same specification as the audio
+                  // one: pass band to 0.125 of the (3x) rate, stop band from 0.167 (weight 30),
+                  // 37 taps: ripple +0.2/-1.4 dB, 34 dB and more down from 0.167, 44 from 0.18.
+                  // Design: tools/muse-4to3-filter.py.
+                  0.002646730012522024, 0.006480643437177124, 0.008385594904737104, 0.005037497789252051,
+                  -0.003735010657332328, -0.013043359998247005, -0.015090914316393264, -0.005064227084600736,
+                  0.013218859264166239, 0.027143087873341052, 0.022775679525513556, -0.003720233228949926,
+                  -0.038852520933186099, -0.055699952817362432, -0.028941657193870683, 0.047390572246389269,
+                  0.151392167554216611, 0.241288687581996120, 0.276776712081262144, 0.241288687581996092,
+                  0.151392167554216556, 0.047390572246389290, -0.028941657193870617, -0.055699952817362432,
+                  -0.038852520933185981, -0.003720233228949479, 0.022775679525513418, 0.027143087873341104,
+                  0.013218859264165871, -0.005064227084600748, -0.015090914316393214, -0.013043359998246969,
+                  -0.003735010657332298, 0.005037497789252110, 0.008385594904737352, 0.006480643437177167,
+                  0.002646730012521992
+          })),
   m_filter_4_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
           Size(65),
           {
                   // cutoff 0.135, transition 0.035, sample freq 1, Kaiser window: 65 coeffs.
-                  // This is quite a few taps, but the filter is only used for the audio signal so
-                  // performance doesn't matter much.
+                  // This is quite a few taps, but the filter is only used for the audio signal
+                  // (since 2026-10; the video has its own above) so performance doesn't matter much.
                   // Notice that, when doing 4 to 3 sample rate down conversion, one would normally want
                   // to have a lowpass filter that suppresses everything under 0.125 times the sample
                   // rate before the final 4:1 decimation.  However, in this case we know that there are
@@ -375,11 +399,14 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
     copyYForInterpolation(sq, copy_y_descriptor_set_first_index + 1, field_b.m_data, m_interpolated32_buffer,
                           fields_parity, field_b_frame_phase_y, false);
 
-    m_convert_sample_rate_algo->updateBufferDescriptorsInSet(convert_sample_rate_descriptor_set_index, {m_filter_4_to_3_buffer, m_interpolated32_buffer, m_inter_frame_Y_buffer});
+    // Measurement hook: MUSELD_VIDEO_43_FILTER=audio runs the video through the audio's 65-tap filter for A/B
+    static const bool video_uses_audio_filter = [] { const char *e = getenv("MUSELD_VIDEO_43_FILTER"); return e && std::string(e) == "audio"; }();
+    const auto &filter_4_to_3 = video_uses_audio_filter ? m_filter_4_to_3_buffer : m_filter_4_to_3_video_buffer;
+    m_convert_sample_rate_algo->updateBufferDescriptorsInSet(convert_sample_rate_descriptor_set_index, {filter_4_to_3, m_interpolated32_buffer, m_inter_frame_Y_buffer});
     m_convert_sample_rate_algo->updateWorkgroup(Size(m_inter_frame_Y_buffer->size().x_size, m_inter_frame_Y_buffer->size().y_size / 2));
     sq.enqueueComputeShader(
             m_convert_sample_rate_algo,
-            vector{m_filter_4_to_3_buffer->size().x_size, 3u, 4u, 0u, 0u, m_interpolated32_buffer->size().y_size,
+            vector{filter_4_to_3->size().x_size, 3u, 4u, 0u, 0u, m_interpolated32_buffer->size().y_size,
                         m_interpolated32_buffer->size().x_size, (1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases}, convert_sample_rate_descriptor_set_index);
 }
 
