@@ -291,9 +291,14 @@ void SdtvRfDemodulator::demodulate() {
                               fir_dispatch_size(c_video_block_size), 1,
                               {(uint32_t)decimated_lowpass_filter_def.size(), /* decimation */ 1, c_fir_outputs_per_invocation}));
 
+    // The carrier's phase step per sample at demod_rate, taken out of the
+    // product before its phase is measured (see fm_quadrature.comp)
+    const double carrier_phase_step = -2 * M_PI * m_video_standard.rf_center_hz / demod_rate;
+    const float carrier_rotation_re = (float)cos(carrier_phase_step);
+    const float carrier_rotation_im = (float)sin(carrier_phase_step);
     shared_ptr<ComputeShader> fm_quadrature_shader = unique_ptr<ComputeShader>(
             new ComputeShader(m_vulkan_manager, "fm_quadrature",
-                              {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer, envelope_buffer}, 7 * sizeof(float),
+                              {analytic_buffer_re, analytic_buffer_im, lowpass_in_buffer, envelope_buffer}, 8 * sizeof(float),
                               VulkanUtil::loadSpirv(m_executable_dir, "fm_quadrature.comp"), Size(demod_block)));
 
     constexpr uint32_t c_envelope_box_outputs = 4; // OUTPUTS in envelope_box.comp
@@ -540,7 +545,8 @@ void SdtvRfDemodulator::demodulate() {
         command_buffer->enqueueComputeShader<float>(fm_quadrature_shader,
                                                     {(float)demod_block, (float)lowpass_filter_def.size() - 1,
                                                      demod_rate, (float)m_video_standard.rf_deviation_hz,
-                                                     (float)m_video_standard.rf_center_hz, /* scale */ 0.5f, /* add */ 0.5f});
+                                                     carrier_rotation_re, carrier_rotation_im,
+                                                     /* scale */ 0.5f, /* add */ 0.5f});
 
         // Lowpass filter the demodulated signal, and down-sample to the video rate (by 2, unless the input was pre-decimated)
         command_buffer->enqueueComputeShader<uint32_t>(lowpass_fir_shader, {c_video_block_size, /* out offset */ 0});
