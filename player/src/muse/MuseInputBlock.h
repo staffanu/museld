@@ -4,6 +4,8 @@
 #ifndef MUSECPP_MUSEINPUTBLOCK_H
 #define MUSECPP_MUSEINPUTBLOCK_H
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <array>
 #include <unistd.h>
@@ -23,12 +25,22 @@ public:
               dropout_data(std::move(d)) {
     };
 
+    // --write-muse16: the raw baseband as unsigned 16-bit, 4 codes per level plus an
+    // offset, clamped.  The raw levels are whatever the capture's deviation and
+    // carrier offset make them (the decoder rescales them per frame; blue1-fx3 runs
+    // from about -55 to 260), and until 2026-10 this was `short(sample * 4)`, which
+    // wrapped every negative sample to 65000-ish and broke the muse-16 reader's scale
+    // fit (PhaseCorrect16MHzFrameReader takes the 500th highest sample as white).
+    // The reader fits an affine scale to the file, so the offset is free to choose.
+    static constexpr float c_file_scale = 4.f;
+    static constexpr float c_file_offset = 8192.f;
+
     void writeToFile(int fd, void *buffer) {
-        auto m_output_short_buffer = (short *)buffer;
+        auto m_output_short_buffer = (uint16_t *)buffer;
         int size = video_data->size().numberOfElements();
         float *ptr = video_data->data<float>();
         for (int i = 0; i < size; i++)
-            m_output_short_buffer[i] = ptr[i] * 4;
+            m_output_short_buffer[i] = (uint16_t)std::clamp(std::lround(ptr[i] * c_file_scale + c_file_offset), 0L, 65535L);
 
         if (write(fd, m_output_short_buffer, size * sizeof(int16_t)) != size * sizeof(int16_t))
             throw std::runtime_error("Output file write error");
