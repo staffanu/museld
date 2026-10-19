@@ -141,7 +141,6 @@ private:
     std::shared_ptr<musevk::VulkanBuffer> m_audio_data;
 
     // filter definitions
-    std::shared_ptr<musevk::VulkanBuffer> m_diamond_filter_buffer;
     std::shared_ptr<musevk::VulkanBuffer> m_filter_2_to_3_buffer;
     std::shared_ptr<musevk::VulkanBuffer> m_filter_4_to_3_video_buffer;
     std::shared_ptr<musevk::VulkanBuffer> m_filter_4_to_3_buffer;

@@ -43,20 +43,6 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
   m_image_V_out(make_unique<VulkanBuffer>(m_vulkan_manager, Size(MUSE_Y_BUF_WIDTH * 3 / 2, MUSE_BUF_HEIGHT * 2 / 2), 2,
                                           vk::BufferUsageFlagBits::eStorageBuffer, eHostRead)),
-  m_diamond_filter_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
-          Size(7, 7), // Notice the total size should not be larger than the workgroup size!
-          { // Filter taken from "Perfect reconstruction filter banks for HDTV representation and coding",
-            // Martin VETTERLI, Jelena KOVAČEVIĆ, Didier J. LEGALL, Signal Processing: Image Communication 2 (1990) 349-363.
-            // Notice we really only use half of the coefficients -- if we were to compute the filter response
-            // for a point on the sampling grid, we would get the center coefficient (0.5) and then only zeros.
-            0.000000, 0.000000, 0.000000, 0.001953, 0.000000, 0.000000, 0.000000,
-            0.000000, 0.000000, -0.017578, 0.000000, -0.017578, 0.000000, 0.000000,
-            0.000000, -0.017578, 0.000000, 0.158203, 0.000000, -0.017578, 0.000000,
-            0.001953, 0.000000, 0.158203, 0.500000, 0.158203, 0.000000, 0.001953,
-            0.000000, -0.017578, 0.000000, 0.158203, 0.000000, -0.017578, 0.000000,
-            0.000000, 0.000000, -0.017578, 0.000000, -0.017578, 0.000000, 0.000000,
-            0.000000, 0.000000, 0.000000, 0.001953, 0.000000, 0.000000, 0.000000,
-          })),
   m_filter_2_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
           Size(23),
           {
@@ -148,7 +134,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             VulkanUtil::loadSpirv(executable_dir, "copy_y_for_interpolation.comp"), Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT), 8));
     m_diamond_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "diamond",
-            {eBuffer, eBuffer}, sizeof(uint32_t) * 5,
+            {eBuffer}, sizeof(uint32_t) * 3,
             VulkanUtil::loadSpirv(executable_dir, "filter_diamond.comp"), Size(0), 4));
     m_convert_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "convert_sample_rate",
@@ -298,12 +284,11 @@ void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_onl
 
 void Shaders::filterImageDiamond(CommandBuffer &sq, int descriptor_set_index,
                                  int phase, shared_ptr<VulkanBuffer> const &buffer) {
-    m_diamond_algo->updateBufferDescriptorsInSet(descriptor_set_index, {m_diamond_filter_buffer, buffer});
+    m_diamond_algo->updateBufferDescriptorsInSet(descriptor_set_index, {buffer});
     m_diamond_algo->updateWorkgroup(Size(buffer->size().x_size / 2, buffer->size().y_size));
     sq.enqueueComputeShader(
             m_diamond_algo,
-            vector{m_diamond_filter_buffer->size().y_size, m_diamond_filter_buffer->size().x_size,
-                   buffer->size().y_size, buffer->size().x_size, (unsigned)phase},
+            vector{buffer->size().y_size, buffer->size().x_size, (unsigned)phase},
             descriptor_set_index);
 }
 

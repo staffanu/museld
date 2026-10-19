@@ -7,30 +7,44 @@
 // maintain their original values.  If phase == 0, then the top left
 // pixel is filled in.  If phase == 1 the top left pixel is part of the
 // input lattice, so pixels with x + y being odd are filled in.
+//
+// The interpolation kernel is the 7x7 diamond from "Perfect reconstruction
+// filter banks for HDTV representation and coding", Martin Vetterli, Jelena
+// Kovacevic, Didier J. LeGall, Signal Processing: Image Communication 2
+// (1990) 349-363, applied at the missing lattice points, where only the taps
+// on known points matter: 16 of them, below, at odd Manhattan distance from
+// the centre (the kernel's centre 0.5 and its zeros never meet a known
+// point).  They are literals here: the kernel does not change, and reading
+// it from a shared tile behind a barrier, 24 taps a pixel with 8 of them
+// zero, each through a four-way edge reflection, cost 3.6 ms per field on
+// the Apple TV's A10X.  The reflection is only done on the three-pixel border.
+//
+//           0.001953
+//        -0.017578  -0.017578
+//     -0.017578  0.158203  -0.017578
+//  0.001953  0.158203  [0.5]  0.158203  0.001953
+//     -0.017578  0.158203  -0.017578
+//        -0.017578  -0.017578
+//           0.001953
 
 #include "muse.h"
 
 layout(push_constant) uniform PushConstants {
-    int filter_height;
-    int filter_width;
     int frame_buffer_height;
     int frame_buffer_width;
     int phase;
 };
 
-layout(set = 0, binding = 0) buffer readonly filter_input {
-    float16_t diamond_filter[];
-};
-
-layout(set = 0, binding = 1) buffer framebuffer_inout {
+layout(set = 0, binding = 0) buffer framebuffer_inout {
     float16_t frame_buffer[];
 };
 
-#define MAX_FILTER_SIZE 64 // same as workgroup size
-shared float16_t shared_filter[MAX_FILTER_SIZE];
+const float16_t k1 = 0.158203hf;  // (+-1, 0), (0, +-1)
+const float16_t k3 = -0.017578hf; // (+-1, +-2), (+-2, +-1)
+const float16_t k5 = 0.001953hf;  // (+-3, 0), (0, +-3)
 
 // reflect reading coordinates at the edges
-float16_t read_framebuffer(int y, int x) {
+float16_t read_reflected(int y, int x) {
     if (x < 0)
         x = -x;
     if (x >= frame_buffer_width)
@@ -43,46 +57,25 @@ float16_t read_framebuffer(int y, int x) {
 }
 
 void main() {
-    // This converts the local index to a one-dimensional index
-    uint local_ix = gl_LocalInvocationID.x + gl_WorkGroupSize.x * gl_LocalInvocationID.y;
-    if (local_ix < filter_width * filter_height) {
-        shared_filter[local_ix] = diamond_filter[local_ix];
-    }
-
-    barrier();
-
     int row = int(gl_GlobalInvocationID.y);
-    int invocation_x = int(gl_GlobalInvocationID.x);
-    int col = (phase + row) % 2 + invocation_x * 2;
+    int col = ((phase + row) & 1) + int(gl_GlobalInvocationID.x) * 2;
 
     if (row >= frame_buffer_height || col >= frame_buffer_width)
         return;
 
-    int H = filter_height / 2;
-    int W = filter_width / 2;
-
-    int i_start_odd = -(H + 1) / 2 * 2 - 1;
-    int i_start_even = -H / 2 * 2;
-    int j_start_odd = -((W + 1) / 2 * 2 - 1);
-    int j_start_even = -W / 2 * 2;
-
-    float16_t s = 0.hf;
-
-    // First loop over odd values of i; splitting this into two loops makes the boundaries
-    // of the inner loop simpler.
-    for (int i = i_start_odd; i <= H; i += 2) {
-        for (int j = j_start_even; j <= W; j += 2) {
-            s += read_framebuffer(row + i, col + j) *
-                shared_filter[(i + H) * filter_width + j + W];
-        }
-    }
-
-    // Then cover the even values of i
-    for (int i = i_start_even; i <= H; i += 2) {
-        for (int j = j_start_odd; j <= W; j += 2) {
-            s += read_framebuffer(row + i, col + j) *
-                shared_filter[(i + H) * filter_width + j + W];
-        }
+    float16_t s;
+    if (row >= 3 && row < frame_buffer_height - 3 && col >= 3 && col < frame_buffer_width - 3) {
+        const int w = frame_buffer_width;
+        const int c = row * w + col;
+        s = k1 * (frame_buffer[c - 1] + frame_buffer[c + 1] + frame_buffer[c - w] + frame_buffer[c + w])
+          + k3 * (frame_buffer[c - w - 2] + frame_buffer[c - w + 2] + frame_buffer[c + w - 2] + frame_buffer[c + w + 2]
+                  + frame_buffer[c - 2 * w - 1] + frame_buffer[c - 2 * w + 1] + frame_buffer[c + 2 * w - 1] + frame_buffer[c + 2 * w + 1])
+          + k5 * (frame_buffer[c - 3] + frame_buffer[c + 3] + frame_buffer[c - 3 * w] + frame_buffer[c + 3 * w]);
+    } else {
+        s = k1 * (read_reflected(row, col - 1) + read_reflected(row, col + 1) + read_reflected(row - 1, col) + read_reflected(row + 1, col))
+          + k3 * (read_reflected(row - 1, col - 2) + read_reflected(row - 1, col + 2) + read_reflected(row + 1, col - 2) + read_reflected(row + 1, col + 2)
+                  + read_reflected(row - 2, col - 1) + read_reflected(row - 2, col + 1) + read_reflected(row + 2, col - 1) + read_reflected(row + 2, col + 1))
+          + k5 * (read_reflected(row, col - 3) + read_reflected(row, col + 3) + read_reflected(row - 3, col) + read_reflected(row + 3, col));
     }
 
     frame_buffer[row * frame_buffer_width + col] = clamp(s * 2.hf, 0.hf, 255.hf);
