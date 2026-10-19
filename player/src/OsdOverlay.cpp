@@ -88,7 +88,7 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
                     std::string offset_string = std::format(
                             "{} {} {} {} {}",
                             state.last_decoded.last_frame_buffer_input_offset,
-                            state.last_decoded.field_parity ? "ODD" : "EVEN",
+                            state.last_decoded.field_parity ? "Field 2" : "Field 1",
                             offsets->field_start,
                             sample_label,
                             offsets->y);

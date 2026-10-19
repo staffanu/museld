@@ -410,11 +410,17 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | ] | Cycle the secondary subtitle track (top of the frame) through the available tracks and off |
 | Print Screen | Copy the displayed cursor/offset text to the clipboard |
 
-The C key overlay shows the cursor position both in single-field coordinates (374×516) and in the
-decoded picture (1122×1032). When playback is paused and intra-field interpolation is forced (key
-2), it also shows calculated input-file offsets for the pixel under the cursor: the frame start,
-the field start (the start of the sound data, i.e. the third line of the field), and the Y, Cr, and
-Cb sample offsets. This is useful for locating a dropout in the input RF file when working on
+The C key overlay shows the cursor position both in single-field coordinates (374×516 for MUSE,
+764×240 for NTSC and 764×288 for PAL: the column over the whole decoded width, the line within
+the field) and in the decoded picture (1122×1032 for MUSE, 764×480 or 764×576 for the SD
+standards). When playback is paused and intra-field interpolation is forced (key 2), it also
+shows the field on screen and calculated input-file offsets for the pixel under the cursor: the
+frame start, the field start (the start of the sound data, i.e. the third line of the field),
+and the Y, Cr, and Cb sample offsets.  Fields are named as the television standards do: field 1
+is the first field of the frame, the one whose vertical sync group starts at a line boundary,
+and it carries the odd-numbered lines of the 525 (625) line count, which are the even rows of
+the decoded picture counting from zero; field 2 follows half a line later. The paused disc
+info overlay (I key) names the field the same way. This is useful for locating a dropout in the input RF file when working on
 dropout detection — the offsets are off by something like a thousand samples for unknown reasons,
 but usually close enough to find the dropout.  For NTSC the offsets are line-accurate (the frame
 start is tracked to the input sample), and Y, Cr, and Cb are the same offset since the composite
