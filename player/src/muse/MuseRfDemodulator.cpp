@@ -121,11 +121,21 @@ void MuseRfDemodulator::demodulate() {
         // line).  So the band-pass is a least-squares design with the stop bands
         // weighted by what they must reject: the image 50 dB and more, the EFM
         // region about as much as the rectangular design did (-12 dB at 2 MHz,
-        // -31 at 1), the pass band flat within 0.1 dB from 3.5 to 20 MHz.
-        // 43 taps at 62.5 MHz.
+        // -31 at 1), the pass band flat within 0.8 dB from 3.5 to 20 MHz.
+        // 35 taps at 62.5 MHz: 43 gave 0.1 dB ripple and the image 50 dB down,
+        // 35 the image 43 dB down with the decoder's noise statistics unchanged
+        // (SNR 33.85 dB, 43.2 dB after de-emphasis), and 31 is where the image
+        // shows again (29 dB at DC; de-emphasis SNR 38.5 dB).  On the A10X 35 taps
+        // are 1.1 ms per block cheaper than 43.
         const double tw = bandpass_transition / 2; // from the -6 dB edge to the flat pass band
+        int bandpass_taps = odd_taps_for(35, m_sample_frequency);
+        // Measurement hook: MUSELD_BANDPASS_TAPS overrides the tap count (odd)
+        if (const char *env = getenv("MUSELD_BANDPASS_TAPS"); env != nullptr && atoi(env) > 0) {
+            bandpass_taps = atoi(env) | 1;
+            m_log.info(ePerformance, std::format("band-pass taps forced to {} (measurement only)", bandpass_taps));
+        }
         bandpass_filter_def = [&] {
-            auto h = LeastSquaresFir::design(odd_taps_for(43, m_sample_frequency), m_sample_frequency, {
+            auto h = LeastSquaresFir::design(bandpass_taps, m_sample_frequency, {
                     {-m_sample_frequency / 2, -c_band_low, LeastSquaresFir::constant(0), 10},  // the image
                     {-c_band_low, c_band_low - tw, LeastSquaresFir::constant(0), 3},          // EFM, pilot
                     {c_band_low + tw / 2, c_band_high - tw / 2, LeastSquaresFir::constant(1), 1},
