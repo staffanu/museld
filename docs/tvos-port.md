@@ -333,6 +333,19 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   unreachable (devicectl "not able to fulfill the requested usage assertion", the box
   asleep with its owner away).  Recipe: `python3 rangeserver.py <dir> 8765` on the Mac,
   then launch museld on the box with `http://<mac>:8765/<dump>`.
+- **The feed-forward MUSE reader** (2026-10-20, merged from master, commit 818f4e6 there):
+  `MuseFrameReader` with `timebase/LineTimebase` replaces `ResamplingFrameReader`'s
+  per-sample DPLL.  A10X, the s8 clip from the NAS: the reader's timebase plus
+  resampling is 3.3-3.7 ms per frame against 9.6-10 for the DPLL (the M2: 1.1 against
+  3.2); real-time playback with audio 29.5 frames/s, 1 underrun in 100 s, the
+  demodulator at 8.36 ms per block; the decoder's noise statistics unchanged on the
+  Mac (SNR 34.1 dB, 43.4 after de-emphasis).  Unpaced it is still 29.7 frames/s: the
+  ceiling is the receive-plus-GPU pair as measured the day before, and the reader's
+  6 ms of CPU per frame given back did not move it.  The merge kept this branch's
+  carrier rotation in `fm_quadrature.comp` over master's phase unwrap: both pick the
+  reading nearest the carrier, the rotation by construction, so master's `unwrap_below`
+  push constant went and its explanation (the Technidisc title-text wrap) moved into
+  the shader's comment.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
