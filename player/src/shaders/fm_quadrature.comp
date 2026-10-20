@@ -22,6 +22,26 @@
 // whenever that step plus the deviation passed pi, which it does when the
 // analytic signal is decimated: at 31.25 MHz a 12.5 MHz carrier steps 2.51 rad
 // per sample and the top of the MUSE band 4.48.
+//
+// That rotation also settles the wrapped step: a step of more than pi from the
+// carrier reads as the frequency fs/2 further the other way, which happens without
+// any dropout: on the Technidisc Star Wars capture the saturated
+// green title text takes the carrier amplitude to a fifth of its local level for
+// one sample once per chroma cycle (the lower chroma sideband at 7.5 - 3.6 MHz has
+// largely left the passband), and the phase has to catch up there in one sample --
+// usually by less than pi, a short spike towards white that the mean over the
+// chroma cycle needs, now and then by more, and the wrapped step then read as
+// -19.8 MHz: one raw sample that the video lowpass spread into a dark comet across
+// ten columns of the picture, and the de-emphasis gave a tail.  A wrapped step is
+// only known modulo 2 pi, and the two readings (as is, or plus the sample rate) are
+// both spikes the lowpass spreads into the picture, one dark and one bright; the
+// atan of the rotated product gives the one nearer the carrier, never further than
+// half the sample rate from it, which is what the unwrap_below threshold of the
+// earlier (atan, then subtract) form chose.  (ld-decode adds 2 pi to every negative
+// step, and its brightest specks come from the readings near zero.)  Replacing the wrapped sample by a
+// neighbour instead was tried and left half the hole: the phase it carried is
+// real.  A real dropout is noise with steps in both directions, and stays noise
+// for the dropout detector's slew test downstream.
 
 #include "muse.h"
 
@@ -34,6 +54,7 @@ layout(push_constant) uniform PushConstants {
     float carrier_rotation_im;
     float output_scale;
     float output_add;
+    float unwrap_below; // fm_out below this is a wrapped step and gets 2 pi added
 };
 
 layout(set = 0, binding = 0) buffer readonly filter_buffer {
@@ -51,6 +72,8 @@ layout(set = 0, binding = 2) buffer writeonly dest_buffer {
 layout(set = 0, binding = 3) buffer writeonly envelope_buffer {
     float envelope[];
 };
+
+const float c_pi = 3.14159265f;
 
 void main() {
     uint ix = gl_GlobalInvocationID.x;

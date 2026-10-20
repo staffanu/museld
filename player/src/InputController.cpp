@@ -338,9 +338,11 @@ bool InputController::poll(SDL_Window *window,
                 state.osd_text = "DROPOUT ENABLED";
                 break;
         }
+        if (state.paused) state.redo_last_field = true;
     }
     if (checkKey(SDL_SCANCODE_L)) {
         state.enable_non_linear = !state.enable_non_linear;
+        if (state.paused) state.redo_last_field = true;
         state.osd_text = state.enable_non_linear ? "NON-LINEAR DE-EMPH ON" : "NON-LINEAR DE-EMPH OFF";
     }
     if (checkKey(SDL_SCANCODE_C)) {
