@@ -523,6 +523,7 @@ static void runPlayer(Logger &log,
 
         auto t0 = chrono::high_resolution_clock::now();
         int disc_code_logged_minute = 0; // minute 0 is not logged: the decoder is still locking
+        std::string disc_code_logged;    // M4: the last disc code logged, one line per change
 
         // Real-time pacing where the swap chain's vsync cannot provide it:
         // the loop presents one field per refresh, which is real time for
@@ -687,6 +688,20 @@ static void runPlayer(Logger &log,
                              std::format("Stream {:.2f} s ({} fields), disc code {:.2f} s, offset {:+.2f} s",
                                          stream_seconds, state.field_count, *disc_seconds,
                                          *disc_seconds - stream_seconds));
+                }
+            }
+
+            // M4: every change of the disc code with its input offset, to find a disc
+            // frame in a capture
+            if (log.isEnabled(eDebug, eApplication) && state.last_decoded.disc_info) {
+                std::string code;
+                for (const auto &line : state.last_decoded.disc_info->asStrings())
+                    code += (code.empty() ? "" : "; ") + line;
+                if (code != disc_code_logged) {
+                    disc_code_logged = code;
+                    log.debug(eApplication, std::format("disc code at input offset {} ({:.3f} s): {}",
+                                                        state.last_decoded.disc_info_input_offset,
+                                                        state.field_count * seconds_per_iteration, code));
                 }
             }
 
