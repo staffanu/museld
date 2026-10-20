@@ -62,7 +62,9 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
                                            vk::BufferUsageFlagBits::eStorageBuffer, eHostWrite)),
   m_raw_deemphasized(createVulkanBuffer(standard.total_lines, standard.samples_per_line)),
   m_chroma_taps(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.y_buf_width + 2 * VideoStandard::c_chroma_tap_halo, standard.field_lines), 4 * 2 /* f16vec4 */,
-                                          vk::BufferUsageFlagBits::eStorageBuffer, eHostNone))
+                                          vk::BufferUsageFlagBits::eStorageBuffer, eHostNone)),
+  m_pal_uv(make_unique<VulkanBuffer>(m_vulkan_manager, Size(standard.y_buf_width, standard.field_lines), 2 * 2 /* f16vec2 */,
+                                     vk::BufferUsageFlagBits::eStorageBuffer, eHostNone))
 {
   // The standard's build of each shader: ntsc_X.comp.spv or pal_X.comp.spv
   auto spirv = [&](const char *name) {
@@ -101,7 +103,7 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
         spirv("detect_color_burst_phase"), Size(standard.total_lines)));
   m_decode_single_field_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_decode_single_field",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 9,
+          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 10,
           spirv("decode_single_field"), Size(standard.y_buf_width, standard.field_lines)));
   // One descriptor set per motion set: on PAL the comb and the weave masks
   // are both recorded into the same command buffer, and a descriptor set
@@ -181,14 +183,18 @@ void SdtvShaders::decodeSingleField(CommandBuffer &sq, SdtvFieldView &field,
       m_field_Y_buffers[field_parity], m_field_U_buffers[field_parity], m_field_V_buffers[field_parity],
       field.m_dropout_data, prev_frame, next_frame,
       m_movement_buffers[m_current_movement_buffer_index], m_future_movement_buffer,
-      prev_burst, next_burst, prev_dropout, next_dropout, m_chroma_taps});
-  sq.enqueueComputeShader<uint32_t>(m_decode_single_field_algo,
-      { (uint32_t)field_parity,
-        dropout_mode == DropoutMode::eNormal ? 0u : dropout_mode == DropoutMode::eDisabled ? 1u : 2u,
-        use_3d_comb ? 1u : 0u,
-        std::bit_cast<uint32_t>(rot_re), std::bit_cast<uint32_t>(rot_im),
-        std::bit_cast<uint32_t>(level_floor), std::bit_cast<uint32_t>(level_ceiling),
-        std::bit_cast<uint32_t>(chroma_sel_floor), pal_v_flip ? 1u : 0u });
+      prev_burst, next_burst, prev_dropout, next_dropout, m_chroma_taps, m_pal_uv});
+  // PAL decodes in two dispatches: every column's own-line U and V first,
+  // then the decode, whose vertical chroma filter reads the neighbouring
+  // lines' from that pass
+  for (uint32_t uv_pass : m_standard.ntsc_chroma ? std::vector<uint32_t>{0u} : std::vector<uint32_t>{1u, 0u})
+    sq.enqueueComputeShader<uint32_t>(m_decode_single_field_algo,
+        { (uint32_t)field_parity,
+          dropout_mode == DropoutMode::eNormal ? 0u : dropout_mode == DropoutMode::eDisabled ? 1u : 2u,
+          use_3d_comb ? 1u : 0u,
+          std::bit_cast<uint32_t>(rot_re), std::bit_cast<uint32_t>(rot_im),
+          std::bit_cast<uint32_t>(level_floor), std::bit_cast<uint32_t>(level_ceiling),
+          std::bit_cast<uint32_t>(chroma_sel_floor), pal_v_flip ? 1u : 0u, uv_pass });
 }
 
 void SdtvShaders::detectMotion(CommandBuffer &sq, MotionSet set,

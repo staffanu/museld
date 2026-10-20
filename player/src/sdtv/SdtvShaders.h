@@ -119,6 +119,10 @@ private:
   // chroma taps and the single field shader (field_lines rows of
   // y_buf_width + 2 * c_chroma_tap_halo f16vec4)
   std::shared_ptr<musevk::VulkanBuffer> m_chroma_taps;
+  // PAL: each field line's own U and V per column, written by the single
+  // field shader's first dispatch and read by its second for the vertical
+  // chroma filter (field_lines rows of y_buf_width f16vec2)
+  std::shared_ptr<musevk::VulkanBuffer> m_pal_uv;
 
   // output from the single field decoder, one set per field parity so that
   // the previous field is still available for weaving in the combine

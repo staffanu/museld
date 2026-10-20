@@ -17,6 +17,8 @@ layout(push_constant) uniform PushConstants {
     float chroma_sel_floor; // noise floor for the spatial/temporal comb
                             // selector, scaled from the measured sigma
     uint pal_v_flip;        // PAL: invert the derived V switch (calibration aid)
+    uint uv_pass;           // PAL: 1 = only write each column's own-line U and V to
+                            // pal_uv (the first of two dispatches), 0 = decode
 };
 
 layout(set = 0, binding = 0) buffer readonly input_frame_buffer {
@@ -83,6 +85,13 @@ layout(set = 0, binding = 14) buffer readonly chroma_taps_buffer {
     f16vec4 chroma_taps[][SDTV_CHROMA_TAPS_WIDTH];
 };
 
+// PAL: every field line's own U and V per column (the temporal blend where
+// the 3D comb is on, else the spatial comb), written by the uv_pass
+// dispatch and read back by the decode for the vertical chroma filter
+layout(set = 0, binding = 15) buffer pal_uv_buffer {
+    f16vec2 pal_uv[][SDTV_Y_BUF_WIDTH];
+};
+
 float16_t cosine_lut[] = { 1.hf, 0.hf, -1.hf, 0.hf };
 float16_t sine_lut[] = { 0.hf, 1.hf, 0.hf, -1.hf };
 
@@ -98,11 +107,22 @@ float16_t color_sine(uint col) {
 // cutoff on the 4 fsc grid (-60 dB at fsc, -52 dB at the 2 fsc demodulation
 // image).  Applied to the raw demodulation products, it also interpolates the
 // missing quadrature: at 4 fsc each sample carries only one of them.
+#ifdef SDTV_PAL
+// PAL's grid is 17.7 MHz, where the NTSC taps would pass 1.24 MHz (-4 dB
+// at 1.1 MHz, -8 at 1.5): a 0.9 MHz design here, -3.5 dB at 0.9 MHz, -5.5
+// at 1.1, -11 at 1.5, -22 at 2.0, which is within half a dB of the centre
+// line of ld-decode's PAL decoder's raised-cosine window (its 1.18 MHz
+// nominal).  The wider band let more of a luma edge's energy into the
+// chroma, the brighter part of the Pioneer 94 fringes.
+const float16_t chroma_lowpass[19] = float16_t[](
+    0.00094736hf, 0.00297739hf, 0.00839697hf, 0.01931887hf, 0.03651930hf, 0.05885220hf, 0.08326332hf, 0.10545001hf, 0.12098767hf, 0.12657379hf, 0.12098767hf, 0.10545001hf, 0.08326332hf, 0.05885220hf, 0.03651930hf, 0.01931887hf, 0.00839697hf, 0.00297739hf, 0.00094736hf);
+#else
 const float16_t chroma_lowpass[19] = float16_t[](
     -0.00218987hf, -0.00165572hf, 0.00063727hf, 0.00857601hf, 0.02546721hf,
     0.05192392hf, 0.08466937hf, 0.11698703hf, 0.14079925hf, 0.14957109hf,
     0.14079925hf, 0.11698703hf, 0.08466937hf, 0.05192392hf, 0.02546721hf,
     0.00857601hf, 0.00063727hf, -0.00165572hf, -0.00218987hf);
+#endif
 
 float16_t comb_luma(uint frame_line, uint next_line, uint frame_col) {
     return 0.25hf * input_frame[frame_line - 1][frame_col]
@@ -328,6 +348,43 @@ vec2 pal_line_uv(int src, uint fl, uint field_last, uint frame_col) {
         c_src[n] = pal_chroma(src, fl, field_last, uint(int(frame_col) + n - 9));
     return pal_demod(c_src, frame_col, bref, vs);
 }
+
+// A PAL line's U and V at a column as the decode sees them without any
+// repair: the motion-gated blend of the spatial comb and the temporal
+// estimate from sdtv_chroma_taps.comp with the 3D comb on, the spatial
+// comb alone otherwise, against the line's own burst reference
+vec2 pal_column_uv(uint row, uint col, uint fl, uint field_last, uint frame_col) {
+    if (use_3d_comb != 0u && dropout_data[fl][frame_col] == 0) {
+        float16_t cs_arr[19], pure_arr[19], ct_arr[19], c_src[19];
+        for (int n = 0; n < 19; n++) {
+            f16vec4 taps = chroma_taps[row][col + n];
+            cs_arr[n] = taps.x;
+            pure_arr[n] = taps.y;
+            ct_arr[n] = taps.z;
+        }
+        float16_t w_t = temporal_weight(cs_arr, pure_arr);
+        for (int n = 0; n < 19; n++)
+            c_src[n] = mix(cs_arr[n], ct_arr[n], w_t);
+        vec2 bref; float vs;
+        return pal_reference(0, fl, field_last, bref, vs) ? pal_demod(c_src, frame_col, bref, vs) : vec2(0.0);
+    }
+    return pal_line_uv(0, fl, field_last, frame_col);
+}
+
+// The vertical chroma filter: a line's U and V averaged with the three
+// lines each side of it in the field, weighted as the 2D chroma filter of
+// ld-decode's PAL decoder (William Andrew Steer's) weights its vertical
+// taps at the centre of its raised-cosine window.  The 3-line comb leaves
+// a luma leak wherever the picture differs from line to line -- the
+// diagonal high-contrast edges of the Pioneer 94 clip decoded as rainbow
+// fringes -- and the leak's phase rotates with the subcarrier from line to
+// line while the chroma holds, so the average thins the leak and leaves
+// the chroma; it also carries the delay-line step (3 dB less chroma noise,
+// differential phase cancelling on V).  The price is vertical chroma
+// resolution, which PAL decoders have always paid.  The horizontal window
+// stays the 19-tap demodulation lowpass for all seven lines, where the 2D
+// filter narrows it for the outer ones.
+const float pal_vertical_weight[4] = float[](1.0, 0.835, 0.447, 0.095);
 #endif
 
 void main() {
@@ -359,11 +416,13 @@ void main() {
     // added to this line's, is 2 cos 45 times the burst amplitude along -U
     // (the V parts cancel), and the side of that axis this line's burst
     // lies on is the line's V switch.  With use_3d_comb set (key 4, its
-    // only meaning on PAL) the line's U and V are averaged with the
-    // previous line's, the classic PAL delay-line step: 3 dB less chroma
-    // noise, and a differential phase error, which lands on V with opposite
-    // signs on consecutive lines, cancels instead of showing as Hanover
-    // bars.  The dropout paths are NTSC's (see below): the illegal-level
+    // only meaning on PAL) the line's U and V are averaged with the three
+    // lines each side (pal_vertical_weight, the uv_pass dispatch): the
+    // classic PAL delay-line step widened, 3 dB less chroma noise, a
+    // differential phase error, which lands on V with opposite signs on
+    // consecutive lines, cancelling instead of showing as Hanover bars, and
+    // the 3-line comb's luma leak on diagonal edges thinned (see
+    // pal_vertical_weight).  The dropout paths are NTSC's (see below): the illegal-level
     // rescue substitutes the nearest healthy line of the field -- any line
     // will do, each decodes against its own burst -- and a flagged pixel
     // takes the same pixel of the stiller neighbour frame, decoded in
@@ -371,6 +430,10 @@ void main() {
     {
         const uint field_first = SDTV_FIELD_START_Y + SDTV_FIELD2_OFFSET * field_parity;
         const uint field_last = field_first + SDTV_FIELD_HEIGHT - 1;
+        if (uv_pass != 0u) {
+            pal_uv[row][col] = f16vec2(pal_column_uv(row, col, frame_line, field_last, frame_col));
+            return;
+        }
         float16_t Yp = pal_luma(0, frame_line, field_last, frame_col);
         bool pal_painted = false;
         bool pal_rescued = false;
@@ -463,34 +526,24 @@ void main() {
             uv = pal_line_uv(pal_src, src_line, field_last, frame_col);
         }
         if (use_3d_comb != 0u && !pal_rescued && pal_src == 0) {
-            // the delay-line U/V average with the line above.  Where this
-            // pixel took the temporal path the neighbour gets the same
-            // treatment from its own column estimates: its spatial comb
-            // alone put half its vertical-detail leak back (the ringed
-            // sculpture in Empire D515 at 24:01 measured 4.5 of line-to-line
-            // chroma alternation against 3.5 on a flat wall, 1.7 with this),
-            // and on moving content the two gated estimates average their
-            // residues as well (every region of the Pioneer94 clip improved).
-            const uint other = frame_line > field_first ? frame_line - 1 : frame_line + 1;
-            vec2 uv_other = vec2(0.0);
-            if (pal_temporal) {
-                const uint orow = frame_line > field_first ? row - 1 : row + 1;
-                float16_t cs_o[19], pure_o[19], ct_o[19], c_o[19];
-                for (int n = 0; n < 19; n++) {
-                    f16vec4 taps = chroma_taps[orow][col + n];
-                    cs_o[n] = taps.x;
-                    pure_o[n] = taps.y;
-                    ct_o[n] = taps.z;
+            // the vertical chroma filter over the three lines each side,
+            // from their own column estimates in pal_uv (the uv_pass
+            // dispatch), skipping lines flagged as dropouts at this column
+            vec2 acc = uv * pal_vertical_weight[0];
+            float wsum = pal_vertical_weight[0];
+            for (int k = 1; k <= 3; k++) {
+                for (int side = -1; side <= 1; side += 2) {
+                    const int orow = int(row) + side * k;
+                    if (orow < 0 || orow >= SDTV_FIELD_HEIGHT)
+                        continue;
+                    const uint ofl = uint(int(frame_line) + side * k);
+                    if (dropout_data[ofl][frame_col] != 0)
+                        continue;
+                    acc += pal_vertical_weight[k] * vec2(pal_uv[orow][col]);
+                    wsum += pal_vertical_weight[k];
                 }
-                float16_t w_o = temporal_weight(cs_o, pure_o);
-                for (int n = 0; n < 19; n++)
-                    c_o[n] = mix(cs_o[n], ct_o[n], w_o);
-                vec2 bref_o; float vs_o;
-                uv_other = pal_reference(0, other, field_last, bref_o, vs_o) ? pal_demod(c_o, frame_col, bref_o, vs_o) : vec2(0.0);
-            } else {
-                uv_other = pal_line_uv(0, other, field_last, frame_col);
             }
-            uv = 0.5 * (uv + uv_other);
+            uv = acc / wsum;
         }
         float16_t Up = float16_t(uv.x), Vp = float16_t(uv.y);
         if (dropout_mode == 2 && pal_painted) {
