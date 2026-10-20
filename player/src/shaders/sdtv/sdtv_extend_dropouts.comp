@@ -53,6 +53,33 @@ bool video_damaged(uint row, int col) {
     return false;
 }
 
+// The same evidence also starts a flag on its own, for damage the RF
+// detector misses: a discriminator step wrapped past pi at a one-sample
+// amplitude notch (saturated colour whose lower chroma sideband has left the
+// passband, the Technidisc Star Wars titles) is a single raw sample at a
+// frequency near half the sample rate, too brief for the envelope box, and
+// the video lowpass spreads it into a bright comet with its tail to the
+// right, pinned above white where no picture goes.  ld-decode flags the same
+// samples from the demodulated value and repairs them.  Only the upper limit
+// serves: saturated dark colour swings below -0.3 legitimately (the blue
+// CBS/Fox logo on the same disc, hundreds of runs a frame), so the lower
+// one stays a corroboration of an RF flag.  The reach is the comet: the
+// pinned sample itself and the twelve columns after it, two before.  With
+// the discriminator unwrapping to the reading nearer the carrier this
+// fires rarely -- a couple of samples a frame on the logo, none on the
+// title or the crawl -- and at 1.0 instead of 1.45 it would paint the
+// title's pre-emphasis overshoots (9300 pixels in one frame).
+bool video_spike(uint row, int col) {
+    if (col < SDTV_FIELD_START_X || col >= SDTV_FIELD_START_X + SDTV_Y_BUF_WIDTH)
+        return false;
+    for (int dc = -12; dc <= 2; dc++) {
+        float v = float(deemphasized[row][uint(clamp(col + dc, 0, SDTV_TOTAL_WIDTH - 1))]);
+        if (v > 1.45)
+            return true;
+    }
+    return false;
+}
+
 uint word(uint row, int w) {
     return (w < 0 || w >= SDTV_DROPOUT_BIT_WORDS) ? 0u : dropout_bits[row][w];
 }
@@ -118,5 +145,9 @@ void main() {
         core = false;
         soft = false;
     }
+    // A spike flag is soft: a comet is one line's worth of damage, and the
+    // lines around it are good donors
+    if (!core && !soft)
+        soft = video_spike(row, col);
     dropout_out[row][col] = uint8_t(core ? 1 : soft ? 2 : 0);
 }

@@ -541,7 +541,15 @@ void SdtvRfDemodulator::demodulate() {
         command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {(uint32_t)demod_block, /* out offset */ 1}, 0);
         command_buffer->enqueueComputeShader<uint32_t>(bandpass_fir_shader, {(uint32_t)demod_block, /* out offset */ 1}, 1);
 
-        // Demodulate the analytic signal, and scale to [0, 1].
+        // Demodulate the analytic signal, and scale to [0, 1].  A phase step past
+        // pi at an amplitude notch reads as a frequency below zero, and the
+        // step is only known modulo a turn: fm_quadrature.comp adds 2 pi where
+        // the reading is further from the carrier than the reading plus the
+        // sample rate would be, below center - sample_rate / 2 (-11.5 MHz at
+        // 40 MHz for NTSC), so the spike the lowpass makes of it is the
+        // smaller of the two, at most half the sample rate either side of the
+        // carrier.  (The passband starts at 2.3 MHz or above, so a reading
+        // below zero is never the signal itself.)
         command_buffer->enqueueComputeShader<float>(fm_quadrature_shader,
                                                     {(float)demod_block, (float)lowpass_filter_def.size() - 1,
                                                      demod_rate, (float)m_video_standard.rf_deviation_hz,

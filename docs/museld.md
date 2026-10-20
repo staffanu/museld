@@ -25,9 +25,9 @@ is updated 60 times per second (once per field) unless `--full-frames-only` is u
 
 Machines tested and found too slow: NVIDIA Jetson Nano, Raspberry Pi 5 (1–5 fps).
 
-The numbers were obtained by playing an RF capture with `--no-sync --log P4`. There are two
-bottlenecks: GPU performance, and the resampling to 16.2 MHz (a software DPLL) that runs in a
-single CPU thread.
+The numbers were obtained by playing an RF capture with `--no-sync --log P4`. The bottleneck is
+GPU performance: the RF demodulation per block. The resampling to 16.2 MHz (the reader thread's
+feed-forward timebase) costs about 1 ms per frame.
 
 ## Input options
 
@@ -48,7 +48,7 @@ The input types:
   (colour metadata tagged BT.470BG; 50 frames/s, one per field, or 25 with `--full-frames-only`,
   as 59.94/29.97 for NTSC). See `docs/pal-decoding.md`.
 - `muse-16` — MUSE baseband resampled to exactly one sample per pixel at 16.2 MHz, phase locked to the line structure (480 samples per line). This is museld's own intermediate format, produced with `--write-muse16` (see below); `--sample-freq` does not apply.
-- `muse-os` — MUSE baseband (a player's output, before any resampling) captured at an arbitrary rate, e.g. an oscilloscope capture at 50 MHz. The resampling DPLL locks to it like to RF, but skips the FM demodulation.
+- `muse-os` — MUSE baseband (a player's output, before any resampling) captured at an arbitrary rate, e.g. an oscilloscope capture at 50 MHz. The reader's timebase locks to it like to RF, but skips the FM demodulation.
 
 By default museld detects everything the options leave open and plays the file with whatever it
 finds: the input type, the sample rate (unless `--sample-freq` was given -- and with an explicit
@@ -410,11 +410,17 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | ] | Cycle the secondary subtitle track (top of the frame) through the available tracks and off |
 | Print Screen | Copy the displayed cursor/offset text to the clipboard |
 
-The C key overlay shows the cursor position both in single-field coordinates (374×516) and in the
-decoded picture (1122×1032). When playback is paused and intra-field interpolation is forced (key
-2), it also shows calculated input-file offsets for the pixel under the cursor: the frame start,
-the field start (the start of the sound data, i.e. the third line of the field), and the Y, Cr, and
-Cb sample offsets. This is useful for locating a dropout in the input RF file when working on
+The C key overlay shows the cursor position both in single-field coordinates (374×516 for MUSE,
+764×240 for NTSC and 764×288 for PAL: the column over the whole decoded width, the line within
+the field) and in the decoded picture (1122×1032 for MUSE, 764×480 or 764×576 for the SD
+standards). When playback is paused and intra-field interpolation is forced (key 2), it also
+shows the field on screen and calculated input-file offsets for the pixel under the cursor: the
+frame start, the field start (the start of the sound data, i.e. the third line of the field),
+and the Y, Cr, and Cb sample offsets.  Fields are named as the television standards do: field 1
+is the first field of the frame, the one whose vertical sync group starts at a line boundary,
+and it carries the odd-numbered lines of the 525 (625) line count, which are the even rows of
+the decoded picture counting from zero; field 2 follows half a line later. The paused disc
+info overlay (I key) names the field the same way. This is useful for locating a dropout in the input RF file when working on
 dropout detection — the offsets are off by something like a thousand samples for unknown reasons,
 but usually close enough to find the dropout.  For NTSC the offsets are line-accurate (the frame
 start is tracked to the input sample), and Y, Cr, and Cb are the same offset since the composite
@@ -461,13 +467,20 @@ of components.
 ### Data flow — MUSE
 
 ```
-RF capture (any rate; 62.5 MHz typical) → MuseRfDemodulator → ResamplingFrameReader (DPLL, 16.2 MHz)
+RF capture (any rate; 62.5 MHz typical) → MuseRfDemodulator → MuseFrameReader (timebase, resampling to 16.2 MHz)
   → FrameBuffer → Vulkan GPU shaders (de-emphasis, gamma, color decode, motion detection)
   → SDL3 window + miniaudio
 ```
 
-The resampling DPLL runs in a dedicated CPU thread. Vulkan command recording and SDL event handling
-run on the main thread. The GPU pipeline has two stages separated by a semaphore.
+The reader runs in a dedicated CPU thread.  It measures the HD sync edge at the start of every
+line on the demodulated stream (the crossing of the midpoint between the sync's two plateaus),
+chains the measurements onto the line lattice, smooths them with the same fixed-lag Kalman
+smoother the SD readers use (`LineTimebase`), and resamples each line to its 480 pixels between
+two smoothed line starts.  Lock is acquired by chaining edge candidates a line period apart,
+judging a chain by its polarity sequence (the sync alternates line to line, a picture edge does
+not) and verifying it by the frame pulses of lines 1-2 before it becomes the lattice, which also
+anchors the frame.  Vulkan command recording and SDL event handling run on the main
+thread. The GPU pipeline has two stages separated by a semaphore.
 
 ### Data flow — NTSC
 

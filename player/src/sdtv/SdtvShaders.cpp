@@ -115,7 +115,7 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
   m_combine_still_and_moving_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_combine_still_and_moving",
           {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eImage, eBuffer, eBuffer, eBuffer},
-          sizeof(uint32_t) * 4,
+          sizeof(uint32_t) * 5,
           spirv("combine_still_and_moving"), Size(standard.y_buf_width, standard.field_lines * 2)));
 }
 
