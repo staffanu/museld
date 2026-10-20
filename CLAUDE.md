@@ -184,6 +184,8 @@ instruments, all in the RelWithDebInfo build:
 
 **Log categories** (`--log <letter><level>…`, letters MPAVDIO = Main, Performance,
 Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, debug):
+- `M4` — one line per change of the disc code (chapter, frame or time) with the input
+  offset it was read at, to find a disc frame in a capture.
 - `P3` — per-stage timing (demodulator per block, reader and decoder per frame) and
   the final frames/s; the frame rate is set by the slowest stage, the demodulator.
 - `I3` — timebase: anchoring, resets, lattice slips, re-anchors. `I4` adds one line
