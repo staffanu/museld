@@ -12,13 +12,14 @@
 #include "input/InputReader.h"
 #include "util/ConstExprHelpers.h"
 #include "SdtvInputBlock.h"
+#include "timebase/LineTimebase.h"
 
 // Feed-forward timebase: instead of a causal DPLL resampling the signal as it
 // arrives, the reader finds sync pulses in a cheap lowpassed/decimated pass,
 // assigns them to an integer line lattice, fits a smooth curve T(k) -- the
 // input position of the start of line k -- through them with a fixed-lag
-// Kalman smoother, and only then resamples each line between its two curve
-// points.  Look-ahead makes disc wow trivial to follow (the white squall test
+// Kalman smoother (both in LineTimebase, shared with the MUSE reader), and
+// only then resamples each line between its two curve points.  Look-ahead makes disc wow trivial to follow (the white squall test
 // disc swings its line period +-0.24% once per revolution, faster at the
 // extremes than any per-line servo can slew), missing and false pulses are
 // handled in the smoother (an outlier is rejected unless the next pulse
@@ -61,8 +62,6 @@ private:
     bool readInputBlock(std::unique_ptr<SdtvInputBlock> const &output_block);
     void syncPass(const float *data, int64_t stream_base, int count);
     void handlePulse(double t, double width_us);
-    bool canFinalize() const;
-    void finalizeBatch();
     void evaluateAnchors();
     // Resample finalized lines into the frame; returns true when a frame completed
     bool consumeFinalized(std::unique_ptr<SdtvInputBlock> const &output_block);
@@ -117,56 +116,8 @@ private:
     float m_blank_level;                // slow average of the back-porch level
     float m_blank_local;                // the last pulse's back-porch level, when near the average
 
-    // --- lattice: integer line numbers for hsync timestamps ---
-    // Chained pulse to pulse: the nominal period is known a priori to ~0.1%
-    // (wow included), so round(dt / period) is unambiguous for gaps of
-    // hundreds of lines and needs no lock-in phase.  The period is tracked
-    // from clean consecutive intervals only, never from the filter (see
-    // handlePulse for the runaway that causes).  Line numbers are
-    // attached separately by the vertical anchor below.
-    bool m_lattice_valid;
-    double m_lat_t;                     // last accepted pulse
-    double m_p_run;                     // slowly adapted local period
-    int64_t m_last_meas_k;              // its line
-    // Integer-line slip correction against the curve: a shift confirmed by
-    // this many consecutive pulses re-labels the chain
-    int64_t m_slip_shift;
-    int64_t m_slip_first_k;
-    int m_slip_count;
-    // Running measurement-noise estimate: mean |second difference| of
-    // consecutive-line pulse times (see handlePulse)
-    double m_last_dt;
-    int64_t m_last_dk;
-    double m_d2_mean;
-    std::deque<std::pair<int64_t, double>> m_meas; // (k, t) hsync measurements
     std::deque<double> m_broad_falls;   // broad (vertical sync) pulse falls
-
-    // --- fixed-lag Kalman smoother over [position, period] ---
-    struct KalState {
-        double t, p;                    // position of line start, period
-        double P00, P01, P11;           // symmetric covariance
-    };
-    static constexpr int c_kal_batch = 64;  // lines finalized per batch
-    static constexpr int c_kal_lag = 128;   // look-ahead beyond the batch
-    bool m_kal_valid;
-    KalState m_kal;                     // filtered state after line m_k_final - 1
-    KalState m_kal_head;                // newest filtered state (look-ahead head)
-    int64_t m_kal_head_k;               // its line, 0 while unset
-    int64_t m_k_final;                  // first line not yet finalized
-    // Innovation-based adaptation of the period process noise: the filter
-    // does not estimate its own noise model, so the normalized innovation
-    // variance steers a slow scale factor -- wow varies with disc radius
-    double m_qscale;
-    double m_nis_avg;
-    int64_t m_adapted_to_k;
-    // Per-frame sync quality (logged at debug level): how many lines had a
-    // sync, and how many of those disagreed with the fitted curve
-    int m_frame_resid_bad;
-    int m_frame_meas;
-    int64_t m_frame_log_k;
-
-    std::deque<double> m_curve;         // finalized T(k), k from m_curve_base
-    int64_t m_curve_base;
+    LineTimebase m_timebase;            // the lattice, the smoother and the finalized curve
 
     // --- pilot burst timing refinement (PAL) ---
     // The curve is the smoothed hsync timing, good to a couple of ns; the
