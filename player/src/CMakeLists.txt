@@ -228,7 +228,7 @@ if(BUILD_MUSE)
         muse/MuseDecoder.cpp muse/MuseDecoder.h
         muse/MuseAdaptiveEqualizer.cpp muse/MuseAdaptiveEqualizer.h
         muse/MuseEqReference.h
-        muse/ResamplingFrameReader.cpp muse/ResamplingFrameReader.h
+        muse/MuseFrameReader.cpp muse/MuseFrameReader.h
         muse/PhaseCorrect16MHzFrameReader.cpp muse/PhaseCorrect16MHzFrameReader.h
         muse/MuseRfDemodulator.cpp muse/MuseRfDemodulator.h
         muse/MuseInputBlock.h
@@ -236,6 +236,7 @@ if(BUILD_MUSE)
         muse/DiscCode.h muse/DiscCode.cpp
         sdtv/SdtvRfDemodulator.cpp sdtv/SdtvRfDemodulator.h
         sdtv/SdtvFrameReader.cpp sdtv/SdtvFrameReader.h
+        timebase/LineTimebase.cpp timebase/LineTimebase.h
         sdtv/SdtvInputBlock.h
         sdtv/VideoStandard.cpp sdtv/VideoStandard.h
         sdtv/NtscCadenceTracker.cpp sdtv/NtscCadenceTracker.h

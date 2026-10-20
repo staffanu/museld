@@ -49,7 +49,7 @@
 # include "ocr/OcrWorker.h"
 # include "ocr/TranslationWorker.h"
 #endif
-#include "muse/ResamplingFrameReader.h"
+#include "muse/MuseFrameReader.h"
 #include "muse/PhaseCorrect16MHzFrameReader.h"
 #include "muse/MuseDecoder.h"
 #include "muse/MuseConstants.h"
@@ -1207,7 +1207,9 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         // window on macOS), with a few fields of slack so the refresh keeps
         // the cadence.  Slower material (PAL) is paced by the clock itself.
         // --no-sync (-1) runs free.
-        const GLFWvidmode *video_mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+        // (no primary monitor while the screen is locked: then the default refresh)
+        GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode *video_mode = monitor != nullptr ? glfwGetVideoMode(monitor) : nullptr;
         const double refresh_hz = video_mode != nullptr && video_mode->refreshRate > 0 ? video_mode->refreshRate : 60.0;
         const bool refresh_paces = fields_per_second >= 0.97 * refresh_hz;
         const int pace_slack_fields = no_sync ? -1 : refresh_paces ? 4 : 0;
@@ -1997,7 +1999,7 @@ int main(int argc, char *argv[]) {
                 }
                 case eMuseOversampled:
                 case eMuseRf: {
-                    auto reader = make_unique<ResamplingFrameReader>(
+                    auto reader = make_unique<MuseFrameReader>(
                             log, executable_dir, manager, std::move(input),
                             file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
                             audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);

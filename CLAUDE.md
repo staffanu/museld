@@ -55,6 +55,8 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
     muse/          — MUSE frame buffers, audio/video decoders, GPU shaders interface
     sdtv/          — Standard definition (NTSC and PAL) frame buffers, sync detection, field
                      decoder, the video standard descriptor
+    timebase/      — LineTimebase: the feed-forward line timebase (lattice chain, fixed-lag Kalman
+                     smoother, finalized curve) shared by the SDTV and MUSE frame readers
     musevk/        — Vulkan abstraction layer (buffers, images, command pools, compute)
     subtitles/     — SRT parser, stb_truetype-based glyph atlas, GPU subtitle overlay,
                      EIA-608 closed caption decoder (live "CC" track on NTSC discs,
@@ -236,6 +238,31 @@ independent — expect ±40 ns and ~1 ns line-to-line jitter; `pal-pilot-check.p
 refines PAL line starts with the pilot, and `<prefix>.pilot.f64` holds the corrected curve --
 run the tool on it as a prefix to see the residual, 0.4 ns).
 
+**MUSE timebase**: the two dumps exist for MUSE too: `MUSELD_DUMP_DEMOD` writes
+the demodulated 31.25 MHz baseband (MUSE levels, plateaus of the HD sync at about 57 and 178;
+with `MUSELD_DUMP_DEMOD_AFTER_SEEK=1` it starts at the first block after the seek and writes the
+dump's stream position to `<path>.pos`, which the tool reads) and `MUSELD_DUMP_TIMEBASE=<prefix>`
+writes `<prefix>.muse.f64`, one record per line with the stream position the reader gave pixel 1.
+`tools/muse-sync-delta.py <fs> <dump> <prefix> <out>`
+finds the HD sync edge of every line on its own (midpoint crossing between the plateaus of
+pixels 2-4.5 and 7.5-10, cubic spline) and reports edge minus grid per line, the single-edge
+measurement noise and the wow; `MUSELD_TRACE_SYNC=1` with `--log I4` logs every line the
+reader's tracking misses and every acquisition chain that dies. Measured 2026-10 on three
+62.5 MHz captures (blue, jp-muse, the Sony test disc at 120 s), the dump started at `--seek`:
+edge noise 3.4-4.5 ns rms; the reader's grid within 2.6-2.9 ns rms of the edges (p99 7-8 ns,
+max 15-26), every line tracked, no resets (the per-line DPLL it replaced in 2026-10 was within
+4.7-5.2 ns rms, p99 12-14 ns, max 31-36, with a lag-1 autocorrelation of -0.3 to -0.4 from its
+proportional term chasing that noise).  The MUSE-specific traps met on the way, all found with these instruments:
+the plateau windows must start at pixel 2, not 1.5, since the dip before the sync ends only at
+pixel 1.5 on the negative lines (93% and 12% of positive/negative lines passed the test a sample
+early, against 99.9% and 99%); the tracking window must be predicted from the last edge and the
+chain's period, not from the smoother's look-ahead head, whose 64-line extrapolation is good to
+a few pixels only (15% of lines missed); and MUSE's line-sequential chroma makes a static colour
+edge alternate polarity line to line exactly like the sync, so an acquisition chain is verified
+by the frame pulses of lines 1-2 before it becomes the lattice (the Sony test disc's bars locked
+the chain otherwise). A player spinning up (the first two seconds of the blue capture) hunts
++-2% around nominal speed.
+
 **Sample rates**: anything in the sync pass and timebase that is a count of (decimated)
 samples must be derived from a time, never a constant: a 30 MHz Domesday Duplicator capture
 (`~/Downloads/RF_Reference_30mhz.ddd.s16`, with a 40 MHz capture of the same disc beside it)
@@ -361,7 +388,8 @@ fractional resampler → EfmDecoder → CIRC C1/C2 → concealment → pop detec
 
 **MUSE path:**
 ```
-RF (62.5 MHz) → RF demod → ResamplingFrameReader DPLL (16.2 MHz) →
+RF (62.5 MHz) → RF demod → MuseFrameReader (feed-forward timebase: HD sync edge per line →
+line lattice → fixed-lag Kalman smoother → per-line resample to 16.2 MHz) →
 MUSE frame buffer → video/audio split → Vulkan GPU filters →
 HD video + miniaudio
 ```
@@ -392,7 +420,7 @@ down via a RAII guard: reader → Vulkan → GLFW window, in that order.
 ### museld Threading
 
 - Main thread: Vulkan command recording + GLFW event loop
-- Reader thread: for MUSE the resampling DPLL (the CPU bottleneck); for NTSC the sync pass, timebase fit and per-line resampling (about 2 ms per frame)
+- Reader thread: the sync measurement, timebase fit and per-line resampling (about 2 ms per frame for NTSC, 1 ms for MUSE); the lattice, smoother and curve are `timebase/LineTimebase`, shared by `SdtvFrameReader` and `MuseFrameReader`, which supply the standard's sync detection, vertical anchor and resampling
 - Demodulator thread (`museld-demod`): input read + RF demod GPU pipeline; logs per-section timing at info level (`ePerformance`), for both MUSE and NTSC
 - EFM worker thread (`museld-efm`): EFM demodulation off the demodulator thread; blocks flow vacant → demod → EFM queue → filled, order preserved by the single FIFO worker. The NTSC worker (EFM or analog demod always runs), the NTSC reader thread (timebase and resampling vs input wait per frame) and the NTSC decoder (per-section, including the fence waits and the host reads of mapped buffers) also log `ePerformance` timing
 - GPU: Async compute via SPIR-V shaders (`player/src/shaders/*.comp`)
