@@ -346,6 +346,20 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   reading nearest the carrier, the rotation by construction, so master's `unwrap_below`
   push constant went and its explanation (the Technidisc title-text wrap) moved into
   the shader's comment.
+- **s16 and lds input** (2026-10-20, with the feed-forward reader): neither plays in real
+  time on the A10X from the NAS; s8 remains the raw format for this box.  The clips are
+  the same 60 s of blue1 as s8 (62.5 MB/s), lds (78 MB/s; made with ldconv from the s8,
+  now beside it on the NAS) and s16 (125 MB/s).  Real-time playback with audio: s16
+  read 16.4 ms per block, 22.2 total, 38% of real time, 272 underruns; lds read 9.1 ms,
+  14.9 total, 17 frames/s, 215 underruns; s8 at real time.  The receive alone (every
+  GPU pass skipped) from the NAS reached 123 MB/s on lds at one moment and 46-72 MB/s on
+  both s8 and lds half an hour later, in alternating runs: the NAS's rate to the box
+  swings by a factor of two with time, so the lds unpack's own CPU cost could not be
+  separated from it today.  What is firm: with the whole pipeline running, the receive
+  gets 51-72 MB/s on this three-core CPU, which carries s8's 62.5 and not lds's 78 or
+  s16's 125.  (A Python range server on the Mac serves 1 GB/s over loopback but the box
+  reads 50 MB/s from it across the Mac's Wi-Fi, so it is no better than the NAS for
+  these tests; the Mac's LAN address also changes between days.)
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
