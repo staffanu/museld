@@ -360,6 +360,22 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   s16's 125.  (A Python range server on the Mac serves 1 GB/s over loopback but the box
   reads 50 MB/s from it across the Mac's Wi-Fi, so it is no better than the NAS for
   these tests; the Mac's LAN address also changes between days.)
+- **The input server** (2026-10-22): the NAS (a Synology DS1819+) serves its share to
+  multivac (FreeBSD, 8 GB RAM, Apache in a jail at 10.0.2.22) over NFS, and multivac
+  serves it as `/ld-captures`.  The variability was multivac's page cache: a warm
+  file goes to the box at line rate (131 MB/s), a cold one at whatever Apache's
+  4 MiB-range reads get from the source: 44-85 MB/s over NFS (the NFS link itself does
+  111 with 4 MiB reads, the Synology's RAID6 386 locally), 65-74 from multivac's
+  spinning scratch disk (98 with one long read), 94 from its SSD (206 on loopback).
+  The three blue1 clips total 9.2 GB against about 5.5 GB of cache, so alternating
+  runs read cold.  Now: `/ld-local` serves `/scratch0/ld-captures` (the HDD; the three
+  clips copied there) and `/ld-ssd` the SSD (the s8 clip so far), both LAN-only
+  (`Require ip 10.0.2.0/24`, the port 80 vhost; nullfs into the jail, fstab).
+  EnableSendfile made the 4 MiB-range pattern slower (65 against 84 MB/s on loopback),
+  so the default mmap stays.  The remaining per-chunk cost is on the box's side: a cold
+  SSD file is 94 MB/s to the box in 4 MiB range requests one at a time, about 12 ms of
+  request overhead per chunk; bigger chunks or a second connection in
+  `HttpByteSource` would recover most of the way to line rate.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
