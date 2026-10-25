@@ -421,14 +421,14 @@ void main() {
     // de-rotated by the structural 270.576 degrees into this line's frame,
     // added to this line's, is 2 cos 45 times the burst amplitude along -U
     // (the V parts cancel), and the side of that axis this line's burst
-    // lies on is the line's V switch.  With use_3d_comb set (key 4, its
-    // only meaning on PAL) the line's U and V are averaged with the three
-    // lines each side (pal_vertical_weight, the uv_pass dispatch): the
-    // classic PAL delay-line step widened, 3 dB less chroma noise, a
-    // differential phase error, which lands on V with opposite signs on
-    // consecutive lines, cancelling instead of showing as Hanover bars, and
-    // the 3-line comb's luma leak on diagonal edges thinned (see
-    // pal_vertical_weight).  The dropout paths are NTSC's (see below): the illegal-level
+    // lies on is the line's V switch.  The line's U and V are then averaged
+    // with the three lines each side (pal_vertical_weight, the uv_pass
+    // dispatch): the classic PAL delay-line step widened, 3 dB less chroma
+    // noise, a differential phase error, which lands on V with opposite
+    // signs on consecutive lines, cancelling instead of showing as Hanover
+    // bars, and the 3-line comb's luma leak on diagonal edges thinned (see
+    // pal_vertical_weight).  use_3d_comb (key 4) switches only the temporal
+    // estimate, as on NTSC.  The dropout paths are NTSC's (see below): the illegal-level
     // rescue substitutes the nearest healthy line of the field -- any line
     // will do, each decodes against its own burst -- and a flagged pixel
     // takes the same pixel of the stiller neighbour frame, decoded in
@@ -531,7 +531,7 @@ void main() {
         } else {
             uv = pal_line_uv(pal_src, src_line, field_last, frame_col);
         }
-        if (use_3d_comb != 0u && !pal_rescued && pal_src == 0) {
+        if (!pal_rescued && pal_src == 0) {
             // the vertical chroma filter over the three lines each side,
             // from their own column estimates in pal_uv (the uv_pass
             // dispatch), skipping lines flagged as dropouts at this column

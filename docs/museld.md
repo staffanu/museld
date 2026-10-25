@@ -177,7 +177,7 @@ the decoder cannot keep up with, so play files by name.
 | `--benchmark-shaders` | Print GPU shader timing statistics |
 | `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |
 | `--field-interpolation <mode>` | Initial de-interlacing mode: `normal` (motion-adaptive), `intra-field`, or `inter-frame` — same as keys 1/2/3 |
-| `--no-3d-comb` | Start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4. On PAL the key also switches the U/V line averaging (the PAL delay-line step) |
+| `--no-3d-comb` | Start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4 |
 | `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
 | `--black-level <mode>` | NTSC: where the disc puts black — `auto` (default) reads it off the picture, `m` forces NTSC-M (US discs: 7.5 IRE above blanking), `j` forces NTSC-J (Japanese discs: black at blanking). Same as the J key. Wrong in the M direction, a Japanese disc loses its darkest 7.5 IRE; wrong in the J direction, a US disc shows black as dark grey and slightly desaturated |
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
