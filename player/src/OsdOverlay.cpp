@@ -111,8 +111,12 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         // and a defect on one field only (a dropout, a cadence slip) is
         // otherwise impossible to point at while stepping with N.  Only
         // while paused, like the film detail: at speed it just flickers.
-        if (state.paused && state.last_decoded.decoded && !disc_info_strings.empty())
-            disc_info_strings.back() += std::format("Field {} ", state.last_decoded.field_parity + 1);
+        if (state.paused && state.last_decoded.decoded && !disc_info_strings.empty()) {
+            std::string &last = disc_info_strings.back();
+            if (!last.empty() && last.back() != ' ')
+                last += ' '; // the MUSE disc code ends without one, the VBI strings with one
+            last += std::format("Field {} ", state.last_decoded.field_parity + 1);
+        }
         if (!state.last_decoded.film_status.empty()) {
             std::string film_line = state.last_decoded.film_status;
             // The detail changes per field -- unreadable at speed, so only
