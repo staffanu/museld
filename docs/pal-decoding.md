@@ -158,30 +158,35 @@ the switch, a calibration aid.
 
 **Vertical chroma filter** (the PAL delay-line step, widened).  With the temporal comb on
 (key 4; this is the key's only meaning on PAL) a line's U and V are averaged with the three
-lines each side of it in the field, weights 1 : 0.835 : 0.447 : 0.095 for distances 0 to 3,
-the vertical taps of the 2D chroma filter of ld-decode's PAL decoder (William Andrew Steer's)
-at the centre of its raised-cosine window.  Each line's U and V come from its own column
-taps through the same spatial/temporal selector and its own burst reference (the single
-field shader runs twice: a first dispatch writes every column's own-line estimate to
-`pal_uv`, the decode reads its neighbours back), lines flagged as dropouts at the column
-are left out, and the field's first and last lines use what is there.  It keeps what the
-line-pair average gave -- 3 dB less chroma noise, a differential phase error landing on V
-with opposite signs on consecutive lines and cancelling instead of showing as Hanover bars
-(R−G noise on the GGV1011 modulated staircase 10.3 → 6.9, line alternation on the NYCSTM
-1.05 → 0.41 with the pair; the sculpture in Empire D515 at 24:01 that the pair took from 4.5
-to 1.7 of line-to-line chroma alternation) -- and goes after the 3-line comb's one real
-weakness: wherever the picture differs from line to line the comb leaks luma into the
-chroma, and on a diagonal high-contrast edge the leak's phase rotates with the subcarrier
-from line to line while the chroma holds, which decoded as rainbow fringes along the edges
-of clothing on the Pioneer 94 clip (pictures 40970-41000).  The average thins the rotating
-leak and leaves the chroma: local chroma variation in two edge regions of picture 40986
-4.61 → 2.46 and 6.93 → 3.48 (2.70 and 3.97 before the PAL lowpass above), the GGV1011 bars'
-colours unchanged to within a level, the Big Day frame's chroma noise 5.9 → 3.1, and the
-NTSC path byte-identical.  ld-decode's 2D decoder measures 3.04 and 4.46 on the same
-regions and its Transform decoder 2.61 and 3.54, with a luma 9 % softer; what is left of
-the fringes in museld is visible at full zoom and would need the 2D filter's narrower
-horizontal windows on the outer lines, or more, to go further.  The price is vertical
-chroma resolution, which PAL decoders have always paid; the frame time is unchanged.
+lines each side of it in the field, weights 1 : 0.75 : 0.5 : 0.25.  Each line's U and V come
+from its own column taps through the same spatial/temporal selector and its own burst
+reference (the single field shader runs twice: a first dispatch writes every column's
+own-line estimate to `pal_uv`, the decode reads its neighbours back), lines flagged as
+dropouts at the column are left out, and the field's first and last lines use what is there.
+
+The weights are derived from the two errors with a fixed vertical period.  The 3-line comb
+leaks luma into the chroma wherever the picture differs from line to line, and the leak's
+phase rotates with the subcarrier, 90° per field line, while the chroma holds, so across
+lines it is a pattern of period four; on a diagonal high-contrast edge that is the rainbow
+fringe along the edge (the edges of clothing on the Pioneer 94 clip, pictures 40970-41000).
+The differential phase error lands on V with opposite signs on consecutive lines, period
+two (Hanover bars, what the classic delay-line average cancels).  A symmetric filter
+w0 .. w3 responds to period four as w0 − 2 w2 and to period two as w0 − 2 w1 + 2 w2 − 2 w3,
+so the nulls need w2 = w0/2 and w1 + w3 = w0.  A box over four lines has both; convolved
+with itself it is this triangle, with both nulls doubled so the notches are wide enough for
+a leak that moves across the lines.  Measured against the five-line box-times-two-line-box
+(½ 1 1 1 ½, the shortest filter with both nulls) and against the vertical taps of ld-decode's
+PAL decoder's raised-cosine window (1 : 0.835 : 0.447 : 0.095, which sit near the nulls by
+chance): local chroma variation in two edge regions of picture 40986, 4.61 and 6.93 with the
+line-pair average, 2.60 and 3.68 with the five-line filter, 2.46 and 3.48 with the raised
+cosine, 2.29 and 3.21 with the triangle; the GGV1011 bars' line-to-line chroma alternation
+4.45 → 1.88, 1.72, 1.56; the Big Day frame's chroma noise 5.9 → 3.2, 3.1, 2.8; the bars'
+colours unchanged to within a level in all three.  ld-decode's 2D decoder measures 3.04 and
+4.46 on the same edge regions and its Transform decoder 2.61 and 3.54, with a luma 9 %
+softer; what is left of the fringes in museld is visible at full zoom.  The NTSC path is
+byte-identical and the frame time unchanged.  The price is vertical chroma resolution, −7 dB
+at an eighth of a cycle per field line (the raised cosine −5, the five-line −4), which PAL
+decoders have always paid.
 
 **Temporal (3D) comb.**  The subcarrier advances 270° per frame and the V switch flips (625
 is odd), so frames N ± 1 do not cancel; N ± 2 do (chroma inverted, V switch matching), and

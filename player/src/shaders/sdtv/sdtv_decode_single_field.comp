@@ -372,19 +372,25 @@ vec2 pal_column_uv(uint row, uint col, uint fl, uint field_last, uint frame_col)
 }
 
 // The vertical chroma filter: a line's U and V averaged with the three
-// lines each side of it in the field, weighted as the 2D chroma filter of
-// ld-decode's PAL decoder (William Andrew Steer's) weights its vertical
-// taps at the centre of its raised-cosine window.  The 3-line comb leaves
-// a luma leak wherever the picture differs from line to line -- the
-// diagonal high-contrast edges of the Pioneer 94 clip decoded as rainbow
-// fringes -- and the leak's phase rotates with the subcarrier from line to
-// line while the chroma holds, so the average thins the leak and leaves
-// the chroma; it also carries the delay-line step (3 dB less chroma noise,
-// differential phase cancelling on V).  The price is vertical chroma
-// resolution, which PAL decoders have always paid.  The horizontal window
-// stays the 19-tap demodulation lowpass for all seven lines, where the 2D
-// filter narrows it for the outer ones.
-const float pal_vertical_weight[4] = float[](1.0, 0.835, 0.447, 0.095);
+// lines each side of it in the field, weights 1 : 0.75 : 0.5 : 0.25.  The
+// 3-line comb leaks luma into the chroma wherever the picture differs from
+// line to line, and the leak's phase rotates with the subcarrier, 90
+// degrees per field line, while the chroma holds: across lines it is a
+// pattern of period four, and a box over four lines sums it to zero.  The
+// other error with a fixed period is the line alternation (a differential
+// phase error landing on V with opposite signs on consecutive lines, the
+// Hanover bars the classic delay-line average cancels), period two, which
+// the four-line box also nulls.  A symmetric filter w0 .. w3 responds to a
+// period-four pattern as w0 - 2 w2 and to period two as w0 - 2 w1 + 2 w2 -
+// 2 w3, so the nulls need w2 = w0 / 2 and w1 + w3 = w0; the box convolved
+// with itself, this triangle, has both nulls doubled, so the notches are
+// wide enough for a leak that is not exactly periodic -- a diagonal edge
+// moves across the lines -- and it measured best of the candidates on the
+// Pioneer 94 edges, the GGV1011 bars' line alternation and the Big Day
+// chroma noise.  The price is vertical chroma resolution (-7 dB at an
+// eighth of a cycle per field line), which PAL decoders have always paid.
+// The horizontal window stays the 19-tap demodulation lowpass.
+const float pal_vertical_weight[4] = float[](1.0, 0.75, 0.5, 0.25);
 #endif
 
 void main() {
