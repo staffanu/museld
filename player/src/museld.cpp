@@ -1847,8 +1847,9 @@ int main(int argc, char *argv[]) {
 
             // The rate follows from the line period under whichever type is
             // in effect, so with the type given only the line structure has
-            // to be found, not the type
-            const bool needs_probe = probe_only || !type_given ||
+            // to be found, not the type; and a format the extension did not
+            // give is detected whatever else is known
+            const bool needs_probe = probe_only || !type_given || !resolved_format ||
                     (!known_sample_frequency && file_input_type != eMuse16MHz);
             if (needs_probe) {
                 if (input.isLive())
