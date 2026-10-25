@@ -746,12 +746,15 @@ FileAnalysis analyzeFile(Logger &log, SampleSource &source, InputFormat format) 
     // A chunk in the lead-in or a dropout can lock onto something that is not
     // the line structure, and a clean chunk can lock two or three lines apart
     // (a harmonic of the period).  Pick the reference chunk most others agree
-    // with -- counting a chunk as agreeing when an integer division of its
-    // period lands on the reference -- and require a majority so a single
-    // rogue chunk cannot decide.
+    // with -- counting a chunk as agreeing when a division of its period by
+    // two or three lands on the reference -- and require a majority so a
+    // single rogue chunk cannot decide.  Only those small factors count: a
+    // lead-in chunk once locked at a fifth of a line, and with any multiple
+    // accepted the two clean chunks were read as its fifth harmonics and
+    // elected it, which put the capture at 8 MHz instead of 40.
     auto harmonicOf = [](double period, double reference) -> int {
         int k = (int)lround(period / reference);
-        return k >= 1 && abs(period / k - reference) / reference <= 0.03 ? k : 0;
+        return k >= 1 && k <= 3 && abs(period / k - reference) / reference <= 0.03 ? k : 0;
     };
     size_t best_ref = 0, best_count = 0;
     for (size_t i = 0; i < chunks.size(); i++) {
