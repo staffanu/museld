@@ -169,6 +169,15 @@ cmake --build player/build-debug
 cd player/build-debug && ctest -V
 ```
 
+**Picture and sound regression** (`tests/regression/regress.py run`, see
+**docs/regression-testing.md**): renders fifteen 4 s reference clips (fetched from multivac on
+first use, 1.5 GB) with lossless `--write` and compares every frame, the audio, the disc codes
+and the probe verdict against the goldens in `tests/regression/golden/`. Output is bit-exact run
+to run on one machine, so PASS means nothing changed; DIFF reports per-frame PSNR against the
+golden render. Run it after any change to the decode (shaders, timebase, dropout, audio), and
+`run --accept --upload madeye.org:/nas/video/LD-Captures/public/museld-testdata/golden` to
+re-record the goldens of an intended change, committing the JSON with the change.
+
 Tests are only built when `-DBUILD_TESTING=ON` is passed. They are in `player/tests/`
 (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`, `FilterSimdParityTest.cpp`, `InputProbeTest.cpp`,
 `NtscCadenceTrackerTest.cpp`, `PalCadenceTrackerTest.cpp`, `PrefetchingInputReaderTest.cpp`, `SrtParserTest.cpp`,
