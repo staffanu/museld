@@ -16,6 +16,7 @@ add_executable(museld-tests
     DisplayGeometryTest.cpp
     ChapterSearchTest.cpp
     LdfInputReaderTest.cpp
+    HttpByteSourceTest.cpp
     ../src/ChapterSearch.cpp
     ../src/subtitles/Eia608Decoder.cpp
     ../src/bch/BchDecoder.cpp
