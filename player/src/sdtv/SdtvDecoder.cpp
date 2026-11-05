@@ -74,6 +74,8 @@ SdtvDecoder::SdtvDecoder(
   m_dts_detector(),
   m_pending_audio(),
   m_pending_audio_mode(MODE_UNKNOWN),
+  m_cx_expander(48000.0),
+  m_analog_cx_from_vbi(false),
   m_temporal_distance(video_standard.ntsc_chroma ? 1 : 2),
   m_frames() {
     // 185.8 degrees is the structural 180 (see sdtv_decode_single_field.comp)
@@ -621,22 +623,11 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         // is well inside the caption timing tolerance.
         out.cc_bytes = m_frames[0]->getClosedCaptionBytes();
 
-        // Drive the analog audio's CX expansion from the VBI status, unless
-        // the user forces it.  The demodulator runs a few frames ahead of the
-        // VBI decode, but the flag changes on program boundaries, so the
-        // latency does not matter.
-        switch (controls.analog_cx) {
-            case CxMode::eOff:
-                m_reader.setAnalogCx(false);
-                break;
-            case CxMode::eOn:
-                m_reader.setAnalogCx(true);
-                break;
-            case CxMode::eAuto:
-                if (auto cx = m_frames[0]->getVbiData()->cxEnabled(); cx.has_value())
-                    m_reader.setAnalogCx(cx.value());
-                break;
-        }
+        // The CX flag of the frame just read, which the analog audio of this
+        // read belongs to (the flag changes on program boundaries, so a frame
+        // without a readable code keeps the last one)
+        if (auto cx = m_frames[0]->getVbiData()->cxEnabled(); cx.has_value())
+            m_analog_cx_from_vbi = cx.value();
         section_ms(m_sec_vbi_ms); // processVbi reads the mapped frame buffer on the CPU
 
         // Film cadence evidence: the per-field differences between the frame
@@ -706,6 +697,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
             if (mode != m_pending_audio_mode) {
                 m_pending_audio.clear();
                 m_audio_hold.clear();
+                m_cx_expander.reset();
             }
             m_pending_audio_mode = mode;
         };
@@ -747,7 +739,17 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
             m_pending_ac3_frames = input_block->ac3_frames; // originals for the file writer
         } else if (input_block != nullptr && !input_block->analog_data.empty()) {
             beginMode(MODE_ANALOG);
-            pendStereo(input_block->analog_data);
+            const bool cx = controls.analog_cx == CxMode::eAuto ? m_analog_cx_from_vbi
+                                                                 : controls.analog_cx == CxMode::eOn;
+            constexpr float scale = 32767.0f * AnalogAudioDemodulator::c_output_level;
+            for (const auto &s : input_block->analog_data) {
+                float left = s.samples[0], right = s.samples[1];
+                m_cx_expander.process(left, right, cx);
+                AudioFrame f{};
+                f.samples[0] = (int16_t)std::clamp(left * scale, -32768.0f, 32767.0f);
+                f.samples[1] = (int16_t)std::clamp(right * scale, -32768.0f, 32767.0f);
+                batch.push_back(f);
+            }
         } else {
             beginMode(MODE_UNKNOWN);
         }

@@ -15,4 +15,9 @@ struct TwoChannelSample {
     int16_t samples[2];
 };
 
+// A stereo sample before quantisation, full scale +-1.0
+struct TwoChannelFloatSample {
+    float samples[2];
+};
+
 #endif //AC3RF_EFM_DECODE_TWOCHANNELSAMPLE_H

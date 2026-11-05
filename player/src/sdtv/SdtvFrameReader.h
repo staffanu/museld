@@ -49,7 +49,6 @@ public:
     [[nodiscard]] double inputSampleRate() const override { return m_input_sample_rate; }
     [[nodiscard]] int64_t inputSampleCount() const override;
     void setAudioTrack(AudioTrack track) override;
-    void setAnalogCx(bool enabled) override;
     void setEfmAdaptiveFilterSize(int size) override;
     [[nodiscard]] int efmAdaptiveFilterSize() const override;
 
