@@ -410,6 +410,27 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   capture, brings FLAC to the edge of real time on this box, and only decoding on two
   threads (FLAC frames are independent, Ogg pages mark where they start) would put it
   clearly inside.  Not done; s8 remains the format for the 2017 box, FLAC for the Mac.
+- **FLAC decoded on two threads** (2026-11-05, done): `input/ParallelOggFlacReader`.
+  A scanner thread cuts the Ogg stream into runs of pages (2 MiB and more) that begin
+  at a page whose first packet is a fresh frame, renumbering the pages so that each
+  run follows the stream's header pages in sequence; decoder threads, each with its
+  own libFLAC decoder, take the runs in turn (headers, then the run, then end of
+  stream) and the frames' own sample numbers put the output back in order.  Seeks
+  bisect the pages by granule position, which also frees seeking from the wrapped
+  36-bit STREAMINFO count.  The factory uses it for seekable FLAC-in-Ogg on a machine
+  with three cores or more, `MUSELD_FLAC_THREADS` overrides (1 is the serial reader);
+  plain FLAC and live streams keep the serial reader.  Tests against libFLAC's own
+  encoder: order on 1-3 threads, identical to the serial reader, seeks of every kind
+  including while runs are in flight; on the Mac the exported frame is identical.
+  Throughput as blocks per 8.39 ms, receive only: the M2 from 4.13 ms per block
+  serial to 2.24 on two threads and 1.80 on four; the A10X on the 10-bit blue1 ldf
+  from the NAS from 9.1 ms (0.92x) to a reader that waits for the network 61% of the
+  time at 55 MB/s, i.e. the NAS path is now the limit there, and on the 8-bit-content
+  clip from multivac's SSD 5.5-5.9 ms (1.5x).  Real-time playback with audio on the
+  A10X: the ldf from the NAS at 8.4 ms per block with 6 underruns in 100 s, clustered
+  where the GPU wait rose to 7.5 ms (the two decoder threads and the receive leave the
+  GPU driver short of CPU); the SSD clip at 8.26 ms with none.  So FLAC plays in
+  real time on the 2017 box, marginally from the NAS and cleanly from a fast source.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the

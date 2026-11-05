@@ -182,6 +182,7 @@ if(BUILD_AC3RF_DECODE)
         input/InputReaderFactory.cpp input/InputReaderFactory.h
         input/LdsInputReader.cpp input/LdsInputReader.h
         input/LdfInputReader.cpp input/LdfInputReader.h
+        input/ParallelOggFlacReader.cpp input/ParallelOggFlacReader.h
         input/PrefetchingInputReader.cpp input/PrefetchingInputReader.h
     )
 
@@ -293,6 +294,7 @@ if(BUILD_MUSE)
         input/InputReaderFactory.cpp input/InputReaderFactory.h
         input/LdsInputReader.cpp input/LdsInputReader.h
         input/LdfInputReader.cpp input/LdfInputReader.h
+        input/ParallelOggFlacReader.cpp input/ParallelOggFlacReader.h
         input/PrefetchingInputReader.cpp input/PrefetchingInputReader.h
         input/PreparedInput.cpp input/PreparedInput.h
         input/RebatchingInputReader.h

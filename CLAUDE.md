@@ -341,7 +341,9 @@ the seeking thread, and the NTSC reader drops the partial frame after a reset. A
 about 50 ms. `DiscInfo` exposes chapter, lead-in/out and the CAV picture stop (which pauses
 playback unless turned off with P).
 
-**Input format abstraction**: `InputReader` specializations (raw widths, lds, FLAC) with
+**Input format abstraction**: `InputReader` specializations (raw widths, lds, FLAC; a seekable
+FLAC-in-Ogg stream is decoded on two threads by `ParallelOggFlacReader`, `MUSELD_FLAC_THREADS=1`
+for the serial `LdfInputReader`) with
 auto-detection by file extension, reading through a `ByteSource` (`input/ByteSource.h`) that
 hides where the bytes come from: a file, fifo or stdin (`FdByteSource`; `-` names stdin, which
 is live when it is a pipe and a plain seekable source when a file is redirected in, decided by
