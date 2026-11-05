@@ -510,12 +510,15 @@ The default NTSC audio; both it and EFM run on the demodulator's audio worker th
 ```
 RF → shared half-band decimation → per channel (2.3011 / 2.8125 MHz): NCO mix
   → complex decimation + channel filter → atan2 FM discriminator → audio decimation
-  → resample to 48 kHz → 75 µs de-emphasis → CX expansion (VBI-controlled) → stereo PCM
+  → resample to 48 kHz → 75 µs de-emphasis → squelch → float stereo
+  → (decoder, per frame) CX expansion → stereo PCM
 ```
 
 A channel whose carrier is missing (the right channel on AC3 discs) is squelched. The CX
-expander follows the CX flag decoded from the VBI, a few frames behind the audio, which is
-harmless since the flag changes on program boundaries.
+expander runs in the decoder, on the audio of the frame being read, so that it follows the
+CX flag decoded from that frame's VBI (or the forced mode): the worker runs ahead of the
+VBI decode by a scheduling-dependent number of blocks, so applying the flag there made the
+switch-on point differ from run to run.
 
 ### Data flow — AC3 and DTS (inside museld)
 

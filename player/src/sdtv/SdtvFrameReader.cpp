@@ -174,11 +174,6 @@ int SdtvFrameReader::efmAdaptiveFilterSize() const {
     return m_demodulator != nullptr ? m_demodulator->efmAdaptiveFilterSize() : -1;
 }
 
-void SdtvFrameReader::setAnalogCx(bool enabled) {
-    if (m_demodulator != nullptr)
-        m_demodulator->setAnalogCx(enabled);
-}
-
 void SdtvFrameReader::resetTimebase(const char *why) {
     m_timebase.reset();
     m_broad_falls.clear();

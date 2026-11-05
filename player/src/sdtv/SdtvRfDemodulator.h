@@ -59,7 +59,7 @@ struct SdtvDemodulatedBlock {
     bool analog_wanted = false;
     bool ac3_wanted = false;
     std::vector<float> efm_data;
-    std::vector<TwoChannelSample> analog_data; // 48 kHz stereo from the analog FM carriers
+    std::vector<TwoChannelFloatSample> analog_data; // 48 kHz stereo from the analog FM carriers, before CX expansion
     std::vector<std::array<uint8_t, 1536>> ac3_frames; // raw AC3 sync frames from the AC3-RF carrier
     std::shared_ptr<musevk::VulkanBuffer> audio_data;
 };
@@ -84,8 +84,6 @@ public:
         m_analog_enabled = track == AudioTrack::eDefault;
         m_ac3_enabled = track == AudioTrack::eAc3;
     }
-    // CX expansion for the analog audio, driven by the VBI status decoded downstream
-    void setAnalogCx(bool enabled) { m_analog_cx = enabled; }
     // Taps in the EFM timing recovery's adaptive filter (0 disables it); applied at the next block
     void setEfmAdaptiveFilterSize(int size) { m_efm_demodulator.setAdaptiveFilterSize(size); }
     [[nodiscard]] int efmAdaptiveFilterSize() const { return m_efm_demodulator.adaptiveFilterSize(); }
@@ -108,7 +106,6 @@ private:
     std::atomic<bool> m_efm_enabled;
     std::atomic<bool> m_analog_enabled;
     std::atomic<bool> m_ac3_enabled;
-    std::atomic<bool> m_analog_cx;
 };
 
 #endif //MUSECPP_SDTVRFDEMODULATOR_H

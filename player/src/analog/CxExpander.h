@@ -30,6 +30,20 @@ public:
     // Advances the sidechain by one stereo sample and returns the CX gain.
     float processSidechain(float left, float right);
 
+    // Advances the sidechain and applies its gain when enabled.  The
+    // sidechain runs either way so the level estimate stays warm across
+    // a switch, which then takes effect without a transient.
+    void process(float &left, float &right, bool enabled) {
+        const float gain = processSidechain(left, right);
+        if (enabled) {
+            left *= gain;
+            right *= gain;
+        }
+    }
+
+    // Forgets the level: for audio that does not continue the previous
+    void reset();
+
 private:
     // Reference constants at 48 kHz (converted to the actual rate in the
     // constructor): high-pass y = (15/16) y' + (31/32) (x - x'), attack

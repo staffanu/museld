@@ -11,6 +11,8 @@
 #include "DtsSyncDetector.h"
 #include "efm/EfmDecoder.h"
 #include "efm/EfmPcmProcessor.h"
+#include "analog/CxExpander.h"
+#include "analog/AnalogAudioDemodulator.h"
 #include "musevk/CommandPool.h"
 #include "SdtvInputBlock.h"
 #include "VbiData.h"
@@ -136,6 +138,13 @@ private:
     // whole-frame quanta, so a delivery can leave a remainder for the next.
     std::vector<AudioFrame> m_pending_audio;
     AudioMode m_pending_audio_mode;
+    // CX expansion of the analog track, applied here rather than in the
+    // demodulator's worker so that it follows the CX flag of the frame the
+    // audio belongs to: the worker runs ahead of the VBI decode by a
+    // scheduling-dependent number of blocks, which made the switch-on
+    // point differ from run to run
+    CxExpander m_cx_expander;
+    bool m_analog_cx_from_vbi; // the last CX flag the VBI carried, for CxMode::eAuto
     // Per-read audio batches held back beyond the one frame m_pending_audio
     // gives, for a display latency of more than one frame (PAL: two)
     std::deque<std::vector<AudioFrame>> m_audio_hold;
