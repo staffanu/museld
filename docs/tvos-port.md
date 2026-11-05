@@ -376,6 +376,26 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   SSD file is 94 MB/s to the box in 4 MiB range requests one at a time, about 12 ms of
   request overhead per chunk; bigger chunks or a second connection in
   `HttpByteSource` would recover most of the way to line rate.
+- **HTTP chunks and connections** (2026-11-05, done): `HttpByteSource` can run several
+  connections, claiming chunks in file order and queueing them by offset whichever
+  finishes first (so a chunk's cold start-up on the server overlaps the previous one's
+  transfer), with the chunk size and the connection count as `MUSELD_HTTP_CHUNK_MIB` and
+  `MUSELD_HTTP_CONNECTIONS`; a unit test runs it against an in-process httplib server.
+  Measured on the box, receive only, the file evicted from multivac's cache before every
+  run (MB/s from block size over `total`):
+
+  | cold source | 4 MiB, 1 conn | 4 MiB, 2 conn | 16 MiB, 1 conn | 16 MiB, 2 conn |
+  |---|---|---|---|---|
+  | SSD (`/ld-ssd`), s8 | 79 | 92-117 | 99 | 119 |
+  | HDD (`/ld-local`), lds | 42 | 15-24 | 72-88 | 15-20 |
+
+  Two connections on a spinning disk make its head seek between two streams 4 MiB
+  apart, so the default is 16 MiB chunks on one connection, two ahead (32 MiB in
+  flight); two connections remain a hook for SSD-backed servers.  Real-time lds playback
+  with audio, cold: from the SSD 29.5 frames/s with 2 underruns, both in the first
+  two seconds; from the HDD 28.0 frames/s with 14, in three bursts, the HDD's 72-88 MB/s
+  being marginal for lds's 78.  So lds works on this box from an SSD-backed server, and
+  s8 stays the safe raw format from anything; s16 remains out by the wire.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the

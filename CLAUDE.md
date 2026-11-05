@@ -345,8 +345,10 @@ playback unless turned off with P).
 auto-detection by file extension, reading through a `ByteSource` (`input/ByteSource.h`) that
 hides where the bytes come from: a file, fifo or stdin (`FdByteSource`; `-` names stdin, which
 is live when it is a pipe and a plain seekable source when a file is redirected in, decided by
-`fstat`), a web server via HTTP range requests (`HttpByteSource`, cpp-httplib, prefetching
-3×4 MiB ahead) or the live ethadc UDP capture stream (`EthadcByteSource`, built on the vendored
+`fstat`), a web server via HTTP range requests (`HttpByteSource`, cpp-httplib, 16 MiB chunks
+fetched up to 2 ahead on one connection -- a second connection is faster from an SSD-backed
+server and much slower from a spinning disk, whose head then seeks between the streams;
+`MUSELD_HTTP_CONNECTIONS`/`MUSELD_HTTP_CHUNK_MIB` for A/B) or the live ethadc UDP capture stream (`EthadcByteSource`, built on the vendored
 `third_party/ethadc` receiver; not in the Windows build). Names starting with `http://` or
 `udp://` select them; `inputIsLive()` replaces the old `filesystem::is_fifo()` checks. A udp://
 stream's format and rate come from its packet headers (`networkStreamInfo()` on the open source;

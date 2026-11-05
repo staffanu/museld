@@ -5,12 +5,14 @@
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
-#include <deque>
 #include <format>
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 #include <pthread.h>
 #include "input/HttpClient.h" // httplib.h with its configuration
 #include "HttpByteSource.h"
@@ -18,12 +20,29 @@
 
 namespace {
 
-// Chunks this size are fetched this many ahead of the reader: 12 MiB in
-// flight covers a 62.5 MHz 8-bit capture for about 190 ms, which rides out a
-// NAS that hesitates without the decoder noticing.
-constexpr size_t c_chunk_bytes = 4u << 20;
-constexpr int c_chunks_ahead = 3;
+// Chunks this size are fetched this many ahead of the reader, on this many
+// connections.  A range request has a start-up cost the server pays before the
+// first byte moves, and on a file that is not in its page cache it sits in
+// series with the transfer on one connection; measured in 2026-11 on an Apple TV
+// reading cold files from a FreeBSD/Apache server on gigabit: 4 MiB chunks on
+// one connection 79 MB/s from an SSD and 42 from a spinning disk, 16 MiB chunks
+// 99 and 72-88, a second connection 119 from the SSD but 15-24 from the disk,
+// whose head then seeks between the two streams.  So: 16 MiB chunks, one
+// connection, two ahead (32 MiB in flight, half a second of a 62.5 MHz 8-bit
+// capture, which rides out a NAS that hesitates).  The chunks are claimed in
+// file order and queued in file order whichever connection finishes first.
+// MUSELD_HTTP_CONNECTIONS and MUSELD_HTTP_CHUNK_MIB override the two for A/B.
+constexpr size_t c_default_chunk_bytes = 16u << 20;
+constexpr int c_default_connections = 1;
+constexpr int c_chunks_ahead = 2; // completed or in flight, beyond the one being read
 constexpr int c_fetch_attempts = 4;
+
+int envInt(const char *name, int fallback, int lo, int hi) {
+    const char *v = getenv(name);
+    if (v == nullptr || *v == 0)
+        return fallback;
+    return std::clamp(atoi(v), lo, hi);
+}
 
 struct ParsedUrl {
     std::string origin; // scheme://host[:port], what httplib::Client takes
@@ -108,17 +127,24 @@ struct HttpByteSource::Impl {
         int64_t end() const { return offset + (int64_t)data.size(); }
     };
 
-    Impl(const std::string &url, Logger *log) : m_url(parseUrl(url)), m_log(log), m_client(makeClient(m_url)) {
+    Impl(const std::string &url, Logger *log)
+        : m_url(parseUrl(url)), m_log(log),
+          m_chunk_bytes((size_t)envInt("MUSELD_HTTP_CHUNK_MIB", (int)(c_default_chunk_bytes >> 20), 1, 64) << 20),
+          m_connections(envInt("MUSELD_HTTP_CONNECTIONS", c_default_connections, 1, 8)) {
+        auto client = makeClient(m_url);
         bool ranges_ok = false;
         std::string error;
-        m_size = querySize(*m_client, m_url.path, ranges_ok, error);
+        m_size = querySize(*client, m_url.path, ranges_ok, error);
         if (!ranges_ok)
             throw std::runtime_error(std::format("Cannot read {}: {}", url, error));
         if (m_log)
-            m_log->info(eInput, std::format("{}: {} bytes on {} (received in pieces of {} KiB, {} MiB chunks, {} ahead)",
+            m_log->info(eInput, std::format("{}: {} bytes on {} (received in pieces of {} KiB, {} MiB chunks, {} ahead, on {} connection{})",
                                             m_url.path, m_size >= 0 ? std::to_string(m_size) : "unknown", m_url.origin,
-                                            CPPHTTPLIB_RECV_BUFSIZ / 1024, c_chunk_bytes >> 20, c_chunks_ahead));
-        m_producer = std::thread([this] { produce(); });
+                                            CPPHTTPLIB_RECV_BUFSIZ / 1024, m_chunk_bytes >> 20, c_chunks_ahead,
+                                            m_connections, m_connections == 1 ? "" : "s"));
+        m_fetchers.emplace_back([this, c = std::move(client)]() mutable { produce(*c); });
+        for (int i = 1; i < m_connections; i++)
+            m_fetchers.emplace_back([this]() { auto c = makeClient(m_url); produce(*c); });
     }
 
     ~Impl() {
@@ -127,18 +153,19 @@ struct HttpByteSource::Impl {
             m_stop = true;
         }
         m_cv.notify_all();
-        if (m_producer.joinable())
-            m_producer.join();
+        for (auto &fetcher : m_fetchers)
+            if (fetcher.joinable())
+                fetcher.join();
     }
 
     // One range request, retried on transient failures.  Returns the bytes,
     // fewer than asked for only at the end of the file.
-    std::string fetch(int64_t offset, size_t length) {
+    std::string fetch(httplib::Client &client, int64_t offset, size_t length) {
         std::string last_error;
         for (int attempt = 0; attempt < c_fetch_attempts; attempt++) {
             if (attempt > 0)
                 std::this_thread::sleep_for(std::chrono::milliseconds(200 * attempt));
-            auto result = m_client->Get(m_url.path, httplib::Headers{{"Range", std::format("bytes={}-{}", offset, offset + (int64_t)length - 1)}});
+            auto result = client.Get(m_url.path, httplib::Headers{{"Range", std::format("bytes={}-{}", offset, offset + (int64_t)length - 1)}});
             if (result && result->status == 206)
                 return std::move(result->body);
             if (result && result->status == 416)
@@ -151,7 +178,10 @@ struct HttpByteSource::Impl {
         throw std::runtime_error(std::format("HTTP read of {} failed: {}", m_url.path, last_error));
     }
 
-    void produce() {
+    // A fetcher: claims the next chunk in file order, fetches it on its own
+    // connection, and files it under its offset.  The queue holds at most
+    // c_chunks_ahead chunks completed or in flight beyond the one being read.
+    void produce(httplib::Client &client) {
 #ifdef __APPLE__
         pthread_setname_np("input-http");
 #elif defined(linux) || defined(__FreeBSD__)
@@ -160,56 +190,79 @@ struct HttpByteSource::Impl {
         std::unique_lock lock(m_mutex);
         while (!m_stop) {
             const bool at_end = m_end_at >= 0 && m_fetch_pos >= m_end_at;
-            if ((int)m_chunks.size() >= c_chunks_ahead || at_end) {
+            if ((int)m_chunks.size() + m_in_flight >= c_chunks_ahead + 1 || at_end || m_error) {
                 m_cv.wait(lock);
                 continue;
             }
             const int64_t offset = m_fetch_pos;
             const uint64_t generation = m_generation;
+            m_fetch_pos += (int64_t)m_chunk_bytes;
+            m_in_flight++;
             lock.unlock();
             std::string data;
+            std::exception_ptr error;
             try {
-                data = fetch(offset, c_chunk_bytes);
+                data = fetch(client, offset, m_chunk_bytes);
             } catch (...) {
-                lock.lock();
-                m_error = std::current_exception();
+                error = std::current_exception();
+            }
+            lock.lock();
+            m_in_flight--;
+            if (generation != m_generation) {
+                m_cv.notify_all();
+                continue; // a seek happened meanwhile; this chunk is for the old position
+            }
+            if (error) {
+                m_error = error;
                 m_cv.notify_all();
                 return;
             }
-            lock.lock();
-            if (generation != m_generation)
-                continue; // a seek happened meanwhile; this chunk is for the old position
-            m_chunks.push_back({offset, std::move(data)});
-            m_fetch_pos += (int64_t)m_chunks.back().data.size();
-            if (m_chunks.back().data.size() < c_chunk_bytes)
-                m_end_at = m_fetch_pos;
+            if (data.size() < m_chunk_bytes) {
+                // The end of the file: nothing claimed beyond it is worth keeping
+                const int64_t end = offset + (int64_t)data.size();
+                if (m_end_at < 0 || end < m_end_at)
+                    m_end_at = end;
+                for (auto it = m_chunks.begin(); it != m_chunks.end();)
+                    it = it->first >= m_end_at ? m_chunks.erase(it) : std::next(it);
+            }
+            if (!data.empty() && (m_end_at < 0 || offset < m_end_at))
+                m_chunks.emplace(offset, Chunk{offset, std::move(data)});
             m_cv.notify_all();
         }
     }
 
+    // The chunk holding the reader's position, once it has arrived
+    std::map<int64_t, Chunk>::iterator currentChunk() {
+        auto it = m_chunks.upper_bound(m_pos);
+        if (it == m_chunks.begin())
+            return m_chunks.end();
+        --it;
+        return m_pos < it->second.end() ? it : m_chunks.end();
+    }
+
     ssize_t read(uint8_t *buf, size_t len) {
         std::unique_lock lock(m_mutex);
+        std::map<int64_t, Chunk>::iterator current;
         for (;;) {
             if (m_error)
                 std::rethrow_exception(m_error);
-            // Empty chunks mark the end and carry nothing; drop them.
-            while (!m_chunks.empty() && m_chunks.front().data.empty())
-                m_chunks.pop_front();
-            if (!m_chunks.empty())
+            // Chunks the reader has passed (a chunk arriving after a seek within it)
+            while (!m_chunks.empty() && m_chunks.begin()->second.end() <= m_pos)
+                m_chunks.erase(m_chunks.begin());
+            current = currentChunk();
+            if (current != m_chunks.end())
                 break;
             if (m_end_at >= 0 && m_pos >= m_end_at)
                 return 0;
             m_cv.wait(lock);
         }
-        Chunk &front = m_chunks.front();
-        // The consumer's position always lies inside the front chunk: seeks
-        // that leave it discard the queue.
-        const int64_t within = m_pos - front.offset;
-        const size_t n = std::min(len, (size_t)(front.end() - m_pos));
-        memcpy(buf, front.data.data() + within, n);
+        Chunk &chunk = current->second;
+        const int64_t within = m_pos - chunk.offset;
+        const size_t n = std::min(len, (size_t)(chunk.end() - m_pos));
+        memcpy(buf, chunk.data.data() + within, n);
         m_pos += (int64_t)n;
-        if (m_pos == front.end()) {
-            m_chunks.pop_front();
+        if (m_pos == chunk.end()) {
+            m_chunks.erase(current);
             m_cv.notify_all();
         }
         return (ssize_t)n;
@@ -233,8 +286,10 @@ struct HttpByteSource::Impl {
                 return -1;
         }
         target = std::max<int64_t>(0, target);
-        if (!m_chunks.empty() && target >= m_chunks.front().offset && target < m_chunks.front().end()) {
-            m_pos = target; // still inside the chunk being read
+        // Within what is queued (contiguous from the chunk being read): just move
+        if (!m_chunks.empty() && target >= m_chunks.begin()->first && target < m_fetch_pos
+            && (m_end_at < 0 || target < m_end_at)) {
+            m_pos = target;
             return m_pos;
         }
         m_chunks.clear();
@@ -247,19 +302,21 @@ struct HttpByteSource::Impl {
 
     ParsedUrl m_url;
     Logger *m_log;
-    std::unique_ptr<httplib::Client> m_client;
+    const size_t m_chunk_bytes;
+    const int m_connections;
     int64_t m_size = -1;
 
     std::mutex m_mutex;
     std::condition_variable m_cv;
-    std::deque<Chunk> m_chunks; // fetched, in order, the front one being consumed
+    std::map<int64_t, Chunk> m_chunks; // fetched, by offset; contiguous from the reader's chunk to m_fetch_pos less what is in flight
+    int m_in_flight = 0;        // chunks claimed and being fetched
     int64_t m_pos = 0;          // the reader's position
-    int64_t m_fetch_pos = 0;    // where the next chunk starts
+    int64_t m_fetch_pos = 0;    // where the next chunk to claim starts
     int64_t m_end_at = -1;      // the end of the file once a short chunk revealed it
     uint64_t m_generation = 0;  // bumped by seeks, so a fetch in flight is discarded
     std::exception_ptr m_error;
     bool m_stop = false;
-    std::thread m_producer; // last: joined before the state above goes away
+    std::vector<std::thread> m_fetchers; // last: joined before the state above goes away
 };
 
 HttpByteSource::HttpByteSource(const std::string &url, Logger *log) : m_impl(std::make_unique<Impl>(url, log)) {}
