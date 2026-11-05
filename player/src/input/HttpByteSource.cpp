@@ -254,7 +254,23 @@ struct HttpByteSource::Impl {
                 break;
             if (m_end_at >= 0 && m_pos >= m_end_at)
                 return 0;
+            // The reader is ahead of the network: the time it waits here is what the
+            // source costs the pipeline (--log P3, every 256 MiB)
+            const auto t_wait = std::chrono::steady_clock::now();
             m_cv.wait(lock);
+            m_stats_wait_us += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t_wait).count();
+        }
+        if (m_log) {
+            if (m_stats_bytes == 0)
+                m_stats_start = std::chrono::steady_clock::now();
+            m_stats_bytes += (int64_t)len;
+            if (m_stats_bytes >= (int64_t)256 << 20) {
+                const double elapsed_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - m_stats_start).count();
+                m_log->info(ePerformance, std::format("http input: {:.1f} MB/s consumed, the reader waited for the network {:.0f}% of the time",
+                                                      m_stats_bytes / 1e6 / elapsed_s, 100.0 * m_stats_wait_us / 1e6 / elapsed_s));
+                m_stats_bytes = 0;
+                m_stats_wait_us = 0;
+            }
         }
         Chunk &chunk = current->second;
         const int64_t within = m_pos - chunk.offset;
@@ -315,6 +331,8 @@ struct HttpByteSource::Impl {
     int64_t m_end_at = -1;      // the end of the file once a short chunk revealed it
     uint64_t m_generation = 0;  // bumped by seeks, so a fetch in flight is discarded
     std::exception_ptr m_error;
+    int64_t m_stats_bytes = 0, m_stats_wait_us = 0; // the P3 statistics, see read()
+    std::chrono::steady_clock::time_point m_stats_start;
     bool m_stop = false;
     std::vector<std::thread> m_fetchers; // last: joined before the state above goes away
 };
