@@ -4,12 +4,45 @@
 #include <chrono>
 #include <cstdint>
 #include <format>
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
+#include <thread>
 #include "ByteSource.h"
 #include "EthadcByteSource.h"
 #include "InputReaderFactory.h"
 #include "LdfInputReader.h"
 #include "LdsInputReader.h"
+#include "ParallelOggFlacReader.h"
 #include "PrefetchingInputReader.h"
+
+namespace {
+
+// Decoder threads for FLAC in Ogg: two by default where the machine has at least
+// three cores (two decoders beside the rest of the player), else one, the serial
+// reader; MUSELD_FLAC_THREADS overrides
+int flacThreads() {
+    if (const char *env = getenv("MUSELD_FLAC_THREADS"); env != nullptr && *env)
+        return std::clamp(atoi(env), 1, 16);
+    const int cores = (int)std::thread::hardware_concurrency();
+    return cores >= 3 ? 2 : 1;
+}
+
+// Whether a seekable stream starts with an Ogg page; the position is put back
+bool streamIsOgg(ByteSource &source) {
+    uint8_t sig[4];
+    size_t got = 0;
+    while (got < 4) {
+        const ssize_t n = source.read(sig + got, 4 - got);
+        if (n <= 0)
+            break;
+        got += (size_t)n;
+    }
+    source.seek(0, SEEK_SET);
+    return got == 4 && memcmp(sig, "OggS", 4) == 0;
+}
+
+} // namespace
 
 std::unique_ptr<InputReader> makeInputReader(
         std::unique_ptr<ByteSource> source, InputFormat format, uint32_t block_size, Logger *log) {
@@ -22,11 +55,19 @@ std::unique_ptr<InputReader> makeInputReader(
         case eSint16BE: return std::make_unique<InputReaderImpl<int16_t, true>>(std::move(source), block_size);
         case eLds:      return std::make_unique<LdsInputReader>(std::move(source), block_size);
         case eFlac:
-        case eFlacOgg:
+        case eFlacOgg: {
             // FLAC decoding costs milliseconds per block, too much to leave in series with
-            // a real-time consumer's other work, so decode ahead on a separate thread.
+            // a real-time consumer's other work, so decode ahead on a separate thread.  A
+            // seekable FLAC-in-Ogg stream is decoded on several threads (ParallelOggFlacReader:
+            // libFLAC alone is below real time on an Apple TV 4K's A10X); MUSELD_FLAC_THREADS
+            // sets how many, 1 for the serial reader.
+            const int threads = flacThreads();
+            if (threads >= 2 && !source->isLive() && streamIsOgg(*source))
+                return std::make_unique<PrefetchingInputReader>(
+                    std::make_unique<ParallelOggFlacReader>(std::move(source), block_size, threads, log));
             return std::make_unique<PrefetchingInputReader>(
                 std::make_unique<LdfInputReader>(std::move(source), block_size, format, log));
+        }
     }
     throw std::runtime_error("Unsupported input format");
 }

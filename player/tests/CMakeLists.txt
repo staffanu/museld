@@ -17,6 +17,7 @@ add_executable(museld-tests
     ChapterSearchTest.cpp
     LdfInputReaderTest.cpp
     HttpByteSourceTest.cpp
+    ParallelOggFlacReaderTest.cpp
     ../src/ChapterSearch.cpp
     ../src/subtitles/Eia608Decoder.cpp
     ../src/bch/BchDecoder.cpp
@@ -27,6 +28,7 @@ add_executable(museld-tests
     ../src/input/InputReaderFactory.cpp
     ../src/input/LdsInputReader.cpp
     ../src/input/LdfInputReader.cpp
+    ../src/input/ParallelOggFlacReader.cpp
     ../src/input/PrefetchingInputReader.cpp
     ../src/input/PreparedInput.cpp
     ../src/sdtv/NtscCadenceTracker.cpp
