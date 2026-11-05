@@ -1,0 +1,164 @@
+# Reference clips for tests/regression/regress.py.  The clips are short cuts of RF
+# captures served from multivac (see docs/regression-testing.md); the goldens are
+# in golden/<clip>.<stage>.json, with the full golden renders at golden_url.
+
+base_url = "https://madeye.org/ld-captures/public/museld-testdata/"
+golden_url = "https://madeye.org/ld-captures/public/museld-testdata/golden/"
+
+# Frames before this many seconds are the decoder's warm-up (sync lock, AGC, the
+# temporal comb's window, cadence lock, the MUSE equaliser) and are not judged.
+judge_from = 2.0
+
+# A stage is a set of museld options that isolates part of the decode; every clip is
+# rendered once per stage of its standard (or its own `stages` list).
+[stages]
+default = []
+intra-field = ["--field-interpolation", "intra-field"]
+no-3d-comb = ["--no-3d-comb"]
+no-film-mode = ["--no-film-mode"]
+no-dropout = ["--no-dropout"]
+eq-off = ["--eq", "off"]
+
+[standard_stages]
+ntsc = ["default", "intra-field", "no-3d-comb", "no-film-mode", "no-dropout"]
+pal = ["default", "intra-field", "no-3d-comb", "no-dropout"]
+muse = ["default", "intra-field", "eq-off"]
+
+# ---- NTSC -------------------------------------------------------------------------
+
+[[clip]]
+name = "ntsc-alien2-0s"
+file = "ntsc-alien2-0s.ldf"
+sha256 = "f8a461a7d040a20a9f1bfaf9bb4a67ec993d6dd46955dc40b7ec7cc550937952"
+standard = "ntsc"
+source = "alien2.ldf, 40 MHz DdD, from 0 s"
+why = "Clean NTSC film reference: 3:2 cadence, analog audio with the right channel squelched (AC3 disc)."
+
+[[clip]]
+name = "ntsc-alien1-ac3"
+file = "ntsc-alien1-ac3-full.ldf"
+sha256 = "d48a70d4cb4ea0ef84dbe6e14e775c35b56cb4665918b7e998ae776a6fb9f61f"
+standard = "ntsc"
+source = "alien1.ldf, 40 MHz DdD, the whole 6.7 s capture"
+why = "AC3-RF track: QPSK demodulation, framing, Reed-Solomon, and the AC3 stream copy in --write."
+args = ["--ac3"]
+stages = ["default"]
+
+[[clip]]
+name = "ntsc-zero-effect-ac3-30s"
+file = "ntsc-zero-effect-ac3-30s.ldf"
+sha256 = "07aee64e7f51a8e0fdd00248b08d3876dd47688ec139670d56f0ef5862e99c21"
+standard = "ntsc"
+source = "Zero Effect, 40 MHz DdD .lds, from 30 s"
+why = "Second AC3 disc, CLV, from a different player; a lead-in with garbage codes precedes the cut."
+args = ["--ac3"]
+stages = ["default"]
+
+[[clip]]
+name = "ntsc-wow-fbi-text-8s"
+file = "ntsc-wow-fbi-text-8s.ldf"
+sha256 = "5c7964102912df8c93078525ab842eb699d2c9b147c96d8d4f37fa1d2be16090"
+standard = "ntsc"
+source = "WOW demo disc side 1, 40 MHz DdD FLAC, from 8 s"
+why = "Static text on a CAV disc with heavy eccentricity: the carrier wanders +-7 IRE per rotation, which once put the fields a pixel apart (sync slicer bias) and brightened one field (per-line black clamp). EFM track with the DTS false-detection history."
+args = ["--efm"]
+
+[[clip]]
+name = "ntsc-abyss-credits-repeat-15s"
+file = "ntsc-abyss-credits-repeat-15s.ldf"
+sha256 = "9e03d8a18413f12b6ed2cb13c295d045dde081f3144dd8b89a43bfa408c731ec"
+standard = "ntsc"
+source = "The Abyss end credits, 40 MHz DdD, from 15 s"
+why = "The player kicks back and repeats pictures from 17.5 s: identical frame pairs made the temporal comb lose the chroma of the blue credits until it was gated on burst inversion."
+
+[[clip]]
+name = "ntsc-rfref-40mhz-40s"
+file = "ntsc-rfref-40mhz-40s.ldf"
+sha256 = "87a5762511f1c36e345509c5d99c362682df0171c524e4e09ccef6a71e7c3cac"
+standard = "ntsc"
+source = "RF_Reference_40mhz.ddd.s16, CLV concert disc chapter 3, from 40 s"
+why = "The 40 MHz half of the sample-rate pair; same disc and position as the 30 MHz clip."
+
+[[clip]]
+name = "ntsc-rfref-30mhz-40s"
+file = "ntsc-rfref-30mhz-40s.ldf"
+sha256 = "5fc551885bd21ab02c813f68b5f1bf961377f1721c73b01fb9a470339efb7a23"
+standard = "ntsc"
+source = "RF_Reference_30mhz.ddd.s16, the same disc captured at 30 MHz, from 40 s"
+why = "30 MHz capture: every sync-pass constant must be a time, not a sample count (two were not, in 2026-10). EFM at the 30 MHz rate; the switching-supply interferer of this capture ends at 33.75 s."
+args = ["--efm"]
+
+[[clip]]
+name = "ntsc-ggv1069-bars-195s"
+file = "ntsc-ggv1069-bars-195s.ldf"
+sha256 = "01513f8ea4c6e08c8d85a40b1486f10d1a07b04616ad9e8117251f762a3fa841"
+standard = "ntsc"
+source = "Pioneer GGV1069 NTSC test disc side 1, 40 MHz DdD, from 195 s"
+why = "SMPTE 75 % colour bars: chroma phase and gain, black level, the 1 kHz analog tone."
+stages = ["default", "no-3d-comb"]
+
+[[clip]]
+name = "ntsc-ld-decode-ve-snw-cut"
+file = "ntsc-ld-decode-ve-snw-cut.ldf"
+sha256 = "0f594405f747ca034ca6659d6ba25b566f0dcd0994c074aae44fffdd68f023a3"
+standard = "ntsc"
+source = "ld-decode testdata ntsc/ve-snw-cut.ldf (Video Essentials, Snell & Wilcox pattern), 0.75 s"
+why = "The NTSC colour reference, public test data shared with ld-decode; too short for a warm-up, so only the last frames are judged."
+judge_from = 0.4
+stages = ["default", "no-3d-comb"]
+
+# ---- PAL --------------------------------------------------------------------------
+
+[[clip]]
+name = "pal-ggv1011-bars-195s"
+file = "pal-ggv1011-bars-195s.ldf"
+sha256 = "733179b4b577be43768e94b668290817fcbb8b08b722a7e6ec94b96ae33cb06a"
+standard = "pal"
+source = "Pioneer GGV1011 PAL test disc side 1, 40 MHz DdD, from 195 s"
+why = "The PAL calibration disc: colour bars, the swinging burst and V switch, the pilot-refined timebase, analog sound with a 1 kHz tone on the right."
+stages = ["default", "no-3d-comb"]
+
+[[clip]]
+name = "pal-empire-d515-0s"
+file = "pal-empire-d515-0s.ldf"
+sha256 = "00c7faacffd2a43d3efb44f6ff6bf548e1f3a4b3d3991f25970b69d75227832e"
+standard = "pal"
+source = "The Empire Strikes Back (PAL), Pioneer CLD-D515, 40 MHz DdD, from 0 s"
+why = "PAL film: 2:2 cadence locks at frame 10. EFM-only disc (no analog carriers)."
+args = ["--efm"]
+
+[[clip]]
+name = "pal-pioneer94-wander-4s"
+file = "pal-pioneer94-wander-4s.ldf"
+sha256 = "c2410b9f833a56a3d132aed9a6ed88c58d9d18e73e96ad1bdec7fa9c4c5d6f33"
+standard = "pal"
+source = "Pioneer 1994 demo disc (Jurassic Park clip), 40 MHz DdD, from 4 s"
+why = "The whole baseband wanders +-4 IRE at 2.5 Hz: the black offset must follow the frame's own blanking or the picture flickers. 2:2 lock at frame 142 of the capture. EFM-only."
+args = ["--efm"]
+
+[[clip]]
+name = "pal-bigday-d515-20s"
+file = "pal-bigday-d515-20s.ldf"
+sha256 = "9b6f1e3860567f95fc7de4b08c5bbc0544b1720b1205e4a9f8b9c9127fd45d42"
+standard = "pal"
+source = "The Big Day (CD Video, PAL), Pioneer CLD-D515, 40 MHz DdD, from 20 s"
+why = "Aerial video with real dropouts and sharp bright detail: the dropout detector's false-flag case (flags are kept only where the de-emphasised video is pinned). Never locks a film cadence. EFM-only."
+args = ["--efm"]
+
+# ---- MUSE -------------------------------------------------------------------------
+
+[[clip]]
+name = "muse-sony-test-disc-120s"
+file = "muse-sony-test-disc-120s.ldf"
+sha256 = "a204a3cf65b49f674d12b394cec0a192075f245a79e2606c8ea7e2073f987e08"
+standard = "muse"
+source = "Sony 'The Test Disc' (MUSE), 62.5 MHz, from 120 s"
+why = "MUSE test patterns: the acquisition chain's frame-pulse verification (its bars lock a false chain otherwise), the adaptive equaliser, MUSE audio."
+
+[[clip]]
+name = "muse-ursa-minor-blue-120s"
+file = "muse-ursa-minor-blue-120s.ldf"
+sha256 = "ea14f2a2c4309f5d4da9509e7ffeded55addf2e7ff36d647c566d3ed308fcbe5"
+standard = "muse"
+source = "Ursa Minor Blue (MUSE), fx3usbadc at 62.5 MHz, from 120 s"
+why = "MUSE film: motion detection and the still/moving reconstruction, the feed-forward timebase on a spinning-up player's successor frames."
