@@ -396,6 +396,20 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   two seconds; from the HDD 28.0 frames/s with 14, in three bursts, the HDD's 72-88 MB/s
   being marginal for lds's 78.  So lds works on this box from an SSD-backed server, and
   s8 stays the safe raw format from anything; s16 remains out by the wire.
+- **FLAC on the A10X** (2026-11-05): it is the decoding, not the network.  `HttpByteSource`
+  now logs at P3, every 256 MiB, what it delivered and how much of the time the reader
+  waited for it ("http input: ... waited for the network N% of the time"); on the blue1
+  ldf from the NAS, receive only, the reader waited 0% and the prefetch thread delivered
+  a block every 9.1-9.4 ms (8.39 is real time): libFLAC on one A10X core decodes this
+  10-bit capture (about 6.2 bits per sample compressed, 48 MB/s of file at real time)
+  at 0.88x.  The cost follows the bits in the bitstream more than the predictor: the s8
+  clip re-encoded as FLAC (8-bit content in a 16-bit stream, 4 bits per sample) decodes
+  at 0.97x with the usual order 12, 0.99x at order 8 and 1.06x at order 4 (the file 1.5%
+  and 10% bigger); on the M2 order 4 decodes 25% faster than order 12.  So `ldconv
+  --bits 8`, which the s8 clip's identical decoder statistics say costs nothing on this
+  capture, brings FLAC to the edge of real time on this box, and only decoding on two
+  threads (FLAC frames are independent, Ogg pages mark where they start) would put it
+  clearly inside.  Not done; s8 remains the format for the 2017 box, FLAC for the Mac.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
