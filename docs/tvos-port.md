@@ -445,6 +445,21 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   whenever the server delivers 48 MB/s, and the cold NAS path is what remains: warm the
   file, keep the clips on multivac's SSD, or fix the cold path on multivac (the
   `EnableMMAP Off` trial, or nginx's read_ahead).
+- **A faster libFLAC, measured not built** (2026-11-07): a sampling profile of the
+  decode on ARM64 (the M2 runs the same code paths as the A10X: libFLAC 1.5.0 has no
+  NEON decoder routines) splits the time 44% LPC restore (the prediction, plain
+  unrolled C), 38% Rice residual decoding (the bit reader, inherently serial), 13%
+  the FLAC frame CRC-16 and the Ogg page checksum, 5% the rest; the 10-bit samples
+  keep the decoder on the 32-bit restore path thanks to their wasted bits.
+  `tools/lpc-neon-bench.cpp`: a NEON restore sample by sample gains 5% (the loop is a
+  serial recurrence); four outputs per step, the known part of the four sums built in
+  parallel and a six-term serial tail, gains 2.85x on the M2, bit-identical.  That is
+  about 29% off the decode time, which on the A10X would take the two-thread ceiling
+  from 1.25-1.4x real time to about 1.8x and the decoders' CPU share at real time from
+  two times 45% of a core to two times 32%, i.e. real margin.  It would go in as a
+  patch to the fetched libFLAC (`FetchContent` takes a `PATCH_COMMAND`): the routine in
+  `lpc_intrin_neon.c` and its selection in `stream_decoder.c` on `FLAC__CPU_ARM64`, as
+  the SSE4.1 versions are selected on x86; worth offering upstream.  Not done.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
