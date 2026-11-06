@@ -17,6 +17,7 @@
 #include "input/HttpClient.h" // httplib.h with its configuration
 #include "HttpByteSource.h"
 #include "logging/Logger.h"
+#include "util/ThreadRole.h"
 
 namespace {
 
@@ -182,11 +183,7 @@ struct HttpByteSource::Impl {
     // connection, and files it under its offset.  The queue holds at most
     // c_chunks_ahead chunks completed or in flight beyond the one being read.
     void produce(httplib::Client &client) {
-#ifdef __APPLE__
-        pthread_setname_np("input-http");
-#elif defined(linux) || defined(__FreeBSD__)
-        pthread_setname_np(pthread_self(), "input-http");
-#endif
+        setThreadRole(ThreadRole::eInput, "input-http");
         std::unique_lock lock(m_mutex);
         while (!m_stop) {
             const bool at_end = m_end_at >= 0 && m_fetch_pos >= m_end_at;
