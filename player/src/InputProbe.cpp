@@ -2,6 +2,7 @@
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
 #include <algorithm>
+#include <pthread.h>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
@@ -568,14 +569,8 @@ double foldSignificance(const vector<float> &x, int period) {
 
 // Lines per field from one chunk, for a line period in input samples; 0 when
 // fewer than two vertical sync groups were found or they disagree
-double measureFieldLines(Logger &log, SampleSource &source, InputFormat format,
-                         int64_t offset, double line_period) {
-    const double want = c_field_chunk_fields * 312.5 * line_period + c_analytic_taps + 1;
-    // a multiple of 4: the lds reader unpacks four samples at a time
-    const auto chunk_samples = (uint32_t)min<double>(want, c_field_chunk_max) / 4 * 4;
-    auto samples = readChunkNear(log, source, format, offset, chunk_samples);
-    if (samples.empty())
-        return 0;
+// The field-period test on samples in hand: see measureFieldLines
+double fieldLinesOfSamples(Logger &log, const vector<float> &samples, int64_t offset, double line_period) {
     auto analytic = analyticSignal(samples);
     auto freq = instantaneousFrequency(analytic).first;
     auto d_raw = blockAverage(freq, c_block_average);
@@ -643,6 +638,32 @@ double measureFieldLines(Logger &log, SampleSource &source, InputFormat format,
     log.debug(eInput, std::format("Probe: vertical sync groups at sample {}: {} found, {:.1f} lines apart",
                                   offset, group_starts.size(), field_lines));
     return field_lines;
+}
+
+// The samples the field-period test wants: c_field_chunk_fields PAL fields
+uint32_t fieldChunkSamples(double line_period) {
+    const double want = c_field_chunk_fields * 312.5 * line_period + c_analytic_taps + 1;
+    // a multiple of 4: the lds reader unpacks four samples at a time
+    return (uint32_t)min<double>(want, c_field_chunk_max) / 4 * 4;
+}
+
+double measureFieldLines(Logger &log, SampleSource &source, InputFormat format,
+                         int64_t offset, double line_period) {
+    auto samples = readChunkNear(log, source, format, offset, fieldChunkSamples(line_period));
+    if (samples.empty())
+        return 0;
+    return fieldLinesOfSamples(log, samples, offset, line_period);
+}
+
+// The carrier band a mean carrier frequency (in cycles per line) falls in:
+// see classify()
+enum class CarrierBand { eSd, eMuse, eNone };
+CarrierBand bandOfCarrier(double cycles_per_line) {
+    if (cycles_per_line >= 420 && cycles_per_line <= 640)
+        return CarrierBand::eSd;
+    if (cycles_per_line >= 260 && cycles_per_line <= 430)
+        return CarrierBand::eMuse;
+    return CarrierBand::eNone;
 }
 
 ChunkStats analyzeChunk(Logger &log, const vector<float> &samples, int64_t offset) {
@@ -890,14 +911,7 @@ void classify(Logger &log, SampleSource &source, const FileAnalysis &best, Input
     // puts every sync pulse half a line off.  The audio carrier breaks ties
     // (PAL discs with analog sound have their carriers elsewhere; those with
     // digital sound have none).
-    enum class Band { eSd, eMuse, eNone };
-    auto bandOfCarrier = [](double cycles_per_line) {
-        if (cycles_per_line >= 420 && cycles_per_line <= 640)
-            return Band::eSd;
-        if (cycles_per_line >= 260 && cycles_per_line <= 430)
-            return Band::eMuse;
-        return Band::eNone;
-    };
+    using Band = CarrierBand;
     for (int harmonic = 1; harmonic <= 3; harmonic++) {
         // The audio carrier is decisive where it is measurable -- the ratio is
         // ~10^4 on real NTSC RF and ~1.5 elsewhere -- but it was measured at
@@ -1113,6 +1127,144 @@ InputProbeResult probeInput(Logger &log, PreparedInput &input, optional<InputFor
 InputProbeResult probeInputFile(Logger &log, const string &filename, optional<InputFormat> known_format) {
     PreparedInput input(filename, openByteSource(filename, &log), known_format);
     return probeInput(log, input, known_format);
+}
+
+// The type of one chunk of RF samples on its own, the way classify() decides
+// it for a file: the line period and carrier from the chunk analysis, the
+// field period measured on the same chunk.  eUnknown when the chunk shows no
+// convincing line structure or the measurements fall between the bands.
+static InputProbeResult::Type classifyChunk(Logger &log, const vector<float> &samples) {
+    using Type = InputProbeResult::Type;
+    const ChunkStats stats = analyzeChunk(log, samples, 0);
+    if (stats.line_strength < 0.25)
+        return Type::eUnknown;
+    for (int harmonic = 1; harmonic <= 3; harmonic++) {
+        const CarrierBand band = bandOfCarrier(stats.cycles_per_line / harmonic);
+        const bool ntsc_audio = harmonic == 1 && stats.audio_carrier_ratio > 50;
+        if (band == CarrierBand::eNone && !ntsc_audio)
+            continue;
+        if (band == CarrierBand::eMuse)
+            return Type::eMuseRf;
+        const double field_lines = fieldLinesOfSamples(log, samples, 0, stats.line_period / harmonic);
+        if (abs(field_lines - 262.5) <= 1.5)
+            return Type::eNtscRf;
+        if (abs(field_lines - 312.5) <= 1.5)
+            return Type::ePalRf;
+        return ntsc_audio ? Type::eNtscRf : Type::eUnknown;
+    }
+    return Type::eUnknown;
+}
+
+static const char *typeName(InputProbeResult::Type type) {
+    switch (type) {
+        case InputProbeResult::Type::eNtscRf: return "NTSC RF";
+        case InputProbeResult::Type::ePalRf: return "PAL RF";
+        case InputProbeResult::Type::eMuseRf: return "MUSE RF";
+        case InputProbeResult::Type::eMuse16Baseband: return "MUSE baseband";
+        case InputProbeResult::Type::eUnknown: break;
+    }
+    return "unknown";
+}
+
+constexpr int c_watch_agreeing_chunks = 3;    // consecutive verdicts of another type before a switch
+constexpr double c_watch_interval_s = 4.0;    // between chunks while the reader has sync
+constexpr double c_watch_urgent_interval_s = 1.0; // and while it has not
+
+ContentWatch::ContentWatch(Logger &log, Type current, double sample_rate)
+    : m_log(log),
+      m_current(current),
+      // Long enough for the field-period test at the slowest line rate (PAL)
+      m_chunk_samples(fieldChunkSamples(sample_rate / c_pal_line_hz)),
+      m_interval_samples((int64_t)(c_watch_interval_s * sample_rate)),
+      m_urgent_interval_samples((int64_t)(c_watch_urgent_interval_s * sample_rate)),
+      m_since_analysis(m_interval_samples), // the first chunk right away
+      m_collecting(false),
+      m_stop(false),
+      m_candidate(Type::eUnknown),
+      m_agreeing(0),
+      m_other(-1),
+      m_thread([this]() { worker(); }) {
+}
+
+ContentWatch::~ContentWatch() {
+    {
+        std::scoped_lock lock(m_mutex);
+        m_stop = true;
+    }
+    m_cv.notify_all();
+    if (m_thread.joinable())
+        m_thread.join();
+}
+
+void ContentWatch::feed(const float *samples, size_t n, bool urgent) {
+    if (m_other >= 0)
+        return; // decided
+    if (!m_collecting) {
+        m_since_analysis += (int64_t)n;
+        if (m_since_analysis < (urgent ? m_urgent_interval_samples : m_interval_samples))
+            return;
+        m_collecting = true;
+        m_chunk.clear();
+    }
+    m_chunk.insert(m_chunk.end(), samples, samples + n);
+    if (m_chunk.size() < m_chunk_samples)
+        return;
+    m_chunk.resize(m_chunk_samples);
+    m_collecting = false;
+    m_since_analysis = 0;
+    std::scoped_lock lock(m_mutex);
+    if (m_pending.empty()) { // else the worker is behind: this chunk is skipped
+        m_pending.swap(m_chunk);
+        m_cv.notify_one();
+    }
+}
+
+std::optional<ContentWatch::Type> ContentWatch::otherType() const {
+    const int other = m_other;
+    return other >= 0 ? std::make_optional((Type)other) : std::nullopt;
+}
+
+void ContentWatch::worker() {
+#ifdef __APPLE__
+    pthread_setname_np("museld-watch");
+#elif defined(linux) || defined(__FreeBSD__)
+    pthread_setname_np(pthread_self(), "museld-watch");
+#endif
+    vector<float> chunk;
+    for (;;) {
+        {
+            std::unique_lock lock(m_mutex);
+            m_cv.wait(lock, [this]() { return m_stop || !m_pending.empty(); });
+            if (m_stop)
+                return;
+            chunk.swap(m_pending);
+            m_pending.clear();
+        }
+        classify(chunk);
+    }
+}
+
+void ContentWatch::classify(const vector<float> &chunk) {
+    if (m_other >= 0)
+        return; // decided while this chunk was on its way
+    const auto t0 = chrono::steady_clock::now();
+    const Type verdict = classifyChunk(m_log, chunk);
+    const auto ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - t0).count();
+    if (verdict == Type::eUnknown || verdict == m_current) {
+        m_candidate = verdict;
+        m_agreeing = 0;
+    } else {
+        m_agreeing = verdict == m_candidate ? m_agreeing + 1 : 1;
+        m_candidate = verdict;
+    }
+    m_log.debug(eInput, std::format("Content watch: chunk of {} samples is {} ({} ms){}", chunk.size(),
+                                    typeName(verdict), ms,
+                                    m_agreeing > 0 ? std::format(", {} of {} agreeing", m_agreeing, c_watch_agreeing_chunks) : ""));
+    if (m_agreeing >= c_watch_agreeing_chunks) {
+        m_log.info(eInput, std::format("Content watch: the input carries {} now, not {}; switching",
+                                       typeName(m_candidate), typeName(m_current)));
+        m_other = (int)m_candidate;
+    }
 }
 
 double estimateSampleFrequency(const InputProbeResult &result, InputProbeResult::Type type) {

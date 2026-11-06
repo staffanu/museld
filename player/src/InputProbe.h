@@ -5,7 +5,12 @@
 #define MUSECPP_INPUTPROBE_H
 
 #include <cstdint>
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <optional>
+#include <thread>
+#include <vector>
 #include <string>
 #include "input/InputReader.h"
 
@@ -71,5 +76,49 @@ InputProbeResult probeInputFile(Logger &log, const std::string &filename,
 // Works even when the probe left the type unclassified.  0 when no line
 // structure was found.
 double estimateSampleFrequency(const InputProbeResult &result, InputProbeResult::Type type);
+
+// Watches a live input while it plays for a change of type (a disc of another
+// standard put in the player).  The demodulator feeds it the samples it reads;
+// every few seconds of input -- every second while the reader has no sync --
+// it collects a chunk long enough for the field-period test and classifies it
+// on a thread of its own, exactly as the probe would, and once three
+// consecutive verdicts agree on a type other than the current one, otherType()
+// reports it.  A chunk that arrives while the previous one is still being
+// analysed is skipped: the demodulator is never held up.
+class ContentWatch {
+public:
+    using Type = InputProbeResult::Type;
+    ContentWatch(Logger &log, Type current, double sample_rate);
+    ~ContentWatch();
+    ContentWatch(const ContentWatch &) = delete;
+    ContentWatch &operator=(const ContentWatch &) = delete;
+
+    // The demodulator thread, with each block it reads; `urgent` while the
+    // reader has no sync
+    void feed(const float *samples, size_t n, bool urgent);
+    // The other type, once decided; never cleared
+    std::optional<Type> otherType() const;
+
+private:
+    void worker();
+    void classify(const std::vector<float> &chunk);
+
+    Logger &m_log;
+    const Type m_current;
+    const size_t m_chunk_samples;
+    const int64_t m_interval_samples;        // between analyses, in input samples
+    const int64_t m_urgent_interval_samples;
+    int64_t m_since_analysis;
+    std::vector<float> m_chunk;              // being collected (demodulator thread)
+    bool m_collecting;
+    std::vector<float> m_pending;            // handed to the worker
+    std::mutex m_mutex;
+    std::condition_variable m_cv;
+    bool m_stop;
+    Type m_candidate;
+    int m_agreeing;
+    std::atomic<int> m_other;                // -1, or the other Type
+    std::thread m_thread;                    // last: joined before the state above goes
+};
 
 #endif //MUSECPP_INPUTPROBE_H

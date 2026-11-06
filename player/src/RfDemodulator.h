@@ -28,6 +28,7 @@
 #include "input/InputReaderFactory.h"
 #include "input/PreparedInput.h"
 #include "musevk/VulkanManager.h"
+#include "InputProbe.h"
 
 template<class B>
 class RfDemodulator {
@@ -187,6 +188,17 @@ public:
         m_filled_blocks.clear();
     }
 
+    // Watch the input for a change of type, from `current` (live input
+    // whose type was detected, not given)
+    void watchContent(InputProbeResult::Type current) {
+        m_content_watch = std::make_unique<ContentWatch>(m_log, current, m_sample_frequency);
+    }
+    // The reader's sync state, which sets the watch's pace
+    void setSignalLost(bool lost) { m_signal_lost = lost; }
+    std::optional<InputProbeResult::Type> otherTypeDetected() const {
+        return m_content_watch ? m_content_watch->otherType() : std::nullopt;
+    }
+
     // The input, to be continued from by another demodulator: a live stream
     // cannot be reopened where this one left it.  Stops the thread first.
     // Whatever was read into blocks not yet consumed is lost with them.
@@ -218,6 +230,8 @@ protected:
         block_input_offset = m_total_samples_read;
         seek_generation = m_seek_generation;
         m_total_samples_read += (int64_t)n;
+        if (m_content_watch)
+            m_content_watch->feed(out, n, m_signal_lost);
         return true;
     }
 
@@ -251,6 +265,8 @@ protected:
     std::mutex m_input_mutex; // the input reader's position and the two fields below
     int64_t m_total_samples_read;
     uint32_t m_seek_generation = 0;
+    std::unique_ptr<ContentWatch> m_content_watch;
+    std::atomic<bool> m_signal_lost{false};
     std::deque<std::unique_ptr<B>> m_vacant_blocks;
     std::deque<std::unique_ptr<B>> m_filled_blocks;
     std::mutex m_demodulated_block_mutex; // used to synchronize access to the vacant / filled blocks

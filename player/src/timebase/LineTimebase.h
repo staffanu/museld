@@ -53,6 +53,10 @@ public:
     int64_t addPulse(double t);
 
     [[nodiscard]] bool latticeValid() const { return m_lattice_valid; }
+    // Of the last whole frame's finalized lines, the fraction without a sync
+    // pulse near the curve: ~0.035 on a locked NTSC frame (the vertical
+    // intervals), far higher when the lattice runs at the wrong line rate
+    [[nodiscard]] double lastFrameUnsupportedFraction() const { return m_last_frame_unsupported; }
     [[nodiscard]] double lastPulseTime() const { return m_lat_t; }
     [[nodiscard]] int64_t lastPulseLine() const { return m_last_meas_k; }
     [[nodiscard]] double period() const { return m_p_run; } // the chain's local line period
@@ -106,6 +110,7 @@ private:
     int64_t m_slip_shift;
     int64_t m_slip_first_k;
     int m_slip_count;
+    double m_last_frame_unsupported = 0;
     // Running measurement-noise estimate: mean |second difference| of
     // consecutive-line pulse times (see addPulse)
     double m_last_dt;

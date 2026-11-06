@@ -350,6 +350,10 @@ bool SdtvFrameReader::readInputBlock(std::unique_ptr<SdtvInputBlock> const &outp
         resetTimebase("no sync pulses");
         m_timebase_restarted = true; // (a seek's reset is not a new disc, so it does not set this)
     }
+    // No lock, or a lattice that keeps losing the pulses (the other SD
+    // standard's line rate, 0.7 % off, does that without ever unanchoring):
+    // the content watch looks more often
+    m_demodulator->setSignalLost(!m_anchored || m_timebase.lastFrameUnsupportedFraction() > 0.25);
 
     return true;
 }

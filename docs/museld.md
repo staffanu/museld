@@ -148,6 +148,20 @@ live: it plays like a file named on the command line, seeking included. Being li
 to do with speed: a file piped through `cat` arrives faster than real time and loses the fields
 the decoder cannot keep up with, so play files by name.
 
+### Changing discs on a live input
+
+A live input whose type was detected (no `--input-type`) is watched for a change of type
+while it plays, for the decoder-box setup where the player is fed discs of any standard. The
+demodulator hands every few seconds of samples to a content watch, which classifies them the
+way the probe does (carrier frequency, line period, field period); when three consecutive
+chunks agree on another type, the player is rebuilt for it on the same stream, keeping the
+window. While the reader has no sync the watch looks every second and the picture is blanked
+with `NO SIGNAL` in the OSD; a new disc of the same standard is simply re-acquired by the
+running decoder. The switch takes a second or two after the new disc's signal appears, and
+anything the old demodulator had buffered at that moment is skipped. The sample rate is the
+stream's and never changes, so for MUSE to be among the possibilities the capture must run at
+a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at a switch.
+
 ## Playback options
 
 | Option | Description |
@@ -563,7 +577,6 @@ DTS: EFM stereo samples → DTS sync detection → byte stream → libavcodec dc
 - **Picture filters**: Most filters were computed early in the project; picture quality could probably be improved by spending more time on them.
 - **Motion detection**: The algorithm is quite simplistic and could probably be improved.
 - **LD MUSE vs BS MUSE**: Available documentation describes the satellite broadcasting standard. MUSE decoders have separate inputs for the two signals, so presumably there is some difference, but it is unknown what it is.
-- **Live MUSE/NTSC switching**: For the decoder-box use case (a pipe from a capture device to the TV), the player should switch type when the disc changes. Detection runs on live input now (window after window, and the player keeps whether the type was given or detected), but the per-type reader/demodulator/decoder pipeline setup has to be refactored so it can be torn down and rebuilt mid-playback.
 - **Subtitle OCR** (experimental; see the option section above):
   - The full release packages include ONNX Runtime but not the PP-OCR models, which have to be downloaded separately (see above); the minimal packages are built without OCR (see docs/packaging.md).
   - `--ocr-translate` speaks plain HTTP only; hosted TLS endpoints would need an OpenSSL-enabled cpp-httplib build.

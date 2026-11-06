@@ -56,6 +56,14 @@ public:
     bool initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) override;
     void cleanup() override;
     std::unique_ptr<InputReader> releaseInput() override;
+    void watchForTypeChange(InputProbeResult::Type current) override {
+        if (m_demodulator != nullptr)
+            m_demodulator->watchContent(current);
+    }
+    [[nodiscard]] std::optional<InputProbeResult::Type> otherTypeDetected() override {
+        return m_demodulator != nullptr ? m_demodulator->otherTypeDetected() : std::nullopt;
+    }
+    [[nodiscard]] bool signalPresent() const override { return m_anchored; }
     bool seek(double seconds) override;
     std::optional<uint32_t> seekToInputSample(int64_t sample) override;
     [[nodiscard]] double inputSampleRate() const override {
@@ -168,7 +176,7 @@ private:
     std::deque<std::pair<int64_t, bool>> m_polarities; // (lattice line, positive) of accepted pulses
 
     // --- vertical anchor: MUSE line numbers on the lattice ---
-    bool m_anchored;
+    std::atomic<bool> m_anchored;       // the reader thread's; read by signalPresent()
     uint32_t m_seek_generation;
     bool m_frame_partial;
     int64_t m_line1_k;

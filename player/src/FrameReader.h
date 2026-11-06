@@ -12,6 +12,7 @@
 #include <deque>
 #include <atomic>
 #include "AudioDefs.h"
+#include "InputProbe.h"
 
 namespace musevk {
     class VulkanBuffer;
@@ -44,6 +45,12 @@ public:
     // type to continue a live stream from (null when there is none to hand
     // over).  The reader is finished after this; cleanup() still runs.
     virtual std::unique_ptr<InputReader> releaseInput() { return nullptr; }
+    // Watch a live input for a change of type away from `current`; see
+    // ContentWatch.  otherTypeDetected() reports the type found, once.
+    virtual void watchForTypeChange(InputProbeResult::Type) {}
+    [[nodiscard]] virtual std::optional<InputProbeResult::Type> otherTypeDetected() { return std::nullopt; }
+    // Whether the reader is locked to a signal (the OSD's no-signal state)
+    [[nodiscard]] virtual bool signalPresent() const { return true; }
 
     std::pair<std::unique_ptr<InputBlock>, InputStatus> getNextInputBuffer();
     void returnBuffer(std::unique_ptr<InputBlock> &buffer);
