@@ -105,6 +105,7 @@ private:
 
     Logger &m_log;
     const Type m_current;
+    const double m_sample_rate;
     const size_t m_chunk_samples;
     const int64_t m_interval_samples;        // between analyses, in input samples
     const int64_t m_urgent_interval_samples;
