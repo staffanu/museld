@@ -372,9 +372,10 @@ static void runPlayer(Logger &log,
                       std::optional<int> start_chapter) {
     vk::Device &device = manager.getDevice();
 
-    vk::SemaphoreCreateInfo semaphoreInfo{};
-    auto image_available_semaphore = device.createSemaphore(semaphoreInfo);
-    auto render_finished_semaphore = device.createSemaphore(semaphoreInfo);
+    // A unique handle: released on every exit path, an exception's unwinding
+    // included (as a raw handle it leaked whenever the player loop threw)
+    vk::UniqueSemaphore image_available_semaphore_holder = device.createSemaphoreUnique(vk::SemaphoreCreateInfo{});
+    const vk::Semaphore image_available_semaphore = image_available_semaphore_holder.get();
 
     {
         musevk::CommandPool command_pool(manager);
@@ -990,9 +991,6 @@ static void runPlayer(Logger &log,
         if (benchmark_shaders)
             decoder.outputBenchmarkResults();
     }
-
-    device.destroy(image_available_semaphore);
-    device.destroy(render_finished_semaphore);
 }
 
 // video_standard: the composite standard of an SD (SdtvInputBlock) input, unused for MUSE

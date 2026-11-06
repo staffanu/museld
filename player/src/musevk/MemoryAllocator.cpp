@@ -26,6 +26,15 @@ namespace musevk {
         m_memory_pools[memory.allocation_key].free(memory);
     }
 
+    size_t MemoryAllocator::liveAllocations() {
+        std::scoped_lock lock(m_mutex);
+        size_t n = 0;
+        for (const auto &pool : m_memory_pools)
+            for (const auto &block : pool.second.blocks)
+                n += block.allocations.size();
+        return n;
+    }
+
     MemoryAllocator::~MemoryAllocator() {
         for (auto i: m_memory_pools)
             assert(i.second.blocks.empty());
