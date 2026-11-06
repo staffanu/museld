@@ -159,6 +159,14 @@ public:
         return m_input_reader ? m_input_reader->sampleCount() : -1;
     }
 
+    // Stops and joins the demodulator thread; idempotent
+    void stop() {
+        requestStop();
+        m_log.debug(eInput, "RfDemodulator: requested stop");
+        if (m_demodulator_thread.joinable())
+            m_demodulator_thread.join();
+    }
+
     // Wake everything waiting on this demodulator without joining anything, so
     // a caller can unblock its own consumer thread before joining it.
     void requestStop() {
@@ -173,13 +181,18 @@ public:
 
     // Idempotent: runs both from the explicit teardown path and from the destructors.
     void cleanup() {
-        requestStop();
-        m_log.debug(eInput, "RfDemodulator: requested stop");
-        if (m_demodulator_thread.joinable())
-            m_demodulator_thread.join();
+        stop();
         m_input_reader.reset();
         m_vacant_blocks.clear();
         m_filled_blocks.clear();
+    }
+
+    // The input, to be continued from by another demodulator: a live stream
+    // cannot be reopened where this one left it.  Stops the thread first.
+    // Whatever was read into blocks not yet consumed is lost with them.
+    std::unique_ptr<InputReader> releaseInput() {
+        stop();
+        return std::move(m_input_reader);
     }
 
 protected:

@@ -994,15 +994,47 @@ static void runPlayer(Logger &log,
 }
 
 // video_standard: the composite standard of an SD (SdtvInputBlock) input, unused for MUSE
-// Plays one input.  Everything with a lifetime -- the window, the Vulkan
-// device, the reader with its threads, the decoder and the player's objects --
-// is owned here, declared in the order it must be destroyed in reverse, so an
-// exception on any path unwinds correctly without an explicit teardown: player
-// objects and decoder, then the reader (which joins its threads and frees its
-// blocks while the device exists), then the device, then the window the surface
-// was created from.  The reader is made by make_reader once the device exists.
+enum InputType {
+    eMuseRf,
+    eNtscRf,
+    ePalRf,
+    eMuse16MHz,
+    eMuseOversampled,
+};
+
+// The window and the Vulkan device, which outlive one process_file() call:
+// a live input that changes type is played on by another call with the same
+// surface.  Declared in destruction-reverse order: the device (and its
+// surface) goes before the window it was created on.
+struct PlayerSurface {
+    struct GlfwWindow {
+        GLFWwindow *window = nullptr;
+        ~GlfwWindow() {
+            if (window != nullptr)
+                glfwDestroyWindow(window);
+            glfwTerminate();
+        }
+    } glfw;
+    std::optional<musevk::VulkanManager> manager;
+};
+
+// How process_file() ended: with switch_to set, the live input turned out to
+// carry another type, and `input` is the stream to continue from
+struct PlayOutcome {
+    std::optional<InputType> switch_to;
+    std::unique_ptr<InputReader> input;
+};
+
+// Plays one input.  Everything with a lifetime per input type -- the reader
+// with its threads, the decoder and the player's objects -- is owned here,
+// declared in the order it must be destroyed in reverse, so an exception on
+// any path unwinds correctly without an explicit teardown: player objects and
+// decoder, then the reader (which joins its threads and frees its blocks
+// while the device exists).  The window and device are the caller's surface,
+// created here on the first call and kept across a type switch.  The reader
+// is made by make_reader once the device exists.
 template<class InputBlock>
-void process_file(Logger &log, const string &executable_dir,
+PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurface &surface,
                   const std::function<std::unique_ptr<FrameReader<InputBlock>>(musevk::VulkanManager &)> &make_reader,
                   const VideoStandard *video_standard,
                   bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool full_image, double overscan,
@@ -1021,28 +1053,6 @@ void process_file(Logger &log, const string &executable_dir,
                   double write_duration_seconds,
                   double initial_seek_seconds,
                   std::optional<int> start_chapter) {
-    glfwSetErrorCallback(glfw_error_callback);
-    g_last_glfw_error.clear();
-    if (!glfwInit())
-        // No display, or none of the platforms GLFW was built with: stop here
-        // instead of cascading into "not initialized" errors and a Vulkan
-        // instance with no presentable device.  A failed glfwInit leaves
-        // nothing to terminate.
-        throw runtime_error(std::format("Cannot initialize GLFW (no usable display?): {}", g_last_glfw_error));
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    // A full screen window keeps its screen when another application takes
-    // the focus.  By default GLFW iconifies it instead, and on macOS the
-    // window then does not come back when the application is activated
-    // again: it sits minimized off screen until found in the Dock.
-    glfwWindowHint(GLFW_AUTO_ICONIFY, GLFW_FALSE);
-    if (no_keys) {
-        // a run made beside other work: the window must not take the
-        // keyboard away from whatever the user is typing into
-        glfwWindowHint(GLFW_FOCUSED, GLFW_FALSE);
-        glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
-    }
-
     // The decoded image size (also the size of a written video file), where
     // the picture sits in it and the shape of its pixels, and a window of the
     // picture's shape that downscales it in neither direction
@@ -1064,36 +1074,55 @@ void process_file(Logger &log, const string &executable_dir,
     }
     int window_w, window_h;
     defaultWindowSize(picture_format, full_image, window_w, window_h);
-    // The window outlives everything created on its surface: first declared,
-    // last destroyed
-    struct GlfwWindow {
-        GLFWwindow *window = nullptr;
-        ~GlfwWindow() {
-            if (window != nullptr)
-                glfwDestroyWindow(window);
-            glfwTerminate();
+    if (surface.glfw.window == nullptr) {
+        glfwSetErrorCallback(glfw_error_callback);
+        g_last_glfw_error.clear();
+        if (!glfwInit())
+            // No display, or none of the platforms GLFW was built with: stop here
+            // instead of cascading into "not initialized" errors and a Vulkan
+            // instance with no presentable device.  A failed glfwInit leaves
+            // nothing to terminate.
+            throw runtime_error(std::format("Cannot initialize GLFW (no usable display?): {}", g_last_glfw_error));
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+        // A full screen window keeps its screen when another application takes
+        // the focus.  By default GLFW iconifies it instead, and on macOS the
+        // window then does not come back when the application is activated
+        // again: it sits minimized off screen until found in the Dock.
+        glfwWindowHint(GLFW_AUTO_ICONIFY, GLFW_FALSE);
+        if (no_keys) {
+            // a run made beside other work: the window must not take the
+            // keyboard away from whatever the user is typing into
+            glfwWindowHint(GLFW_FOCUSED, GLFW_FALSE);
+            glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
         }
-    } glfw;
-    if (full_screen) {
-        // At the monitor's current mode -- no mode switch; the blit scales
-        GLFWmonitor *monitor = glfwGetPrimaryMonitor();
-        const GLFWvidmode *mode = glfwGetVideoMode(monitor);
-        glfwWindowHint(GLFW_RED_BITS, mode->redBits);
-        glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
-        glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
-        glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
-        glfw.window = glfwCreateWindow(mode->width, mode->height, title, monitor, nullptr);
+        if (full_screen) {
+            // At the monitor's current mode -- no mode switch; the blit scales
+            GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+            const GLFWvidmode *mode = glfwGetVideoMode(monitor);
+            glfwWindowHint(GLFW_RED_BITS, mode->redBits);
+            glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
+            glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
+            glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+            surface.glfw.window = glfwCreateWindow(mode->width, mode->height, title, monitor, nullptr);
+        } else {
+            surface.glfw.window = glfwCreateWindow(window_w, window_h, title, nullptr, nullptr);
+        }
+        if (surface.glfw.window == nullptr)
+            throw runtime_error(std::format("Cannot create the {} window: {}", title, g_last_glfw_error));
+        glfwSetInputMode(surface.glfw.window, GLFW_STICKY_KEYS, GLFW_TRUE);
+        glfwSetInputMode(surface.glfw.window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
     } else {
-        glfw.window = glfwCreateWindow(window_w, window_h, title, nullptr, nullptr);
+        // A type switch: the window stays, at whatever size and mode it has
+        glfwSetWindowTitle(surface.glfw.window, title);
     }
-    GLFWwindow *const window = glfw.window;
-    if (!window)
-        throw runtime_error(std::format("Cannot create the {} window: {}", title, g_last_glfw_error));
-    glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+    GLFWwindow *const window = surface.glfw.window;
 
-    musevk::VulkanManager manager(log);
-    manager.initVulkan(window, no_sync);
+    if (!surface.manager) {
+        surface.manager.emplace(log);
+        surface.manager->initVulkan(window, no_sync);
+    }
+    musevk::VulkanManager &manager = *surface.manager;
 
     // The reader's threads use the device, so the reader comes after the
     // manager: its destructor joins them and frees its blocks before the
@@ -1248,17 +1277,10 @@ void process_file(Logger &log, const string &executable_dir,
         vfw = nullptr;
     }
 #endif
-    // audio_playback, the reader, the Vulkan manager and the window follow, in
-    // reverse declaration order.
+    // audio_playback and the reader follow, in reverse declaration order; the
+    // surface is the caller's.
+    return {};
 }
-
-enum InputType {
-    eMuseRf,
-    eNtscRf,
-    ePalRf,
-    eMuse16MHz,
-    eMuseOversampled,
-};
 
 // The directory holding shaders/ and fonts/, i.e. the one containing the running
 // executable. argv[0] alone is not enough: it has no directory part when the
@@ -1976,6 +1998,11 @@ int main(int argc, char *argv[]) {
                         "the seek position ({} s) to give the decoder a warm-up run.",
                         initial_seek_seconds) << endl;
 
+            // One process_file() call per input type; a live input that turns
+            // out to carry another type comes back with the stream to go on from
+            PlayerSurface surface;
+            PlayOutcome outcome;
+            do {
             switch (file_input_type) {
                 case eNtscRf:
                 case ePalRf: {
@@ -1988,7 +2015,7 @@ int main(int argc, char *argv[]) {
                                     file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
                                     efm_adaptive_filter_size, muse_output_filename, standard);
                     };
-                    process_file<SdtvInputBlock>(log, executable_dir, make_reader, &standard, decode_all_fields,
+                    outcome = process_file<SdtvInputBlock>(log, executable_dir, surface, make_reader, &standard, decode_all_fields,
                                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                  audio_track,
                                                  benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
@@ -2002,7 +2029,7 @@ int main(int argc, char *argv[]) {
                         return make_unique<PhaseCorrect16MHzFrameReader>(
                                 log, std::move(input), initial_seek_seconds, muse_output_filename);
                     };
-                    process_file<MuseInputBlock>(log, executable_dir, make_reader, nullptr, decode_all_fields,
+                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, make_reader, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                  subtitle_setup,
@@ -2018,7 +2045,7 @@ int main(int argc, char *argv[]) {
                                 file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
                                 audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
                     };
-                    process_file<MuseInputBlock>(log, executable_dir, make_reader, nullptr, decode_all_fields,
+                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, make_reader, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                  subtitle_setup,
@@ -2029,6 +2056,15 @@ int main(int argc, char *argv[]) {
                 default:
                     throw std::runtime_error("Unknown input type: {}");
             }
+            if (outcome.switch_to) {
+                // The stream continues under the new type from where the old
+                // reader stopped; nothing is seeked or probed again
+                file_input_type = *outcome.switch_to;
+                input = PreparedInput(name, std::move(outcome.input), *resolved_format);
+                initial_seek_seconds = 0;
+                start_chapter = std::nullopt;
+            }
+            } while (outcome.switch_to);
         };
         while (it != args.cend()) {
             if (const CliOptions::Option *option = options.find(*it)) {

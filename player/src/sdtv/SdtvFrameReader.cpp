@@ -132,6 +132,14 @@ void SdtvFrameReader::cleanup() {
     }
 }
 
+std::unique_ptr<InputReader> SdtvFrameReader::releaseInput() {
+    if (m_demodulator == nullptr)
+        return nullptr;
+    m_demodulator->requestStop();
+    FrameReader::cleanup(); // joins the reader thread, which may hold a block
+    return m_demodulator->releaseInput();
+}
+
 // The seeks only move the demodulator's input: the timebase is reset on the
 // reader thread when the first block after the seek arrives (readInputBlock
 // sees its generation change), so the reset never races the thread's own
