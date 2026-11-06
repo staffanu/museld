@@ -425,8 +425,13 @@ they use is destroyed); worker-thread exceptions are marshalled via
 `exception_ptr` and rethrown on the consumer's thread (`getNextInputBuffer`
 ultimately rethrows on the main thread — never `std::exit` from a worker);
 frame readers call `RfDemodulator::requestStop()` before joining their reader
-thread (deadlock otherwise); destructors never throw. `process_file` tears
-down via a RAII guard: reader → Vulkan → GLFW window, in that order.
+thread (deadlock otherwise); destructors never throw. `process_file` owns the
+window, the `VulkanManager`, the reader (made by a callable once the device exists) and the
+player's objects, declared in that order, so stack unwinding tears down player objects and
+decoder → reader (joining its threads, freeing its blocks) → Vulkan device → window on every
+path; no explicit teardown guard. `VulkanManager::cleanup()` logs the memory still
+sub-allocated when the device goes, and the wrappers' destructors skip a dead device via
+`deviceAlive()`, so an ownership mistake is reported, not crashed on.
 
 ### museld Threading
 

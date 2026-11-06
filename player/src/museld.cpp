@@ -994,8 +994,16 @@ static void runPlayer(Logger &log,
 }
 
 // video_standard: the composite standard of an SD (SdtvInputBlock) input, unused for MUSE
+// Plays one input.  Everything with a lifetime -- the window, the Vulkan
+// device, the reader with its threads, the decoder and the player's objects --
+// is owned here, declared in the order it must be destroyed in reverse, so an
+// exception on any path unwinds correctly without an explicit teardown: player
+// objects and decoder, then the reader (which joins its threads and frees its
+// blocks while the device exists), then the device, then the window the surface
+// was created from.  The reader is made by make_reader once the device exists.
 template<class InputBlock>
-void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, FrameReader<InputBlock> &reader,
+void process_file(Logger &log, const string &executable_dir,
+                  const std::function<std::unique_ptr<FrameReader<InputBlock>>(musevk::VulkanManager &)> &make_reader,
                   const VideoStandard *video_standard,
                   bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool full_image, double overscan,
                   bool no_sync, bool no_keys,
@@ -1056,7 +1064,16 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
     }
     int window_w, window_h;
     defaultWindowSize(picture_format, full_image, window_w, window_h);
-    GLFWwindow *window;
+    // The window outlives everything created on its surface: first declared,
+    // last destroyed
+    struct GlfwWindow {
+        GLFWwindow *window = nullptr;
+        ~GlfwWindow() {
+            if (window != nullptr)
+                glfwDestroyWindow(window);
+            glfwTerminate();
+        }
+    } glfw;
     if (full_screen) {
         // At the monitor's current mode -- no mode switch; the blit scales
         GLFWmonitor *monitor = glfwGetPrimaryMonitor();
@@ -1065,44 +1082,24 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
         glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
         glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
-        window = glfwCreateWindow(mode->width, mode->height, title, monitor, nullptr);
+        glfw.window = glfwCreateWindow(mode->width, mode->height, title, monitor, nullptr);
     } else {
-        window = glfwCreateWindow(window_w, window_h, title, nullptr, nullptr);
+        glfw.window = glfwCreateWindow(window_w, window_h, title, nullptr, nullptr);
     }
-    if (!window) {
-        // The Teardown guard below does not exist yet, so terminate here
-        const string reason = g_last_glfw_error;
-        glfwTerminate();
-        throw runtime_error(std::format("Cannot create the {} window: {}", title, reason));
-    }
+    GLFWwindow *const window = glfw.window;
+    if (!window)
+        throw runtime_error(std::format("Cannot create the {} window: {}", title, g_last_glfw_error));
     glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
 
-    // Teardown must run in this order on every exit path, including stack
-    // unwinding: first stop the reader, which joins the reader/demodulator/EFM
-    // threads while the Vulkan device they use is still alive; then tear down
-    // Vulkan, which destroys the surface; then the window the surface was
-    // created from.  Both cleanup()s are idempotent, and their destructors
-    // would otherwise run too late -- reader and manager belong to main().
-    // Declared before initVulkan so a failure anywhere below is covered.
-    struct Teardown {
-        Logger &log;
-        FrameReader<InputBlock> &reader;
-        musevk::VulkanManager &manager;
-        GLFWwindow *window;
-        ~Teardown() {
-            try {
-                reader.cleanup();
-                manager.cleanup();
-            } catch (const std::exception &x) {
-                log.error(eApplication, x.what());
-            }
-            glfwDestroyWindow(window);
-            glfwTerminate();
-        }
-    } teardown{log, reader, manager, window};
-
+    musevk::VulkanManager manager(log);
     manager.initVulkan(window, no_sync);
+
+    // The reader's threads use the device, so the reader comes after the
+    // manager: its destructor joins them and frees its blocks before the
+    // device goes
+    std::unique_ptr<FrameReader<InputBlock>> reader_owner = make_reader(manager);
+    FrameReader<InputBlock> &reader = *reader_owner;
 
     {
         std::vector<std::unique_ptr<InputBlock>> input_vulkan_buffers{};
@@ -1251,8 +1248,8 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
         vfw = nullptr;
     }
 #endif
-    // audio_playback, the decoder scope above and the Teardown guard handle the
-    // rest, in reverse declaration order.
+    // audio_playback, the reader, the Vulkan manager and the window follow, in
+    // reverse declaration order.
 }
 
 enum InputType {
@@ -1970,8 +1967,6 @@ int main(int argc, char *argv[]) {
                 cerr << "No .srt files matching " << filesystem::path(name).stem().string()
                      << "*.srt found next to " << name << endl;
 
-            musevk::VulkanManager manager(log);
-
             const double export_frame_after_seconds = max(0.0, export_frame_at_seconds - initial_seek_seconds);
             if (export_frame_filename && initial_seek_seconds > 0 && export_frame_at_seconds <= initial_seek_seconds)
                 cerr << std::format(
@@ -1987,11 +1982,13 @@ int main(int argc, char *argv[]) {
                     const VideoStandard &standard = file_input_type == eNtscRf ? VideoStandard::ntsc()
                                                                                 : VideoStandard::pal();
                     subtitle_setup.ntsc_cc = standard.has_closed_captions;
-                    auto reader = make_unique<SdtvFrameReader>(
+                    auto make_reader = [&](musevk::VulkanManager &manager) -> std::unique_ptr<FrameReader<SdtvInputBlock>> {
+                        return make_unique<SdtvFrameReader>(
                                     log, executable_dir, manager, std::move(input),
                                     file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
                                     efm_adaptive_filter_size, muse_output_filename, standard);
-                    process_file<SdtvInputBlock>(log, executable_dir, manager, *reader, &standard, decode_all_fields,
+                    };
+                    process_file<SdtvInputBlock>(log, executable_dir, make_reader, &standard, decode_all_fields,
                                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                  audio_track,
                                                  benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
@@ -2001,9 +1998,11 @@ int main(int argc, char *argv[]) {
                     break;
                 }
                 case eMuse16MHz: {
-                    auto reader = make_unique<PhaseCorrect16MHzFrameReader>(
-                            log, std::move(input), initial_seek_seconds, muse_output_filename);
-                    process_file<MuseInputBlock>(log, executable_dir, manager, *reader, nullptr, decode_all_fields,
+                    auto make_reader = [&](musevk::VulkanManager &) -> std::unique_ptr<FrameReader<MuseInputBlock>> {
+                        return make_unique<PhaseCorrect16MHzFrameReader>(
+                                log, std::move(input), initial_seek_seconds, muse_output_filename);
+                    };
+                    process_file<MuseInputBlock>(log, executable_dir, make_reader, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                  subtitle_setup,
@@ -2013,11 +2012,13 @@ int main(int argc, char *argv[]) {
                 }
                 case eMuseOversampled:
                 case eMuseRf: {
-                    auto reader = make_unique<MuseFrameReader>(
-                            log, executable_dir, manager, std::move(input),
-                            file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
-                            audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
-                    process_file<MuseInputBlock>(log, executable_dir, manager, *reader, nullptr, decode_all_fields,
+                    auto make_reader = [&](musevk::VulkanManager &manager) -> std::unique_ptr<FrameReader<MuseInputBlock>> {
+                        return make_unique<MuseFrameReader>(
+                                log, executable_dir, manager, std::move(input),
+                                file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
+                                audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
+                    };
+                    process_file<MuseInputBlock>(log, executable_dir, make_reader, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                  subtitle_setup,
