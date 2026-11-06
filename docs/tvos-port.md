@@ -431,6 +431,20 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   where the GPU wait rose to 7.5 ms (the two decoder threads and the receive leave the
   GPU driver short of CPU); the SSD clip at 8.26 ms with none.  So FLAC plays in
   real time on the 2017 box, marginally from the NAS and cleanly from a fast source.
+- **Thread roles** (2026-11-06, done): `util/ThreadRole.h` names each thread and, on Apple
+  platforms, sets its QoS class: the demodulator thread user-interactive (it feeds the
+  GPU), the frame reader user-initiated, and the input threads -- FLAC decoders, Ogg
+  scanner, HTTP fetcher, prefetcher -- utility, since they run seconds ahead of the
+  picture.  `MUSELD_THREAD_QOS=0` for A/B.  A10X, the 10-bit ldf from the NAS in real
+  time with audio, six runs alternating: the chain's GPU wait 6.8 ms per block without
+  the classes and 5.7-6.0 with them, the demodulator's total steady at 8.36-8.42; with
+  the file warm in multivac's cache, 7, 2 and 0 underruns in 100 s without, 0 and 0
+  with.  One QoS run had 17: its network statistics showed 43 MB/s delivered with the
+  reader waiting 61-71% of the time, the cold NFS path below the ldf's 48 MB/s; the
+  runs after it found the region warm.  So the box now plays 10-bit FLAC in real time
+  whenever the server delivers 48 MB/s, and the cold NAS path is what remains: warm the
+  file, keep the clips on multivac's SSD, or fix the cold path on multivac (the
+  `EnableMMAP Off` trial, or nginx's read_ahead).
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the

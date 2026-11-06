@@ -4,6 +4,7 @@
 #ifndef MUSECPP_RFDEMODULATOR_H
 #define MUSECPP_RFDEMODULATOR_H
 
+#include "util/ThreadRole.h"
 #include <cstdint>
 #include <pthread.h>
 #include <fstream>
@@ -74,11 +75,7 @@ public:
             m_vacant_blocks.push_back(std::make_unique<B>(m_vulkan_manager));
 
         m_demodulator_thread = std::thread([this]() {
-#ifdef __APPLE__
-            pthread_setname_np("museld-demod");
-#elif defined(linux) || defined(__FreeBSD__)
-            pthread_setname_np(pthread_self(), "museld-demod");
-#endif
+            setThreadRole(ThreadRole::eDemodulator, "museld-demod");
             // Nothing above this catches: an exception escaping the thread would
             // terminate the process.  Store it and signal end of stream instead;
             // getNextDemodulatedBlock() rethrows it on the reader thread, whose

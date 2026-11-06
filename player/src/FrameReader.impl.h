@@ -1,6 +1,7 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include "util/ThreadRole.h"
 #include <pthread.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -54,11 +55,7 @@ bool FrameReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>
     m_log.debug(eInput, std::format("Using {} input buffers", m_vacant_input_buffers.size()));
 
     m_reader_thread = std::thread([this]() {
-#ifdef __APPLE__
-        pthread_setname_np("museld-reader");
-#elif defined(linux) || defined(__FreeBSD__)
-        pthread_setname_np(pthread_self(), "museld-reader");
-#endif
+        setThreadRole(ThreadRole::eReader, "museld-reader");
         // An exception escaping a thread is std::terminate, so store it and
         // finish the stream instead; getNextInputBuffer() rethrows it on the
         // consumer's thread once the filled buffers are drained.

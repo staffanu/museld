@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include "ParallelOggFlacReader.h"
 #include "logging/Logger.h"
+#include "util/ThreadRole.h"
 
 namespace {
 
@@ -341,11 +342,7 @@ void ParallelOggFlacReader::initialize() {
 
 // The scanner: reads pages in order from m_scan_offset and cuts them into runs
 void ParallelOggFlacReader::scan() {
-#ifdef __APPLE__
-    pthread_setname_np("flac-scan");
-#elif defined(linux) || defined(__FreeBSD__)
-    pthread_setname_np(pthread_self(), "flac-scan");
-#endif
+    setThreadRole(ThreadRole::eInput, "flac-scan");
     std::vector<uint8_t> buf;   // bytes read ahead from the source
     size_t buf_at = 0;          // the next unparsed byte
     int64_t buf_offset = 0;     // the stream offset of buf[0]
@@ -462,11 +459,7 @@ void ParallelOggFlacReader::scan() {
 }
 
 void ParallelOggFlacReader::decode(int which) {
-#ifdef __APPLE__
-    pthread_setname_np("flac-decode");
-#elif defined(linux) || defined(__FreeBSD__)
-    pthread_setname_np(pthread_self(), "flac-decode");
-#endif
+    setThreadRole(ThreadRole::eInput, "flac-decode");
     (void)which;
     std::unique_ptr<RunDecoder> decoder;
     std::unique_lock lock(m_mutex);

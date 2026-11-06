@@ -5,6 +5,7 @@
 #include <cstring>
 #include <pthread.h>
 #include "PrefetchingInputReader.h"
+#include "util/ThreadRole.h"
 
 PrefetchingInputReader::PrefetchingInputReader(std::unique_ptr<InputReader> inner, int queue_depth)
     // No source of its own: every byte goes through the inner reader.
@@ -30,11 +31,7 @@ void PrefetchingInputReader::initialize() {
 }
 
 void PrefetchingInputReader::produce() {
-#ifdef __APPLE__
-    pthread_setname_np("input-prefetch");
-#elif defined(linux) || defined(__FreeBSD__)
-    pthread_setname_np(pthread_self(), "input-prefetch");
-#endif
+    setThreadRole(ThreadRole::eInput, "input-prefetch");
     std::unique_lock<std::mutex> lock(m_mutex);
     while (!m_stop) {
         if (m_seek_pending || m_eof || (int)m_filled.size() >= m_queue_depth) {
