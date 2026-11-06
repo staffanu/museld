@@ -31,7 +31,7 @@ time); `--help` lists all options.
 | `--efm` | Decode EFM baseband audio (as captured from the EFM output of some players)       |
 | `--efm-rf` | Decode EFM from RF input (runs bandpass + envelope detection before EFM decoding) |
 | `--efm-t-values` | Decode EFM T-values from ld-decode (raw run-length encoded EFM symbols; implies u8 input) |
-| `--resample <Hz>` | Resample input to the target frequency and write raw u8 output (no audio decoding; mostly a development tool) |
+| `--resample <Hz>` | Resample input to the target frequency and write raw u8 output, rescaled from the input's width (no audio decoding; a 4-point interpolator, so mostly a development tool) |
 
 ## Input format
 

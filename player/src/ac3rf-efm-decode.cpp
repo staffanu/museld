@@ -27,6 +27,9 @@
 #include "analog/AnalogAudioDemodulator.h"
 #include "analog/CxExpander.h"
 #include <algorithm>
+#include <vector>
+#include <cmath>
+#include <cassert>
 #include "efm/EfmDemodulator.h"
 #include "efm/EfmDecoder.h"
 #include "efm/TwoChannelSample.h"
@@ -200,14 +203,23 @@ void processFile(Logger &logger, Operation input_type,
                 std::format("Resampling input at {} MHz to {} MHz", input_sample_frequency / 1e6, target_sample_frequency / 1e6));
             FractionalResampler resampler(block_size);
             double step_size = input_sample_frequency / target_sample_frequency;
-            uint8_t samples[block_size];
+            // Upsampling makes more output than input per block (a block
+            // of 40 MHz samples gives 1.56 blocks at 62.5 MHz): size the
+            // output for it, plus one for the step's rounding
+            std::vector<uint8_t> samples((size_t)std::ceil(block_size / step_size) + 1);
+            // The reader hands out the file's own codes; the output is
+            // unsigned 8-bit, so rescale by the width and offset the sign
+            const float scale = std::ldexp(1.f, 8 - reader->bitsPerSample());
+            const float offset = reader->signedSamples() ? 128.f : 0.f;
             float s;
             while (reader->readFloats(input_buffer) == reader->block_size()) {
                 resampler.updateInput(input_buffer);
-                int i = 0;
-                while (resampler.advanceTimeAndResample(step_size, s))
-                    samples[i++] = (int)s;
-                if (write(out_fd, samples, i) == -1)
+                size_t i = 0;
+                while (resampler.advanceTimeAndResample(step_size, s)) {
+                    assert(i < samples.size());
+                    samples[i++] = (uint8_t)std::clamp(std::lround(s * scale + offset), 0L, 255L);
+                }
+                if (write(out_fd, samples.data(), i) == -1)
                     throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
             }
             break;
