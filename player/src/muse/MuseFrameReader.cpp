@@ -404,6 +404,8 @@ bool MuseFrameReader::readInputBlock(std::unique_ptr<MuseInputBlock> const &outp
     // lattice is stale; start over when they return
     if (m_tracking && (double)m_stream_pos - m_timebase.lastPulseTime() > 3000 * m_p_nominal)
         resetTimebase("no sync edges");
+    if (m_demodulator != nullptr)
+        m_demodulator->setSignalLost(!m_anchored);
     return true;
 }
 

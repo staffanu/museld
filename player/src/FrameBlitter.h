@@ -21,6 +21,10 @@ public:
     // is missing or absurd).  Changes are logged.
     static double displayPixelAspect(GLFWwindow *window, Logger &log);
 
+    // Blanks the decoded image (a live input with no signal), leaving it
+    // ready for the overlays' compute shaders
+    void clear(musevk::CommandBuffer &command_buffer, ResultImages &images);
+
     // Clears the swap chain image and blits the source rectangle of the
     // decoded image into the destination rectangle
     void present(musevk::CommandBuffer &command_buffer,

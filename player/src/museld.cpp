@@ -339,7 +339,9 @@ static std::vector<std::pair<std::string, std::string>> discoverSubtitleFiles(
     return found;
 }
 
-static void runPlayer(Logger &log,
+// Returns the other type the content watch found, when the loop ended for
+// that; nullopt when the input ended or the user quit
+static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                       musevk::VulkanManager &manager,
                       Decoder &decoder,
                       ReaderControls &reader_controls,
@@ -371,6 +373,7 @@ static void runPlayer(Logger &log,
                       double initial_seek_seconds,
                       std::optional<int> start_chapter) {
     vk::Device &device = manager.getDevice();
+    std::optional<InputProbeResult::Type> switched;
 
     // A unique handle: released on every exit path, an exception's unwinding
     // included (as a raw handle it leaked whenever the player loop threw)
@@ -617,6 +620,16 @@ static void runPlayer(Logger &log,
             // frames are not played (no clock, picture, audio, captions or
             // file output), only read for their disc code
             const bool searching = state.chapter_search != nullptr;
+
+            // A live input that now carries another type: this player is
+            // done, the caller starts one for that type on the same stream
+            if (reader_controls.otherTypeDetected)
+                if (auto other = reader_controls.otherTypeDetected()) {
+                    switched = other;
+                    break;
+                }
+            if (reader_controls.signalPresent)
+                state.no_signal = !reader_controls.signalPresent();
 
             // Only fields that were actually decoded: next() also returns true
             // when the input timed out, and counting those would make
@@ -880,6 +893,8 @@ static void runPlayer(Logger &log,
             state.shown_y1 = (double)geometry.dst_y1 / swap_extent.height;
 
             command_buffer->begin();
+            if (state.no_signal)
+                blitter.clear(*command_buffer, images); // black, not the last picture
             state.last_cursor_string = osd.render(*command_buffer, images, state, decoder, window, text_renderer);
             if (subtitle_primary_overlay)
                 subtitle_primary_overlay->render(*command_buffer, images, state, decoder,
@@ -991,6 +1006,7 @@ static void runPlayer(Logger &log,
         if (benchmark_shaders)
             decoder.outputBenchmarkResults();
     }
+    return switched;
 }
 
 // video_standard: the composite standard of an SD (SdtvInputBlock) input, unused for MUSE
@@ -1001,6 +1017,24 @@ enum InputType {
     eMuse16MHz,
     eMuseOversampled,
 };
+
+// The RF types the content watch can tell apart, in both directions
+static std::optional<InputProbeResult::Type> probeTypeOf(InputType type) {
+    switch (type) {
+        case eNtscRf: return InputProbeResult::Type::eNtscRf;
+        case ePalRf: return InputProbeResult::Type::ePalRf;
+        case eMuseRf: return InputProbeResult::Type::eMuseRf;
+        default: return std::nullopt;
+    }
+}
+static std::optional<InputType> inputTypeOf(InputProbeResult::Type type) {
+    switch (type) {
+        case InputProbeResult::Type::eNtscRf: return eNtscRf;
+        case InputProbeResult::Type::ePalRf: return ePalRf;
+        case InputProbeResult::Type::eMuseRf: return eMuseRf;
+        default: return std::nullopt;
+    }
+}
 
 // The window and the Vulkan device, which outlive one process_file() call:
 // a live input that changes type is played on by another call with the same
@@ -1033,9 +1067,12 @@ struct PlayOutcome {
 // while the device exists).  The window and device are the caller's surface,
 // created here on the first call and kept across a type switch.  The reader
 // is made by make_reader once the device exists.
+// watch_type: set for a live input whose type was detected (not given), to
+// watch it for a change away from that type and end with switch_to set
 template<class InputBlock>
 PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurface &surface,
                   const std::function<std::unique_ptr<FrameReader<InputBlock>>(musevk::VulkanManager &)> &make_reader,
+                  std::optional<InputProbeResult::Type> watch_type,
                   const VideoStandard *video_standard,
                   bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool full_image, double overscan,
                   bool no_sync, bool no_keys,
@@ -1140,7 +1177,10 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         }
         if (!reader.initialize(input_vulkan_buffers))
             throw runtime_error("FrameReader initialization failed");
+        if (watch_type)
+            reader.watchForTypeChange(*watch_type);
     }
+    std::optional<InputProbeResult::Type> switched;
 
     unique_ptr<VideoFileWriter> vfw;
 #ifdef HAVE_LIBAV
@@ -1202,6 +1242,10 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                 !is_muse && video_standard->ntsc_chroma, // has_ac3_audio: AC3-RF exists on NTSC discs only
                 reader.inputIsLive(),
         };
+        if (watch_type) {
+            reader_controls.signalPresent = [&reader]() { return reader.signalPresent(); };
+            reader_controls.otherTypeDetected = [&reader]() { return reader.otherTypeDetected(); };
+        }
         if (reader.efmAdaptiveFilterSize() >= 0) { // RF input: the reader runs an EFM demodulator
             reader_controls.efmFilterSize = [&reader]() { return reader.efmAdaptiveFilterSize(); };
             reader_controls.setEfmFilterSize = [&reader](int size) { reader.setEfmAdaptiveFilterSize(size); };
@@ -1259,7 +1303,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                      : std::format("Pacing playback by the clock: {:.2f} fields/s on a {:.0f} Hz display",
                                    fields_per_second, refresh_hz));
 
-        runPlayer(log, manager, *decoder, reader_controls, window, full_screen, no_keys, aspect_mode, picture_format,
+        switched = runPlayer(log, manager, *decoder, reader_controls, window, full_screen, no_keys, aspect_mode, picture_format,
                   full_image, overscan,
                   window_w, window_h, start_paused,
                   field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, dropout_mode, audio_track,
@@ -1277,9 +1321,14 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         vfw = nullptr;
     }
 #endif
+    PlayOutcome outcome;
+    if (switched) {
+        outcome.switch_to = inputTypeOf(*switched);
+        outcome.input = reader.releaseInput(); // stops the reader; the stream goes on
+    }
     // audio_playback and the reader follow, in reverse declaration order; the
     // surface is the caller's.
-    return {};
+    return outcome;
 }
 
 // The directory holding shaders/ and fonts/, i.e. the one containing the running
@@ -1999,10 +2048,13 @@ int main(int argc, char *argv[]) {
                         initial_seek_seconds) << endl;
 
             // One process_file() call per input type; a live input that turns
-            // out to carry another type comes back with the stream to go on from
+            // out to carry another type comes back with the stream to go on
+            // from.  Only a live input whose type was detected is watched.
             PlayerSurface surface;
             PlayOutcome outcome;
             do {
+            const std::optional<InputProbeResult::Type> watch_type =
+                    input.isLive() && !input_type_option ? probeTypeOf(file_input_type) : std::nullopt;
             switch (file_input_type) {
                 case eNtscRf:
                 case ePalRf: {
@@ -2015,7 +2067,7 @@ int main(int argc, char *argv[]) {
                                     file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
                                     efm_adaptive_filter_size, muse_output_filename, standard);
                     };
-                    outcome = process_file<SdtvInputBlock>(log, executable_dir, surface, make_reader, &standard, decode_all_fields,
+                    outcome = process_file<SdtvInputBlock>(log, executable_dir, surface, make_reader, watch_type, &standard, decode_all_fields,
                                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                  audio_track,
                                                  benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
@@ -2029,7 +2081,7 @@ int main(int argc, char *argv[]) {
                         return make_unique<PhaseCorrect16MHzFrameReader>(
                                 log, std::move(input), initial_seek_seconds, muse_output_filename);
                     };
-                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, make_reader, nullptr, decode_all_fields,
+                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, make_reader, std::nullopt, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                  subtitle_setup,
@@ -2045,7 +2097,7 @@ int main(int argc, char *argv[]) {
                                 file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
                                 audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
                     };
-                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, make_reader, nullptr, decode_all_fields,
+                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, make_reader, watch_type, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                  subtitle_setup,
@@ -2056,9 +2108,17 @@ int main(int argc, char *argv[]) {
                 default:
                     throw std::runtime_error("Unknown input type: {}");
             }
+            if (outcome.switch_to && output_filename) {
+                // A written file has one picture size and standard: the
+                // recording ends here rather than being overwritten
+                log.warn(eApplication, std::format("The live input changed to {}; --write records one type, so playback stops here",
+                                                   *outcome.switch_to == eNtscRf ? "NTSC" : *outcome.switch_to == ePalRf ? "PAL" : "MUSE"));
+                outcome.switch_to.reset();
+            }
             if (outcome.switch_to) {
                 // The stream continues under the new type from where the old
                 // reader stopped; nothing is seeked or probed again
+                log.info(eApplication, std::format("Playing on as {}", *outcome.switch_to == eNtscRf ? "NTSC" : *outcome.switch_to == ePalRf ? "PAL" : "MUSE"));
                 file_input_type = *outcome.switch_to;
                 input = PreparedInput(name, std::move(outcome.input), *resolved_format);
                 initial_seek_seconds = 0;

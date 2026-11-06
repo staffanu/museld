@@ -363,6 +363,12 @@ museld opens every input once, in `museld.cpp`, as a `PreparedInput` (`input/Pre
 that the probe reads and the frame reader then opens as its `InputReader`: a live input cannot
 be reopened where detection left it. Where detection had to decode a live stream (one reader
 per stream, so FLAC works), the player takes that reader over through `RebatchingInputReader`.
+A live input with a detected type is also watched while it plays (`ContentWatch` in
+`InputProbe.h`, fed by `RfDemodulator::readInput` on the demodulator thread, classifying a chunk
+on a thread of its own every 4 s, or every 1 s while the reader has no sync or a lattice losing
+its pulses); three agreeing verdicts of another type end `runPlayer`, `process_file` returns a
+`PlayOutcome` with the type and the reader's released `InputReader`, and `main` calls
+`process_file` again for that type on the same `PlayerSurface` (window and Vulkan device).
 
 **Content-based input detection**: `src/InputProbe.{h,cpp}` (museld only, CPU-only, no GPU)
 detects sample format, MUSE/NTSC RF type and sample rate from short windows of samples: a file

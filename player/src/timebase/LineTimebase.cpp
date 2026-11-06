@@ -67,6 +67,7 @@ LineTimebase::LineTimebase(Logger &log, const char *owner, double sample_rate, d
 
 void LineTimebase::reset() {
     m_lattice_valid = false;
+    m_last_frame_unsupported = 0;
     m_kal_valid = false;
     m_kal_head_k = 0;
     m_meas.clear();
@@ -357,6 +358,7 @@ void LineTimebase::finalizeBatch() {
                                         "sigma_meas {:.1f} ns, qscale {:.2f}",
                                         m_frame_log_k, m_frame_resid_bad, m_frame_meas,
                                         sqrt(R) / m_sample_rate * 1e9, m_qscale));
+        m_last_frame_unsupported = m_frame_meas > 0 ? (double)m_frame_resid_bad / m_frame_meas : 0;
         m_frame_resid_bad = 0;
         m_frame_meas = 0;
     }

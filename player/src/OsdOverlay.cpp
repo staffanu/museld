@@ -51,6 +51,8 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
             state.redo_last_field = true;
             state.displayed_osd_text.clear();
         }
+    } else if (state.no_signal) {
+        text_renderer.drawText(images.out_image, tl_x(90), tl_y(50), "NO SIGNAL", comp_scale(osd_base), command_buffer);
     }
 
     if (state.enable_cursor) {
