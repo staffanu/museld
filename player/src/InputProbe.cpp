@@ -1129,32 +1129,6 @@ InputProbeResult probeInputFile(Logger &log, const string &filename, optional<In
     return probeInput(log, input, known_format);
 }
 
-// The type of one chunk of RF samples on its own, the way classify() decides
-// it for a file: the line period and carrier from the chunk analysis, the
-// field period measured on the same chunk.  eUnknown when the chunk shows no
-// convincing line structure or the measurements fall between the bands.
-static InputProbeResult::Type classifyChunk(Logger &log, const vector<float> &samples) {
-    using Type = InputProbeResult::Type;
-    const ChunkStats stats = analyzeChunk(log, samples, 0);
-    if (stats.line_strength < 0.25)
-        return Type::eUnknown;
-    for (int harmonic = 1; harmonic <= 3; harmonic++) {
-        const CarrierBand band = bandOfCarrier(stats.cycles_per_line / harmonic);
-        const bool ntsc_audio = harmonic == 1 && stats.audio_carrier_ratio > 50;
-        if (band == CarrierBand::eNone && !ntsc_audio)
-            continue;
-        if (band == CarrierBand::eMuse)
-            return Type::eMuseRf;
-        const double field_lines = fieldLinesOfSamples(log, samples, 0, stats.line_period / harmonic);
-        if (abs(field_lines - 262.5) <= 1.5)
-            return Type::eNtscRf;
-        if (abs(field_lines - 312.5) <= 1.5)
-            return Type::ePalRf;
-        return ntsc_audio ? Type::eNtscRf : Type::eUnknown;
-    }
-    return Type::eUnknown;
-}
-
 static const char *typeName(InputProbeResult::Type type) {
     switch (type) {
         case InputProbeResult::Type::eNtscRf: return "NTSC RF";
@@ -1166,6 +1140,52 @@ static const char *typeName(InputProbeResult::Type type) {
     return "unknown";
 }
 
+// The type of one chunk of RF samples on its own, the way classify() decides
+// it for a file: the line period and carrier from the chunk analysis, the
+// field period measured on the same chunk.  eUnknown when the chunk shows no
+// convincing line structure or the measurements fall between the bands.
+// The sample rate is known here (the stream's, which never changes), so a
+// verdict must also have been measured at that type's line period in samples
+// (within 2 %, a player's speed error being a few hundred ppm): a lock on
+// something else -- lead-in, a harmonic the band logic did not catch -- is
+// no verdict.  NTSC against PAL is not decided this way, their periods being
+// 0.7 % apart, inside the line peak's resolution; the field count does that.
+static InputProbeResult::Type classifyChunk(Logger &log, const vector<float> &samples, double sample_rate) {
+    using Type = InputProbeResult::Type;
+    const ChunkStats stats = analyzeChunk(log, samples, 0);
+    if (stats.line_strength < 0.25)
+        return Type::eUnknown;
+    auto periodFits = [&](Type type, double period) {
+        const double line_hz = type == Type::eMuseRf ? c_muse_line_hz
+                             : type == Type::ePalRf ? c_pal_line_hz : c_ntsc_line_hz;
+        const double expected = sample_rate / line_hz;
+        if (abs(period - expected) / expected <= 0.02)
+            return true;
+        log.debug(eInput, std::format("Content watch: {} at a line period of {:.1f} samples, not the {:.1f} of the "
+                                      "stream's rate; disregarded", typeName(type), period, expected));
+        return false;
+    };
+    for (int harmonic = 1; harmonic <= 3; harmonic++) {
+        const CarrierBand band = bandOfCarrier(stats.cycles_per_line / harmonic);
+        const bool ntsc_audio = harmonic == 1 && stats.audio_carrier_ratio > 50;
+        if (band == CarrierBand::eNone && !ntsc_audio)
+            continue;
+        const double period = stats.line_period / harmonic;
+        if (band == CarrierBand::eMuse)
+            return periodFits(Type::eMuseRf, period) ? Type::eMuseRf : Type::eUnknown;
+        const double field_lines = fieldLinesOfSamples(log, samples, 0, period);
+        Type type = Type::eUnknown;
+        if (abs(field_lines - 262.5) <= 1.5)
+            type = Type::eNtscRf;
+        else if (abs(field_lines - 312.5) <= 1.5)
+            type = Type::ePalRf;
+        else if (ntsc_audio)
+            type = Type::eNtscRf;
+        return type != Type::eUnknown && periodFits(type, period) ? type : Type::eUnknown;
+    }
+    return Type::eUnknown;
+}
+
 constexpr int c_watch_agreeing_chunks = 3;    // consecutive verdicts of another type before a switch
 constexpr double c_watch_interval_s = 4.0;    // between chunks while the reader has sync
 constexpr double c_watch_urgent_interval_s = 1.0; // and while it has not
@@ -1174,6 +1194,7 @@ ContentWatch::ContentWatch(Logger &log, Type current, double sample_rate)
     : m_log(log),
       m_current(current),
       // Long enough for the field-period test at the slowest line rate (PAL)
+      m_sample_rate(sample_rate),
       m_chunk_samples(fieldChunkSamples(sample_rate / c_pal_line_hz)),
       m_interval_samples((int64_t)(c_watch_interval_s * sample_rate)),
       m_urgent_interval_samples((int64_t)(c_watch_urgent_interval_s * sample_rate)),
@@ -1248,7 +1269,7 @@ void ContentWatch::classify(const vector<float> &chunk) {
     if (m_other >= 0)
         return; // decided while this chunk was on its way
     const auto t0 = chrono::steady_clock::now();
-    const Type verdict = classifyChunk(m_log, chunk);
+    const Type verdict = classifyChunk(m_log, chunk, m_sample_rate);
     const auto ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - t0).count();
     if (verdict == Type::eUnknown || verdict == m_current) {
         m_candidate = verdict;
