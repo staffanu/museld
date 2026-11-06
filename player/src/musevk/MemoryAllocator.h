@@ -65,6 +65,9 @@ namespace musevk {
 
         void free(AllocatedMemory memory);
 
+        // Sub-allocations not yet freed: zero before the device may be destroyed
+        [[nodiscard]] size_t liveAllocations();
+
         ~MemoryAllocator();
 
     private:
