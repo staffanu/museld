@@ -24,6 +24,9 @@ class PreparedInput {
 public:
     PreparedInput(std::string name, std::unique_ptr<ByteSource> source,
                   std::optional<InputFormat> format = std::nullopt);
+    // An input already being read: the reader a previous player handed back
+    // (FrameReader::releaseInput()), continued from where it is
+    PreparedInput(std::string name, std::unique_ptr<InputReader> reader, InputFormat format);
     PreparedInput(PreparedInput &&) noexcept = default;
     PreparedInput &operator=(PreparedInput &&) noexcept = default;
 

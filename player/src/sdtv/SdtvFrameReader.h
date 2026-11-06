@@ -44,6 +44,7 @@ public:
 
     bool initialize(std::vector<std::unique_ptr<SdtvInputBlock>> &buffers) override;
     void cleanup() override;
+    std::unique_ptr<InputReader> releaseInput() override;
     bool seek(double seconds) override;
     std::optional<uint32_t> seekToInputSample(int64_t sample) override;
     [[nodiscard]] double inputSampleRate() const override { return m_input_sample_rate; }

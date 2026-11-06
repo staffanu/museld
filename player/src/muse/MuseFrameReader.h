@@ -55,6 +55,7 @@ public:
 
     bool initialize(std::vector<std::unique_ptr<MuseInputBlock>> &buffers) override;
     void cleanup() override;
+    std::unique_ptr<InputReader> releaseInput() override;
     bool seek(double seconds) override;
     std::optional<uint32_t> seekToInputSample(int64_t sample) override;
     [[nodiscard]] double inputSampleRate() const override {

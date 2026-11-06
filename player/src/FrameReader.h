@@ -17,6 +17,7 @@ namespace musevk {
     class VulkanBuffer;
 }
 class Logger;
+class InputReader;
 
 enum class InputStatus {
     eNormal = 0,
@@ -39,6 +40,10 @@ public:
 
     [[nodiscard]] virtual bool initialize(std::vector<std::unique_ptr<InputBlock>> &buffers);
     virtual void cleanup();
+    // Stops the reader and hands its input over, for a reader of another
+    // type to continue a live stream from (null when there is none to hand
+    // over).  The reader is finished after this; cleanup() still runs.
+    virtual std::unique_ptr<InputReader> releaseInput() { return nullptr; }
 
     std::pair<std::unique_ptr<InputBlock>, InputStatus> getNextInputBuffer();
     void returnBuffer(std::unique_ptr<InputBlock> &buffer);
