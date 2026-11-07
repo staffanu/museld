@@ -342,8 +342,10 @@ about 50 ms. `DiscInfo` exposes chapter, lead-in/out and the CAV picture stop (w
 playback unless turned off with P).
 
 **Input format abstraction**: `InputReader` specializations (raw widths, lds, FLAC; a seekable
-FLAC-in-Ogg stream is decoded on two threads by `ParallelOggFlacReader`, `MUSELD_FLAC_THREADS=1`
-for the serial `LdfInputReader`) with
+FLAC-in-Ogg stream is decoded on two threads by `ParallelOggFlacReader` on machines with three
+cores or more, except tvOS, where the serial `LdfInputReader` with the NEON-patched libFLAC
+(`cmake/patches`) keeps real time and a second thread starves the GPU driver; `MUSELD_FLAC_THREADS`
+overrides) with
 auto-detection by file extension, reading through a `ByteSource` (`input/ByteSource.h`) that
 hides where the bytes come from: a file, fifo or stdin (`FdByteSource`; `-` names stdin, which
 is live when it is a pipe and a plain seekable source when a file is redirected in, decided by

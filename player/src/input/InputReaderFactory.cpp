@@ -5,6 +5,9 @@
 #include <cstdint>
 #include <format>
 #include <algorithm>
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #include <cstdlib>
 #include <cstring>
 #include <thread>
@@ -18,14 +21,23 @@
 
 namespace {
 
-// Decoder threads for FLAC in Ogg: two by default where the machine has at least
-// three cores (two decoders beside the rest of the player), else one, the serial
-// reader; MUSELD_FLAC_THREADS overrides
+// Decoder threads for FLAC in Ogg; one means the serial LdfInputReader, decoding
+// on the prefetch thread.  On tvOS one: with the NEON LPC restore (cmake/patches)
+// the serial reader keeps 1.33x real time on an Apple TV 4K's A10X with no
+// underruns, while the parallel reader costs the GPU driver its CPU on those
+// three cores, with two decoders at any QoS class and even with one (measured
+// 2026-11: 6-37 audio underruns in 100 s against none).  Elsewhere two where the
+// machine has at least three cores (an M2 decodes 3.7x real time on two).
+// MUSELD_FLAC_THREADS overrides.
 int flacThreads() {
     if (const char *env = getenv("MUSELD_FLAC_THREADS"); env != nullptr && *env)
         return std::clamp(atoi(env), 1, 16);
+#if defined(__APPLE__) && TARGET_OS_TV
+    return 1;
+#else
     const int cores = (int)std::thread::hardware_concurrency();
     return cores >= 3 ? 2 : 1;
+#endif
 }
 
 // Whether a seekable stream starts with an Ogg page; the position is put back

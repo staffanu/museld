@@ -445,21 +445,34 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   whenever the server delivers 48 MB/s, and the cold NAS path is what remains: warm the
   file, keep the clips on multivac's SSD, or fix the cold path on multivac (the
   `EnableMMAP Off` trial, or nginx's read_ahead).
-- **A faster libFLAC, measured not built** (2026-11-07): a sampling profile of the
-  decode on ARM64 (the M2 runs the same code paths as the A10X: libFLAC 1.5.0 has no
-  NEON decoder routines) splits the time 44% LPC restore (the prediction, plain
-  unrolled C), 38% Rice residual decoding (the bit reader, inherently serial), 13%
-  the FLAC frame CRC-16 and the Ogg page checksum, 5% the rest; the 10-bit samples
-  keep the decoder on the 32-bit restore path thanks to their wasted bits.
-  `tools/lpc-neon-bench.cpp`: a NEON restore sample by sample gains 5% (the loop is a
-  serial recurrence); four outputs per step, the known part of the four sums built in
-  parallel and a six-term serial tail, gains 2.85x on the M2, bit-identical.  That is
-  about 29% off the decode time, which on the A10X would take the two-thread ceiling
-  from 1.25-1.4x real time to about 1.8x and the decoders' CPU share at real time from
-  two times 45% of a core to two times 32%, i.e. real margin.  It would go in as a
-  patch to the fetched libFLAC (`FetchContent` takes a `PATCH_COMMAND`): the routine in
-  `lpc_intrin_neon.c` and its selection in `stream_decoder.c` on `FLAC__CPU_ARM64`, as
-  the SSE4.1 versions are selected on x86; worth offering upstream.  Not done.
+- **A faster libFLAC** (2026-11-07, done): a sampling profile of the decode on ARM64
+  (the M2 runs the same code paths as the A10X: libFLAC 1.5.0 has no NEON decoder
+  routines) splits the time 44% LPC restore (the prediction, plain unrolled C), 38%
+  Rice residual decoding (the bit reader, inherently serial), 13% the FLAC frame
+  CRC-16 and the Ogg page checksum, 5% the rest; the 10-bit samples keep the decoder
+  on the 32-bit restore path thanks to their wasted bits.  `tools/lpc-neon-bench.cpp`:
+  a NEON restore sample by sample gains 5% (the loop is a serial recurrence); four
+  outputs per step, the known part of the four sums built in parallel and a six-term
+  serial tail, gains 2.85x on the M2, bit-identical.  That is now a patch to the
+  libFLAC the tvOS build fetches (`cmake/patches/flac-1.5.0-lpc-restore-neon.patch`,
+  applied once after extraction by `cmake/patch-flac.cmake` as FetchContent's
+  PATCH_COMMAND; the macOS and Linux builds use their system libFLAC, unpatched):
+  `FLAC__lpc_restore_signal` takes the NEON path for orders up to 12 on ARM64 with
+  NEON, the first 12-order outputs scalar so nothing reads before the warm-up.
+  Verified natively: the patched library decodes 3 GB of the blue1 capture
+  byte-identically to the stock one, in 33% less time like for like (14.8 to 9.9 s).
+  A10X, the 10-bit ldf, receive only: one decoder thread from 9.6 to 6.3 ms per block
+  (1.33x real time), two from 6.4 to 5.0 (1.68x).  Real-time playback with audio then
+  turned the thread question around: with the faster decoder the serial reader on one
+  thread runs clean (two runs, 0 underruns, the demodulator at 8.39 ms per block with
+  a maximum of 8.42, GPU wait 5.75), while the parallel reader costs the GPU driver
+  its CPU on the three cores: 6-11 underruns with two decoders at either QoS class,
+  37 with one decoder through its scanner and queues.  So on tvOS the default is now
+  one thread, the serial `LdfInputReader`; the parallel reader stays the default on
+  machines with three cores or more (the M2: 3.7x real time on two threads) and
+  `MUSELD_FLAC_THREADS` overrides.  Two wasted measurements on the way, both caught by
+  the binary's date: Xcode rebuilt the patched library without relinking the app.
+  10-bit MUSE FLAC from the NAS now plays in real time on the 2017 box with margin.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
