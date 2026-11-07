@@ -44,7 +44,12 @@ if [ -f museld.exe ]; then
     # package missing a DLL never gets as far as printing anything. --help
     # returns before a Vulkan device is needed, so this works without a GPU.
     PATH="$clean_path" ./museld.exe --help > help.txt 2>&1 || true
-    grep -q "^usage: museld" help.txt
+    if ! grep -q "^usage: museld" help.txt; then
+        echo "FAIL: museld.exe --help printed no usage; its output ($(wc -c < help.txt) bytes):"
+        cat help.txt
+        rm help.txt
+        exit 1
+    fi
     rm help.txt
 fi
 
