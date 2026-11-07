@@ -132,6 +132,14 @@ void SdtvFrameReader::cleanup() {
     }
 }
 
+std::unique_ptr<InputReader> SdtvFrameReader::releaseInput() {
+    if (m_demodulator == nullptr)
+        return nullptr;
+    m_demodulator->requestStop();
+    FrameReader::cleanup(); // joins the reader thread, which may hold a block
+    return m_demodulator->releaseInput();
+}
+
 // The seeks only move the demodulator's input: the timebase is reset on the
 // reader thread when the first block after the seek arrives (readInputBlock
 // sees its generation change), so the reset never races the thread's own
@@ -172,11 +180,6 @@ void SdtvFrameReader::setEfmAdaptiveFilterSize(int size) {
 
 int SdtvFrameReader::efmAdaptiveFilterSize() const {
     return m_demodulator != nullptr ? m_demodulator->efmAdaptiveFilterSize() : -1;
-}
-
-void SdtvFrameReader::setAnalogCx(bool enabled) {
-    if (m_demodulator != nullptr)
-        m_demodulator->setAnalogCx(enabled);
 }
 
 void SdtvFrameReader::resetTimebase(const char *why) {
@@ -347,6 +350,10 @@ bool SdtvFrameReader::readInputBlock(std::unique_ptr<SdtvInputBlock> const &outp
         resetTimebase("no sync pulses");
         m_timebase_restarted = true; // (a seek's reset is not a new disc, so it does not set this)
     }
+    // No lock, or a lattice that keeps losing the pulses (the other SD
+    // standard's line rate, 0.7 % off, does that without ever unanchoring):
+    // the content watch looks more often
+    m_demodulator->setSignalLost(!m_anchored || m_timebase.lastFrameUnsupportedFraction() > 0.25);
 
     return true;
 }

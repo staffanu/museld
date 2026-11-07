@@ -15,7 +15,6 @@
 #include "../filter/ComplexFirFilterStage.h"
 #include "../efm/FractionalResampler.h"
 #include "../efm/TwoChannelSample.h"
-#include "CxExpander.h"
 
 /*
  * Demodulator for the two analog FM audio channels of an NTSC laserdisc RF
@@ -24,8 +23,11 @@
  * decimation of the real RF, then per channel an NCO mix to baseband, a
  * complex half-band cascade plus channel-select lowpass, and an atan2 FM
  * discriminator.  The audio tail decimates further, resamples to the output
- * rate, applies 75 us de-emphasis and optional CX expansion, and converts to
- * 16-bit stereo samples.
+ * rate and applies 75 us de-emphasis, and outputs float stereo samples at
+ * the level the 16-bit output will have.  CX expansion is not done here: it
+ * is the caller's (CxExpander), which knows the disc's CX flag -- museld
+ * reads it from the VBI of the frame the audio belongs to, which is decoded
+ * after this demodulator has run.
  *
  * Each channel carries a squelch driven by discriminator overload (phase
  * steps beyond the deviation clamp), so a missing carrier — e.g. the right
@@ -54,8 +56,19 @@ public:
     AnalogAudioDemodulator &operator=(AnalogAudioDemodulator &&) = delete;
 
     // Demodulates one full input block (the block size passed at construction)
-    // and appends the resulting stereo samples to output.
-    void demodulate(const float *input_buffer, bool cx_enabled, std::vector<TwoChannelSample> &output);
+    // and appends the resulting stereo samples to output, with 100 kHz
+    // deviation at +-1.0: the CX expander's sidechain is calibrated against
+    // that scale, so the caller applies c_output_level after the expander.
+    void demodulate(const float *input_buffer, std::vector<TwoChannelFloatSample> &output);
+
+    // Output level calibration: 100 kHz deviation maps to this fraction of
+    // int16 full scale (-11.8 dBFS).  Discs modulate only a fraction of the
+    // peak deviation while the digital track is mastered against digital
+    // full scale; this value plays the analog track level-matched with the
+    // EFM track of the same program (measured on a CX disc with expansion
+    // enabled, and reconfirmed within 0.5 dB on The Abyss's non-CX mono
+    // track).  The headroom given up is far above the medium's noise floor.
+    static constexpr float c_output_level = 0.2584f;
 
     [[nodiscard]] bool squelched(int channel) const { return m_channels[channel].squelched; }
 
@@ -115,14 +128,6 @@ private:
     // discriminator rate, the natural fixed-point boundary there, so the
     // planned VHDL backport can clamp identically.
     static constexpr float c_deviation_clamp = 2.445f;
-    // Output level calibration: 100 kHz deviation maps to this fraction of
-    // int16 full scale (-11.8 dBFS).  Discs modulate only a fraction of the
-    // peak deviation while the digital track is mastered against digital
-    // full scale; this value plays the analog track level-matched with the
-    // EFM track of the same program (measured on a CX disc with expansion
-    // enabled, and reconfirmed within 0.5 dB on The Abyss's non-CX mono
-    // track).  The headroom given up is far above the medium's noise floor.
-    static constexpr float c_output_level = 0.2584f;
 
     int m_pre_mix_decimation_factor;
     int m_post_mix_decimation_factor;
@@ -142,8 +147,6 @@ private:
     float m_deemph_b, m_deemph_a1;
     float m_dc_pole;
     float m_squelch_ramp_step;
-
-    CxExpander m_cx_expander;
 };
 
 #endif //AC3RF_DECODE_ANALOGAUDIODEMODULATOR_H

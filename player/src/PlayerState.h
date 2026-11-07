@@ -48,6 +48,8 @@ struct PlayerState {
     double visible_x0 = 0, visible_y0 = 0, visible_x1 = 0, visible_y1 = 0;
     // Where that part sits in the window, as fractions of the window size
     double shown_x0 = 0, shown_y0 = 0, shown_x1 = 1, shown_y1 = 1;
+    // A live input with no signal: the picture is blanked and the OSD says so
+    bool no_signal = false;
     std::string osd_text; // Set to update text, moved to displayed_ during display
     std::string displayed_osd_text;
     int osd_text_remaining_frames = 0;

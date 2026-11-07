@@ -13,6 +13,7 @@
 #include "AudioDefs.h"
 #include "ChapterSearch.h"
 #include "DropoutMode.h"
+#include "InputProbe.h"
 
 struct SDL_Window;
 struct PlayerState;
@@ -41,6 +42,11 @@ struct ReaderControls {
     bool has_ac3_audio = false;
     // True for a pipe, fifo or udp:// stream (FrameReader::inputIsLive)
     bool input_is_live = false;
+    // Live input whose type was detected: whether the reader has a signal,
+    // and the other type the content watch found (the player then ends to
+    // be restarted for that type).  Empty when the type is not watched.
+    std::function<bool()> signalPresent;
+    std::function<std::optional<InputProbeResult::Type>()> otherTypeDetected;
     // Adaptive equalizer controls (MUSE only).  cycleEqMode returns a short label
     // for the new mode ("OFF"/"ADAPT"/"FROZEN") for OSD display.  Empty when the
     // decoder doesn't support adaptive equalization (NTSC).

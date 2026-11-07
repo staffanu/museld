@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <string>
 #include <optional>
+#include <atomic>
+#include <memory>
 #include <vulkan/vulkan.hpp>
 struct SDL_Window;
 
@@ -31,6 +33,11 @@ namespace musevk {
         // on this manager's device must already be gone: the explicit teardown
         // path calls this once that holds, and the destructor is the backstop.
         void cleanup();
+        // Whether the device still exists, for the destructors of objects created
+        // on it: false means the object outlived cleanup() -- an ownership mistake,
+        // reported there -- and there is nothing left for the destructor to do.
+        // `who` names the caller in the message logged once per such destructor.
+        bool deviceAlive(const char *who);
 
         Logger &getLogger() { return m_log; }
         vk::PhysicalDevice &getPhysicalDevice() { return m_physical_device; }
@@ -131,6 +138,7 @@ namespace musevk {
         void *m_metal_view = nullptr; // Apple: the SDL_MetalView the surface is made from
         bool m_no_sync;
         std::unique_ptr<MemoryAllocator> m_memory_allocator;
+        std::atomic<bool> m_device_gone_reported{false};
 
         vk::Instance m_instance;
         vk::DebugUtilsMessengerEXT m_debug_messenger;

@@ -15,6 +15,12 @@ CxExpander::CxExpander(double sample_frequency)
   m_level(0), m_slow_level(0) {
 }
 
+void CxExpander::reset() {
+    m_hp_left = m_hp_right = 0;
+    m_prev_left = m_prev_right = 0;
+    m_level = m_slow_level = 0;
+}
+
 float CxExpander::processSidechain(float left, float right) {
     m_hp_left = std::clamp(m_hp_pole * m_hp_left + c_hp_gain * (left - m_prev_left), -c_hp_clamp, c_hp_clamp);
     m_prev_left = left;

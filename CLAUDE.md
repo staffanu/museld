@@ -170,6 +170,15 @@ cmake --build player/build-debug
 cd player/build-debug && ctest -V
 ```
 
+**Picture and sound regression** (`tests/regression/regress.py run`, see
+**docs/regression-testing.md**): renders fifteen 4 s reference clips (fetched from multivac on
+first use, 1.5 GB) with lossless `--write` and compares every frame, the audio, the disc codes
+and the probe verdict against the goldens in `tests/regression/golden/`. Output is bit-exact run
+to run on one machine, so PASS means nothing changed; DIFF reports per-frame PSNR against the
+golden render. Run it after any change to the decode (shaders, timebase, dropout, audio), and
+`run --accept --upload madeye.org:/nas/video/LD-Captures/public/museld-testdata/golden` to
+re-record the goldens of an intended change, committing the JSON with the change.
+
 Tests are only built when `-DBUILD_TESTING=ON` is passed. They are in `player/tests/`
 (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`, `FilterSimdParityTest.cpp`, `InputProbeTest.cpp`,
 `NtscCadenceTrackerTest.cpp`, `PalCadenceTrackerTest.cpp`, `PrefetchingInputReaderTest.cpp`, `SrtParserTest.cpp`,
@@ -361,6 +370,12 @@ museld opens every input once, in `museld.cpp`, as a `PreparedInput` (`input/Pre
 that the probe reads and the frame reader then opens as its `InputReader`: a live input cannot
 be reopened where detection left it. Where detection had to decode a live stream (one reader
 per stream, so FLAC works), the player takes that reader over through `RebatchingInputReader`.
+A live input with a detected type is also watched while it plays (`ContentWatch` in
+`InputProbe.h`, fed by `RfDemodulator::readInput` on the demodulator thread, classifying a chunk
+on a thread of its own every 4 s, or every 1 s while the reader has no sync or a lattice losing
+its pulses); three agreeing verdicts of another type end `runPlayer`, `process_file` returns a
+`PlayOutcome` with the type and the reader's released `InputReader`, and `main` calls
+`process_file` again for that type on the same `PlayerSurface` (window and Vulkan device).
 
 **Content-based input detection**: `src/InputProbe.{h,cpp}` (museld only, CPU-only, no GPU)
 detects sample format, MUSE/NTSC RF type and sample rate from short windows of samples: a file
@@ -423,8 +438,13 @@ they use is destroyed); worker-thread exceptions are marshalled via
 `exception_ptr` and rethrown on the consumer's thread (`getNextInputBuffer`
 ultimately rethrows on the main thread — never `std::exit` from a worker);
 frame readers call `RfDemodulator::requestStop()` before joining their reader
-thread (deadlock otherwise); destructors never throw. `process_file` tears
-down via a RAII guard: reader → Vulkan → SDL window, in that order.
+thread (deadlock otherwise); destructors never throw. `process_file` owns the
+window, the `VulkanManager`, the reader (made by a callable once the device exists) and the
+player's objects, declared in that order, so stack unwinding tears down player objects and
+decoder → reader (joining its threads, freeing its blocks) → Vulkan device → SDL window on every
+path; no explicit teardown guard. `VulkanManager::cleanup()` logs the memory still
+sub-allocated when the device goes, and the wrappers' destructors skip a dead device via
+`deviceAlive()`, so an ownership mistake is reported, not crashed on.
 
 ### museld Threading
 

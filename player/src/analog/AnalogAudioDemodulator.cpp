@@ -20,8 +20,7 @@ AnalogAudioDemodulator::AnalogAudioDemodulator(Logger &log, double input_sample_
   m_input_block_size(input_block_size),
   m_output_sample_frequency(output_sample_frequency),
   m_channel_pass_hz(channel_pass_hz),
-  m_channel_stop_hz(channel_stop_hz),
-  m_cx_expander(output_sample_frequency)
+  m_channel_stop_hz(channel_stop_hz)
 {
     if (input_sample_frequency < 6.5e6)
         throw std::runtime_error("Analog audio decoding needs an input sample frequency of at least 6.5 MHz");
@@ -313,8 +312,7 @@ void AnalogAudioDemodulator::processChannel(ChannelState &channel, std::vector<f
         resampled.push_back(sample);
 }
 
-void AnalogAudioDemodulator::demodulate(const float *input_buffer, bool cx_enabled,
-                                        std::vector<TwoChannelSample> &output) {
+void AnalogAudioDemodulator::demodulate(const float *input_buffer, std::vector<TwoChannelFloatSample> &output) {
     // Low-pass filter and decimate the input signal (shared by both channels)
     if (m_pre_mix_filter_stages.empty()) {
         memcpy(m_pre_mix_buffer.data(), input_buffer, m_input_block_size * sizeof(float));
@@ -339,7 +337,7 @@ void AnalogAudioDemodulator::demodulate(const float *input_buffer, bool cx_enabl
     processChannel(m_channels[1], m_resampled[1]);
     assert(m_resampled[0].size() == m_resampled[1].size());
 
-    // De-emphasis, DC blocking, CX expansion, squelch and conversion to s16
+    // De-emphasis, DC blocking and squelch
     for (size_t i = 0; i < m_resampled[0].size(); i++) {
         float samples[2];
         for (int c = 0; c < 2; c++) {
@@ -357,15 +355,7 @@ void AnalogAudioDemodulator::demodulate(const float *input_buffer, bool cx_enabl
             samples[c] = dc_blocked;
         }
 
-        // The sidechain runs whether or not CX is enabled so the level
-        // estimate stays warm across transitions
-        const float cx_gain = m_cx_expander.processSidechain(samples[0], samples[1]);
-        if (cx_enabled) {
-            samples[0] *= cx_gain;
-            samples[1] *= cx_gain;
-        }
-
-        TwoChannelSample out_sample{};
+        TwoChannelFloatSample out_sample{};
         for (int c = 0; c < 2; c++) {
             ChannelState &channel = m_channels[c];
             const float squelch_target = channel.squelched ? 0.0f : 1.0f;
@@ -374,8 +364,7 @@ void AnalogAudioDemodulator::demodulate(const float *input_buffer, bool cx_enabl
             else if (channel.squelch_gain > squelch_target)
                 channel.squelch_gain = std::max(squelch_target, channel.squelch_gain - m_squelch_ramp_step);
 
-            const float scaled = samples[c] * channel.squelch_gain * (32767.0f * c_output_level);
-            out_sample.samples[c] = (int16_t)std::clamp(scaled, -32768.0f, 32767.0f);
+            out_sample.samples[c] = samples[c] * channel.squelch_gain;
         }
         output.push_back(out_sample);
     }

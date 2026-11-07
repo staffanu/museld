@@ -17,6 +17,13 @@ PreparedInput::PreparedInput(std::string name, std::unique_ptr<ByteSource> sourc
       m_live(m_source->isLive()) {
 }
 
+PreparedInput::PreparedInput(std::string name, std::unique_ptr<InputReader> reader, InputFormat format)
+    : m_name(std::move(name)),
+      m_reader(std::move(reader)),
+      m_format(format),
+      m_live(m_reader->isLive()) {
+}
+
 bool PreparedInput::isLive() const {
     return m_live;
 }

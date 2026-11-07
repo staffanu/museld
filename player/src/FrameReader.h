@@ -12,11 +12,13 @@
 #include <deque>
 #include <atomic>
 #include "AudioDefs.h"
+#include "InputProbe.h"
 
 namespace musevk {
     class VulkanBuffer;
 }
 class Logger;
+class InputReader;
 
 enum class InputStatus {
     eNormal = 0,
@@ -39,6 +41,16 @@ public:
 
     [[nodiscard]] virtual bool initialize(std::vector<std::unique_ptr<InputBlock>> &buffers);
     virtual void cleanup();
+    // Stops the reader and hands its input over, for a reader of another
+    // type to continue a live stream from (null when there is none to hand
+    // over).  The reader is finished after this; cleanup() still runs.
+    virtual std::unique_ptr<InputReader> releaseInput() { return nullptr; }
+    // Watch a live input for a change of type away from `current`; see
+    // ContentWatch.  otherTypeDetected() reports the type found, once.
+    virtual void watchForTypeChange(InputProbeResult::Type) {}
+    [[nodiscard]] virtual std::optional<InputProbeResult::Type> otherTypeDetected() { return std::nullopt; }
+    // Whether the reader is locked to a signal (the OSD's no-signal state)
+    [[nodiscard]] virtual bool signalPresent() const { return true; }
 
     std::pair<std::unique_ptr<InputBlock>, InputStatus> getNextInputBuffer();
     void returnBuffer(std::unique_ptr<InputBlock> &buffer);
@@ -64,8 +76,6 @@ public:
     // default maps the track onto the EFM on/off switch; the NTSC reader
     // overrides this with its three-way selection (analog/EFM/AC3-RF).
     virtual void setAudioTrack(AudioTrack track) { setEfmEnabled(track == AudioTrack::eEfm); }
-    // CX noise reduction for the NTSC analog audio; a no-op elsewhere
-    virtual void setAnalogCx(bool) {}
     // Taps in the EFM timing recovery's adaptive filter (0 disables it).
     // efmAdaptiveFilterSize() is negative when the reader has no EFM demodulator.
     virtual void setEfmAdaptiveFilterSize(int) {}

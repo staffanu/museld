@@ -25,17 +25,23 @@ namespace musevk {
                                          vk::SharingMode::eExclusive);
         m_device_buffer = m_vulkan_manager.getDevice().createBuffer(buffer_info);
 
-        vk::MemoryRequirements memory_requirements = m_vulkan_manager.getDevice().getBufferMemoryRequirements(m_device_buffer);
-
-        allocateMemory(memory_requirements, host_access);
-
-        m_vulkan_manager.getDevice().bindBufferMemory(m_device_buffer, m_allocated_device_memory.device_memory, m_allocated_device_memory.offset);
+        // A throw from here on does not run ~VulkanBuffer (the constructor
+        // never completed), so the buffer is released by hand
+        try {
+            vk::MemoryRequirements memory_requirements = m_vulkan_manager.getDevice().getBufferMemoryRequirements(m_device_buffer);
+            allocateMemory(memory_requirements, host_access);
+            m_vulkan_manager.getDevice().bindBufferMemory(m_device_buffer, m_allocated_device_memory.device_memory, m_allocated_device_memory.offset);
+        } catch (...) {
+            m_vulkan_manager.getDevice().destroy(m_device_buffer);
+            throw;
+        }
 
         m_descriptor_buffer_info = vk::DescriptorBufferInfo(m_device_buffer, 0, m_memory_size);
     }
 
     VulkanBuffer::~VulkanBuffer() {
-        m_vulkan_manager.getDevice().destroy(m_device_buffer);
+        if (m_vulkan_manager.deviceAlive("~VulkanBuffer"))
+            m_vulkan_manager.getDevice().destroy(m_device_buffer);
     }
 
 

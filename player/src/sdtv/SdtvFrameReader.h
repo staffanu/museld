@@ -4,6 +4,7 @@
 #ifndef MUSECPP_SDTVFRAMEREADER_H
 #define MUSECPP_SDTVFRAMEREADER_H
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <vector>
@@ -44,12 +45,20 @@ public:
 
     bool initialize(std::vector<std::unique_ptr<SdtvInputBlock>> &buffers) override;
     void cleanup() override;
+    std::unique_ptr<InputReader> releaseInput() override;
+    void watchForTypeChange(InputProbeResult::Type current) override {
+        if (m_demodulator != nullptr)
+            m_demodulator->watchContent(current);
+    }
+    [[nodiscard]] std::optional<InputProbeResult::Type> otherTypeDetected() override {
+        return m_demodulator != nullptr ? m_demodulator->otherTypeDetected() : std::nullopt;
+    }
+    [[nodiscard]] bool signalPresent() const override { return m_anchored; }
     bool seek(double seconds) override;
     std::optional<uint32_t> seekToInputSample(int64_t sample) override;
     [[nodiscard]] double inputSampleRate() const override { return m_input_sample_rate; }
     [[nodiscard]] int64_t inputSampleCount() const override;
     void setAudioTrack(AudioTrack track) override;
-    void setAnalogCx(bool enabled) override;
     void setEfmAdaptiveFilterSize(int size) override;
     [[nodiscard]] int efmAdaptiveFilterSize() const override;
 
@@ -136,7 +145,7 @@ private:
     // A group of broad pulses starting on a lattice line boundary is field 1
     // (the group spans lines 4-6 on NTSC, 1-3 on PAL); starting half a line
     // in, field 2.
-    bool m_anchored;
+    std::atomic<bool> m_anchored;       // the reader thread's; read by signalPresent()
     bool m_timebase_restarted;          // report the next frame as the first after a signal loss
     uint32_t m_seek_generation;         // of the demodulated blocks being consumed
     // Rows of the frame being filled come from before a timebase reset: the

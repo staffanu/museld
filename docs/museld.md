@@ -148,6 +148,20 @@ live: it plays like a file named on the command line, seeking included. Being li
 to do with speed: a file piped through `cat` arrives faster than real time and loses the fields
 the decoder cannot keep up with, so play files by name.
 
+### Changing discs on a live input
+
+A live input whose type was detected (no `--input-type`) is watched for a change of type
+while it plays, for the decoder-box setup where the player is fed discs of any standard. The
+demodulator hands every few seconds of samples to a content watch, which classifies them the
+way the probe does (carrier frequency, line period, field period); when three consecutive
+chunks agree on another type, the player is rebuilt for it on the same stream, keeping the
+window. While the reader has no sync the watch looks every second and the picture is blanked
+with `NO SIGNAL` in the OSD; a new disc of the same standard is simply re-acquired by the
+running decoder. The switch takes a second or two after the new disc's signal appears, and
+anything the old demodulator had buffered at that moment is skipped. The sample rate is the
+stream's and never changes, so for MUSE to be among the possibilities the capture must run at
+a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at a switch.
+
 ## Playback options
 
 | Option | Description |
@@ -155,7 +169,7 @@ the decoder cannot keep up with, so play files by name.
 | `--efm` | Use EFM data for audio instead of the MUSE audio, or of the NTSC analog audio (RF input only). A DTS bitstream on the track (DTS laserdiscs) is detected and decoded automatically. |
 | `--ac3` | NTSC: use the AC3-RF surround track (RF input only; decoding requires an FFmpeg build — without it the track is silent). All 5.1 channels go to the audio device, and `--write` files carry the original AC3 bitstream (stream copy, no transcode). |
 | `--efm-filter-size <n>` | Number of taps in the adaptive FIR filter ahead of the EFM timing detector (default 3, 0 disables it). Try 9 or 11 when a distorted signal causes many errors; the same setting as `ac3rf-efm-decode --adaptive-filter-size`. The E key cycles it during playback. |
-| `--no-video` / `--no-audio` | Disable video or audio output |
+| `--no-video` / `--no-audio` | Do not decode video, or audio, at all (not merely silence the output): a `--write` file made with `--no-audio` has an empty audio stream |
 | `--no-sync` | Display frames as fast as possible (benchmark mode). Without it playback runs at real time: the display's refresh sets the cadence when it matches the field rate (NTSC on a 60 Hz display), with the clock as a guard a few fields behind in case the refresh stops pacing (macOS does not block on it while the window is covered or minimized); slower material (PAL on 60 Hz) is paced by the clock itself |
 | `--no-keys` | Ignore the keyboard and open the window without taking input focus. For runs made beside other work (measurements, scripts): nothing typed into another window can pause or change the decode. The window's close button still quits. |
 | `--full-frames-only` | Skip every other field update (reduces CPU/GPU load) |
@@ -177,7 +191,7 @@ the decoder cannot keep up with, so play files by name.
 | `--benchmark-shaders` | Print GPU shader timing statistics |
 | `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |
 | `--field-interpolation <mode>` | Initial de-interlacing mode: `normal` (motion-adaptive), `intra-field`, or `inter-frame` — same as keys 1/2/3 |
-| `--no-3d-comb` | Start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4. On PAL the key also switches the U/V line averaging (the PAL delay-line step) |
+| `--no-3d-comb` | Start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4 |
 | `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
 | `--black-level <mode>` | NTSC: where the disc puts black — `auto` (default) reads it off the picture, `m` forces NTSC-M (US discs: 7.5 IRE above blanking), `j` forces NTSC-J (Japanese discs: black at blanking). Same as the J key. Wrong in the M direction, a Japanese disc loses its darkest 7.5 IRE; wrong in the J direction, a US disc shows black as dark grey and slightly desaturated |
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
@@ -510,12 +524,15 @@ The default NTSC audio; both it and EFM run on the demodulator's audio worker th
 ```
 RF → shared half-band decimation → per channel (2.3011 / 2.8125 MHz): NCO mix
   → complex decimation + channel filter → atan2 FM discriminator → audio decimation
-  → resample to 48 kHz → 75 µs de-emphasis → CX expansion (VBI-controlled) → stereo PCM
+  → resample to 48 kHz → 75 µs de-emphasis → squelch → float stereo
+  → (decoder, per frame) CX expansion → stereo PCM
 ```
 
 A channel whose carrier is missing (the right channel on AC3 discs) is squelched. The CX
-expander follows the CX flag decoded from the VBI, a few frames behind the audio, which is
-harmless since the flag changes on program boundaries.
+expander runs in the decoder, on the audio of the frame being read, so that it follows the
+CX flag decoded from that frame's VBI (or the forced mode): the worker runs ahead of the
+VBI decode by a scheduling-dependent number of blocks, so applying the flag there made the
+switch-on point differ from run to run.
 
 ### Data flow — AC3 and DTS (inside museld)
 
@@ -560,7 +577,6 @@ DTS: EFM stereo samples → DTS sync detection → byte stream → libavcodec dc
 - **Picture filters**: Most filters were computed early in the project; picture quality could probably be improved by spending more time on them.
 - **Motion detection**: The algorithm is quite simplistic and could probably be improved.
 - **LD MUSE vs BS MUSE**: Available documentation describes the satellite broadcasting standard. MUSE decoders have separate inputs for the two signals, so presumably there is some difference, but it is unknown what it is.
-- **Live MUSE/NTSC switching**: For the decoder-box use case (a pipe from a capture device to the TV), the player should switch type when the disc changes. Detection runs on live input now (window after window, and the player keeps whether the type was given or detected), but the per-type reader/demodulator/decoder pipeline setup has to be refactored so it can be torn down and rebuilt mid-playback.
 - **Subtitle OCR** (experimental; see the option section above):
   - The full release packages include ONNX Runtime but not the PP-OCR models, which have to be downloaded separately (see above); the minimal packages are built without OCR (see docs/packaging.md).
   - `--ocr-translate` speaks plain HTTP only; hosted TLS endpoints would need an OpenSSL-enabled cpp-httplib build.

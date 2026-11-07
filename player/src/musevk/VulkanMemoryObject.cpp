@@ -54,11 +54,18 @@ void musevk::VulkanMemoryObject::synchronizeHostWrites(CommandBuffer &command_bu
 musevk::VulkanMemoryObject::~VulkanMemoryObject() {
     // Implicitly noexcept, so an allocator error escaping here would be an
     // immediate terminate -- during unwinding, before anything gets reported.
+    // The object may have no memory: a derived constructor that throws in
+    // allocateMemory() still destroys this base.  And it may outlive the
+    // device (an ownership mistake upstream): then there is nothing left to
+    // free, and VulkanManager::cleanup() has already reported it.
+    if (!m_vulkan_manager.deviceAlive("~VulkanMemoryObject"))
+        return;
     try {
         if (m_host_visible_buffer)
             m_vulkan_manager.getDevice().destroy(m_host_visible_buffer.value());
 
-        m_vulkan_manager.getMemoryAllocator().free(m_allocated_device_memory);
+        if (m_allocated_device_memory.device_memory)
+            m_vulkan_manager.getMemoryAllocator().free(m_allocated_device_memory);
         if (m_allocated_host_visible_memory)
             m_vulkan_manager.getMemoryAllocator().free(m_allocated_host_visible_memory.value());
     } catch (const std::exception &x) {
@@ -149,12 +156,15 @@ void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_re
 
     auto memory_property_priorities = makeMemoryPropertyFlags(host_access);
 
-    // Create a host visible buffer so that we can query its memory requirements; if not used we'll destroy it again
+    // Create a host visible buffer so that we can query its memory requirements; it is kept only
+    // by the alternatives that use it, and the unique handle destroys it on every other exit,
+    // the throw below included
     vk::BufferCreateInfo buffer_info(vk::BufferCreateFlags(),
                                      m_memory_size,
                                      vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
                                      vk::SharingMode::eExclusive);
-    vk::Buffer host_visible_buffer = m_vulkan_manager.getDevice().createBuffer(buffer_info);
+    vk::UniqueBuffer host_visible_buffer_holder = m_vulkan_manager.getDevice().createBufferUnique(buffer_info);
+    const vk::Buffer host_visible_buffer = host_visible_buffer_holder.get();
     vk::MemoryRequirements host_visible_buffer_memory_requirements = m_vulkan_manager.getDevice().getBufferMemoryRequirements(host_visible_buffer);
 
     for (std::pair<vk::MemoryPropertyFlags, std::optional<vk::MemoryPropertyFlags>> device_and_host_memory_flags : memory_property_priorities) {
@@ -192,7 +202,7 @@ void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_re
                                                                           host_visible_memory_type_index_and_properties.value().first, true,
                                                                           (int)host_access);
             m_vulkan_manager.getDevice().bindBufferMemory(host_visible_buffer, m_allocated_host_visible_memory.value().device_memory, m_allocated_host_visible_memory.value().offset);
-            m_host_visible_buffer = host_visible_buffer;
+            m_host_visible_buffer = host_visible_buffer_holder.release(); // ours from here on
         } else {
             if (host_access == eHostNone) {
                 log.debug(eVideo, std::format("VulkanMemoryObject: {} bytes, hostAccess=none -> device-only; type{}(heap{},{})",
@@ -203,7 +213,6 @@ void musevk::VulkanMemoryObject::allocateMemory(vk::MemoryRequirements memory_re
                     m_memory_size, (int)host_access, dev_type_idx, dev_heap_idx,
                     vk::to_string(device_memory_type_index_and_properties->second)));
             }
-            m_vulkan_manager.getDevice().destroy(host_visible_buffer);
         }
 
         m_raw_data = host_access != eHostNone ?

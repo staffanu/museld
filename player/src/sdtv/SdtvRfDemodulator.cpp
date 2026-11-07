@@ -49,8 +49,7 @@ SdtvRfDemodulator::SdtvRfDemodulator(Logger &log, std::string executable_dir, Pr
   m_ac3_decoder(log),
   m_efm_enabled(audio_track == AudioTrack::eEfm),
   m_analog_enabled(audio_track == AudioTrack::eDefault),
-  m_ac3_enabled(audio_track == AudioTrack::eAc3),
-  m_analog_cx(false) {
+  m_ac3_enabled(audio_track == AudioTrack::eAc3) {
     // demodulateToSymbols requires block sizes aligned to its internal decimation
     assert(c_sample_block_size % m_ac3_demodulator.inputSampleAlignment() == 0);
 }
@@ -407,7 +406,7 @@ void SdtvRfDemodulator::demodulate() {
             auto t_after_efm = timing_clock::now();
             block->analog_data.clear();
             if (block->analog_wanted)
-                m_analog_demodulator.demodulate(block->raw_input.data(), m_analog_cx, block->analog_data);
+                m_analog_demodulator.demodulate(block->raw_input.data(), block->analog_data);
             auto t_after_analog = timing_clock::now();
             if (block->ac3_wanted)
                 block->ac3_frames = m_ac3_decoder.decodeSymbols(

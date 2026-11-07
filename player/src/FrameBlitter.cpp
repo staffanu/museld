@@ -14,6 +14,20 @@
 #include "musevk/VulkanImage.h"
 #include "musevk/VulkanManager.h"
 
+void FrameBlitter::clear(musevk::CommandBuffer &command_buffer, ResultImages &images) {
+    images.out_image->enqueueTransitionLayout(command_buffer, vk::ImageLayout::eTransferDstOptimal,
+                                              vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer,
+                                              vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eShaderRead,
+                                              vk::AccessFlagBits::eTransferWrite);
+    vk::Image image = images.out_image->image();
+    command_buffer.enqueueClearColorImage(image, vk::ImageLayout::eTransferDstOptimal,
+                                          vk::ClearColorValue(std::array<float, 4>{0.f, 0.f, 0.f, 1.f}));
+    images.out_image->enqueueTransitionLayout(command_buffer, vk::ImageLayout::eGeneral,
+                                              vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader,
+                                              vk::AccessFlagBits::eTransferWrite,
+                                              vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eShaderRead);
+}
+
 void FrameBlitter::present(musevk::CommandBuffer &command_buffer,
                            ResultImages &images,
                            const DisplayGeometry &geometry,
