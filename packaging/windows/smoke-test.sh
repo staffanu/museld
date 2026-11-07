@@ -30,9 +30,11 @@ for f in *.exe *.dll; do
         if [ -f "/ucrt64/bin/$imp" ] && [ ! -f "./$imp" ]; then
             echo "FAIL: $f imports $imp, which MSYS2 provides but the package does not carry"
             status=1
-        elif [ "$where" = "not" ] || [ "$arrow" = "not" ]; then
+        elif { [ "$where" = "not" ] || [ "$arrow" = "not" ]; } && [[ "$imp" != api-ms-win-* && "$imp" != ext-ms-* ]]; then
             # Neither the package, MSYS2 nor Windows has it; the staging loop
             # skips such a name silently since /ucrt64/bin does not provide it.
+            # The api-ms-win-*/ext-ms-* API sets are names the loader resolves
+            # from its own schema, not files, so ldd reports them as not found.
             echo "FAIL: $f imports $imp, which nothing on this machine provides"
             status=1
         fi

@@ -336,10 +336,31 @@ jobs:
         with:
           msystem: UCRT64
           update: true
-          install: git zip
+          install: git zip zstd
           pacboy: >-
             gcc:p cmake:p ninja:p pkgconf:p flac:p ffmpeg:p onnxruntime:p
             vulkan-headers:p vulkan-loader:p glfw:p shaderc:p
+
+      # MSYS2 moved abseil-cpp to 20260817 on 2026-10-29 without rebuilding
+      # onnxruntime (1.29.0-2, built 2026-09-25), whose onnxruntime.dll still
+      # imports the libabsl_*-2605.0.0.dll names, so the full package's museld
+      # does not start. Until onnxruntime is rebuilt, put the old abseil DLLs
+      # beside the new ones (their names differ by version, nothing collides)
+      # so the staging loop ships them. Remove this step once
+      # "ldd /ucrt64/bin/onnxruntime.dll" no longer lists 2605 names.
+      - name: Work around onnxruntime linked against an older abseil
+        run: |
+          set -euo pipefail
+          if ldd /ucrt64/bin/onnxruntime.dll | grep -q 'libabsl_.*-2605.0.0.dll => not found'; then
+            curl -fsSL -o abseil-old.pkg.tar.zst \
+              https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-abseil-cpp-20260526.0-1-any.pkg.tar.zst
+            tar --zstd -xf abseil-old.pkg.tar.zst -C / --wildcards 'ucrt64/bin/libabsl_*-2605.0.0.dll'
+            rm abseil-old.pkg.tar.zst
+            ldd /ucrt64/bin/onnxruntime.dll | grep -q 'not found' && { echo "onnxruntime.dll still has unresolved imports"; ldd /ucrt64/bin/onnxruntime.dll; exit 1; }
+            echo "onnxruntime.dll resolves again with the 20260526 abseil DLLs added"
+          else
+            echo "onnxruntime.dll resolves; this workaround step can be removed"
+          fi
 
       # The default -march=native would target whatever CPU this runner happens
       # to have; x86-64-v2 (Nehalem/Westmere and later) is the baseline for the
