@@ -1,0 +1,28 @@
+#version 450
+// Blends a colour into a rectangle of the output image, for the menu's panel
+// and bars: out = out * (1 - alpha) + colour * alpha.  To be invoked with
+// indices [0, 0] to (width, height) of the rectangle.
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    uint top_left_x;
+    uint top_left_y;
+    uint width;
+    uint height;
+    float red;
+    float green;
+    float blue;
+    float alpha;
+};
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D frame_out_image;
+
+void main() {
+    uint x = gl_GlobalInvocationID.x;
+    uint y = gl_GlobalInvocationID.y;
+    if (x >= width || y >= height)
+        return;
+    const ivec2 at = ivec2(x + top_left_x, y + top_left_y);
+    const vec4 was = imageLoad(frame_out_image, at);
+    imageStore(frame_out_image, at, vec4(mix(was.rgb, vec3(red, green, blue), alpha), 1.0));
+}

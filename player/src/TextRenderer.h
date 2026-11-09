@@ -19,6 +19,10 @@ public:
     void operator=(const TextRenderer &) = delete;
 
     void drawText(std::shared_ptr<musevk::VulkanImage> const &image, int x, int y, std::string s, int scale, musevk::CommandBuffer &command_buffer);
+    // Blends a colour into a rectangle of the image (alpha 1 paints it over), for
+    // the menu's panel and bars
+    void fillRect(std::shared_ptr<musevk::VulkanImage> const &image, int x, int y, int width, int height,
+                  float red, float green, float blue, float alpha, musevk::CommandBuffer &command_buffer);
 
 private:
     static const int c_font_codepoint_begin = 32;
@@ -34,6 +38,7 @@ private:
     std::shared_ptr<musevk::VulkanBuffer> m_text_buffer;
     int m_text_ring_offset = 0;
     std::shared_ptr<musevk::ComputeShader> m_render_text_shader;
+    std::shared_ptr<musevk::ComputeShader> m_fill_rect_shader;
 };
 
 #endif //MUSECPP_TEXTRENDERER_H

@@ -317,6 +317,10 @@ if(BUILD_MUSE)
         TextRenderer.cpp TextRenderer.h
         PlayerState.h
         OsdOverlay.cpp OsdOverlay.h
+        PlayerActions.cpp PlayerActions.h
+        ui/Menu.cpp ui/Menu.h
+        ui/PlayerMenu.cpp ui/PlayerMenu.h
+        ui/MenuOverlay.cpp ui/MenuOverlay.h
         subtitles/Eia608Decoder.cpp subtitles/Eia608Decoder.h
         subtitles/SrtParser.cpp subtitles/SrtParser.h
         subtitles/SubtitleFont.cpp subtitles/SubtitleFont.h

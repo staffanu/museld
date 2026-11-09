@@ -43,6 +43,7 @@ public:
 
     // Interactive controls (key bindings in InputController).
     MuseAdaptiveEqualizer::Mode cycleEqMode() { return m_equalizer.cycleMode(); }
+    MuseAdaptiveEqualizer::Mode eqMode() const { return m_equalizer.mode(); }
     void resetEqTaps() { m_equalizer.resetTaps(); }
     ~MuseDecoder();
     MuseDecoder(const MuseDecoder&) = delete;

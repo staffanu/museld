@@ -2,6 +2,8 @@
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
 #include <cstdint>
+#include <algorithm>
+#include <bit>
 #include "TextRenderer.h"
 #include "musevk/Size.h"
 #include "musevk/VulkanUtil.h"
@@ -21,7 +23,34 @@ TextRenderer::TextRenderer(std::string const &executable_dir, VulkanManager &vul
   m_render_text_shader(std::shared_ptr<ComputeShader>(
           new ComputeShader(m_vulkan_manager,
                             "render_text", {eBuffer, eBuffer, eImage}, sizeof(uint16_t) * 64,
-                            musevk::VulkanUtil::loadSpirv(executable_dir, "render_text.comp"), musevk::Size(0)))) {
+                            musevk::VulkanUtil::loadSpirv(executable_dir, "render_text.comp"), musevk::Size(0)))),
+  m_fill_rect_shader(std::shared_ptr<ComputeShader>(
+          new ComputeShader(m_vulkan_manager,
+                            "fill_rect", {eImage}, sizeof(uint32_t) * 8,
+                            musevk::VulkanUtil::loadSpirv(executable_dir, "fill_rect.comp"), musevk::Size(0)))) {
+}
+
+void TextRenderer::fillRect(std::shared_ptr<VulkanImage> const &image, int x, int y, int width, int height,
+                            float red, float green, float blue, float alpha, CommandBuffer &command_buffer) {
+    // Clipped to the image
+    const int x0 = std::max(0, x), y0 = std::max(0, y);
+    const int x1 = std::min((int)image->getWidth(), x + width), y1 = std::min((int)image->getHeight(), y + height);
+    if (x1 <= x0 || y1 <= y0)
+        return;
+    image->enqueueTransitionLayout(command_buffer, vk::ImageLayout::eGeneral,
+                                   vk::PipelineStageFlagBits::eTopOfPipe,
+                                   vk::PipelineStageFlagBits::eComputeShader,
+                                   vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
+    auto current = m_fill_rect_shader->getBuffersForDescriptorSet(0);
+    if (current.size() != 1 || current[0] != image)
+        m_fill_rect_shader->updateBufferDescriptorsInSet(0, {image});
+    // The colour rides in the push constants as the bits of floats
+    const std::vector<uint32_t> push_constants = {
+            (uint32_t)x0, (uint32_t)y0, (uint32_t)(x1 - x0), (uint32_t)(y1 - y0),
+            std::bit_cast<uint32_t>(red), std::bit_cast<uint32_t>(green),
+            std::bit_cast<uint32_t>(blue), std::bit_cast<uint32_t>(alpha)};
+    m_fill_rect_shader->updateWorkgroup(Size(x1 - x0, y1 - y0));
+    command_buffer.enqueueComputeShader(m_fill_rect_shader, push_constants);
 }
 
 void TextRenderer::drawText(std::shared_ptr<VulkanImage> const &image, int x, int y, std::string s, int scale, CommandBuffer &command_buffer) {

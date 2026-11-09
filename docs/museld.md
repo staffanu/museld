@@ -395,7 +395,8 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 
 | Key | Action |
 |---|---|
-| Q / Escape | Quit |
+| M | Open and close the on-screen menu (see below) |
+| Q / Escape | Quit; Escape closes the menu instead while it is open |
 | Tab | Toggle full screen |
 | F | Cycle how the picture is fitted to the window: normal → zoom → squeeze (NTSC only) → stretch (see `--aspect`) |
 | Space | Pause / resume |
@@ -423,6 +424,19 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | [ | Cycle the primary subtitle track (bottom of the frame) through the available tracks and off |
 | ] | Cycle the secondary subtitle track (top of the frame) through the available tracks and off |
 | Print Screen | Copy the displayed cursor/offset text to the clipboard |
+
+### The on-screen menu
+
+M opens a menu over the picture with the same settings as the keys, for a remote
+control or a game controller as much as for the keyboard: the arrow keys move in
+it, Left and Right step a setting, Space or Return steps it forward or runs an
+action or opens a page, Escape (or Backspace) goes back a page and closes the menu
+from its root, and M closes it from anywhere.  While the menu is open the arrows
+and Space belong to it, so seeking and pausing wait until it is closed, and so
+does quitting with Escape.  Settings that mean nothing for the disc being played
+(the 3D comb on MUSE, the equaliser on NTSC) are left out of its pages.  On the
+Apple TV the Siri Remote's Menu button opens it, and from its root page leaves
+the app; the app starts in the menu.
 
 The C key overlay shows the cursor position both in single-field coordinates (374×516 for MUSE,
 764×240 for NTSC and 764×288 for PAL: the column over the whole decoded width, the line within

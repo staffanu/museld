@@ -43,6 +43,9 @@
 #include "DisplayGeometry.h"
 #include "FrameExporter.h"
 #include "InputController.h"
+#include "ui/Menu.h"
+#include "ui/MenuOverlay.h"
+#include "ui/PlayerMenu.h"
 #include "subtitles/Eia608Decoder.h"
 #include "subtitles/SrtParser.h"
 #include "subtitles/SubtitleFont.h"
@@ -361,6 +364,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                       Decoder::BlackLevelMode initial_black_level_mode,
                       DropoutMode dropout_mode,
                       AudioTrack audio_track,
+                      bool is_muse,
                       bool benchmark_shaders,
                       bool output_yuv,
                       const std::unique_ptr<VideoFileWriter> &vfw,
@@ -411,6 +415,31 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         OsdOverlay osd;
         FrameBlitter blitter;
         InputController input(log, no_keys);
+        // The on-screen menu: the same settings as the keys, for the remote
+        // (M on a keyboard, the Menu button on tvOS); a quit from its root
+        bool menu_quit = false;
+#if defined(__APPLE__) && TARGET_OS_TV
+        constexpr bool is_tvos = true;
+#else
+        constexpr bool is_tvos = false;
+#endif
+        Menu menu;
+        MenuOverlay menu_overlay;
+        buildPlayerMenu(menu, PlayerMenuBindings{state, reader_controls, dropout_mode, audio_track, full_screen, window,
+                                                 log, is_muse, is_tvos, &menu_quit});
+        input.setMenu(&menu);
+        if (const char *open_page = getenv("MUSELD_MENU_OPEN"); open_page != nullptr) {
+            // A screenshot or a test run: start with the menu up, on the root or on
+            // the page named (MUSELD_MENU_OPEN=Picture)
+            menu.open();
+            for (const auto &line : menu.lines()) {
+                if (line.label == open_page) {
+                    menu.handleKey(MenuKey::eSelect);
+                    break;
+                }
+                menu.handleKey(MenuKey::eDown);
+            }
+        }
         FrameExporter frame_exporter(log, manager, command_pool);
 
         // All tracks are parsed and warmed into the shared glyph atlas up front,
@@ -733,14 +762,23 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
 
             // Export before the OSD and subtitles are drawn into the image, so
             // the file contains only the decoded picture
+            // The export takes the frame as decoded, before the overlays are drawn into
+            // it; MUSELD_EXPORT_OVERLAYS=1 takes it after them instead (a check of the
+            // OSD or the menu, which a screenshot would otherwise be needed for)
+            static const bool export_with_overlays = getenv("MUSELD_EXPORT_OVERLAYS") != nullptr;
+            bool export_after_present = false;
             if (state.export_frame && !searching) {
                 state.export_frame = false;
-                auto path = frame_exporter.exportFrame(*images.out_image,
-                                                       scripted_export ? export_frame_filename : std::nullopt);
-                if (scripted_export)
-                    break;
-                state.osd_text = path ? std::format("SAVED {}", std::filesystem::path(*path).filename().string())
-                                      : "EXPORT FAILED";
+                if (export_with_overlays) {
+                    export_after_present = true;
+                } else {
+                    auto path = frame_exporter.exportFrame(*images.out_image,
+                                                           scripted_export ? export_frame_filename : std::nullopt);
+                    if (scripted_export)
+                        break;
+                    state.osd_text = path ? std::format("SAVED {}", std::filesystem::path(*path).filename().string())
+                                          : "EXPORT FAILED";
+                }
             }
 
             if (cc_track_index >= 0 && state.last_decoded.cc_bytes && subtitle_tracks && !searching) {
@@ -905,6 +943,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 if (state.no_signal)
                     blitter.clear(*command_buffer, images); // black, not the last picture
                 state.last_cursor_string = osd.render(*command_buffer, images, state, decoder, window, text_renderer);
+                menu_overlay.render(*command_buffer, images, state, menu, text_renderer);
                 if (subtitle_primary_overlay)
                     subtitle_primary_overlay->render(*command_buffer, images, state, decoder,
                                                      state.subtitle_primary);
@@ -914,6 +953,14 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 blitter.present(*command_buffer, images, geometry, swap_chain_image, image_available_semaphore);
 
                 manager.present(swap_chain_image);
+            }
+            if (export_after_present) {
+                auto path = frame_exporter.exportFrame(*images.out_image,
+                                                       scripted_export ? export_frame_filename : std::nullopt);
+                if (scripted_export)
+                    break;
+                state.osd_text = path ? std::format("SAVED {}", std::filesystem::path(*path).filename().string())
+                                      : "EXPORT FAILED";
             }
 
             if (pace_slack_fields >= 0) {
@@ -946,7 +993,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 state.paused = true;
                 state.osd_text = "PAUSE";
             }
-            if (!input.poll(window, state, reader_controls, dropout_mode, audio_track, full_screen))
+            if (!input.poll(window, state, reader_controls, dropout_mode, audio_track, full_screen) || menu_quit)
                 break;
         }
 
@@ -1266,14 +1313,16 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                                                     timestamp_query_pool.get());
             // This isn't a great use of unique_ptr
             MuseDecoder *muse_decoder = mp.get();
-            reader_controls.cycleEqMode = [muse_decoder]() -> std::string {
-                switch (muse_decoder->cycleEqMode()) {
+            auto eq_mode_name = [](MuseAdaptiveEqualizer::Mode mode) -> std::string {
+                switch (mode) {
                     case MuseAdaptiveEqualizer::Mode::eOff:    return "OFF";
                     case MuseAdaptiveEqualizer::Mode::eAdapt:  return "ADAPT";
                     case MuseAdaptiveEqualizer::Mode::eFrozen: return "FROZEN";
                 }
                 return "?";
             };
+            reader_controls.cycleEqMode = [muse_decoder, eq_mode_name]() { return eq_mode_name(muse_decoder->cycleEqMode()); };
+            reader_controls.eqMode = [muse_decoder, eq_mode_name]() { return eq_mode_name(muse_decoder->eqMode()); };
             reader_controls.resetEqTaps = [muse_decoder]() { muse_decoder->resetEqTaps(); };
             decoder = std::move(mp);
         } else {
@@ -1311,6 +1360,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   full_image, overscan,
                   start_paused,
                   field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, dropout_mode, audio_track,
+                  std::is_same<InputBlock, MuseInputBlock>::value,
                   benchmark_shaders,
                   output_filename.has_value(),
                   vfw, audio_playback.get(), executable_dir,

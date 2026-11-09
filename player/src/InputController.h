@@ -51,6 +51,7 @@ struct ReaderControls {
     // for the new mode ("OFF"/"ADAPT"/"FROZEN") for OSD display.  Empty when the
     // decoder doesn't support adaptive equalization (NTSC).
     std::function<std::string()> cycleEqMode;
+    std::function<std::string()> eqMode; // the current mode's label, for the menu
     std::function<void()> resetEqTaps;
     // EFM timing recovery adaptive filter size (RF input only): the current
     // number of taps and a setter, empty when the reader has no EFM demodulator.
@@ -68,6 +69,9 @@ class InputController {
 public:
     // ignore_keys: poll only pumps the window events (--no-keys)
     explicit InputController(Logger &log, bool ignore_keys = false) : m_log(log), m_ignore_keys(ignore_keys) {}
+    // The menu the keys drive while it is open (and open with M, or the Menu
+    // button on tvOS); none without one
+    void setMenu(class Menu *menu) { m_menu = menu; }
 
     // Pumps the window system's events and acts on the keys pressed.  Must
     // run on the main thread.  Returns false if the user requested quit (a
@@ -87,6 +91,8 @@ private:
     static int gamepadButtonScancode(int button);
 
     Logger &m_log;
+
+    class Menu *m_menu = nullptr;
     const bool m_ignore_keys;
     std::set<int> m_pressed; // scancodes pressed since the last poll
 };

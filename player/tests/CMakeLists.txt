@@ -18,6 +18,8 @@ add_executable(museld-tests
     LdfInputReaderTest.cpp
     HttpByteSourceTest.cpp
     ParallelOggFlacReaderTest.cpp
+    MenuTest.cpp
+    ../src/ui/Menu.cpp
     ../src/ChapterSearch.cpp
     ../src/subtitles/Eia608Decoder.cpp
     ../src/bch/BchDecoder.cpp

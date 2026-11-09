@@ -209,6 +209,12 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   misses scores`.
 - Options must precede the input file they apply to; trailing options are ignored
   with a warning.
+- The on-screen menu (`ui/Menu` the model, `ui/PlayerMenu` its pages bound to the player's state
+  through `PlayerActions`, which the keys in `InputController` share, `ui/MenuOverlay` drawing it
+  with `TextRenderer::fillRect` and `drawText`): M opens it, the arrows move in it, Escape backs out.
+  `MUSELD_MENU_OPEN=1` (or a page's name) starts with it open and `MUSELD_EXPORT_OVERLAYS=1` makes
+  `--export-frame` take the frame after the OSD and menu are drawn, which is how to look at it in a
+  scripted run.
 - Always add `--no-keys` to museld runs made for measurements or exports: the window then
   opens without taking the keyboard focus and ignores keys, so the user's typing in another
   window cannot pause the decode or toggle a stage mid-run.
