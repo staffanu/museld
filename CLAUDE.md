@@ -95,6 +95,12 @@ packaging/         — Scripts and per-package READMEs for the Windows/macOS dow
 docs/              — Reference documentation (player, CLI, AC3-RF decoding, packaging)
 ```
 
+## Developer Backlog
+
+`docs/backlog.md` is the working list of improvements still to make, with the reasoning behind
+each; it is not the user-facing limitations list in `docs/museld.md`.  Move an item there when
+the user asks to park work, and strike it when done.
+
 ## Clangd / LSP Diagnostics
 
 CMake generates `compile_commands.json` in the build directory, which clangd uses for accurate diagnostics. The user maintains a symlink `compile_commands.json` → `player/cmake-build-relwithdebinfo/compile_commands.json` at the repo root, so clangd reads from the CLion-managed RelWithDebInfo build.
