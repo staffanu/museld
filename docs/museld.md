@@ -106,8 +106,9 @@ capture.lds:
 
 Any argument not starting with `-` is an input filename. Several files can be given, with other
 options in between; each file is played with the most recent options in effect, so files with
-different formats can be played back to back. An argument starting with `!` is ignored, which is
-practical for temporarily disabling options when reusing long command lines.
+different formats can be played back to back, and a `--write` file continues across them (see the
+option). An argument starting with `!` is ignored, which is practical for temporarily disabling
+options when reusing long command lines.
 
 Because the options in effect are the ones seen so far, **every option must come before the file
 it applies to**. An option placed after a filename applies only to later files, and options after
@@ -184,9 +185,9 @@ a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at 
 | `--export-frame-at <seconds>` | Stream position of the frame saved by `--export-frame` (absolute, same units as `--seek` — not a delay after it). Default: the first decoded frame. |
 | `--no-dropout` / `--highlight-dropout` | Disable dropout concealment, or highlight dropouts instead of concealing them (see below) |
 | `--write-muse16 <file>` | Re-encode input to the 16.2 MHz format (see below) |
-| `--write <file>` | Write decoded video and audio to a media file (requires FFmpeg ≥ 7.1) |
+| `--write <file>` | Write decoded video and audio to a media file (requires FFmpeg ≥ 7.1). The file stays open from one input to the next as long as the name stays the same, so the sides of a disc given as consecutive inputs come out as one continuous file; an input that decodes to another picture size, frame rate or audio stream kind than the file was opened with is refused, and a new `--write` name ends the file and starts another |
 | `--write-preset <preset>` | Media file preset: `standard` (H.264 + AAC in MP4, default) or `archival` (lossless FFV1 16-bit + PCM in Matroska). Container and codecs come from the preset, not the filename extension. |
-| `--write-duration <seconds>` | Stop after writing this much video and finalize the file (default: run to the end of the input) |
+| `--write-duration <seconds>` | Stop an input after writing this much of its video (default: run to the end of the input); the file is finalized when the last input ends |
 | `--log <spec>` | Log level per category, e.g. `A3V4` (Audio=Info, Video=Debug). Categories: M P A V D I O; levels 0–4 = Off Error Warn Info Debug |
 | `--benchmark-shaders` | Print GPU shader timing statistics |
 | `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |
