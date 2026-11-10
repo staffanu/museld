@@ -128,18 +128,27 @@ if(BUILD_AC3RF_DECODE)
         CliOptions.h
         Version.h
         input/InputReader.h
+        input/ByteSource.cpp input/ByteSource.h
+        input/HttpByteSource.cpp input/HttpByteSource.h
+        input/EthadcByteSource.cpp input/EthadcByteSource.h
         input/InputReaderFactory.cpp input/InputReaderFactory.h
         input/LdsInputReader.cpp input/LdsInputReader.h
         input/LdfInputReader.cpp input/LdfInputReader.h
         input/PrefetchingInputReader.cpp input/PrefetchingInputReader.h
     )
 
-    target_include_directories(ac3rf-efm-decode PRIVATE ${FLAC_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+    target_include_directories(ac3rf-efm-decode PRIVATE ${FLAC_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/httplib
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party)
     target_link_options(ac3rf-efm-decode PRIVATE "-L/usr/local/lib")
     target_link_libraries(ac3rf-efm-decode
         PRIVATE ac3rf
         PRIVATE ${FLAC_LINK_LIBRARIES}
     )
+    if(WIN32)
+        # cpp-httplib (the http:// input) uses Winsock
+        target_link_libraries(ac3rf-efm-decode PRIVATE ws2_32)
+    endif()
 endif()
 
 # ============================================================================
@@ -173,10 +182,15 @@ if(BUILD_MUSE)
         CliOptions.h
         AudioDefs.h
         input/InputReader.h
+        input/ByteSource.cpp input/ByteSource.h
+        input/HttpByteSource.cpp input/HttpByteSource.h
+        input/EthadcByteSource.cpp input/EthadcByteSource.h
         input/InputReaderFactory.cpp input/InputReaderFactory.h
         input/LdsInputReader.cpp input/LdsInputReader.h
         input/LdfInputReader.cpp input/LdfInputReader.h
         input/PrefetchingInputReader.cpp input/PrefetchingInputReader.h
+        input/PreparedInput.cpp input/PreparedInput.h
+        input/RebatchingInputReader.h
         InputProbe.cpp InputProbe.h
         AudioPlayback.cpp AudioPlayback.h
         CompressedAudioDecoder.cpp CompressedAudioDecoder.h
@@ -198,6 +212,7 @@ if(BUILD_MUSE)
         DisplayGeometry.cpp DisplayGeometry.h
         FrameExporter.cpp FrameExporter.h
         InputController.cpp InputController.h
+        ChapterSearch.cpp ChapterSearch.h
 
         bch/BchDecoder.cpp bch/BchDecoder.h
         util/PercentileFilter.cpp util/PercentileFilter.h
@@ -213,22 +228,24 @@ if(BUILD_MUSE)
         muse/MuseDecoder.cpp muse/MuseDecoder.h
         muse/MuseAdaptiveEqualizer.cpp muse/MuseAdaptiveEqualizer.h
         muse/MuseEqReference.h
-        muse/ResamplingFrameReader.cpp muse/ResamplingFrameReader.h
+        muse/MuseFrameReader.cpp muse/MuseFrameReader.h
         muse/PhaseCorrect16MHzFrameReader.cpp muse/PhaseCorrect16MHzFrameReader.h
         muse/MuseRfDemodulator.cpp muse/MuseRfDemodulator.h
         muse/MuseInputBlock.h
         muse/MuseConstants.h
         muse/DiscCode.h muse/DiscCode.cpp
-        ntsc/NtscRfDemodulator.cpp ntsc/NtscRfDemodulator.h
-        ntsc/NtscFrameReader.cpp ntsc/NtscFrameReader.h
-        ntsc/NtscInputBlock.h
-        ntsc/NtscConstants.h
-        ntsc/NtscCadenceTracker.cpp ntsc/NtscCadenceTracker.h
-        ntsc/NtscDecoder.cpp ntsc/NtscDecoder.h
-        ntsc/NtscShaders.cpp ntsc/NtscShaders.h
-        ntsc/NtscFrame.cpp ntsc/NtscFrame.h
-        ntsc/NtscFieldView.cpp ntsc/NtscFieldView.h
-        ntsc/VbiData.cpp ntsc/VbiData.h
+        sdtv/SdtvRfDemodulator.cpp sdtv/SdtvRfDemodulator.h
+        sdtv/SdtvFrameReader.cpp sdtv/SdtvFrameReader.h
+        timebase/LineTimebase.cpp timebase/LineTimebase.h
+        sdtv/SdtvInputBlock.h
+        sdtv/VideoStandard.cpp sdtv/VideoStandard.h
+        sdtv/NtscCadenceTracker.cpp sdtv/NtscCadenceTracker.h
+        sdtv/PalCadenceTracker.cpp sdtv/PalCadenceTracker.h sdtv/CadenceAction.h
+        sdtv/SdtvDecoder.cpp sdtv/SdtvDecoder.h
+        sdtv/SdtvShaders.cpp sdtv/SdtvShaders.h
+        sdtv/SdtvFrame.cpp sdtv/SdtvFrame.h
+        sdtv/SdtvFieldView.cpp sdtv/SdtvFieldView.h
+        sdtv/VbiData.cpp sdtv/VbiData.h
         musevk/VulkanManager.cpp musevk/VulkanManager.h
         musevk/CommandBuffer.cpp musevk/CommandBuffer.h
         musevk/CommandPool.h
@@ -254,7 +271,13 @@ if(BUILD_MUSE)
         ${FLAC_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/stb
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/miniaudio
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/httplib
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party
     )
+    if(WIN32)
+        # cpp-httplib (the http:// input) uses Winsock
+        target_link_libraries(museld PRIVATE ws2_32)
+    endif()
     if(HAVE_LIBAV)
         target_include_directories(museld PRIVATE ${LIBAV_INCLUDE_DIR})
     endif()
@@ -274,19 +297,35 @@ if(BUILD_MUSE)
     # Compile GLSL compute shaders to SPIR-V
     set(GLSLC "glslc")
     file(GLOB_RECURSE GLSL_SOURCE_FILES ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.comp)
-    foreach(GLSL ${GLSL_SOURCE_FILES})
-        get_filename_component(FILE_NAME ${GLSL} NAME)
-        set(SPIRV "${CMAKE_CURRENT_BINARY_DIR}/shaders/${FILE_NAME}.spv")
+    # the headers the shaders include: glslc writes no depfile here, so every
+    # SPIR-V build depends on all of them
+    file(GLOB_RECURSE GLSL_HEADER_FILES ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.h)
+    # add_spirv(<glsl source> <output name> [<glslc define>]): one SPIR-V build
+    function(add_spirv GLSL SPIRV_NAME)
+        set(SPIRV "${CMAKE_CURRENT_BINARY_DIR}/shaders/${SPIRV_NAME}")
         add_custom_command(
             OUTPUT ${SPIRV}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/shaders/"
-            COMMAND ${GLSLC} -Werror -O ${GLSL}
+            COMMAND ${GLSLC} -Werror -O ${ARGN} ${GLSL}
                     -I ${CMAKE_CURRENT_SOURCE_DIR}/shaders
                     -I ${CMAKE_CURRENT_SOURCE_DIR}/shaders/muse
                     -o ${SPIRV}
-            DEPENDS ${GLSL}
+            DEPENDS ${GLSL} ${GLSL_HEADER_FILES}
         )
-        list(APPEND SPIRV_BINARY_FILES ${SPIRV})
+        set(SPIRV_BINARY_FILES ${SPIRV_BINARY_FILES} ${SPIRV} PARENT_SCOPE)
+    endfunction()
+    # One SPIR-V per shader, except the SD shaders (shaders/sdtv/sdtv_*.comp),
+    # which are built once per video standard: ntsc_*.comp.spv with the NTSC
+    # frame geometry and pal_*.comp.spv with -DSDTV_PAL (see shaders/muse/muse.h);
+    # SdtvShaders picks the set by VideoStandard::shader_prefix
+    foreach(GLSL ${GLSL_SOURCE_FILES})
+        get_filename_component(FILE_NAME ${GLSL} NAME)
+        if(FILE_NAME MATCHES "^sdtv_(.*)$")
+            add_spirv(${GLSL} "ntsc_${CMAKE_MATCH_1}.spv")
+            add_spirv(${GLSL} "pal_${CMAKE_MATCH_1}.spv" -DSDTV_PAL)
+        else()
+            add_spirv(${GLSL} "${FILE_NAME}.spv")
+        endif()
     endforeach()
     add_custom_target(Shaders DEPENDS ${SPIRV_BINARY_FILES})
     add_dependencies(museld Shaders)

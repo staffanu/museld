@@ -51,6 +51,8 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
             state.redo_last_field = true;
             state.displayed_osd_text.clear();
         }
+    } else if (state.no_signal) {
+        text_renderer.drawText(images.out_image, tl_x(90), tl_y(50), "NO SIGNAL", comp_scale(osd_base), command_buffer);
     }
 
     if (state.enable_cursor) {
@@ -88,7 +90,7 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
                     std::string offset_string = std::format(
                             "{} {} {} {} {}",
                             state.last_decoded.last_frame_buffer_input_offset,
-                            state.last_decoded.field_parity ? "ODD" : "EVEN",
+                            state.last_decoded.field_parity ? "Field 2" : "Field 1",
                             offsets->field_start,
                             sample_label,
                             offsets->y);
@@ -107,6 +109,16 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         auto disc_info_strings = state.last_decoded.disc_info
                 ? state.last_decoded.disc_info->asStrings()
                 : std::vector<std::string>{"No disc info"};
+        // The field on screen, after the frame number: a frame is shown twice,
+        // and a defect on one field only (a dropout, a cadence slip) is
+        // otherwise impossible to point at while stepping with N.  Only
+        // while paused, like the film detail: at speed it just flickers.
+        if (state.paused && state.last_decoded.decoded && !disc_info_strings.empty()) {
+            std::string &last = disc_info_strings.back();
+            if (!last.empty() && last.back() != ' ')
+                last += ' '; // the MUSE disc code ends without one, the VBI strings with one
+            last += std::format("Field {} ", state.last_decoded.field_parity + 1);
+        }
         if (!state.last_decoded.film_status.empty()) {
             std::string film_line = state.last_decoded.film_status;
             // The detail changes per field -- unreadable at speed, so only

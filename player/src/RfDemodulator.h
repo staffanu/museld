@@ -19,24 +19,26 @@
 #include <atomic>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <exception>
 #include <condition_variable>
 #include "logging/Logger.h"
 #include "input/InputReader.h"
 #include "input/InputReaderFactory.h"
+#include "input/PreparedInput.h"
 #include "musevk/VulkanManager.h"
+#include "InputProbe.h"
 
 template<class B>
 class RfDemodulator {
 public:
-    RfDemodulator(Logger &log, std::string executable_dir, std::string filename, float sample_frequency,
-                  musevk::VulkanManager &vulkan_manager, InputFormat input_format, uint32_t input_block_size,
+    RfDemodulator(Logger &log, std::string executable_dir, PreparedInput input, float sample_frequency,
+                  musevk::VulkanManager &vulkan_manager, uint32_t input_block_size,
                   bool benchmark_shaders)
             : m_executable_dir(std::move(executable_dir)),
-              m_filename(std::move(filename)),
+              m_input(std::move(input)),
               m_sample_frequency(sample_frequency),
-              m_input_format(input_format),
               m_input_block_size(input_block_size),
               m_vulkan_manager(vulkan_manager),
               m_benchmark_shaders(benchmark_shaders),
@@ -64,9 +66,9 @@ public:
     }
 
     bool initialize(int number_of_block_buffers) {
-        m_input_reader = makeInputReader(m_filename, m_input_format, m_input_block_size);
+        m_input_reader = m_input.open(m_input_block_size, &m_log);
         m_input_reader->setDcBlocking(true); // RF carries no legitimate DC
-        m_input_is_fifo = m_input_reader->is_fifo();
+        m_input_is_fifo = m_input_reader->isLive();
         m_input_reader->initialize();
 
         for (int i = 0; i < number_of_block_buffers; i++)
@@ -124,21 +126,46 @@ public:
         m_vacant_blocks.push_back(std::move(buffer));
     }
 
-    void seek(double seconds) {
+    // Seeks.  Both return the new seek generation: every block whose input
+    // is read after the seek carries it, so a consumer can tell the first
+    // block after the seek from the ones still in flight before it.  The
+    // input position and its bookkeeping are updated under m_input_mutex,
+    // which readInput() holds while it reads a block, so the relative seek
+    // is relative to the block boundary the demodulator thread is at, and
+    // the absolute one lands where it says (to the input reader's own
+    // granularity).  A seek the input refuses (nullopt) changes nothing:
+    // the demodulator carries on where it was.  Live input cannot seek; the
+    // generation is returned unchanged.
+    std::optional<uint32_t> seek(double seconds) {
         if (m_input_is_fifo)
-            return;
+            return m_seek_generation;
+        std::unique_lock<std::mutex> input_lock(m_input_mutex);
         int64_t samples_to_seek = (int64_t)(seconds * m_sample_frequency);
         m_log.info(eInput, std::format("Seeking relative time {} s, {} samples.",
                                        seconds, samples_to_seek));
-        m_input_reader->seek(samples_to_seek);
-        m_total_samples_read = std::max<int64_t>(0, m_total_samples_read + samples_to_seek);
+        return seekLocked(samples_to_seek);
+    }
 
-        // Discard any filled buffers
-        std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
-        for (auto &b : m_filled_blocks)
-            m_vacant_blocks.push_back(std::move(b));
-        m_filled_blocks.clear();
-        m_cv_vacant.notify_one();
+    std::optional<uint32_t> seekToSample(int64_t sample) {
+        if (m_input_is_fifo)
+            return m_seek_generation;
+        std::unique_lock<std::mutex> input_lock(m_input_mutex);
+        const int64_t samples_to_seek = std::max<int64_t>(0, sample) - m_total_samples_read;
+        m_log.debug(eInput, std::format("Seeking to sample {} ({:+} from the current position)",
+                                        sample, samples_to_seek));
+        return seekLocked(samples_to_seek);
+    }
+
+    [[nodiscard]] int64_t inputSampleCount() const {
+        return m_input_reader ? m_input_reader->sampleCount() : -1;
+    }
+
+    // Stops and joins the demodulator thread; idempotent
+    void stop() {
+        requestStop();
+        m_log.debug(eInput, "RfDemodulator: requested stop");
+        if (m_demodulator_thread.joinable())
+            m_demodulator_thread.join();
     }
 
     // Wake everything waiting on this demodulator without joining anything, so
@@ -155,43 +182,91 @@ public:
 
     // Idempotent: runs both from the explicit teardown path and from the destructors.
     void cleanup() {
-        requestStop();
-        m_log.debug(eInput, "RfDemodulator: requested stop");
-        if (m_demodulator_thread.joinable())
-            m_demodulator_thread.join();
+        stop();
         m_input_reader.reset();
         m_vacant_blocks.clear();
         m_filled_blocks.clear();
     }
 
+    // Watch the input for a change of type, from `current` (live input
+    // whose type was detected, not given)
+    void watchContent(InputProbeResult::Type current) {
+        m_content_watch = std::make_unique<ContentWatch>(m_log, current, m_sample_frequency);
+    }
+    // The reader's sync state, which sets the watch's pace
+    void setSignalLost(bool lost) { m_signal_lost = lost; }
+    std::optional<InputProbeResult::Type> otherTypeDetected() const {
+        return m_content_watch ? m_content_watch->otherType() : std::nullopt;
+    }
+
+    // The input, to be continued from by another demodulator: a live stream
+    // cannot be reopened where this one left it.  Stops the thread first.
+    // Whatever was read into blocks not yet consumed is lost with them.
+    std::unique_ptr<InputReader> releaseInput() {
+        stop();
+        return std::move(m_input_reader);
+    }
+
 protected:
     virtual void demodulate() = 0;
 
-    bool readFloats(float *out, size_t n) {
+    // Reads one input block for the demodulator thread.  On return
+    // block_input_offset is the input sample position the block starts at
+    // and seek_generation the seek count its data belongs to; both are
+    // taken under the same lock as the read itself, so a seek from another
+    // thread lands either wholly before or wholly after this block.
+    bool readInput(float *out, size_t n, int64_t &block_input_offset, uint32_t &seek_generation) {
         assert(n == m_input_block_size);
         if (m_stop_request) {
             m_log.info(eInput, "RfDemodulator: stop requested");
             return false;
         }
+        std::unique_lock<std::mutex> input_lock(m_input_mutex);
         int got = m_input_reader->readFloats(out);
         if (got == 0) {
             m_log.info(eInput, "RfDemodulator: end of file");
             return false;
         }
+        block_input_offset = m_total_samples_read;
+        seek_generation = m_seek_generation;
+        m_total_samples_read += (int64_t)n;
+        if (m_content_watch)
+            m_content_watch->feed(out, n, m_signal_lost);
         return true;
     }
 
+    // m_input_mutex held by the caller
+    std::optional<uint32_t> seekLocked(int64_t samples_to_seek) {
+        if (!m_input_reader->seek(samples_to_seek)) {
+            m_log.warn(eInput, "The input refused the seek; playback continues where it was");
+            return std::nullopt;
+        }
+        m_total_samples_read = std::max<int64_t>(0, m_total_samples_read + samples_to_seek);
+        const uint32_t generation = ++m_seek_generation;
+
+        // Discard any filled buffers
+        std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
+        for (auto &b : m_filled_blocks)
+            m_vacant_blocks.push_back(std::move(b));
+        m_filled_blocks.clear();
+        m_cv_vacant.notify_one();
+        return generation;
+    }
+
     const std::string m_executable_dir;
-    const std::string m_filename;
+    PreparedInput m_input; // until initialize() opens it as m_input_reader
     const float m_sample_frequency;
-    const InputFormat m_input_format;
     const uint32_t m_input_block_size;
     musevk::VulkanManager &m_vulkan_manager;
     bool m_benchmark_shaders;
     Logger &m_log;
     std::unique_ptr<InputReader> m_input_reader;
     bool m_input_is_fifo;
+    std::mutex m_input_mutex; // the input reader's position and the two fields below
     int64_t m_total_samples_read;
+    uint32_t m_seek_generation = 0;
+    std::unique_ptr<ContentWatch> m_content_watch;
+    std::atomic<bool> m_signal_lost{false};
     std::deque<std::unique_ptr<B>> m_vacant_blocks;
     std::deque<std::unique_ptr<B>> m_filled_blocks;
     std::mutex m_demodulated_block_mutex; // used to synchronize access to the vacant / filled blocks

@@ -36,11 +36,16 @@ namespace musevk {
                                        m_layout);
         m_image = m_vulkan_manager.getDevice().createImage(image_info);
 
-        vk::MemoryRequirements memory_requirements = m_vulkan_manager.getDevice().getImageMemoryRequirements(m_image);
-
-        allocateMemory(memory_requirements, host_access);
-
-        m_vulkan_manager.getDevice().bindImageMemory(m_image, m_allocated_device_memory.device_memory, m_allocated_device_memory.offset);
+        // A throw from here on does not run ~VulkanImage (the constructor
+        // never completed), so the image is released by hand
+        try {
+            vk::MemoryRequirements memory_requirements = m_vulkan_manager.getDevice().getImageMemoryRequirements(m_image);
+            allocateMemory(memory_requirements, host_access);
+            m_vulkan_manager.getDevice().bindImageMemory(m_image, m_allocated_device_memory.device_memory, m_allocated_device_memory.offset);
+        } catch (...) {
+            m_vulkan_manager.getDevice().destroy(m_image);
+            throw;
+        }
 
         vk::ImageViewCreateInfo view_info(vk::ImageViewCreateFlags(),
                                           m_image,
@@ -57,6 +62,8 @@ namespace musevk {
     }
 
     VulkanImage::~VulkanImage() {
+        if (!m_vulkan_manager.deviceAlive("~VulkanImage"))
+            return;
         m_vulkan_manager.getDevice().destroy(m_view);
         m_vulkan_manager.getDevice().destroy(m_image);
     }

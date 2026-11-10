@@ -12,11 +12,13 @@
 #include <deque>
 #include <atomic>
 #include "AudioDefs.h"
+#include "InputProbe.h"
 
 namespace musevk {
     class VulkanBuffer;
 }
 class Logger;
+class InputReader;
 
 enum class InputStatus {
     eNormal = 0,
@@ -39,23 +41,59 @@ public:
 
     [[nodiscard]] virtual bool initialize(std::vector<std::unique_ptr<InputBlock>> &buffers);
     virtual void cleanup();
+    // Stops the reader and hands its input over, for a reader of another
+    // type to continue a live stream from (null when there is none to hand
+    // over).  The reader is finished after this; cleanup() still runs.
+    virtual std::unique_ptr<InputReader> releaseInput() { return nullptr; }
+    // Watch a live input for a change of type away from `current`; see
+    // ContentWatch.  otherTypeDetected() reports the type found, once.
+    virtual void watchForTypeChange(InputProbeResult::Type) {}
+    [[nodiscard]] virtual std::optional<InputProbeResult::Type> otherTypeDetected() { return std::nullopt; }
+    // Whether the reader is locked to a signal (the OSD's no-signal state)
+    [[nodiscard]] virtual bool signalPresent() const { return true; }
 
     std::pair<std::unique_ptr<InputBlock>, InputStatus> getNextInputBuffer();
     void returnBuffer(std::unique_ptr<InputBlock> &buffer);
-    virtual void seek(double seconds) = 0;
+    // Relative seek; false when the input refused it and nothing moved
+    // (live input ignores seeks and reports true)
+    virtual bool seek(double seconds) = 0;
+    // Positions the input at an absolute sample offset and returns the new
+    // seek generation (see InputBlockBase::seek_generation), or nullopt when
+    // the reader cannot: live input, the legacy readers without input
+    // offset bookkeeping, or a position the input refuses (then nothing
+    // moved).  The chapter search is built on this.
+    virtual std::optional<uint32_t> seekToInputSample(int64_t) { return std::nullopt; }
+    // The input's sample rate, and its length in samples (-1 when unknown);
+    // what the search needs to turn disc time into input offsets and to
+    // keep its probes inside the file
+    [[nodiscard]] virtual double inputSampleRate() const { return 0; }
+    [[nodiscard]] virtual int64_t inputSampleCount() const { return -1; }
+    // A pipe, fifo or udp:// stream: it cannot be positioned and has a
+    // transport of its own (see PlayerState::honor_picture_stops)
+    [[nodiscard]] bool inputIsLive() const { return m_input_is_realtime; }
     virtual void setEfmEnabled(bool) {}
     // Which audio source to demodulate.  MUSE readers know two sources, so the
     // default maps the track onto the EFM on/off switch; the NTSC reader
     // overrides this with its three-way selection (analog/EFM/AC3-RF).
     virtual void setAudioTrack(AudioTrack track) { setEfmEnabled(track == AudioTrack::eEfm); }
-    // CX noise reduction for the NTSC analog audio; a no-op elsewhere
-    virtual void setAnalogCx(bool) {}
     // Taps in the EFM timing recovery's adaptive filter (0 disables it).
     // efmAdaptiveFilterSize() is negative when the reader has no EFM demodulator.
     virtual void setEfmAdaptiveFilterSize(int) {}
     [[nodiscard]] virtual int efmAdaptiveFilterSize() const { return -1; }
 
 protected:
+    // Hands the frames already read but not yet collected back to the reader
+    // thread, for a seek: they are from the abandoned position, and every
+    // one of them would cost the consumer a decode before the first frame
+    // from the new position comes through
+    void discardFilledBuffers() {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        for (auto &b : m_filled_input_buffers)
+            m_vacant_input_buffers.push_back(std::move(b));
+        m_filled_input_buffers.clear();
+        m_cv_vacant.notify_one();
+    }
+
     // input_is_realtime is separate from input_is_fifo since we could have non-real-time input from a pipe
     // that is written to by someone that reads from a file (the example so far is reading from the FmDemodulator)
     FrameReader(Logger &log, const std::string &filename,

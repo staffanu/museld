@@ -2,8 +2,7 @@
 
 Converts between the sample formats laserdisc RF captures come in: the packed 10-bit
 `.lds` of the Domesday Duplicator, the FLAC-compressed `.ldf`, and raw files such as
-`.s16`. One program in place of the `ld-lds-converter` + `ffmpeg` + `flac` pipelines
-that `ld-compress` runs.
+`.s16`.
 
 ```
 ldconv capture.lds capture.ldf        # compress, as ld-compress -c does
@@ -23,7 +22,7 @@ produce, in both directions; `tests/roundtrip.sh` checks that against
 |---|---|---|
 | `lds` | `.lds` | 10-bit unsigned, 4 samples packed into 5 bytes (Domesday Duplicator) |
 | `r30` | `.r30` | 10-bit unsigned, 3 samples per little-endian 32-bit word (deprecated) |
-| `s8` `u8` | `.s8` `.u8` `.r8` | 8-bit raw (cxadc) |
+| `s8` `u8` | `.s8` `.u8` `.r8` | 8-bit raw |
 | `s16` `u16` | `.s16` `.raw` `.u16` `.r16` | 16-bit raw, little endian |
 | `s16be` `u16be` | `.s16be` `.u16be` | 16-bit raw, big endian |
 | `f32` | `.rf` | 32-bit float, ±1.0 full scale |
@@ -46,8 +45,7 @@ Anything that falls outside the destination's range is clamped, and counted in t
 summary.
 
 FLAC cannot express a 40 MHz sample rate, so the rate is stored in the header in kHz —
-40 MHz becomes 40000 Hz, as `ld-compress` does it. `--rate 62.5e6` records 62500 Hz
-instead; the samples are unaffected either way.
+40 MHz becomes 40000 Hz, `--rate 62.5e6` records 62500 Hz.
 
 ## Resolution
 
@@ -55,7 +53,7 @@ instead; the samples are unaffected either way.
 thing ldconv does, and it is there because the compressed size of an RF capture is
 mostly the cost of storing noise: FLAC's predictor cannot predict the low bits, so
 each one of them costs about a bit per sample. Dropping the ones that carry no
-signal makes the file smaller and changes nothing that a decoder can see.
+signal makes the file smaller.
 
 `N` counts against the output format's full scale, not against the capture's own
 range, so it means the same thing whatever went in. A capture that sits in the low
@@ -65,9 +63,7 @@ is 12 bits of signal in a range that `--bits` measures as 16, and needs either a
 `Values` line from `--info` shows which kind a file is.
 
 The samples stay in the same 16-bit domain — the low bits are zeroed, not removed —
-so the output is an ordinary `.ldf` that `ld-decode` and museld read as usual. FLAC
-notices that a whole frame shares those zero bits and stores the narrower width, so
-the saving is real rather than a pile of zeros.
+so the output is an ordinary `.ldf` that `museld` and `ld-decode` read as usual.
 
 `--info` reports how much resolution a file actually uses, which is what says how far
 `--bits` can go for free:
@@ -97,31 +93,15 @@ two bits are below its own noise floor should therefore lose rather more than 16
 from the first two, but that depends on the capture, so measure yours before committing
 to it — the original cannot be recovered.
 
-Rounding is to nearest, and a sample already on a step is left where it is, so
-`--bits` twice is `--bits` once and re-encoding an already-reduced capture costs
-nothing further.
-
 ## Speed
 
-Encoding uses every core. Converting a 1 GB `.lds` (839 M samples, about 21 seconds of
-a 40 MHz capture) on a laptop i7-1185G7, four cores with SMT:
+Encoding is multi-threaded. Converting a 1 GB `.lds` (839 M samples, about 21 seconds of
+a 40 MHz capture) on a laptop i7-1185G7, four cores:
 
 | | Time | Output |
 |---|---|---|
 | `ldconv capture.lds capture.ldf` | 11 s | 590 MB |
 | `ldconv --lpc-order 32 --blocksize 16384 capture.lds capture.ldf` | 69 s | 561 MB |
-| `ld-compress -c capture.lds` | 70 s | 577 MB |
-
-Most of the difference in the first row is that the default compresses less hard than
-`ld-compress` does: a file about 2% larger, in roughly a sixth of the time. Asking for
-comparable compression with `--lpc-order 32 --blocksize 16384` — a longer predictor,
-and larger frames to amortize its coefficients over — takes about as long as
-`ld-compress` and gives the smallest file of the three. Uncompressing is disk-bound
-and takes about the same time either way, though `ld-compress` spends three times the
-CPU on it.
-
-These are single measurements on one machine and one capture, so treat them as rough:
-how much the higher predictor order buys depends on the disc and the capture hardware.
 
 ## Building
 

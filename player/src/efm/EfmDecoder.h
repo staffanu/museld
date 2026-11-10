@@ -57,6 +57,12 @@ private:
 
     static const std::array<uint16_t, 256> c_byte_to_channel_symbols_table;
     static std::array<uint16_t, 256> makeEfmChannelSymbolTable();
+    // The 512 candidates of estimateSymbol() (each byte in both polarities, in
+    // the order byte 0 as is, byte 0 inverted, byte 1, ...), as the three
+    // 5-bit groups of their 15 channel bits: the level before the symbol and
+    // its 14 bits, most significant first
+    static const std::array<std::array<uint8_t, 3>, 512> c_candidate_groups;
+    static std::array<std::array<uint8_t, 3>, 512> makeCandidateGroups();
 
     static const std::array<std::pair<int, bool>, 32> c_initial_delays;
     static std::array<std::pair<int, bool>, 32> makeInitialDelays();
@@ -74,7 +80,7 @@ private:
 
     uint8_t estimateSymbol() const;
     // ML estimate with the runner-up and both scores (the estimate is the best)
-    void estimateSymbolScored(uint8_t &best, uint8_t &second, double &p_best, double &p_second) const;
+    void estimateSymbolScored(uint8_t &best, uint8_t &second, float &p_best, float &p_second) const;
 
     Logger &m_log;
     FILE *m_circ_debug_file;
@@ -114,6 +120,7 @@ private:
     // -3 means that we didn't see the sync sequence S0, S1
     // -2, -1 means that we are in the sync sequence
     int m_subcode_symbol_index;
+    int64_t m_q_frames_logged = 0; // Q frames with a good CRC, for the once-a-second debug dump
     std::array<ByteWithErasureFlag, 33> m_frame; // first byte is the control data
 
     // bits 7-0 correspond to P-W

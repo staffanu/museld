@@ -77,6 +77,20 @@ std::array<uint16_t, 256> EfmDecoder::makeEfmChannelSymbolTable() {
 
 const std::array<uint16_t, 256> EfmDecoder::c_byte_to_channel_symbols_table = makeEfmChannelSymbolTable();
 
+std::array<std::array<uint8_t, 3>, 512> EfmDecoder::makeCandidateGroups() {
+    std::array<std::array<uint8_t, 3>, 512> table{};
+    for (int i = 0; i < 256; i++) {
+        const int seq = c_byte_to_channel_symbols_table[i];
+        for (int polarity = 0; polarity < 2; polarity++) {
+            const int bits = (polarity ? ~seq : seq) & 0x7fff;
+            table[2 * i + polarity] = {(uint8_t)(bits >> 10 & 31), (uint8_t)(bits >> 5 & 31), (uint8_t)(bits & 31)};
+        }
+    }
+    return table;
+}
+
+const std::array<std::array<uint8_t, 3>, 512> EfmDecoder::c_candidate_groups = makeCandidateGroups();
+
 std::array<std::pair<int, bool>, 32> EfmDecoder::makeInitialDelays() {
     std::array<std::pair<int, bool>, 32> delays{};
     for (int i = 0; i < 32; i++)
@@ -316,7 +330,7 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
                 }
                 if (m_symbol_debug_file != nullptr) {
                     uint8_t best, second;
-                    double p_best, p_second;
+                    float p_best, p_second;
                     estimateSymbolScored(best, second, p_best, p_second);
                     float rec[24] = {(float)m_total_efm_frame_count, (float)m_byte_index, octet.isErased() ? 0.0f : 1.0f,
                                      octet.isErased() ? 0.0f : (float)octet.byteValue(), (float)best, (float)second,
@@ -423,6 +437,20 @@ void EfmDecoder::handleSubcode() {
     }
 
     if (crc == 0) {
+        // The whole Q frame at debug level, once a second: control+ADR, TNO,
+        // index, track time, zero, absolute time (IEC 60908 17.5.1; ADR 4
+        // with the same layout on laserdiscs, IEC 60857 amendment 2) -- what
+        // a decoder that keys on the Q timecodes sees of this disc
+        if (m_log.isEnabled(eDebug, eAudio) && ++m_q_frames_logged % 75 == 1) {
+            uint8_t q[12] = {};
+            for (int i = 0; i < 96; i++)
+                if (get_bit(i, 'Q'))
+                    q[i / 8] |= (uint8_t)(0x80 >> (i % 8));
+            m_log.debug(eAudio, std::format(
+                "Subcode Q: ctrl/adr {:02x} tno {:02x} idx {:02x} time {:02x}:{:02x}:{:02x} zero {:02x} "
+                "abs {:02x}:{:02x}:{:02x} crc {:02x}{:02x}",
+                q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7], q[8], q[9], q[10], q[11]));
+        }
         std::optional<SubcodePUse> use;
         // Pre-emphasis
         if ((get_bit(0, 'Q')) == 0 && (get_bit(1, 'Q')) == 0) {
@@ -463,29 +491,54 @@ void EfmDecoder::handleSubcode() {
 // ML estimation of the received symbol -- used only when we do not have a perfect match
 uint8_t EfmDecoder::estimateSymbol() const {
     uint8_t best, second;
-    double p_best, p_second;
+    float p_best, p_second;
     estimateSymbolScored(best, second, p_best, p_second);
     return best;
 }
 
-void EfmDecoder::estimateSymbolScored(uint8_t &best, uint8_t &second, double &p_best, double &p_second) const {
+void EfmDecoder::estimateSymbolScored(uint8_t &best, uint8_t &second, float &p_best, float &p_second) const {
+    // The most likely of the 256 valid symbols (either polarity) given the
+    // soft values of the 15 channel bits, each bit's probability a clamped
+    // linear function of its value.  This runs once per invalid symbol,
+    // which on a badly damaged disc (a rotted or clipped capture) is most
+    // of them, 240k per second, and took four fifths of the decoder's time
+    // as a search over 512 candidates with 15 multiplications each, even
+    // abandoning a candidate as soon as it fell below the best so far.
+    // The product factors over the bits, so the 15 bits are split into
+    // three groups of five and each group's 32 products are tabulated
+    // first (62 multiplications a group, doubling the table a bit at a
+    // time); a candidate is then two multiplications and a compare, with
+    // no branch the predictor can miss.  Same result as the plain search,
+    // first candidate on a tie.  The runner-up is the best scoring other
+    // byte (not the other polarity of the best), for the symbol debug dump.
+    float p_one[15], p_zero[15];
+    for (int j = 0; j < 15; j++) {
+        const float v = m_symbol_history[j];
+        p_one[j] = v > 0.5f ? 1.0f : std::max(0.0f, v + 0.5f);
+        p_zero[j] = v < -0.5f ? 1.0f : std::max(0.0f, 0.5f - v);
+    }
+    float table[3][32];
+    for (int g = 0; g < 3; g++) {
+        float *t = table[g];
+        t[0] = 1.0f;
+        for (int k = 0; k < 5; k++) {
+            // entries 0 .. 2^k - 1 hold the products of the first k bits of
+            // the group; bit k extends them to 2^(k+1)
+            const int j = 5 * g + k;
+            for (int m = (1 << k) - 1; m >= 0; m--) {
+                t[2 * m + 1] = t[m] * p_one[j];
+                t[2 * m] = t[m] * p_zero[j];
+            }
+        }
+    }
     p_best = -1;
     p_second = -1;
     best = second = 0;
     for (int i = 0; i < 256; i++) {
-        const int symbol_sequence = c_byte_to_channel_symbols_table[i];
-        const int seqs[2] = {symbol_sequence, ~symbol_sequence}; // two possibilities
-        double p_sym = 0;
-        for (auto seq: seqs) {
-            double p_tot = 1.0;
-            for (int j = 0; j < 15; j++) {
-                auto v = m_symbol_history[j];
-                double d = (1 << (14 - j)) & seq ? 1.0 : -1.0;
-                double p = d > 0 ? (v > 0.5 ? 1.0 : std::max(0.0, v + 0.5)) : (v < -0.5 ? 1.0 : std::max(0.0, 0.5 - v));
-                p_tot *= p;
-            }
-            p_sym = std::max(p_sym, p_tot);
-        }
+        const auto &g0 = c_candidate_groups[2 * i];
+        const auto &g1 = c_candidate_groups[2 * i + 1];
+        const float p_sym = std::max(table[0][g0[0]] * table[1][g0[1]] * table[2][g0[2]],
+                                     table[0][g1[0]] * table[1][g1[1]] * table[2][g1[2]]);
         if (p_sym > p_best) {
             p_second = p_best;
             second = best;

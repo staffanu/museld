@@ -3,8 +3,7 @@
 
 #include <catch2/catch_all.hpp>
 #include <vector>
-#include "ntsc/NtscCadenceTracker.h"
-#include "ntsc/NtscConstants.h"
+#include "sdtv/NtscCadenceTracker.h"
 #include "musevk/HalfFloatUtil.h"
 
 using FA = NtscCadenceTracker::FieldAction;
@@ -96,10 +95,15 @@ TEST_CASE("a single cut neither breaks the lock nor gets woven") {
     t.update(30, c_motion, c_motion, -1.0f); // phase 0: a normal motion frame
     t.update(31, 10 * c_motion, 10 * c_motion, -1.0f); // cut where the f0 repeat was due
     REQUIRE(t.isLocked());
-    // The missing repeat vetoes this frame's weave, but only this frame's
+    // The missing repeat vetoes the weave until the next expected repeat
+    // (frame 33, phase 3) confirms the lock
     REQUIRE(t.actionForField(31, 0) == FA::eAdaptive);
     REQUIRE(t.actionForField(31, 1) == FA::eAdaptive);
-    for (int f = 32; f < 40; f++)
+    feedPulldownFrame(t, 32);
+    REQUIRE(t.actionForField(32, 0) == FA::eAdaptive);
+    feedPulldownFrame(t, 33);
+    REQUIRE(t.actionForField(33, 1) == FA::eWeave);
+    for (int f = 34; f < 40; f++)
         feedPulldownFrame(t, f);
     REQUIRE(t.isLocked());
     REQUIRE(t.actionForField(36, 0) == FA::eWeave); // phase 1 carries its repeat again
@@ -139,6 +143,48 @@ TEST_CASE("re-locks to a shifted cadence after a break") {
     REQUIRE(t.isLocked());
     REQUIRE(t.actionForField(69, 0) == c_expected_actions[(69 + 2) % 5][0]);
     REQUIRE(t.actionForField(69, 1) == c_expected_actions[(69 + 2) % 5][1]);
+}
+
+TEST_CASE("a phase jump at a cut re-locks within one cycle, and is never woven across") {
+    NullLogger log;
+    NtscCadenceTracker t(log);
+    for (int f = 2; f < 30; f++)
+        feedPulldownFrame(t, f);
+    REQUIRE(t.isLocked());
+    t.update(30, c_motion, c_motion, -1.0f);
+    t.update(31, 10 * c_motion, 10 * c_motion, -1.0f); // cut on the f0 repeat's frame
+    // From here the cadence runs one phase late
+    int relocked_at = -1;
+    for (int f = 32; f < 60; f++) {
+        feedPulldownFrame(t, f, 1);
+        // Nothing woven while the old lock is in doubt or gone
+        if (t.phaseForFrame(f) != (f + 1) % 5)
+            for (int p = 0; p < 2; p++)
+                REQUIRE(t.actionForField(f, p) != FA::eWeave);
+        if (relocked_at < 0 && t.isLocked() && t.phaseForFrame(f) == (f + 1) % 5)
+            relocked_at = f;
+    }
+    // Second miss at frame 33, then the new cadence's repeats on 35 (f0)
+    // and 32/37 (f1): re-locked by the second one of the first full cycle
+    REQUIRE(relocked_at >= 33);
+    REQUIRE(relocked_at <= 37);
+}
+
+TEST_CASE("one stray repeat in a near-static scene does not hand the lock to another phase") {
+    NullLogger log;
+    NtscCadenceTracker t(log);
+    for (int f = 2; f < 30; f++)
+        feedPulldownFrame(t, f);
+    REQUIRE(t.isLocked());
+    // A long dim, nearly still stretch: field 0 at the floor, field 1
+    // ambiguous -- a weak repeat credited to a different phase every frame,
+    // until every hypothesis sits at the score cap
+    for (int f = 30; f < 200; f++)
+        t.update(f, c_floor, 1.7f * c_floor, -1.0f);
+    REQUIRE(t.isLocked());
+    // One noisy frame reads as a clean repeat at the wrong phase
+    t.update(200, c_floor, c_motion, -1.0f); // phase 0, no repeat expected
+    REQUIRE(t.isLocked());
 }
 
 TEST_CASE("weak repeats lock a dim low-motion film scene") {
@@ -204,16 +250,16 @@ TEST_CASE("the noise hint blocks false repeats from weak periodic motion") {
 }
 
 TEST_CASE("MeasureFieldDiffs measures per field and nulls the subcarrier") {
-    std::vector<int16_t> cur(NTSC_TOTAL_WIDTH * NTSC_TOTAL_HEIGHT);
-    std::vector<int16_t> prev(NTSC_TOTAL_WIDTH * NTSC_TOTAL_HEIGHT);
+    std::vector<int16_t> cur(NtscCadenceTracker::c_frame_width * NtscCadenceTracker::c_frame_height);
+    std::vector<int16_t> prev(NtscCadenceTracker::c_frame_width * NtscCadenceTracker::c_frame_height);
     auto h = [](float v) { return (int16_t)HalfFloatUtil::float_to_half(v); };
 
     SECTION("luma step in the second field only") {
         std::fill(cur.begin(), cur.end(), h(0.3f));
         std::fill(prev.begin(), prev.end(), h(0.3f));
         for (int row = 300; row < 400; row++)
-            for (int x = 0; x < NTSC_TOTAL_WIDTH; x++)
-                cur[row * NTSC_TOTAL_WIDTH + x] = h(0.4f);
+            for (int x = 0; x < NtscCadenceTracker::c_frame_width; x++)
+                cur[row * NtscCadenceTracker::c_frame_width + x] = h(0.4f);
         auto d = NtscCadenceTracker::MeasureFieldDiffs(cur.data(), prev.data());
         REQUIRE(d.d0 < 0.001f);
         REQUIRE(d.d1 > 0.02f);
@@ -221,10 +267,10 @@ TEST_CASE("MeasureFieldDiffs measures per field and nulls the subcarrier") {
 
     SECTION("chroma that inverts between frames cancels in the box") {
         static constexpr float pat[4] = {0.2f, 0.0f, -0.2f, 0.0f};
-        for (int row = 0; row < NTSC_TOTAL_HEIGHT; row++)
-            for (int x = 0; x < NTSC_TOTAL_WIDTH; x++) {
-                cur[row * NTSC_TOTAL_WIDTH + x] = h(0.3f + pat[x % 4]);
-                prev[row * NTSC_TOTAL_WIDTH + x] = h(0.3f - pat[x % 4]);
+        for (int row = 0; row < NtscCadenceTracker::c_frame_height; row++)
+            for (int x = 0; x < NtscCadenceTracker::c_frame_width; x++) {
+                cur[row * NtscCadenceTracker::c_frame_width + x] = h(0.3f + pat[x % 4]);
+                prev[row * NtscCadenceTracker::c_frame_width + x] = h(0.3f - pat[x % 4]);
             }
         auto d = NtscCadenceTracker::MeasureFieldDiffs(cur.data(), prev.data());
         REQUIRE(d.d0 < 0.002f);

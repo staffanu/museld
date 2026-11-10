@@ -25,6 +25,11 @@
 #include "ac3/Ac3Decoder.h"
 #include "ac3/Ac3RfDemodulator.h"
 #include "analog/AnalogAudioDemodulator.h"
+#include "analog/CxExpander.h"
+#include <algorithm>
+#include <vector>
+#include <cmath>
+#include <cassert>
 #include "efm/EfmDemodulator.h"
 #include "efm/EfmDecoder.h"
 #include "efm/TwoChannelSample.h"
@@ -55,8 +60,8 @@ void processFile(Logger &logger, Operation input_type,
     double target_sample_frequency, bool analog_cx, double analog_output_frequency) {
 
     reader->initialize();
-    if (initial_seek_seconds != 0)
-        reader->seek((int64_t)(input_sample_frequency * initial_seek_seconds));
+    if (initial_seek_seconds != 0 && !reader->seek((int64_t)(input_sample_frequency * initial_seek_seconds)))
+        throw std::runtime_error(std::format("Cannot seek to {} s in the input", initial_seek_seconds));
     auto *input_buffer = new float[block_size];
 
     switch (input_type) {
@@ -167,16 +172,26 @@ void processFile(Logger &logger, Operation input_type,
 
             AnalogAudioDemodulator analog_demodulator(logger, input_sample_frequency, (int)reader->block_size(),
                 analog_output_frequency, use_simd);
+            CxExpander cx_expander(analog_output_frequency);
 
+            std::vector<TwoChannelFloatSample> demodulated;
             std::vector<TwoChannelSample> output;
             double processed_time = 0.0;
             bool squelch_logged[2] = {false, false};
             while (reader->readFloats(input_buffer) == reader->block_size() &&
                 (!duration_seconds.has_value() || processed_time < duration_seconds.value())) {
 
-                output.clear();
-                analog_demodulator.demodulate(input_buffer, analog_cx, output);
+                demodulated.clear();
+                analog_demodulator.demodulate(input_buffer, demodulated);
                 processed_time += block_size / input_sample_frequency;
+                output.clear();
+                constexpr float scale = 32767.0f * AnalogAudioDemodulator::c_output_level;
+                for (const auto &s : demodulated) {
+                    float left = s.samples[0], right = s.samples[1];
+                    cx_expander.process(left, right, analog_cx);
+                    output.push_back({{(int16_t)std::clamp(left * scale, -32768.0f, 32767.0f),
+                                       (int16_t)std::clamp(right * scale, -32768.0f, 32767.0f)}});
+                }
 
                 for (int c = 0; c < 2; c++) {
                     if (analog_demodulator.squelched(c) != squelch_logged[c]) {
@@ -197,14 +212,23 @@ void processFile(Logger &logger, Operation input_type,
                 std::format("Resampling input at {} MHz to {} MHz", input_sample_frequency / 1e6, target_sample_frequency / 1e6));
             FractionalResampler resampler(block_size);
             double step_size = input_sample_frequency / target_sample_frequency;
-            uint8_t samples[block_size];
+            // Upsampling makes more output than input per block (a block
+            // of 40 MHz samples gives 1.56 blocks at 62.5 MHz): size the
+            // output for it, plus one for the step's rounding
+            std::vector<uint8_t> samples((size_t)std::ceil(block_size / step_size) + 1);
+            // The reader hands out the file's own codes; the output is
+            // unsigned 8-bit, so rescale by the width and offset the sign
+            const float scale = std::ldexp(1.f, 8 - reader->bitsPerSample());
+            const float offset = reader->signedSamples() ? 128.f : 0.f;
             float s;
             while (reader->readFloats(input_buffer) == reader->block_size()) {
                 resampler.updateInput(input_buffer);
-                int i = 0;
-                while (resampler.advanceTimeAndResample(step_size, s))
-                    samples[i++] = (int)s;
-                if (write(out_fd, samples, i) == -1)
+                size_t i = 0;
+                while (resampler.advanceTimeAndResample(step_size, s)) {
+                    assert(i < samples.size());
+                    samples[i++] = (uint8_t)std::clamp(std::lround(s * scale + offset), 0L, 255L);
+                }
+                if (write(out_fd, samples.data(), i) == -1)
                     throw std::runtime_error(std::format("Error writing to output: {}", strerror(errno)));
             }
             break;
@@ -250,11 +274,11 @@ int main(int argc, char *argv[]) {
 
     auto usage = [&options] (std::ostream &out, int status) -> void {
         options.printHelp(out, "ac3rf-efm-decode [options] [<input_file> ...]");
-        out << "\nInput is read from stdin when no file is given, and the output is written to\n"
-               "stdout unless --output-filename says otherwise.  Several input files can be given,\n"
-               "with options in between; each one is decoded with the options in effect where it\n"
-               "appears.  An argument starting with ! is ignored, which is practical for disabling\n"
-               "an option in a saved command line.\n";
+        out << "\nInput is read from stdin when no file is given (or when the file is named \"-\"),\n"
+               "and the output is written to stdout unless --output-filename says otherwise.\n"
+               "Several input files can be given, with options in between; each one is decoded\n"
+               "with the options in effect where it appears.  An argument starting with ! is\n"
+               "ignored, which is practical for disabling an option in a saved command line.\n";
         exit(status);
     };
 
@@ -278,6 +302,10 @@ int main(int argc, char *argv[]) {
                                    "transitions (implies --input-format u8)", [&] () -> void {
         input_format_option = std::make_optional(eUint8);
         operation = EfmTValues;
+        // One byte per T value, about a million per second of audio: the
+        // default block of a million left anything shorter unread (a partial
+        // block at the end is dropped), so take them in small steps
+        block_size = 4096;
     });
     options.option("--resample", "HZ", "Resample the input to HZ and write it as raw u8; no audio "
                                        "is decoded", [&] () -> void {
@@ -474,7 +502,7 @@ int main(int argc, char *argv[]) {
                 option->action();
             } else if (it->find("!", 0) == 0) {
                 it++; // used to ignore options (to easily enable/disable options in debug settings etc.)
-            } else if (it->find("-", 0) == 0) {
+            } else if (*it != "-" && it->find("-", 0) == 0) {
                 std::cerr << "Unknown option: " << *it << std::endl;
                 usage(std::cerr, EXIT_FAILURE);
             } else {
@@ -495,8 +523,11 @@ int main(int argc, char *argv[]) {
                 log.debug(eApplication, std::format("ac3rf-decode version {}", AC3RF_DECODE_VERSION));
                 log.info(eApplication, std::format("Processing input file {}", filename));
                 processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
-                    [&] { auto r = makeInputReader(filename, input_format, block_size);
-                          r->setDcBlocking(true); // RF carries no legitimate DC
+                    [&] { auto r = makeInputReader(filename, input_format, block_size, &log);
+                          // RF carries no legitimate DC; t-values are small
+                          // integers whose mean is the data
+                          if (operation != EfmTValues)
+                              r->setDcBlocking(true);
                           return r; }(), block_size, out_fd, use_simd,
                     efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,
                     efm_t_values_output_filename, efm_circ_debug_filename, efm_symbol_debug_filename, efm_rate_source, efm_c1_strategy, efm_c1_gate_rank, concealment_debug_filename, efm_test_noise, concealment_impl, target_sample_frequency,
@@ -511,7 +542,7 @@ int main(int argc, char *argv[]) {
                 throw std::runtime_error("Input format must be given for stdin");
 
             log.info(eApplication, std::format("Processing stdin"));
-            auto stdin_reader = makeStdinInputReader(input_format_option.value(), block_size);
+            auto stdin_reader = makeInputReader("-", input_format_option.value(), block_size, &log);
             processFile(log, operation, initial_seek_seconds, duration_seconds, input_sample_frequency,
                 std::move(stdin_reader), block_size, out_fd, use_simd,
                 efm_log2_decimation, efm_adaptive_filter_size, efm_retiming_debug_filename,

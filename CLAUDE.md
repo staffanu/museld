@@ -16,6 +16,19 @@ Supported formats:
 - **AC3RF**: QPSK-demodulated AC3 surround audio
 - **Analog**: NTSC analog FM stereo audio (2.3011/2.8125 MHz carriers, CX expansion, squelch)
 
+The SD pipeline (`sdtv/`) is parameterized by a `VideoStandard` (`sdtv/VideoStandard.h`:
+geometry of the line-locked frame buffer, frame rate, RF carrier, VBI lines, noise windows;
+`VideoStandard::ntsc()` and `::pal()`), and the `shaders/sdtv/sdtv_*.comp` sources are compiled
+once per standard, as `ntsc_*.spv` and as `pal_*.spv` with `-DSDTV_PAL` (the `SDTV_*` macros in
+`shaders/muse/muse.h` take the PAL values there).  Names: `Sdtv…` is what both standards share
+(`SdtvFrameReader`, `SdtvDecoder`, ...), `Ntsc…`/`Pal…` only what belongs to one of them
+(`NtscCadenceTracker` for 3:2, `PalCadenceTracker` for 2:2).  `--input-type pal-rf` plays PAL discs in colour: a 3-line comb over
+the ±90° neighbours, a line-pair burst reference for the swinging burst with the V switch voted
+over five lines, the delay-line U/V average and a temporal comb over frames N ± 2 (the decoder
+keeps 3d + 1 frames with d = 2 on PAL and shows frame N two reads behind), the pilot-refined
+timebase, VBI, analog or EFM audio, `--write` and content detection; calibrated on the GGV1011
+test disc.  `docs/pal-decoding.md` describes the PAL path and what it was calibrated against.
+
 NTSC playback in museld selects between the analog, EFM and AC3-RF tracks (`AudioTrack`,
 A key / `--efm` / `--ac3`); a DTS bitstream on the EFM track is auto-detected. AC3 and DTS
 are decoded by `CompressedAudioDecoder` (libavcodec + libswresample), which is gated on
@@ -40,11 +53,14 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
     logging/       — Abstract Logger, StreamLogger (shared by both binaries)
     bch/           — BCH decoder (MUSE control data)
     muse/          — MUSE frame buffers, audio/video decoders, GPU shaders interface
-    ntsc/          — NTSC frame buffers, sync detection, field decoder
+    sdtv/          — Standard definition (NTSC and PAL) frame buffers, sync detection, field
+                     decoder, the video standard descriptor
+    timebase/      — LineTimebase: the feed-forward line timebase (lattice chain, fixed-lag Kalman
+                     smoother, finalized curve) shared by the SDTV and MUSE frame readers
     musevk/        — Vulkan abstraction layer (buffers, images, command pools, compute)
     subtitles/     — SRT parser, stb_truetype-based glyph atlas, GPU subtitle overlay,
                      EIA-608 closed caption decoder (live "CC" track on NTSC discs,
-                     line 21 sliced in ntsc/NtscFrame; --cc-write saves <input>.CC.srt)
+                     line 21 sliced in sdtv/SdtvFrame; --cc-write saves <input>.CC.srt)
     ocr/           — Live subtitle OCR + translation (PP-OCR on ONNX Runtime, no OpenCV):
                      OcrEngine, OcrWorker thread, Vulkan band readback, TranslationWorker
                      (OpenAI-compatible HTTP, cpp-httplib + nlohmann/json).  Built with
@@ -57,7 +73,11 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
     museld.cpp
     ac3rf-efm-decode.cpp
   tests/           — Catch2 unit tests (ReedSolomonTest, BchDecoderTest, SrtParserTest)
-  third_party/     — Vendored single-header libs (stb_truetype.h, miniaudio.h) and the bundled subtitle font (Noto Sans JP, SIL OFL)
+  third_party/     — Vendored single-header libs (stb_truetype.h, miniaudio.h, httplib.h), the ethadc
+                     stream receiver headers (ethadc/, copied verbatim by its update.sh from ../ethadc;
+                     included as "ethadc/X.h" -- never put a third_party subdirectory holding
+                     non-header files on the include path, macOS/Windows ignore case)
+                     and the bundled subtitle font (Noto Sans JP, SIL OFL)
   cmake/           — CMake helpers (ac3rfConfig.cmake.in, modules/FindLIBAV.cmake, etc.)
 fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device
 picostream/        — Standalone: Picoscope oscilloscope capture tool (analog + MSO digital)
@@ -71,10 +91,19 @@ tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parse
                      srt-furigana.py for beginner-friendly Japanese subtitle variants,
                      subocr/ prototype: OCR burned-in Japanese subtitles from rendered
                      frames to .srt and translate them via the Claude API or a local
-                     OpenAI-compatible model server)
+                     OpenAI-compatible model server; muse-ctlscan.py and
+                     muse-fieldpair-{check,analyze}.py scan a 16.2 MHz MUSE baseband
+                     file (u16 capture or --write-muse16 dump) for the control bits and
+                     for frame-paired field processing, the MUSE-III encoder signatures)
 packaging/         — Scripts and per-package READMEs for the Windows/macOS downloads
 docs/              — Reference documentation (player, CLI, AC3-RF decoding, packaging)
 ```
+
+## Developer Backlog
+
+`docs/backlog.md` is the working list of improvements still to make, with the reasoning behind
+each; it is not the user-facing limitations list in `docs/museld.md`.  Move an item there when
+the user asks to park work, and strike it when done.
 
 ## Clangd / LSP Diagnostics
 
@@ -150,18 +179,141 @@ cmake --build player/build-debug
 cd player/build-debug && ctest -V
 ```
 
+**Picture and sound regression** (`tests/regression/regress.py run`, see
+**docs/regression-testing.md**): renders fifteen 4 s reference clips (fetched from multivac on
+first use, 1.5 GB) with lossless `--write` and compares every frame, the audio, the disc codes
+and the probe verdict against the goldens in `tests/regression/golden/`. Output is bit-exact run
+to run on one machine, so PASS means nothing changed; DIFF reports per-frame PSNR against the
+golden render. Run it after any change to the decode (shaders, timebase, dropout, audio), and
+`run --accept --upload madeye.org:/nas/video/LD-Captures/public/museld-testdata/golden` to
+re-record the goldens of an intended change, committing the JSON with the change.
+
 Tests are only built when `-DBUILD_TESTING=ON` is passed. They are in `player/tests/`
 (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`, `FilterSimdParityTest.cpp`, `InputProbeTest.cpp`,
-`NtscCadenceTrackerTest.cpp`, `PrefetchingInputReaderTest.cpp`, `SrtParserTest.cpp`). On macOS
+`NtscCadenceTrackerTest.cpp`, `PalCadenceTrackerTest.cpp`, `PrefetchingInputReaderTest.cpp`, `SrtParserTest.cpp`,
+`DisplayGeometryTest.cpp`). On macOS
 the Homebrew Catch2 is not ASan-instrumented, so run them with
 `ASAN_OPTIONS=detect_container_overflow=0` to avoid a false container-overflow abort at startup.
+
+## Debugging the NTSC decode
+
+Judge sync and level quality from measurements, never from single frames or
+downscaled montages (they lie — clean stretches land in the sample). The
+instruments, all in the RelWithDebInfo build:
+
+**Log categories** (`--log <letter><level>…`, letters MPAVDIO = Main, Performance,
+Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, debug):
+- `M4` — one line per change of the disc code (chapter, frame or time) with the input
+  offset it was read at, to find a disc frame in a capture.
+- `P3` — per-stage timing (demodulator per block, reader and decoder per frame) and
+  the final frames/s; the frame rate is set by the slowest stage, the demodulator.
+- `I3` — timebase: anchoring, resets, lattice slips, re-anchors. `I4` adds one line
+  per frame, `N of M lines unsupported by a nearby sync pulse`; exactly 18 per
+  frame (the two vertical intervals) means every hsync was found.
+- `D3` — every 30 frames: noise/SNR, levels (blanking, white flag, gain), the black
+  level statistic (`picture black: dark peak … held minimum …`, with the automatic
+  NTSC-M/J choice), film cadence lock/unlock events with their reason.
+- `D4` adds per frame: `VBI frame N: codes …; clv/time/pic/chapter/cx`, the VBI
+  slicer's failure reasons per line, and `film cadence: frame N d0 d1 floor locked
+  misses scores`.
+- Options must precede the input file they apply to; trailing options are ignored
+  with a warning.
+- Always add `--no-keys` to museld runs made for measurements or exports: the window then
+  opens without taking the keyboard focus and ignores keys, so the user's typing in another
+  window cannot pause the decode or toggle a stage mid-run.
+
+**Dumps** (environment variables, append to the file; delete old dumps first):
+- `MUSELD_DUMP_DEMOD=<path>` with `MUSELD_DUMP_DEMOD_BLOCKS=<n>` (default 32; a block
+  is 262144 demodulated samples, 8.4 ms at 62.5 MHz input) — the demodulated
+  composite as float32 at the video-decimated rate (31.25 MHz for 62.5 MHz captures,
+  20 MHz for 40 MHz). Sync tip ≈ 0.0, blanking ≈ 0.3, white ≈ 1.0; no de-emphasis.
+- `MUSELD_DUMP_TIMEBASE=<prefix>` — `<prefix>.curve.f64`: (line k, input sample
+  position of its start) per finalized line; `<prefix>.meas.f64`: the accepted sync
+  measurements. Use together with a demod dump **from the same run**.
+- `MUSELD_DUMP_DEMOD` also writes `<path>.do`, the detector's dropout flags of the same blocks
+  as the reader's ring holds them, one byte per decimated sample.
+- `MUSELD_DUMP_DROPOUT=<prefix>` with `MUSELD_DUMP_DROPOUT_BLOCKS=<n>` (default 32) — what the
+  dropout detector sees, per raw input sample: `<prefix>.env.f32` (the 9-sample box of the squared
+  envelope), `<prefix>.demod.f32` (the raw quadrature output its slew test reads) and
+  `<prefix>.do.u8` (its flags per decimated sample). The flags are delayed like the video, two to
+  four decimated samples after the envelope dip. To judge the detector, classify its flag runs by
+  whether the de-emphasised video is pinned outside the signal range there (the frame dump's
+  `<path>` file, not `.raw`: pre-emphasis overshoots on every sharp edge): on The Big Day that
+  separated real dropouts from bright detail where the envelope ratio and the slew count could not,
+  and `sdtv_extend_dropouts.comp` now keeps a flag only on that evidence.
+- `MUSELD_DUMP_VBI_FAIL=<path>` — each VBI code line that failed to slice, as 910
+  floats (the 4 fsc frame-buffer row).
+- `MUSELD_DUMP_FRAME=<path>` — one whole frame buffer (the de-emphasized, rescaled
+  composite, `total_lines × samples_per_line` float32, blanking 0, white 1) and the
+  reader's raw line-locked composite of the same frame as `<path>.raw` and the dropout
+  detector's flags as `<path>.do` (one byte per sample); the first frame after
+  `MUSELD_DUMP_FRAME_NO` (default 30).
+
+**Offline checks** (`tools/`, numpy + scipy + PIL): `ntsc-sync-delta.py <fs> <demod
+dump> <timebase prefix> <out>` plots detected minus reconstructed sync per line —
+must stay within ±0.1 µs with no walks; `ntsc-burst-check.py <prefix> <dump> <out>
+<fs>` measures the curve's timing error against the colour burst phase, content-
+independent — expect ±40 ns and ~1 ns line-to-line jitter; `pal-pilot-check.py <prefix>
+<dump> <out> <fs>` is the PAL counterpart, against the 3.75 MHz pilot burst on the sync tip
+(measured ±30 ns, 2 ns jitter on the GGV1011 test disc and the NYCSTM captures; the reader
+refines PAL line starts with the pilot, and `<prefix>.pilot.f64` holds the corrected curve --
+run the tool on it as a prefix to see the residual, 0.4 ns).
+
+**MUSE timebase**: the two dumps exist for MUSE too: `MUSELD_DUMP_DEMOD` writes
+the demodulated 31.25 MHz baseband (MUSE levels, plateaus of the HD sync at about 57 and 178;
+with `MUSELD_DUMP_DEMOD_AFTER_SEEK=1` it starts at the first block after the seek and writes the
+dump's stream position to `<path>.pos`, which the tool reads) and `MUSELD_DUMP_TIMEBASE=<prefix>`
+writes `<prefix>.muse.f64`, one record per line with the stream position the reader gave pixel 1.
+`tools/muse-sync-delta.py <fs> <dump> <prefix> <out>`
+finds the HD sync edge of every line on its own (midpoint crossing between the plateaus of
+pixels 2-4.5 and 7.5-10, cubic spline) and reports edge minus grid per line, the single-edge
+measurement noise and the wow; `MUSELD_TRACE_SYNC=1` with `--log I4` logs every line the
+reader's tracking misses and every acquisition chain that dies. Measured 2026-10 on three
+62.5 MHz captures (blue, jp-muse, the Sony test disc at 120 s), the dump started at `--seek`:
+edge noise 3.4-4.5 ns rms; the reader's grid within 2.6-2.9 ns rms of the edges (p99 7-8 ns,
+max 15-26), every line tracked, no resets (the per-line DPLL it replaced in 2026-10 was within
+4.7-5.2 ns rms, p99 12-14 ns, max 31-36, with a lag-1 autocorrelation of -0.3 to -0.4 from its
+proportional term chasing that noise).  The MUSE-specific traps met on the way, all found with these instruments:
+the plateau windows must start at pixel 2, not 1.5, since the dip before the sync ends only at
+pixel 1.5 on the negative lines (93% and 12% of positive/negative lines passed the test a sample
+early, against 99.9% and 99%); the tracking window must be predicted from the last edge and the
+chain's period, not from the smoother's look-ahead head, whose 64-line extrapolation is good to
+a few pixels only (15% of lines missed); and MUSE's line-sequential chroma makes a static colour
+edge alternate polarity line to line exactly like the sync, so an acquisition chain is verified
+by the frame pulses of lines 1-2 before it becomes the lattice (the Sony test disc's bars locked
+the chain otherwise). A player spinning up (the first two seconds of the blue capture) hunts
++-2% around nominal speed.
+
+**Sample rates**: anything in the sync pass and timebase that is a count of (decimated)
+samples must be derived from a time, never a constant: a 30 MHz Domesday Duplicator capture
+(`~/Downloads/RF_Reference_30mhz.ddd.s16`, with a 40 MHz capture of the same disc beside it)
+exposed two such constants in 2026-10 -- a back-porch window that reached into the picture at
+15 MHz demod rate, and pulse widths in whole decimated samples (0.53 µs there) that let
+equalizing pulses pass as hsync. Both showed as per-field sawtooth in `ntsc-burst-check.py`,
+vertical-interval missing-runs shorter than 9 in the timebase dump, and `vertical drift`/
+`lattice slipped` warnings. Re-run the 30, 40 and 62.5 MHz checks after touching that code. The slicer's 50% threshold must
+come from the last pulse's own back porch, not a slow average: the WOW demo capture's baseband
+wanders ±4 IRE per rotation (eccentricity), and an averaged reference biased the crossings ±50 ns
+in step with it, which put the two fields a pixel apart (2026-10). `ntsc-sync-delta.py` slices at a
+fixed level and is biased the same way on such captures; the burst check is not. The direct test for
+field displacement is a static-text frame: cross-correlate each odd row with its even neighbours.
+
+**Frames**: `--seek T --export-frame-at T2 --export-frame f.png` writes the decoded
+764×480 image (all of it: the display shows only its 4:3 middle, see `PictureFormat`; `V3`
+logs the part shown and where) (`--field-interpolation intra-field` for a single field, `--no-3d-comb`,
+`--no-film-mode`, `--black-level m|j` to isolate stages). `--export-frame-at` counts
+displayed fields, so do not combine it with `--no-sync`. The GNOME session must be
+unlocked or the PNGs come out black. Test captures on the development machine:
+`~/alien2.ldf` (40 MHz, clean reference), `~/data/white-squall-*.s8` (62.5 MHz s8, noisy,
+strong wow) and `~/data/godzilla*.s8` (62.5 MHz s8, an NTSC-J disc; the first file has a
+cadence phase jump at ~25 s).
 
 ## CI and Packaging
 
 `.github/workflows/ci.yml` builds on Linux, macOS and Windows (MSYS2 UCRT64) on every push,
-and also packages downloadable binaries: three zips per platform (player, player with
-FFmpeg for `--write`, and `ac3rf-efm-decode` alone), attached to a GitHub release when a
-`v*` tag is pushed. The staging scripts live in `packaging/`.
+and also packages downloadable binaries: two zips per platform (the player and the decoder
+CLI, with and without FFmpeg for `--write` and ONNX Runtime for `--ocr`), attached to a
+GitHub release when a `v*` tag is pushed. The staging scripts live in `packaging/`.
 
 Two options exist for the packages and matter when touching the build:
 
@@ -178,7 +330,7 @@ split, what museld loads at runtime, and how Vulkan is wired up on macOS.
 
 ### src/ Internal Structure
 
-The `src/` directory is the include root for both binaries. The `ac3rf` CMake target covers the reusable library (`ac3/`, `analog/`, `efm/`, `filter/`, `rs/`, `logging/`). The `museld` target adds everything else (`muse/`, `ntsc/`, `musevk/`, `bch/`, `util/`, `shaders/`).
+The `src/` directory is the include root for both binaries. The `ac3rf` CMake target covers the reusable library (`ac3/`, `analog/`, `efm/`, `filter/`, `rs/`, `logging/`). The `museld` target adds everything else (`muse/`, `sdtv/`, `musevk/`, `bch/`, `util/`, `shaders/`).
 
 ### Key Design Patterns
 
@@ -188,12 +340,53 @@ The `src/` directory is the include root for both binaries. The `ac3rf` CMake ta
 
 **Pluggable erasure concealment**: Abstract `ErasureConcealer` interface with four implementations (`RepeatingSample`, `LinearInterpolation`, `Ar`, `SlowAr`), selected via CLI.
 
-**Input format abstraction**: `InputReader` specializations with auto-detection by file extension.
+**Chapter search and picture stops**: the Up/Down keys and `--chapter` find a chapter start by
+probing the input (`ChapterSearch`, pure decision logic with a Catch2 test, driven by the
+player loop in `museld.cpp`). Probes use `DecodeControls::metadata_only` (first decoder stage
+only, no picture or audio), absolute seeks (`FrameReader::seekToInputSample`, returning a seek
+generation that every frame carries in `DecodedField::seek_generation`, so frames from before
+the seek are told apart) and the input length (`InputReader::sampleCount()`, taken from the
+file's tail for FLAC: the last Ogg page's granule position, or the last frame header of a
+plain stream). STREAMINFO's sample count is only 36 bits (28 min at 40 MHz), so long captures
+have it at zero or wrapped, and libFLAC refuses seeks beyond a wrapped value: `LdfInputReader`
+zeroes the field in the bytes it hands libFLAC (re-checksumming the Ogg page), which makes it
+seek by stream length instead. A plain FLAC stream (no Ogg, no seek table) is the opposite case:
+libFLAC seeks it from the count and fails every seek without one, so there the count is kept
+when it is plausible for the file size and hidden only when wrapped (the Technidisc capture). A seek the input refuses returns false up the chain
+(`InputReader::seek`, `RfDemodulator::seekLocked`, `FrameReader::seek`) and nothing moves. Readers
+reset their timebase/PLL on the reader thread when a block's generation changes, never from
+the seeking thread, and the NTSC reader drops the partial frame after a reset. A probe costs
+about 50 ms. `DiscInfo` exposes chapter, lead-in/out and the CAV picture stop (which pauses
+playback unless turned off with P).
+
+**Input format abstraction**: `InputReader` specializations (raw widths, lds, FLAC) with
+auto-detection by file extension, reading through a `ByteSource` (`input/ByteSource.h`) that
+hides where the bytes come from: a file, fifo or stdin (`FdByteSource`; `-` names stdin, which
+is live when it is a pipe and a plain seekable source when a file is redirected in, decided by
+`fstat`), a web server via HTTP range requests (`HttpByteSource`, cpp-httplib, prefetching
+3×4 MiB ahead) or the live ethadc UDP capture stream (`EthadcByteSource`, built on the vendored
+`third_party/ethadc` receiver; not in the Windows build). Names starting with `http://` or
+`udp://` select them; `inputIsLive()` replaces the old `filesystem::is_fifo()` checks. A udp://
+stream's format and rate come from its packet headers (`networkStreamInfo()` on the open source;
+options that contradict them are refused), and the ethadc `u10p` format is the `.lds` packing.
+museld opens every input once, in `museld.cpp`, as a `PreparedInput` (`input/PreparedInput.h`)
+that the probe reads and the frame reader then opens as its `InputReader`: a live input cannot
+be reopened where detection left it. Where detection had to decode a live stream (one reader
+per stream, so FLAC works), the player takes that reader over through `RebatchingInputReader`.
+A live input with a detected type is also watched while it plays (`ContentWatch` in
+`InputProbe.h`, fed by `RfDemodulator::readInput` on the demodulator thread, classifying a chunk
+on a thread of its own every 4 s, or every 1 s while the reader has no sync or a lattice losing
+its pulses); three agreeing verdicts of another type end `runPlayer`, `process_file` returns a
+`PlayOutcome` with the type and the reader's released `InputReader`, and `main` calls
+`process_file` again for that type on the same `PlayerSurface` (window and Vulkan device).
 
 **Content-based input detection**: `src/InputProbe.{h,cpp}` (museld only, CPU-only, no GPU)
-detects sample format, MUSE/NTSC RF type and sample rate from short chunks of the file.
-This is museld's default: `--input-type` and `--sample-freq` are probed when not given
-(so fifo input needs both), and `--probe` prints the measurements instead of decoding.
+detects sample format, MUSE/NTSC RF type and sample rate from short windows of samples: a file
+is sampled at a few positions spread over its length, a live input (pipe, fifo, udp://) is read
+window after window until the verdict is clear (what it consumed is gone; the first window is
+replayed to the reader so a FLAC header is not lost). This is museld's default: type, rate and
+format are each detected only when not given (`--input-type`, `--sample-freq`, `--input-format`
+or the extension), and `--probe` prints the measurements instead of decoding.
 
 **No bare `long` for sample offsets or bit patterns**: Windows is LLP64, so `long` is 32
 bits there (this once broke NTSC vertical sync lock on Windows only). Sample/file offsets
@@ -203,7 +396,7 @@ which are 32-bit on MinGW.
 
 **SIMD-aware FIR filtering**: `FirFilterStage.h` has AVX, NEON, and scalar paths. On x86 the AVX path is compiled in regardless of `-march` (function-level target attribute) and chosen at runtime via CPUID, so `MUSELD_ARCH` sets which CPUs can run the binary without deciding whether AVX is used. `--simd`/`--no-simd` override the automatic choice; forcing `--simd` on a CPU without support is an error.
 
-**Video file output presets**: `museld --write <file> --write-preset standard|archival` (`VideoFileWriter`, `VideoWriterOptions.h`). `standard` = H.264 (libx264, CRF) + AAC in MP4; `archival` = lossless FFV1 16-bit + PCM in Matroska. Container/codecs come from the preset, not the filename extension. Color metadata (BT.709 for MUSE, SMPTE 170M for NTSC, full range) is tagged per input type. Audio is kept in sync with the video clock: small deficits (25–100 ms) are concealed by stretching/interpolation, larger gaps by silence with a fade-out, excess audio by dropping samples. For batch rendering add `--no-sync`, otherwise the display loop caps decoding at 1.0x realtime. Raw captures without a recognized extension need `--input-format` (e.g. `s16`).
+**Video file output presets**: `museld --write <file> --write-preset standard|archival` (`VideoFileWriter`, `VideoWriterOptions.h`). `standard` = H.264 (libx264, CRF) + AAC in MP4; `archival` = lossless FFV1 16-bit + PCM in Matroska. Container/codecs come from the preset, not the filename extension. Color metadata (BT.709 for MUSE, SMPTE 170M for NTSC, full range) is tagged per input type. Audio is kept in sync with the video clock: small deficits (25–100 ms) are concealed by stretching/interpolation, larger gaps by silence with a fade-out, excess audio by dropping samples. For batch rendering add `--no-sync`, otherwise the display loop caps decoding at 1.0x realtime. Raw captures without a recognized extension need `--input-format` (e.g. `s16`). The writer (`VideoFileOutput` in `museld.cpp`) is owned by `main`, not `process_file`: consecutive inputs with the same `--write` name go into one file (checked to decode to the same size, rate and audio stream kind), a new name or the end of the inputs closes it.
 
 ### Data Flow
 
@@ -222,15 +415,17 @@ fractional resampler → EfmDecoder → CIRC C1/C2 → concealment → pop detec
 
 **MUSE path:**
 ```
-RF (62.5 MHz) → RF demod → ResamplingInputReader DPLL (16.2 MHz) →
+RF (62.5 MHz) → RF demod → MuseFrameReader (feed-forward timebase: HD sync edge per line →
+line lattice → fixed-lag Kalman smoother → per-line resample to 16.2 MHz) →
 MUSE frame buffer → video/audio split → Vulkan GPU filters →
 HD video + miniaudio
 ```
 
 **NTSC path:**
 ```
-RF (40 MHz) → NtscRfDemodulator → NtscInputReader DPLL →
-NTSC frame buffer → Vulkan GPU color decode → video output
+RF (40 MHz) → SdtvRfDemodulator → SdtvFrameReader (feed-forward timebase: sync pulse
+pass → line lattice → fixed-lag Kalman smoother → per-line resample, no DPLL) →
+NTSC frame buffer (4 fsc, 910×525) → Vulkan GPU color decode → video output
 ```
 
 ### Object Lifetimes and Teardown (museld)
@@ -246,15 +441,20 @@ they use is destroyed); worker-thread exceptions are marshalled via
 `exception_ptr` and rethrown on the consumer's thread (`getNextInputBuffer`
 ultimately rethrows on the main thread — never `std::exit` from a worker);
 frame readers call `RfDemodulator::requestStop()` before joining their reader
-thread (deadlock otherwise); destructors never throw. `process_file` tears
-down via a RAII guard: reader → Vulkan → GLFW window, in that order.
+thread (deadlock otherwise); destructors never throw. `process_file` owns the
+window, the `VulkanManager`, the reader (made by a callable once the device exists) and the
+player's objects, declared in that order, so stack unwinding tears down player objects and
+decoder → reader (joining its threads, freeing its blocks) → Vulkan device → window on every
+path; no explicit teardown guard. `VulkanManager::cleanup()` logs the memory still
+sub-allocated when the device goes, and the wrappers' destructors skip a dead device via
+`deviceAlive()`, so an ownership mistake is reported, not crashed on.
 
 ### museld Threading
 
 - Main thread: Vulkan command recording + GLFW event loop
-- Worker thread: Resampling DPLL (CPU bottleneck)
+- Reader thread: the sync measurement, timebase fit and per-line resampling (about 2 ms per frame for NTSC, 1 ms for MUSE); the lattice, smoother and curve are `timebase/LineTimebase`, shared by `SdtvFrameReader` and `MuseFrameReader`, which supply the standard's sync detection, vertical anchor and resampling
 - Demodulator thread (`museld-demod`): input read + RF demod GPU pipeline; logs per-section timing at info level (`ePerformance`), for both MUSE and NTSC
-- EFM worker thread (`museld-efm`): EFM demodulation off the demodulator thread; blocks flow vacant → demod → EFM queue → filled, order preserved by the single FIFO worker. The NTSC worker (EFM or analog demod always runs), the NTSC reader thread (DPLL vs input wait per frame) and the NTSC decoder (per-section, including the fence waits and the host reads of mapped buffers) also log `ePerformance` timing
+- EFM worker thread (`museld-efm`): EFM demodulation off the demodulator thread; blocks flow vacant → demod → EFM queue → filled, order preserved by the single FIFO worker. The NTSC worker (EFM or analog demod always runs), the NTSC reader thread (timebase and resampling vs input wait per frame) and the NTSC decoder (per-section, including the fence waits and the host reads of mapped buffers) also log `ePerformance` timing
 - GPU: Async compute via SPIR-V shaders (`player/src/shaders/*.comp`)
 
 ### Compiler Flags

@@ -101,6 +101,11 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     auto t0 = chrono::high_resolution_clock::now();
 
+    // A metadata probe (the chapter search) wants the disc code of the frame
+    // just read and nothing else: the picture stays as it is, no audio
+    const bool decode_video = m_decode_video && !controls.metadata_only;
+    const bool decode_audio = m_decode_audio && !controls.metadata_only;
+
     std::unique_ptr<MuseInputBlock> input_block = nullptr;
     InputStatus input_status = InputStatus::eNormal;
     if (m_field_index == 0 && !redo_last_field) {
@@ -127,6 +132,7 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
         m_frame_buffers.pop_back();
         m_frame_buffers.push_front(frame_buffer);
         frame_buffer->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_muse_sample);
+        m_frame_seek_generation = input_block->seek_generation;
         shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
 
         // Decode the control signal on the *raw* frame so the equaliser can pick the
@@ -271,7 +277,7 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
     // Always begin the batch here since it will wait for the first stage semaphore to complete
     // (or it won't be unsignaled)
     m_second_stage_command_buffer->begin();
-    if (m_decode_video && (m_decode_all_fields || m_field_index == 0)) {
+    if (decode_video && (m_decode_all_fields || m_field_index == 0)) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
         out.last_frame_buffer_input_offset = m_frame_buffers[0]->getInputOffset();
@@ -307,7 +313,7 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
         m_frame_buffers[0]->processDiscCode();
     }
 
-    if (m_decode_audio && m_field_index == 0) {
+    if (decode_audio && m_field_index == 0) {
         if (efm_audio && input_block != nullptr) {
             auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
             for (const auto &s : m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis())) {
@@ -342,6 +348,8 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
         m_field_index = (m_field_index + 1) % 2;
 
     out.disc_info = m_frame_buffers[0]->getDiscCode();
+    out.disc_info_input_offset = m_frame_buffers[0]->getInputOffset();
+    out.seek_generation = m_frame_seek_generation;
 
     return true;
 }

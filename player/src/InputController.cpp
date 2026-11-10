@@ -11,6 +11,42 @@
 #include "PlayerState.h"
 #include "logging/Logger.h"
 
+bool startChapterSearch(PlayerState &state, const ReaderControls &reader, Logger &log,
+                        ChapterSearch::Direction direction, std::optional<int> target_chapter) {
+    if (state.chapter_search)
+        return false; // one at a time
+    const auto &info = state.last_decoded.disc_info;
+    if (!info || !info->chapter()) {
+        state.osd_text = "NO CHAPTER CODE";
+        return false;
+    }
+    if (!reader.seekToInputSample || reader.samples_per_second <= 0) {
+        state.osd_text = "SEARCH NOT AVAIL";
+        return false;
+    }
+    const ChapterSearch::Reading here{state.last_decoded.disc_info_input_offset, info->chapter(),
+                                      info->isLeadIn(), info->isLeadOut()};
+    const ChapterSearch::Params params{reader.samples_per_second,
+                                       reader.input_sample_count ? reader.input_sample_count() : -1};
+    state.chapter_search = target_chapter
+            ? std::make_unique<ChapterSearch>(params, here, *target_chapter)
+            : std::make_unique<ChapterSearch>(params, here, direction);
+    state.search_action_pending = true;
+    // The search needs the decoder running; back to the pause when done.
+    // The OSD text is drawn into the displayed image, which the search
+    // leaves as it is, so re-decode it once first: that clears whatever
+    // text is on it before "SEARCH" goes on.
+    state.search_resume_paused = state.paused;
+    state.paused = false;
+    state.redo_last_field = true;
+    state.paused_countdown = 0;
+    log.info(eApplication, std::format("Chapter search: {} from chapter {} at input sample {}",
+                                       target_chapter ? std::format("chapter {}", *target_chapter)
+                                       : direction == ChapterSearch::Direction::eNext ? "next" : "previous",
+                                       *info->chapter(), here.offset));
+    return true;
+}
+
 bool InputController::checkKey(GLFWwindow *window, int key) {
     if (glfwGetKey(window, key) == GLFW_PRESS) {
         if (m_keys_down.find(key) == m_keys_down.end()) {
@@ -32,6 +68,8 @@ bool InputController::poll(GLFWwindow *window,
                            int window_width,
                            int window_height) {
     glfwPollEvents();
+    if (m_ignore_keys)
+        return true;
 
     if (checkKey(window, GLFW_KEY_ESCAPE) || checkKey(window, GLFW_KEY_Q))
         return false;
@@ -68,8 +106,9 @@ bool InputController::poll(GLFWwindow *window,
         if (state.zoom_factor != 1) {
             state.zoom_center.first = std::max(0.5 / state.zoom_factor,
                                                state.zoom_center.first - zoom_step / state.zoom_factor);
+        } else if (!reader.seek(-10)) {
+            state.osd_text = "SEEK FAILED";
         } else {
-            reader.seek(-10);
             // Keep the stream clock (subtitle fallback time base) in step.  The
             // input readers clamp backward seeks at the start of the input, so
             // clamp the clock the same way; stream_seconds goes negative when
@@ -86,8 +125,9 @@ bool InputController::poll(GLFWwindow *window,
         if (state.zoom_factor != 1) {
             state.zoom_center.first = std::min(1.0 - 0.5 / state.zoom_factor,
                                                state.zoom_center.first + zoom_step / state.zoom_factor);
+        } else if (!reader.seek(10)) {
+            state.osd_text = "SEEK FAILED";
         } else {
-            reader.seek(10);
             state.stream_seek_offset_seconds += 10.0;
             if (state.paused) {
                 state.paused = false;
@@ -95,13 +135,28 @@ bool InputController::poll(GLFWwindow *window,
             }
         }
     }
+    // Up/Down: the next/previous chapter, found by probing the input (see
+    // ChapterSearch; the loop in runPlayer drives it).  Like Left/Right
+    // they pan instead while zoomed.
     if (checkKey(window, GLFW_KEY_UP)) {
-        state.zoom_center.second = std::max(0.5 / state.zoom_factor,
-                                            state.zoom_center.second - zoom_step / state.zoom_factor);
+        if (state.zoom_factor != 1) {
+            state.zoom_center.second = std::max(0.5 / state.zoom_factor,
+                                                state.zoom_center.second - zoom_step / state.zoom_factor);
+        } else {
+            startChapterSearch(state, reader, m_log, ChapterSearch::Direction::eNext);
+        }
     }
     if (checkKey(window, GLFW_KEY_DOWN)) {
-        state.zoom_center.second = std::min(1.0 - 0.5 / state.zoom_factor,
-                                            state.zoom_center.second + zoom_step / state.zoom_factor);
+        if (state.zoom_factor != 1) {
+            state.zoom_center.second = std::min(1.0 - 0.5 / state.zoom_factor,
+                                                state.zoom_center.second + zoom_step / state.zoom_factor);
+        } else {
+            startChapterSearch(state, reader, m_log, ChapterSearch::Direction::ePrevious);
+        }
+    }
+    if (checkKey(window, GLFW_KEY_P)) {
+        state.honor_picture_stops = !state.honor_picture_stops;
+        state.osd_text = state.honor_picture_stops ? "PICTURE STOPS ON" : "PICTURE STOPS OFF";
     }
 
     if (checkKey(window, GLFW_KEY_1)) {
@@ -214,9 +269,11 @@ bool InputController::poll(GLFWwindow *window,
                 state.osd_text = "DROPOUT ENABLED";
                 break;
         }
+        if (state.paused) state.redo_last_field = true;
     }
     if (checkKey(window, GLFW_KEY_L)) {
         state.enable_non_linear = !state.enable_non_linear;
+        if (state.paused) state.redo_last_field = true;
         state.osd_text = state.enable_non_linear ? "NON-LINEAR DE-EMPH ON" : "NON-LINEAR DE-EMPH OFF";
     }
     if (checkKey(window, GLFW_KEY_C)) {
@@ -280,7 +337,7 @@ bool InputController::poll(GLFWwindow *window,
                 state.aspect_mode = AspectMode::eZoom;
                 break;
             case AspectMode::eZoom:
-                state.aspect_mode = state.source_aspect < 1.5 ? AspectMode::eSqueeze : AspectMode::eStretch;
+                state.aspect_mode = state.picture_format.can_squeeze ? AspectMode::eSqueeze : AspectMode::eStretch;
                 break;
             case AspectMode::eSqueeze:
                 state.aspect_mode = AspectMode::eStretch;
@@ -290,6 +347,27 @@ bool InputController::poll(GLFWwindow *window,
                 break;
         }
         state.osd_text = std::format("ASPECT {}", aspectModeName(state.aspect_mode));
+    }
+    if (checkKey(window, GLFW_KEY_O)) {
+        // How much of the edges to hide: the standard picture, a TV's
+        // overscan on top of it, or nothing at all (the whole decoded image,
+        // which for NTSC includes the blanking margins at the sides)
+        const bool has_margins = state.picture_format.picture_x0 > 0
+                                 || state.picture_format.picture_x1 < state.picture_format.width;
+        if (state.full_image) {
+            state.full_image = false;
+            state.overscan = 0.0;
+        } else if (state.overscan < 0.0249) {
+            state.overscan = 0.025;
+        } else if (state.overscan < 0.0499) {
+            state.overscan = 0.05;
+        } else if (has_margins) {
+            state.full_image = true;
+        } else {
+            state.overscan = 0.0;
+        }
+        state.osd_text = state.full_image ? "OVERSCAN OFF: FULL IMAGE"
+                                          : std::format("OVERSCAN {:g}%", state.overscan * 100);
     }
     if (checkKey(window, GLFW_KEY_Z)) {
         state.zoom_factor = (state.zoom_factor * 2) % 7;

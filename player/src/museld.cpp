@@ -1,11 +1,13 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <cstring>
 #include <algorithm>
 #include <filesystem>
 #include <format>
 #include <functional>
 #include <chrono>
+#include <thread>
 #include <utility>
 
 #ifdef _WIN32
@@ -25,6 +27,7 @@
 #include "FrameReader.h"
 #include "TextRenderer.h"
 #include "Decoder.h"
+#include "ChapterSearch.h"
 #include "PlayerState.h"
 #include "OsdOverlay.h"
 #include "FrameBlitter.h"
@@ -38,19 +41,22 @@
 #include "input/InputReader.h"
 #include "input/InputReaderFactory.h"
 #include "InputProbe.h"
+#include "input/PreparedInput.h"
+#include "input/ByteSource.h"
 #ifdef HAVE_OCR
 # include <map>
 # include "ocr/OcrBandCapture.h"
 # include "ocr/OcrWorker.h"
 # include "ocr/TranslationWorker.h"
 #endif
-#include "muse/ResamplingFrameReader.h"
+#include "muse/MuseFrameReader.h"
 #include "muse/PhaseCorrect16MHzFrameReader.h"
 #include "muse/MuseDecoder.h"
 #include "muse/MuseConstants.h"
-#include "ntsc/NtscConstants.h"
-#include "ntsc/NtscFrameReader.h"
-#include "ntsc/NtscDecoder.h"
+#include <numeric>
+#include "sdtv/VideoStandard.h"
+#include "sdtv/SdtvFrameReader.h"
+#include "sdtv/SdtvDecoder.h"
 #include "VideoWriterOptions.h"
 #include "CliOptions.h"
 
@@ -64,7 +70,12 @@ class VideoFileWriter {}; // stub for non-libav builds; never instantiated
 
 using namespace std;
 
+// The description of the most recent GLFW error, for the message of the
+// exception thrown when initialization or window creation fails
+static std::string g_last_glfw_error;
+
 void glfw_error_callback(int error, const char* description) {
+    g_last_glfw_error = description;
     fprintf(stderr, "Error %d: %s\n", error, description); // FIXME: use logging framework
 }
 
@@ -328,14 +339,17 @@ static std::vector<std::pair<std::string, std::string>> discoverSubtitleFiles(
     return found;
 }
 
-static void runPlayer(Logger &log,
+// Returns the other type the content watch found, when the loop ended for
+// that; nullopt when the input ended or the user quit
+static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                       musevk::VulkanManager &manager,
                       Decoder &decoder,
                       ReaderControls &reader_controls,
                       GLFWwindow *window,
-                      bool full_screen,
+                      bool full_screen, bool no_keys,
                       AspectMode initial_aspect_mode,
-                      double source_aspect,
+                      const PictureFormat &picture_format,
+                      bool initial_full_image, double initial_overscan,
                       int window_w, int window_h,
                       bool start_paused,
                       Decoder::FieldInterpolationMode initial_field_interpolation_mode,
@@ -355,12 +369,16 @@ static void runPlayer(Logger &log,
                       double export_frame_after_seconds,
                       double write_duration_seconds,
                       double seconds_per_iteration,
-                      double initial_seek_seconds) {
+                      int pace_slack_fields,
+                      double initial_seek_seconds,
+                      std::optional<int> start_chapter) {
     vk::Device &device = manager.getDevice();
+    std::optional<InputProbeResult::Type> switched;
 
-    vk::SemaphoreCreateInfo semaphoreInfo{};
-    auto image_available_semaphore = device.createSemaphore(semaphoreInfo);
-    auto render_finished_semaphore = device.createSemaphore(semaphoreInfo);
+    // A unique handle: released on every exit path, an exception's unwinding
+    // included (as a raw handle it leaked whenever the player loop threw)
+    vk::UniqueSemaphore image_available_semaphore_holder = device.createSemaphoreUnique(vk::SemaphoreCreateInfo{});
+    const vk::Semaphore image_available_semaphore = image_available_semaphore_holder.get();
 
     {
         musevk::CommandPool command_pool(manager);
@@ -372,6 +390,11 @@ static void runPlayer(Logger &log,
 
         PlayerState state;
         state.stream_start_seconds = initial_seek_seconds;
+        // A live source has a transport of its own: a disc player feeding
+        // museld stops on the picture stop itself, and a pause here on top
+        // of it would have to be released separately (and again on every
+        // frame while the player sits on its still).  P turns them on.
+        state.honor_picture_stops = !reader_controls.input_is_live;
         state.paused_countdown = start_paused ? 5 : 0;
         state.field_interpolation_mode = initial_field_interpolation_mode;
         state.use_3d_comb = initial_use_3d_comb;
@@ -379,11 +402,13 @@ static void runPlayer(Logger &log,
         state.analog_cx_mode = initial_cx_mode;
         state.black_level_mode = initial_black_level_mode;
         state.aspect_mode = initial_aspect_mode;
-        state.source_aspect = source_aspect;
+        state.picture_format = picture_format;
+        state.full_image = initial_full_image;
+        state.overscan = initial_overscan;
 
         OsdOverlay osd;
         FrameBlitter blitter;
-        InputController input(log);
+        InputController input(log, no_keys);
         FrameExporter frame_exporter(log, manager, command_pool);
 
         // All tracks are parsed and warmed into the shared glyph atlas up front,
@@ -502,6 +527,16 @@ static void runPlayer(Logger &log,
 
         auto t0 = chrono::high_resolution_clock::now();
         int disc_code_logged_minute = 0; // minute 0 is not logged: the decoder is still locking
+        std::string disc_code_logged;    // M4: the last disc code logged, one line per change
+
+        // Real-time pacing where the swap chain's vsync cannot provide it:
+        // the loop presents one field per refresh, which is real time for
+        // 60 Hz material on a 60 Hz display but 20 % fast for PAL's 50
+        // fields/s.  Each decoded field then waits for its stream time
+        // against this wall clock, re-based whenever a loop iteration does
+        // not advance the stream (a pause, an input timeout).
+        auto pace_origin = chrono::steady_clock::now();
+        int64_t paced_fields = 0;
 
         auto make_controls = [&](bool redo) {
             return Decoder::DecodeControls{
@@ -515,22 +550,144 @@ static void runPlayer(Logger &log,
                     dropout_mode,
                     output_yuv,
                     state.black_level_mode,
+                    // metadata_only: a probe; a redo during the search is the
+                    // one clean decode of the displayed field it starts with
+                    state.chapter_search != nullptr && !redo,
             };
+        };
+
+        // Moves playback to an input sample offset and keeps the stream clock
+        // (the subtitle fallback time base) in step: afterwards the stream
+        // position reads as the file position of that offset.  Returns false
+        // when the reader cannot seek there.
+        auto seekToInputSample = [&](int64_t offset) -> bool {
+            if (!reader_controls.seekToInputSample || reader_controls.samples_per_second <= 0)
+                return false;
+            const auto generation = reader_controls.seekToInputSample(offset);
+            if (!generation)
+                return false;
+            state.search_generation = *generation;
+            const double file_seconds = (double)offset / reader_controls.samples_per_second;
+            state.stream_seek_offset_seconds = file_seconds - state.stream_start_seconds
+                                               - state.field_count * seconds_per_iteration;
+            return true;
+        };
+
+        // Carries out the chapter search's pending action.  The search ends
+        // where the chapter was found, or back where it started on failure.
+        auto runChapterSearchAction = [&]() {
+            using Kind = ChapterSearch::Action::Kind;
+            const auto &action = state.chapter_search->action();
+            switch (action.kind) {
+                case Kind::eWait:
+                    break;
+                case Kind::eSeek:
+                    if (!seekToInputSample(action.offset)) {
+                        // A reader that can seek but was refused this position
+                        // (the input's end, a container limit) stays put
+                        state.osd_text = reader_controls.seekToInputSample && reader_controls.samples_per_second > 0
+                                         ? "SEEK FAILED" : "SEARCH NOT AVAIL";
+                        state.chapter_search.reset();
+                        break;
+                    }
+                    state.osd_text = "SEARCH";
+                    break;
+                case Kind::eDone:
+                case Kind::eFailed: {
+                    const bool found = action.kind == Kind::eDone;
+                    const int64_t destination = found ? action.offset : state.chapter_search->originOffset();
+                    log.info(eApplication, found
+                             ? std::format("Chapter search: chapter {} found at input sample {} after {} probes",
+                                           action.chapter, action.offset, state.chapter_search->probes())
+                             : std::format("Chapter search: {} after {} probes, returning to input sample {}",
+                                           action.reason, state.chapter_search->probes(), destination));
+                    seekToInputSample(destination);
+                    // Shown with the first frame from there, not on the probe image
+                    state.osd_text_pending = found ? std::format("CHAPTER {}", action.chapter) : action.reason;
+                    state.osd_text_pending_generation = state.search_generation;
+                    if (state.search_resume_paused)
+                        state.paused_countdown = 5;
+                    state.chapter_search.reset();
+                    break;
+                }
+            }
         };
 
         while ((state.paused && !state.redo_last_field)
                || decoder.next(make_controls(state.redo_last_field), state.last_decoded)) {
 
+            // A chapter search owns the decoder while it runs: its probe
+            // frames are not played (no clock, picture, audio, captions or
+            // file output), only read for their disc code
+            const bool searching = state.chapter_search != nullptr;
+
+            // A live input that now carries another type: this player is
+            // done, the caller starts one for that type on the same stream
+            if (reader_controls.otherTypeDetected)
+                if (auto other = reader_controls.otherTypeDetected()) {
+                    switched = other;
+                    break;
+                }
+            if (reader_controls.signalPresent)
+                state.no_signal = !reader_controls.signalPresent();
+
             // Only fields that were actually decoded: next() also returns true
             // when the input timed out, and counting those would make
             // --export-frame-at fire early and the frame rate below flattering.
-            if (!state.paused && state.last_decoded.decoded)
+            if (!state.paused && state.last_decoded.decoded && !searching)
                 state.field_count++;
             state.stream_seconds = state.field_count * seconds_per_iteration
                                    + state.stream_seek_offset_seconds;
             state.redo_last_field = false;
-            if (!state.last_decoded.black_level_event.empty())
-                state.osd_text = state.last_decoded.black_level_event;
+
+            // --chapter: once the disc code is readable, go there.  Before
+            // the first chapter code every frame is a candidate, and a disc
+            // without chapter codes just plays from the start.
+            if (start_chapter && !searching && state.last_decoded.decoded && state.last_decoded.disc_info
+                && state.last_decoded.disc_info->chapter()) {
+                if (!startChapterSearch(state, reader_controls, log, ChapterSearch::Direction::eNext, start_chapter))
+                    log.warn(eApplication, std::format("--chapter {}: {}", *start_chapter, state.osd_text));
+                start_chapter.reset();
+            }
+
+            if (!searching && !state.osd_text_pending.empty() && state.last_decoded.decoded
+                && state.last_decoded.seek_generation == state.osd_text_pending_generation) {
+                state.osd_text = std::move(state.osd_text_pending);
+                state.osd_text_pending.clear();
+            }
+
+            if (searching) {
+                // Frames from before the pending probe's seek (still in the
+                // pipeline) say nothing about where it landed
+                if (!state.search_action_pending && state.last_decoded.decoded
+                    && state.last_decoded.seek_generation == state.search_generation) {
+                    ChapterSearch::Reading reading{state.last_decoded.disc_info_input_offset};
+                    if (const auto &info = state.last_decoded.disc_info) {
+                        reading.chapter = info->chapter();
+                        reading.lead_in = info->isLeadIn();
+                        reading.lead_out = info->isLeadOut();
+                    }
+                    if (state.chapter_search->feed(reading).kind != ChapterSearch::Action::Kind::eWait)
+                        state.search_action_pending = true;
+                }
+                if (state.search_action_pending) {
+                    state.search_action_pending = false;
+                    runChapterSearchAction();
+                }
+            } else if (state.honor_picture_stops && !vfw && !export_frame_filename && !no_keys && !state.paused
+                       && state.last_decoded.decoded && state.last_decoded.disc_info
+                       && state.last_decoded.disc_info->pictureStop()
+                       && state.last_decoded.field_parity == 1 // the frame is complete on screen
+                       && state.last_picture_stop_offset != state.last_decoded.disc_info_input_offset) {
+                // The disc asks for a still here (IEC 60857 10.1.4); once per
+                // stop, so resuming plays on through it.  Not under --no-keys:
+                // a still that no key can release would hang the run
+                state.last_picture_stop_offset = state.last_decoded.disc_info_input_offset;
+                state.paused = true;
+                state.osd_text = "PICTURE STOP";
+                log.info(eApplication, std::format("Picture stop at input sample {}",
+                                                   state.last_decoded.disc_info_input_offset));
+            }
 
             // Once a minute of stream time, log the decoded field count against the
             // disc's own time code.  The offset is what to shift .srt files made from
@@ -548,9 +705,23 @@ static void runPlayer(Logger &log,
                 }
             }
 
+            // M4: every change of the disc code with its input offset, to find a disc
+            // frame in a capture
+            if (log.isEnabled(eDebug, eApplication) && state.last_decoded.disc_info) {
+                std::string code;
+                for (const auto &line : state.last_decoded.disc_info->asStrings())
+                    code += (code.empty() ? "" : "; ") + line;
+                if (code != disc_code_logged) {
+                    disc_code_logged = code;
+                    log.debug(eApplication, std::format("disc code at input offset {} ({:.3f} s): {}",
+                                                        state.last_decoded.disc_info_input_offset,
+                                                        state.field_count * seconds_per_iteration, code));
+                }
+            }
+
             // Scripted export: decode until the requested stream position is reached
             bool scripted_export = false;
-            if (export_frame_filename &&
+            if (export_frame_filename && !searching &&
                 state.field_count * seconds_per_iteration >= export_frame_after_seconds) {
                 state.export_frame = true;
                 scripted_export = true;
@@ -558,7 +729,7 @@ static void runPlayer(Logger &log,
 
             // Export before the OSD and subtitles are drawn into the image, so
             // the file contains only the decoded picture
-            if (state.export_frame) {
+            if (state.export_frame && !searching) {
                 state.export_frame = false;
                 auto path = frame_exporter.exportFrame(*images.out_image,
                                                        scripted_export ? export_frame_filename : std::nullopt);
@@ -568,7 +739,7 @@ static void runPlayer(Logger &log,
                                       : "EXPORT FAILED";
             }
 
-            if (cc_track_index >= 0 && state.last_decoded.cc_bytes && subtitle_tracks) {
+            if (cc_track_index >= 0 && state.last_decoded.cc_bytes && subtitle_tracks && !searching) {
                 // After a seek the caption memories describe the abandoned
                 // stream position; a forward jump also loses the pop-on load
                 // in progress, so start over in both directions
@@ -599,7 +770,7 @@ static void runPlayer(Logger &log,
 
 #ifdef HAVE_OCR
             if (ocr_worker) {
-                if (!state.paused && state.last_decoded.decoded
+                if (!state.paused && state.last_decoded.decoded && !searching
                     && ++ocr_sample_countdown >= ocr_sample_every) {
                     ocr_sample_countdown = 0;
                     int band_width, band_height;
@@ -662,7 +833,7 @@ static void runPlayer(Logger &log,
 #endif
 
 #ifdef HAVE_LIBAV
-            if (vfw) {
+            if (vfw && !searching) {
                 vfw->addVideoFrameWithAudio(images.out_Y, images.out_U, images.out_V,
                                             state.last_decoded.audio_mode,
                                             state.last_decoded.audio_sample_count,
@@ -675,7 +846,7 @@ static void runPlayer(Logger &log,
 #endif
 
             if (audio_playback && state.last_decoded.audio_sample_count != 0
-                && state.last_decoded.audio_mode != MODE_UNKNOWN && !state.paused) {
+                && state.last_decoded.audio_mode != MODE_UNKNOWN && !state.paused && !searching) {
                 // Channel selection for the listener (bilingual discs, or the
                 // left-only analog audio on AC3 discs).  Mutating the decoded
                 // samples is safe here: the file writer above has already
@@ -702,9 +873,16 @@ static void runPlayer(Logger &log,
             // (after the acquire: it may have recreated the swap chain at a new size)
             const vk::Extent2D swap_extent = manager.getSwapChainExtent();
             const DisplayGeometry geometry = computeDisplayGeometry({
-                    state.aspect_mode, state.source_aspect, src_dims.width, src_dims.height,
+                    state.aspect_mode, state.picture_format, state.full_image, state.overscan,
                     state.zoom_factor, state.zoom_center.first, state.zoom_center.second,
                     FrameBlitter::displayPixelAspect(window, log), (int)swap_extent.width, (int)swap_extent.height});
+            if (static DisplayGeometry logged{}; std::memcmp(&logged, &geometry, sizeof geometry) != 0) {
+                logged = geometry;
+                log.info(eVideo, std::format("Picture: image columns {:.1f}..{:.1f}, rows {:.1f}..{:.1f} shown at {},{}..{},{} of {}x{}",
+                                             geometry.src_x0, geometry.src_x1, geometry.src_y0, geometry.src_y1,
+                                             geometry.dst_x0, geometry.dst_y0, geometry.dst_x1, geometry.dst_y1,
+                                             swap_extent.width, swap_extent.height));
+            }
             state.visible_x0 = geometry.src_x0;
             state.visible_y0 = geometry.src_y0;
             state.visible_x1 = geometry.src_x1;
@@ -715,6 +893,8 @@ static void runPlayer(Logger &log,
             state.shown_y1 = (double)geometry.dst_y1 / swap_extent.height;
 
             command_buffer->begin();
+            if (state.no_signal)
+                blitter.clear(*command_buffer, images); // black, not the last picture
             state.last_cursor_string = osd.render(*command_buffer, images, state, decoder, window, text_renderer);
             if (subtitle_primary_overlay)
                 subtitle_primary_overlay->render(*command_buffer, images, state, decoder,
@@ -725,6 +905,32 @@ static void runPlayer(Logger &log,
             blitter.present(*command_buffer, images, geometry, swap_chain_image, image_available_semaphore);
 
             manager.present(swap_chain_image);
+
+            if (pace_slack_fields >= 0) {
+                auto stream_offset = [&](int64_t fields) {
+                    return chrono::duration_cast<chrono::steady_clock::duration>(
+                            chrono::duration<double>(fields * seconds_per_iteration));
+                };
+                const auto now = chrono::steady_clock::now();
+                if (!state.paused && state.last_decoded.decoded) {
+                    paced_fields++;
+                    const auto due = pace_origin + stream_offset(paced_fields);
+                    // Where the display's refresh sets the cadence the clock
+                    // only guards against it failing to (macOS stops blocking
+                    // on the refresh while the window is covered or minimized,
+                    // and the loop then runs at decode speed): it sleeps once
+                    // the loop is pace_slack_fields ahead of the stream clock,
+                    // never for the fraction of a field that 59.94 against
+                    // 60 Hz accumulates between refreshes
+                    if (due - now > stream_offset(pace_slack_fields))
+                        std::this_thread::sleep_until(due - stream_offset(pace_slack_fields));
+                    else if (now - due > stream_offset(2))
+                        pace_origin = now - stream_offset(paced_fields); // fell behind (the initial lock,
+                                                                         // a stall): resume from here, no catch-up burst
+                } else {
+                    pace_origin = now - stream_offset(paced_fields);
+                }
+            }
 
             if (state.paused_countdown != 0 && --state.paused_countdown == 0) {
                 state.paused = true;
@@ -800,14 +1006,101 @@ static void runPlayer(Logger &log,
         if (benchmark_shaders)
             decoder.outputBenchmarkResults();
     }
-
-    device.destroy(image_available_semaphore);
-    device.destroy(render_finished_semaphore);
+    return switched;
 }
 
+// video_standard: the composite standard of an SD (SdtvInputBlock) input, unused for MUSE
+enum InputType {
+    eMuseRf,
+    eNtscRf,
+    ePalRf,
+    eMuse16MHz,
+    eMuseOversampled,
+};
+
+// The RF types the content watch can tell apart, in both directions
+static std::optional<InputProbeResult::Type> probeTypeOf(InputType type) {
+    switch (type) {
+        case eNtscRf: return InputProbeResult::Type::eNtscRf;
+        case ePalRf: return InputProbeResult::Type::ePalRf;
+        case eMuseRf: return InputProbeResult::Type::eMuseRf;
+        default: return std::nullopt;
+    }
+}
+static std::optional<InputType> inputTypeOf(InputProbeResult::Type type) {
+    switch (type) {
+        case InputProbeResult::Type::eNtscRf: return eNtscRf;
+        case InputProbeResult::Type::ePalRf: return ePalRf;
+        case InputProbeResult::Type::eMuseRf: return eMuseRf;
+        default: return std::nullopt;
+    }
+}
+
+// The window and the Vulkan device, which outlive one process_file() call:
+// a live input that changes type is played on by another call with the same
+// surface.  Declared in destruction-reverse order: the device (and its
+// surface) goes before the window it was created on.
+struct PlayerSurface {
+    struct GlfwWindow {
+        GLFWwindow *window = nullptr;
+        ~GlfwWindow() {
+            if (window != nullptr)
+                glfwDestroyWindow(window);
+            glfwTerminate();
+        }
+    } glfw;
+    std::optional<musevk::VulkanManager> manager;
+};
+
+// How process_file() ended: with switch_to set, the live input turned out to
+// carry another type, and `input` is the stream to continue from
+struct PlayOutcome {
+    std::optional<InputType> switch_to;
+    std::unique_ptr<InputReader> input;
+};
+
+// The --write file, which outlives one process_file() call: inputs that
+// follow each other with the same --write name go into one file (the sides
+// of a disc, a capture split into parts).  The format the file was opened
+// with is kept to refuse an input that does not fit it.
+struct VideoFileOutput {
+    // The writer logs through this one, not the per-input logger, which is
+    // gone by the time the file is finalized (declared first: destroyed last)
+    std::unique_ptr<StreamLogger> log;
+    std::unique_ptr<VideoFileWriter> writer;
+    std::string filename;
+    int width = 0, height = 0, fps_num = 0, fps_den = 0;
+    VideoColorStandard color_standard{};
+    bool ac3_passthrough = false;
+
+    void close() {
+#ifdef HAVE_LIBAV
+        if (writer) {
+            writer->cleanup();
+            writer.reset();
+        }
+#endif
+        log.reset();
+    }
+};
+
+// Plays one input.  Everything with a lifetime per input type -- the reader
+// with its threads, the decoder and the player's objects -- is owned here,
+// declared in the order it must be destroyed in reverse, so an exception on
+// any path unwinds correctly without an explicit teardown: player objects and
+// decoder, then the reader (which joins its threads and frees its blocks
+// while the device exists).  The window and device are the caller's surface,
+// created here on the first call and kept across a type switch.  The reader
+// is made by make_reader once the device exists.
+// watch_type: set for a live input whose type was detected (not given), to
+// watch it for a change away from that type and end with switch_to set
 template<class InputBlock>
-void process_file(Logger &log, const string &executable_dir, musevk::VulkanManager &manager, FrameReader<InputBlock> &reader,
-                  bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool no_sync,
+PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurface &surface,
+                  const std::function<std::unique_ptr<FrameReader<InputBlock>>(musevk::VulkanManager &)> &make_reader,
+                  std::optional<InputProbeResult::Type> watch_type,
+                  const VideoStandard *video_standard,
+                  bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool full_image, double overscan,
+                  bool no_sync, bool no_keys,
                   bool start_paused, Decoder::FieldInterpolationMode field_interpolation_mode,
                   bool use_3d_comb, bool film_mode, Decoder::CxMode cx_mode, Decoder::BlackLevelMode black_level_mode, bool decode_video,
                   DropoutMode dropout_mode,
@@ -816,87 +1109,111 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   float tint_degrees, float saturation,
                   optional<string> const &output_filename,
                   [[maybe_unused]] VideoWriterPreset write_preset,
+                  [[maybe_unused]] VideoFileOutput &video_out,
                   const SubtitleSetup &subtitle_setup,
                   optional<string> const &export_frame_filename,
                   double export_frame_after_seconds,
                   double write_duration_seconds,
-                  double initial_seek_seconds) {
-    glfwSetErrorCallback(glfw_error_callback);
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-
-    // The decoded image size (also the size of a written video file), the
-    // picture's intended shape, and a window of that shape that downscales
-    // the image in neither direction
+                  double initial_seek_seconds,
+                  std::optional<int> start_chapter) {
+    // The decoded image size (also the size of a written video file), where
+    // the picture sits in it and the shape of its pixels, and a window of the
+    // picture's shape that downscales it in neither direction
     int initial_w, initial_h;
-    double source_aspect;
+    PictureFormat picture_format;
     const char *title;
     if constexpr (std::is_same<InputBlock, MuseInputBlock>::value) {
         initial_w = MUSE_Y_BUF_WIDTH * 3;
         initial_h = MUSE_BUF_HEIGHT * 2;
-        source_aspect = 16.0 / 9.0;
+        picture_format = PictureFormat::muse(initial_w, initial_h);
         title = "MUSE";
     } else {
-        initial_w = NTSC_Y_BUF_WIDTH;
-        initial_h = NTSC_FIELD_HEIGHT * 2;
-        source_aspect = 4.0 / 3.0;
-        title = "NTSC";
+        initial_w = video_standard->y_buf_width;
+        initial_h = video_standard->field_lines * 2;
+        picture_format = video_standard->ntsc_chroma
+                ? PictureFormat::ntsc(initial_w, initial_h, video_standard->field_start_x)
+                : PictureFormat::pal(initial_w, initial_h, video_standard->field_start_x);
+        title = video_standard->name;
     }
-    const int window_w = max(initial_w, (int)lround(initial_h * source_aspect));
-    const int window_h = max(initial_h, (int)lround(initial_w / source_aspect));
-    GLFWwindow *window;
-    if (full_screen) {
-        // At the monitor's current mode -- no mode switch; the blit scales
-        GLFWmonitor *monitor = glfwGetPrimaryMonitor();
-        const GLFWvidmode *mode = glfwGetVideoMode(monitor);
-        glfwWindowHint(GLFW_RED_BITS, mode->redBits);
-        glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
-        glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
-        glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
-        window = glfwCreateWindow(mode->width, mode->height, title, monitor, nullptr);
-    } else {
-        window = glfwCreateWindow(window_w, window_h, title, nullptr, nullptr);
-    }
-    glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
-
-    // Teardown must run in this order on every exit path, including stack
-    // unwinding: first stop the reader, which joins the reader/demodulator/EFM
-    // threads while the Vulkan device they use is still alive; then tear down
-    // Vulkan, which destroys the surface; then the window the surface was
-    // created from.  Both cleanup()s are idempotent, and their destructors
-    // would otherwise run too late -- reader and manager belong to main().
-    // Declared before initVulkan so a failure anywhere below is covered.
-    struct Teardown {
-        Logger &log;
-        FrameReader<InputBlock> &reader;
-        musevk::VulkanManager &manager;
-        GLFWwindow *window;
-        ~Teardown() {
-            try {
-                reader.cleanup();
-                manager.cleanup();
-            } catch (const std::exception &x) {
-                log.error(eApplication, x.what());
-            }
-            glfwDestroyWindow(window);
-            glfwTerminate();
+    int window_w, window_h;
+    defaultWindowSize(picture_format, full_image, window_w, window_h);
+    if (surface.glfw.window == nullptr) {
+        glfwSetErrorCallback(glfw_error_callback);
+        g_last_glfw_error.clear();
+        if (!glfwInit())
+            // No display, or none of the platforms GLFW was built with: stop here
+            // instead of cascading into "not initialized" errors and a Vulkan
+            // instance with no presentable device.  A failed glfwInit leaves
+            // nothing to terminate.
+            throw runtime_error(std::format("Cannot initialize GLFW (no usable display?): {}", g_last_glfw_error));
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+        // A full screen window keeps its screen when another application takes
+        // the focus.  By default GLFW iconifies it instead, and on macOS the
+        // window then does not come back when the application is activated
+        // again: it sits minimized off screen until found in the Dock.
+        glfwWindowHint(GLFW_AUTO_ICONIFY, GLFW_FALSE);
+        if (no_keys) {
+            // a run made beside other work: the window must not take the
+            // keyboard away from whatever the user is typing into
+            glfwWindowHint(GLFW_FOCUSED, GLFW_FALSE);
+            glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
         }
-    } teardown{log, reader, manager, window};
+        if (full_screen) {
+            // At the monitor's current mode -- no mode switch; the blit scales
+            GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+            const GLFWvidmode *mode = glfwGetVideoMode(monitor);
+            glfwWindowHint(GLFW_RED_BITS, mode->redBits);
+            glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
+            glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
+            glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+            surface.glfw.window = glfwCreateWindow(mode->width, mode->height, title, monitor, nullptr);
+        } else {
+            surface.glfw.window = glfwCreateWindow(window_w, window_h, title, nullptr, nullptr);
+        }
+        if (surface.glfw.window == nullptr)
+            throw runtime_error(std::format("Cannot create the {} window: {}", title, g_last_glfw_error));
+        glfwSetInputMode(surface.glfw.window, GLFW_STICKY_KEYS, GLFW_TRUE);
+        glfwSetInputMode(surface.glfw.window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+    } else {
+        // A type switch: the window stays, at whatever size and mode it has
+        glfwSetWindowTitle(surface.glfw.window, title);
+    }
+    GLFWwindow *const window = surface.glfw.window;
 
-    manager.initVulkan(window, no_sync);
+    if (!surface.manager) {
+        surface.manager.emplace(log);
+        surface.manager->initVulkan(window, no_sync);
+    }
+    musevk::VulkanManager &manager = *surface.manager;
+
+    // The reader's threads use the device, so the reader comes after the
+    // manager: its destructor joins them and frees its blocks before the
+    // device goes
+    std::unique_ptr<FrameReader<InputBlock>> reader_owner = make_reader(manager);
+    FrameReader<InputBlock> &reader = *reader_owner;
 
     {
         std::vector<std::unique_ptr<InputBlock>> input_vulkan_buffers{};
-        for (int i = 0; i < INPUT_BUFFER_COUNT; i++)
-            input_vulkan_buffers.push_back(InputBlockFactory<InputBlock>::makeBlock(manager));
+        for (int i = 0; i < INPUT_BUFFER_COUNT; i++) {
+            if constexpr (std::is_same<InputBlock, SdtvInputBlock>::value)
+                input_vulkan_buffers.push_back(InputBlockFactory<InputBlock>::makeBlock(manager, *video_standard));
+            else
+                input_vulkan_buffers.push_back(InputBlockFactory<InputBlock>::makeBlock(manager));
+        }
         if (!reader.initialize(input_vulkan_buffers))
             throw runtime_error("FrameReader initialization failed");
+        if (watch_type)
+            reader.watchForTypeChange(*watch_type);
     }
+    std::optional<InputProbeResult::Type> switched;
 
-    unique_ptr<VideoFileWriter> vfw;
+    // The writer is the caller's, kept open from one input to the next
+    // while the --write name stays the same; a new name ends the file
+    unique_ptr<VideoFileWriter> &vfw = video_out.writer;
 #ifdef HAVE_LIBAV
+    if (output_filename && vfw && video_out.filename != *output_filename)
+        video_out.close();
     if (output_filename) {
         VideoColorStandard color_standard;
         int dar_num, dar_den; // display aspect ratio
@@ -906,20 +1223,50 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             dar_num = 16; dar_den = 9;
             fps_num = decode_all_fields ? 60 : 30; fps_den = 1;
         } else {
-            color_standard = VideoColorStandard::eSmpte170m;
-            dar_num = 4; dar_den = 3;
-            fps_num = decode_all_fields ? 60000 : 30000; fps_den = 1001;
+            // The file holds the whole decoded image, blanking margins
+            // included, so its display aspect is the image size times the
+            // pixel shape: for NTSC's 764x480 image of 6/7 pixels that is
+            // 191:140, a little wider than the 4:3 of the picture inside it
+            color_standard = video_standard->ntsc_chroma ? VideoColorStandard::eSmpte170m
+                                                         : VideoColorStandard::eBt470bg;
+            const int par_num = video_standard->ntsc_chroma ? 6 : 944;
+            const int par_den = video_standard->ntsc_chroma ? 7 : 1135;
+            const int g = std::gcd(initial_w * par_num, initial_h * par_den);
+            dar_num = initial_w * par_num / g; dar_den = initial_h * par_den / g;
+            fps_num = video_standard->fps_num * (decode_all_fields ? 2 : 1); fps_den = video_standard->fps_den;
         }
         // With the AC3 track selected, the file gets the original AC3
         // bitstream (all 5.1 channels, no transcode) instead of PCM
         const bool ac3_passthrough = !std::is_same<InputBlock, MuseInputBlock>::value
                 && audio_track == AudioTrack::eAc3 && decode_audio;
-        vfw = make_unique<VideoFileWriter>(output_filename.value(), log,
-                                           initial_w, initial_h, fps_num, fps_den,
-                                           write_preset, color_standard, dar_num, dar_den,
-                                           ac3_passthrough);
-        if (!vfw->init())
-            throw runtime_error("Cannot initialize output encoder");
+        if (vfw) {
+            // The file is open from the input before: this one must decode to
+            // the same picture and the same kind of audio stream to go on in it
+            if (initial_w != video_out.width || initial_h != video_out.height
+                    || fps_num != video_out.fps_num || fps_den != video_out.fps_den
+                    || color_standard != video_out.color_standard || ac3_passthrough != video_out.ac3_passthrough)
+                throw runtime_error(std::format(
+                        "--write {}: this input decodes to {}x{} at {}/{} frames/s{}, but the file holds {}x{} at {}/{}{} "
+                        "from the input before it; give it a --write file of its own",
+                        *output_filename, initial_w, initial_h, fps_num, fps_den, ac3_passthrough ? " with the AC3 bitstream" : "",
+                        video_out.width, video_out.height, video_out.fps_num, video_out.fps_den,
+                        video_out.ac3_passthrough ? " with the AC3 bitstream" : ""));
+            log.info(eApplication, std::format("--write: {} continues in {}", title, *output_filename));
+        } else {
+            if (!video_out.log)
+                throw std::logic_error("the --write logger must be made before process_file()");
+            vfw = make_unique<VideoFileWriter>(output_filename.value(), *video_out.log,
+                                               initial_w, initial_h, fps_num, fps_den,
+                                               write_preset, color_standard, dar_num, dar_den,
+                                               ac3_passthrough);
+            if (!vfw->init())
+                throw runtime_error("Cannot initialize output encoder");
+            video_out.filename = *output_filename;
+            video_out.width = initial_w; video_out.height = initial_h;
+            video_out.fps_num = fps_num; video_out.fps_den = fps_den;
+            video_out.color_standard = color_standard;
+            video_out.ac3_passthrough = ac3_passthrough;
+        }
     }
 #endif
 
@@ -936,13 +1283,21 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
 
         constexpr bool is_muse = std::is_same<InputBlock, MuseInputBlock>::value;
         ReaderControls reader_controls{
-                [&reader](double seconds) { reader.seek(seconds); },
+                [&reader](double seconds) { return reader.seek(seconds); },
+                [&reader](int64_t sample) { return reader.seekToInputSample(sample); },
+                reader.inputSampleRate(),
+                [&reader]() { return reader.inputSampleCount(); },
                 [&reader](AudioTrack track) { reader.setAudioTrack(track); },
                 is_muse ? "MUSE AUDIO" : "ANALOG AUDIO",
                 CompressedAudioDecoder::available() ? "AC3 AUDIO" : "AC3 AUDIO (NO FFMPEG)",
                 !is_muse, // has_analog_audio
-                !is_muse, // has_ac3_audio
+                !is_muse && video_standard->ntsc_chroma, // has_ac3_audio: AC3-RF exists on NTSC discs only
+                reader.inputIsLive(),
         };
+        if (watch_type) {
+            reader_controls.signalPresent = [&reader]() { return reader.signalPresent(); };
+            reader_controls.otherTypeDetected = [&reader]() { return reader.otherTypeDetected(); };
+        }
         if (reader.efmAdaptiveFilterSize() >= 0) { // RF input: the reader runs an EFM demodulator
             reader_controls.efmFilterSize = [&reader]() { return reader.efmAdaptiveFilterSize(); };
             reader_controls.setEfmFilterSize = [&reader](int size) { reader.setEfmAdaptiveFilterSize(size); };
@@ -968,20 +1323,40 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
             reader_controls.resetEqTaps = [muse_decoder]() { muse_decoder->resetEqTaps(); };
             decoder = std::move(mp);
         } else {
-            decoder = std::make_unique<NtscDecoder>(log, (FrameReader<NtscInputBlock> &)reader,
+            decoder = std::make_unique<SdtvDecoder>(log, (FrameReader<SdtvInputBlock> &)reader,
                                                     manager, command_pool, executable_dir,
                                                     decode_video, decode_all_fields, decode_audio,
                                                     tint_degrees, saturation,
-                                                    timestamp_query_pool.get());
+                                                    timestamp_query_pool.get(), *video_standard);
         }
 
         if (!decoder->initialize())
             throw runtime_error("Decoder initialization failed");
 
-        const double fields_per_second = std::is_same<InputBlock, MuseInputBlock>::value ? 60.0 : 60000.0 / 1001.0;
+        const double fields_per_second = std::is_same<InputBlock, MuseInputBlock>::value
+                ? 60.0 : 2 * video_standard->framesPerSecond();
         const double seconds_per_iteration = (decode_all_fields ? 1 : 2) / fields_per_second;
+        // The display's refresh paces the loop at one field per refresh, which
+        // is real time only for ~60 Hz material on a ~60 Hz display; there the
+        // clock only guards against the refresh failing to pace (a covered
+        // window on macOS), with a few fields of slack so the refresh keeps
+        // the cadence.  Slower material (PAL) is paced by the clock itself.
+        // --no-sync (-1) runs free.
+        // (no primary monitor while the screen is locked: then the default refresh)
+        GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode *video_mode = monitor != nullptr ? glfwGetVideoMode(monitor) : nullptr;
+        const double refresh_hz = video_mode != nullptr && video_mode->refreshRate > 0 ? video_mode->refreshRate : 60.0;
+        const bool refresh_paces = fields_per_second >= 0.97 * refresh_hz;
+        const int pace_slack_fields = no_sync ? -1 : refresh_paces ? 4 : 0;
+        if (!no_sync)
+            log.info(eApplication, refresh_paces
+                     ? std::format("Pacing playback by the display's {:.0f} Hz refresh, the clock as a guard: {:.2f} fields/s",
+                                   refresh_hz, fields_per_second)
+                     : std::format("Pacing playback by the clock: {:.2f} fields/s on a {:.0f} Hz display",
+                                   fields_per_second, refresh_hz));
 
-        runPlayer(log, manager, *decoder, reader_controls, window, full_screen, aspect_mode, source_aspect,
+        switched = runPlayer(log, manager, *decoder, reader_controls, window, full_screen, no_keys, aspect_mode, picture_format,
+                  full_image, overscan,
                   window_w, window_h, start_paused,
                   field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, dropout_mode, audio_track,
                   benchmark_shaders,
@@ -989,25 +1364,19 @@ void process_file(Logger &log, const string &executable_dir, musevk::VulkanManag
                   vfw, audio_playback.get(), executable_dir,
                   subtitle_setup,
                   export_frame_filename, export_frame_after_seconds, write_duration_seconds, seconds_per_iteration,
-                  initial_seek_seconds);
+                  pace_slack_fields, initial_seek_seconds, start_chapter);
     }
 
-#ifdef HAVE_LIBAV
-    if (vfw) {
-        vfw->cleanup();
-        vfw = nullptr;
+    // The writer stays open for the next input (the caller closes it)
+    PlayOutcome outcome;
+    if (switched) {
+        outcome.switch_to = inputTypeOf(*switched);
+        outcome.input = reader.releaseInput(); // stops the reader; the stream goes on
     }
-#endif
-    // audio_playback, the decoder scope above and the Teardown guard handle the
-    // rest, in reverse declaration order.
+    // audio_playback and the reader follow, in reverse declaration order; the
+    // surface is the caller's.
+    return outcome;
 }
-
-enum InputType {
-    eMuseRf,
-    eNtscRf,
-    eMuse16MHz,
-    eMuseOversampled,
-};
 
 // The directory holding shaders/ and fonts/, i.e. the one containing the running
 // executable. argv[0] alone is not enough: it has no directory part when the
@@ -1058,6 +1427,8 @@ static void printProbeResult(const std::string &filename, const InputProbeResult
                         "carrier {:.0f} cycles/line, audio carrier {:.0f}x background",
                         r.line_period, r.line_strength, r.cycles_per_line,
                         r.audio_carrier_ratio) << endl;
+    if (r.field_lines != 0)
+        cout << std::format("  vertical sync groups {:.1f} lines apart (NTSC 262.5, PAL 312.5)", r.field_lines) << endl;
     if (r.type == InputProbeResult::Type::eUnknown) {
         cout << "  RF type: ambiguous -- give --input-type explicitly" << endl;
         return;
@@ -1068,7 +1439,8 @@ static void printProbeResult(const std::string &filename, const InputProbeResult
                             inputFormatName(*r.format)) << endl;
         return;
     }
-    const char *type = r.type == InputProbeResult::Type::eNtscRf ? "ntsc-rf" : "muse-rf";
+    const char *type = r.type == InputProbeResult::Type::eNtscRf ? "ntsc-rf"
+                     : r.type == InputProbeResult::Type::ePalRf ? "pal-rf" : "muse-rf";
     cout << std::format("  detected: {} at {:.4g} MHz{}", type, r.sample_frequency / 1e6,
                         r.sample_frequency_snapped ? "" : " (no common capture rate matched)") << endl;
     cout << std::format("  suggested: --input-format {} --input-type {} --sample-freq {:.4g}e6",
@@ -1081,12 +1453,16 @@ int main(int argc, char *argv[]) {
     bool decode_all_fields = true;
     bool full_screen = false;
     AspectMode aspect_mode = AspectMode::eNormal;
+    bool full_image = false;
+    double overscan = 0.0;
     bool no_sync = false;
+    bool no_keys = false;
     std::optional<InputType> input_type_option;         // unset (the default) means auto-detect
     bool probe_only = false;      // --probe: print what probing finds and skip decoding
     std::optional<InputFormat> input_format_option = std::nullopt;
     std::optional<double> sample_frequency_option;      // unset means measure it from the file
     double initial_seek_seconds = 0;
+    std::optional<int> start_chapter; // --chapter: search for it once the disc code reads
     bool start_paused = false;
     auto field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
     bool use_3d_comb = true;
@@ -1135,24 +1511,34 @@ int main(int argc, char *argv[]) {
                "the options in effect where it appears.  Options therefore apply to the files that\n"
                "follow them: one placed after a filename does not affect that file, and options\n"
                "after the last filename do nothing at all.  An argument starting with ! is ignored,\n"
-               "which is practical for disabling an option in a saved command line.\n";
+               "which is practical for disabling an option in a saved command line.\n"
+               "\nAn input can also be a URL: http://host/path/capture.ldf plays a file from a web\n"
+               "server that supports range requests (seeking works), and udp://:5000 plays the\n"
+               "live ethadc capture stream sent to that port (the sample format and rate come from\n"
+               "the stream; the type is detected from its first samples unless --input-type says).\n"
+               "\nThe input can be piped in: \"-\" names the standard input, which is also what is\n"
+               "played when no file is given and stdin is a pipe or a redirected file.  A pipe, a\n"
+               "fifo and a udp:// stream are live: the type, rate and format are detected from the\n"
+               "samples as they arrive (waiting through whatever comes before the disc plays),\n"
+               "seeking is not possible, and the player has to keep up.\n";
         exit(status);
     };
 
     options.section("Input options:");
     options.option("--input-format", "FMT",
                    "Input sample type: u8, s8, u16, s16, u16be, s16be, lds, flac, ldf "
-                   "(default: from the filename extension)", [&] () -> void {
+                   "(default: from the filename extension, or failing that from the content)", [&] () -> void {
         input_format_option = inputFormatFromString(*(it++));
     });
     options.option("--input-type", "TYPE",
-                   "muse-rf or ntsc-rf for RF captures, muse-16 for phase correct 16.2 MHz "
+                   "muse-rf, ntsc-rf or pal-rf for RF captures, muse-16 for phase correct 16.2 MHz "
                    "MUSE baseband, muse-os for oversampled MUSE baseband, or auto (the "
                    "default): detect RF type, sample rate and format from the file contents", [&] () -> void {
         const auto &name = *(it++);
         if      (name == "auto")     input_type_option = nullopt;
         else if (name == "muse-rf")  input_type_option = eMuseRf;
         else if (name == "ntsc-rf")  input_type_option = eNtscRf;
+        else if (name == "pal-rf")   input_type_option = ePalRf;
         else if (name == "muse-16")  input_type_option = eMuse16MHz;
         else if (name == "muse-os")  input_type_option = eMuseOversampled;
         else throw std::runtime_error(std::format("Unknown input type {}", name));
@@ -1166,6 +1552,11 @@ int main(int argc, char *argv[]) {
     options.flag("--probe", "Detect each input file's sample format, RF type and sample rate "
                             "from its contents, print the result, and exit without decoding", [&] () -> void {
         probe_only = true;
+    });
+    options.option("--chapter", "N", "Start playing at chapter N, found by searching the capture for its "
+                   "chapter codes (after --seek, if given; the Up and Down keys do the same for the next and "
+                   "previous chapter)", [&] () -> void {
+        start_chapter = stoi(*(it++));
     });
     options.option("--seek", "SECONDS", "Seek to this position before playing", [&] () -> void {
         initial_seek_seconds = stod(*(it++));
@@ -1261,6 +1652,22 @@ int main(int argc, char *argv[]) {
         else if (name == "frozen") eq_mode = MuseAdaptiveEqualizer::Mode::eFrozen;
         else throw std::runtime_error(std::format("Unknown --eq mode {} (expected off|on|frozen)", name));
     });
+    options.option("--overscan", "PERCENT", "How much of the edges to hide, as a TV does (also cycled with the O key): "
+                                            "0 shows the standard picture (default; for NTSC the 4:3 part of the decoded "
+                                            "image, without the blanking margins at the sides), a percentage hides that "
+                                            "much more in each dimension, and full shows the whole decoded image",
+                   [&] () -> void {
+        const string value = *(it++);
+        if (value == "full") {
+            full_image = true;
+        } else {
+            overscan = stod(value) / 100.0;
+            if (overscan < 0.0 || overscan > 0.25) {
+                cerr << "--overscan must be full or a percentage from 0 to 25" << endl;
+                exit(1);
+            }
+        }
+    });
     options.option("--black-level", "MODE", "NTSC: where the disc puts black: auto reads it off the picture "
                                             "(default), m forces NTSC-M (US discs, 7.5 IRE above blanking), j forces "
                                             "NTSC-J (Japanese discs, black at blanking); also cycled with the J key",
@@ -1277,11 +1684,11 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
     });
-    options.option("--tint", "DEGREES", "NTSC: rotate the chroma hue, like a TV's tint control "
+    options.option("--tint", "DEGREES", "NTSC/PAL: rotate the chroma hue, like a TV's tint control "
                                         "(default 0)", [&] () -> void {
         tint_degrees = (float)stod(*(it++));
     });
-    options.option("--saturation", "FACTOR", "NTSC: scale the chroma gain (default 1.0)", [&] () -> void {
+    options.option("--saturation", "FACTOR", "NTSC/PAL: scale the chroma gain (default 1.0)", [&] () -> void {
         saturation = (float)stod(*(it++));
     });
     options.option("--cx", "MODE", "NTSC analog audio CX expansion: auto follows the disc's VBI "
@@ -1395,6 +1802,13 @@ int main(int argc, char *argv[]) {
                  [&] () -> void {
         no_sync = true;
     });
+    options.flag("--no-keys", "Ignore the keyboard and open the window without taking input focus, "
+                              "for runs made beside other work (measurements, scripts): nothing typed "
+                              "elsewhere can pause or change the decode; the close button still quits.  "
+                              "Picture stops are ignored, since no key could release them",
+                 [&] () -> void {
+        no_keys = true;
+    });
 
     options.section("Output options:");
     options.option("--export-frame", "FILE", "Save one decoded frame as PNG to FILE and quit", [&] () -> void {
@@ -1476,11 +1890,297 @@ int main(int argc, char *argv[]) {
         usage(cout, EXIT_SUCCESS);
     });
 
+    // The --write file, kept open across the inputs that name it; declared
+    // outside the try so an error on a later input still finalizes what the
+    // earlier ones wrote
+    VideoFileOutput video_out;
     try {
         bool input_file_given = false;
         // Options apply to the input files that follow them, so any left over when
         // the arguments run out did nothing.  Remember them to say so afterwards.
         vector<string> trailing_options;
+        // Plays (or probes) one input, with the options in effect now
+        auto play_input = [&](const string &name) {
+            input_file_given = true;
+            trailing_options.clear(); // these applied to this file
+            if (initial_seek_seconds != 0 && inputIsLive(name)) {
+                cerr << "Initial seek is not compatible with a live input (a fifo, a pipe or a udp:// stream)" << endl;
+                exit(EXIT_FAILURE);
+            }
+            if (!inputExists(name)) {
+                cerr << "File not found: " << name << endl;
+                exit(EXIT_FAILURE);
+            }
+
+            StreamLogger log(log_selection, std::cerr, true);
+            // The --write file's own logger, with the selection in effect
+            // where the file is opened (it outlives this input's logger)
+            if (output_filename && !video_out.log)
+                video_out.log = make_unique<StreamLogger>(log_selection, std::cerr, true);
+
+            // What the options say about this input, each on its own: the
+            // type, the sample rate and the sample format.  Whatever they
+            // leave open is detected from the content, or taken from the
+            // packets of an ethadc stream; what they give is used as given
+            // and never measured.
+            const bool type_given = input_type_option.has_value();
+            std::optional<InputFormat> resolved_format = input_format_option;
+            if (!resolved_format)
+                resolved_format = inputFormatFromFilename(name);
+            InputType file_input_type = input_type_option.value_or(eMuseRf);
+            std::optional<double> known_sample_frequency = sample_frequency_option;
+
+            // The input is opened once, here: a live input (a fifo, a pipe,
+            // the network stream) cannot be opened again at the point the
+            // detection leaves it, so the player continues from the same one
+            PreparedInput input(name, openByteSource(name, &log), resolved_format);
+
+            // An ethadc stream says in every packet what it carries, so the
+            // format and the rate come from there; an option that says
+            // otherwise is a mistake, not an override.  Only the type is
+            // left for the content probe (or --input-type)
+            if (inputIsNetworkStream(name)) {
+                constexpr double c_stream_wait_seconds = 30;
+                cout << std::format("Waiting for the ethadc stream on {} ...", name) << endl;
+                const auto stream = networkStreamInfo(input.source(), c_stream_wait_seconds);
+                if (!stream) {
+                    cerr << std::format("No stream arrived on {} within {:.0f} s", name, c_stream_wait_seconds) << endl;
+                    exit(EXIT_FAILURE);
+                }
+                if (resolved_format && *resolved_format != stream->format) {
+                    cerr << std::format("{}: the stream carries {} samples, not {} as --input-format says",
+                                        name, inputFormatName(stream->format), inputFormatName(*resolved_format)) << endl;
+                    exit(EXIT_FAILURE);
+                }
+                if (known_sample_frequency &&
+                        abs(*known_sample_frequency - stream->sample_frequency) > 1e-6 * stream->sample_frequency) {
+                    cerr << std::format("{}: the stream is sampled at {:.4g}e6 Hz, not {:.4g}e6 as --sample-freq says",
+                                        name, stream->sample_frequency / 1e6, *known_sample_frequency / 1e6) << endl;
+                    exit(EXIT_FAILURE);
+                }
+                resolved_format = stream->format;
+                input.setFormat(stream->format);
+                known_sample_frequency = stream->sample_frequency;
+                cout << std::format("{}: the stream carries {} samples at {:.4g}e6 Hz", name,
+                                    inputFormatName(stream->format), stream->sample_frequency / 1e6) << endl;
+            }
+            double file_sample_frequency = known_sample_frequency.value_or(0);
+
+            // The rate follows from the line period under whichever type is
+            // in effect, so with the type given only the line structure has
+            // to be found, not the type; and a format the extension did not
+            // give is detected whatever else is known
+            const bool needs_probe = probe_only || !type_given || !resolved_format ||
+                    (!known_sample_frequency && file_input_type != eMuse16MHz);
+            if (needs_probe) {
+                if (input.isLive())
+                    cout << std::format("Detecting the input type from the first samples {} ...",
+                                        inputIsStdin(name) ? "on stdin" : "of " + name) << endl;
+                const InputProbeResult probe = probeInput(log, input, resolved_format, !type_given || probe_only);
+                if (probe_only) {
+                    printProbeResult(name, probe);
+                    return;
+                }
+                if (!resolved_format)
+                    resolved_format = probe.format;
+
+                InputType detected_type = eMuseRf;
+                bool type_detected = true;
+                switch (probe.type) {
+                    case InputProbeResult::Type::eNtscRf:         detected_type = eNtscRf; break;
+                    case InputProbeResult::Type::ePalRf:          detected_type = ePalRf; break;
+                    case InputProbeResult::Type::eMuseRf:         detected_type = eMuseRf; break;
+                    case InputProbeResult::Type::eMuse16Baseband: detected_type = eMuse16MHz; break;
+                    case InputProbeResult::Type::eUnknown:        type_detected = false; break;
+                }
+                if (!input_type_option) {
+                    if (!type_detected) {
+                        cerr << std::format(
+                                "Could not determine the input type of {} -- give --input-type "
+                                "explicitly (--probe prints what the detection measured)", name) << endl;
+                        exit(EXIT_FAILURE);
+                    }
+                    file_input_type = detected_type;
+                } else if (type_detected && detected_type != file_input_type) {
+                    cerr << std::format("Warning: {} looks like --input-type {}",
+                                        name, detected_type == eNtscRf ? "ntsc-rf" :
+                                             detected_type == ePalRf ? "pal-rf" :
+                                             detected_type == eMuseRf ? "muse-rf" : "muse-16") << endl;
+                }
+
+                if (!known_sample_frequency) {
+                    // The rate follows from the line period under whichever
+                    // type is in effect, so an explicit --input-type gets a
+                    // rate even when the classification was ambiguous
+                    auto hypothesis =
+                            file_input_type == eNtscRf    ? InputProbeResult::Type::eNtscRf :
+                            file_input_type == ePalRf     ? InputProbeResult::Type::ePalRf :
+                            file_input_type == eMuse16MHz ? InputProbeResult::Type::eMuse16Baseband :
+                                                            InputProbeResult::Type::eMuseRf;
+                    file_sample_frequency = estimateSampleFrequency(probe, hypothesis);
+                    if (file_sample_frequency == 0) {
+                        cerr << std::format("Could not measure the sample rate of {} -- "
+                                            "give --sample-freq explicitly", name) << endl;
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                cout << std::format("{}: {} {} at {:.4g}e6 Hz",
+                                    name, inputFormatName(resolved_format.value_or(eSint16)),
+                                    file_input_type == eNtscRf ? "NTSC RF" :
+                                    file_input_type == ePalRf ? "PAL RF" :
+                                    file_input_type == eMuseRf ? "MUSE RF" :
+                                    file_input_type == eMuse16MHz ? "MUSE baseband" : "oversampled MUSE baseband",
+                                    file_sample_frequency / 1e6) << endl;
+            }
+
+            if (!resolved_format) {
+                cerr << "No input format specified and unknown input file extension" << endl;
+                exit(EXIT_FAILURE);
+            }
+            input.setFormat(*resolved_format);
+
+            SubtitleSetup subtitle_setup;
+            subtitle_setup.font_path = subtitle_font_path;
+            subtitle_setup.offset_seconds = subtitle_offset_seconds;
+            subtitle_setup.ocr_models_dir = ocr_models_dir;
+            if (ocr_translate_url && !ocr_models_dir) {
+                cerr << "--ocr-translate requires --ocr" << endl;
+                exit(EXIT_FAILURE);
+            }
+            subtitle_setup.ocr_translate_url = ocr_translate_url;
+            subtitle_setup.ocr_translate_model = ocr_translate_model;
+            if (const char *key = getenv("OPENAI_API_KEY"))
+                subtitle_setup.ocr_translate_key = key;
+            subtitle_setup.ocr_script = ocr_script;
+            subtitle_setup.ocr_source_language = ocr_source_language;
+            subtitle_setup.ocr_target_language = ocr_target_language;
+            if (ocr_write) {
+                if (!ocr_models_dir) {
+                    cerr << "--ocr-write requires --ocr" << endl;
+                    exit(EXIT_FAILURE);
+                }
+                const filesystem::path input_path(name);
+                subtitle_setup.ocr_write_stem =
+                        (input_path.parent_path() / input_path.stem()).string();
+            }
+            if (cc_write) {
+                if (file_input_type != eNtscRf)
+                    cerr << "Warning: --cc-write does nothing here: closed captions "
+                            "exist only on NTSC discs" << endl;
+                const filesystem::path input_path(name);
+                subtitle_setup.cc_write_stem =
+                        (input_path.parent_path() / input_path.stem()).string();
+            }
+            if (subtitles_enabled && !inputIsStdin(name))
+                subtitle_setup.files = discoverSubtitleFiles(name);
+            if (subtitles_file) {
+                // If the discovery also found the file, keep the discovered entry
+                // (with its short label); otherwise add it, labeled by filename.
+                std::error_code ec;
+                const auto canon = filesystem::weakly_canonical(*subtitles_file, ec);
+                for (size_t i = 0; i < subtitle_setup.files.size(); i++)
+                    if (filesystem::weakly_canonical(subtitle_setup.files[i].second, ec) == canon)
+                        subtitle_setup.primary_index = (int)i;
+                if (subtitle_setup.primary_index < 0) {
+                    subtitle_setup.files.emplace_back(
+                            filesystem::path(*subtitles_file).stem().string(), *subtitles_file);
+                    subtitle_setup.primary_index = (int)subtitle_setup.files.size() - 1;
+                }
+            } else if (!subtitle_setup.files.empty()) {
+                subtitle_setup.primary_index = 0;
+            }
+            if (subtitles_enabled && !inputIsStdin(name) && subtitle_setup.files.empty())
+                cerr << "No .srt files matching " << filesystem::path(name).stem().string()
+                     << "*.srt found next to " << name << endl;
+
+            const double export_frame_after_seconds = max(0.0, export_frame_at_seconds - initial_seek_seconds);
+            if (export_frame_filename && initial_seek_seconds > 0 && export_frame_at_seconds <= initial_seek_seconds)
+                cerr << std::format(
+                        "Warning: --export-frame will save the first decoded frame, which comes out black "
+                        "(the decoder has not locked yet). --export-frame-at takes the absolute stream "
+                        "position of the frame to save -- not a delay after --seek -- and must lie beyond "
+                        "the seek position ({} s) to give the decoder a warm-up run.",
+                        initial_seek_seconds) << endl;
+
+            // One process_file() call per input type; a live input that turns
+            // out to carry another type comes back with the stream to go on
+            // from.  Only a live input whose type was detected is watched.
+            PlayerSurface surface;
+            PlayOutcome outcome;
+            do {
+            const std::optional<InputProbeResult::Type> watch_type =
+                    input.isLive() && !input_type_option ? probeTypeOf(file_input_type) : std::nullopt;
+            switch (file_input_type) {
+                case eNtscRf:
+                case ePalRf: {
+                    const VideoStandard &standard = file_input_type == eNtscRf ? VideoStandard::ntsc()
+                                                                                : VideoStandard::pal();
+                    subtitle_setup.ntsc_cc = standard.has_closed_captions;
+                    auto make_reader = [&](musevk::VulkanManager &manager) -> std::unique_ptr<FrameReader<SdtvInputBlock>> {
+                        return make_unique<SdtvFrameReader>(
+                                    log, executable_dir, manager, std::move(input),
+                                    file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
+                                    efm_adaptive_filter_size, muse_output_filename, standard);
+                    };
+                    outcome = process_file<SdtvInputBlock>(log, executable_dir, surface, make_reader, watch_type, &standard, decode_all_fields,
+                                                 full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
+                                                 audio_track,
+                                                 benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
+                                 subtitle_setup,
+                                 export_frame_filename, export_frame_after_seconds, write_duration_seconds,
+                                 initial_seek_seconds, start_chapter);
+                    break;
+                }
+                case eMuse16MHz: {
+                    auto make_reader = [&](musevk::VulkanManager &) -> std::unique_ptr<FrameReader<MuseInputBlock>> {
+                        return make_unique<PhaseCorrect16MHzFrameReader>(
+                                log, std::move(input), initial_seek_seconds, muse_output_filename);
+                    };
+                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, make_reader, std::nullopt, nullptr, decode_all_fields,
+                                 full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
+                                 audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
+                                 subtitle_setup,
+                                 export_frame_filename, export_frame_after_seconds, write_duration_seconds,
+                                 initial_seek_seconds, start_chapter);
+                    break;
+                }
+                case eMuseOversampled:
+                case eMuseRf: {
+                    auto make_reader = [&](musevk::VulkanManager &manager) -> std::unique_ptr<FrameReader<MuseInputBlock>> {
+                        return make_unique<MuseFrameReader>(
+                                log, executable_dir, manager, std::move(input),
+                                file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
+                                audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
+                    };
+                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, make_reader, watch_type, nullptr, decode_all_fields,
+                                 full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
+                                 audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
+                                 subtitle_setup,
+                                 export_frame_filename, export_frame_after_seconds, write_duration_seconds,
+                                 initial_seek_seconds, start_chapter);
+                    break;
+                }
+                default:
+                    throw std::runtime_error("Unknown input type: {}");
+            }
+            if (outcome.switch_to && output_filename) {
+                // A written file has one picture size and standard: the
+                // recording ends here rather than being overwritten
+                log.warn(eApplication, std::format("The live input changed to {}; --write records one type, so playback stops here",
+                                                   *outcome.switch_to == eNtscRf ? "NTSC" : *outcome.switch_to == ePalRf ? "PAL" : "MUSE"));
+                outcome.switch_to.reset();
+            }
+            if (outcome.switch_to) {
+                // The stream continues under the new type from where the old
+                // reader stopped; nothing is seeked or probed again
+                log.info(eApplication, std::format("Playing on as {}", *outcome.switch_to == eNtscRf ? "NTSC" : *outcome.switch_to == ePalRf ? "PAL" : "MUSE"));
+                file_input_type = *outcome.switch_to;
+                input = PreparedInput(name, std::move(outcome.input), *resolved_format);
+                initial_seek_seconds = 0;
+                start_chapter = std::nullopt;
+            }
+            } while (outcome.switch_to);
+        };
         while (it != args.cend()) {
             if (const CliOptions::Option *option = options.find(*it)) {
                 it++;
@@ -1490,213 +2190,20 @@ int main(int argc, char *argv[]) {
                 trailing_options.push_back(option->name);
             } else if (it->find("!", 0) == 0) {
                 it++; // used to ignore options (to easily enable/disable options in CLion debug settings)
-            } else if (it->find("-", 0) == 0) {
+            } else if (*it != "-" && it->find("-", 0) == 0) {
                 cerr << "Unknown option: " << *it << endl;
                 usage(cerr, EXIT_FAILURE);
             } else {
-                input_file_given = true;
-                trailing_options.clear(); // these applied to this file
-                if (initial_seek_seconds != 0 && filesystem::is_fifo(*it)) {
-                    cerr << "Initial seek is not compatible with reading from fifo" << endl;
-                    exit(EXIT_FAILURE);
-                }
-                if (!filesystem::exists(*it)) {
-                    cerr << "File not found: " << *it << endl;
-                    exit(EXIT_FAILURE);
-                }
-
-                std::optional<InputFormat> resolved_format = input_format_option;
-                if (!resolved_format)
-                    resolved_format = inputFormatFromFilename(*it);
-
-                // The type and rate used for this file; probing fills in
-                // whatever the options left open
-                InputType file_input_type = input_type_option.value_or(eMuseRf);
-                double file_sample_frequency = sample_frequency_option.value_or(0);
-
-                const bool needs_probe = probe_only || !input_type_option ||
-                        (!sample_frequency_option && *input_type_option != eMuse16MHz);
-                if (needs_probe) {
-                    if (filesystem::is_fifo(*it)) {
-                        cerr << "Reading from a pipe cannot use content detection -- give both "
-                                "--input-type and --sample-freq explicitly" << endl;
-                        exit(EXIT_FAILURE);
-                    }
-                    StreamLogger probe_log(log_selection, std::cerr, true);
-                    const InputProbeResult probe = probeInputFile(probe_log, *it, resolved_format);
-                    if (probe_only) {
-                        printProbeResult(*it, probe);
-                        it++;
-                        continue;
-                    }
-                    if (!resolved_format)
-                        resolved_format = probe.format;
-
-                    InputType detected_type = eMuseRf;
-                    bool type_detected = true;
-                    switch (probe.type) {
-                        case InputProbeResult::Type::eNtscRf:         detected_type = eNtscRf; break;
-                        case InputProbeResult::Type::eMuseRf:         detected_type = eMuseRf; break;
-                        case InputProbeResult::Type::eMuse16Baseband: detected_type = eMuse16MHz; break;
-                        case InputProbeResult::Type::eUnknown:        type_detected = false; break;
-                    }
-                    if (!input_type_option) {
-                        if (!type_detected) {
-                            cerr << std::format(
-                                    "Could not determine the input type of {} -- give --input-type "
-                                    "explicitly (--probe prints what the detection measured)", *it) << endl;
-                            exit(EXIT_FAILURE);
-                        }
-                        file_input_type = detected_type;
-                    } else if (type_detected && detected_type != file_input_type) {
-                        cerr << std::format("Warning: {} looks like --input-type {}",
-                                            *it, detected_type == eNtscRf ? "ntsc-rf" :
-                                                 detected_type == eMuseRf ? "muse-rf" : "muse-16") << endl;
-                    }
-
-                    if (!sample_frequency_option) {
-                        // The rate follows from the line period under whichever
-                        // type is in effect, so an explicit --input-type gets a
-                        // rate even when the classification was ambiguous
-                        auto hypothesis =
-                                file_input_type == eNtscRf    ? InputProbeResult::Type::eNtscRf :
-                                file_input_type == eMuse16MHz ? InputProbeResult::Type::eMuse16Baseband :
-                                                                InputProbeResult::Type::eMuseRf;
-                        file_sample_frequency = estimateSampleFrequency(probe, hypothesis);
-                        if (file_sample_frequency == 0) {
-                            cerr << std::format("Could not measure the sample rate of {} -- "
-                                                "give --sample-freq explicitly", *it) << endl;
-                            exit(EXIT_FAILURE);
-                        }
-                    }
-                    cout << std::format("{}: {} {} at {:.4g}e6 Hz",
-                                        *it, inputFormatName(resolved_format.value_or(eSint16)),
-                                        file_input_type == eNtscRf ? "NTSC RF" :
-                                        file_input_type == eMuseRf ? "MUSE RF" :
-                                        file_input_type == eMuse16MHz ? "MUSE baseband" : "oversampled MUSE baseband",
-                                        file_sample_frequency / 1e6) << endl;
-                }
-
-                if (!resolved_format) {
-                    cerr << "No input format specified and unknown input file extension" << endl;
-                    exit(EXIT_FAILURE);
-                }
-                InputFormat input_format = *resolved_format;
-
-                SubtitleSetup subtitle_setup;
-                subtitle_setup.font_path = subtitle_font_path;
-                subtitle_setup.offset_seconds = subtitle_offset_seconds;
-                subtitle_setup.ocr_models_dir = ocr_models_dir;
-                if (ocr_translate_url && !ocr_models_dir) {
-                    cerr << "--ocr-translate requires --ocr" << endl;
-                    exit(EXIT_FAILURE);
-                }
-                subtitle_setup.ocr_translate_url = ocr_translate_url;
-                subtitle_setup.ocr_translate_model = ocr_translate_model;
-                if (const char *key = getenv("OPENAI_API_KEY"))
-                    subtitle_setup.ocr_translate_key = key;
-                subtitle_setup.ocr_script = ocr_script;
-                subtitle_setup.ocr_source_language = ocr_source_language;
-                subtitle_setup.ocr_target_language = ocr_target_language;
-                if (ocr_write) {
-                    if (!ocr_models_dir) {
-                        cerr << "--ocr-write requires --ocr" << endl;
-                        exit(EXIT_FAILURE);
-                    }
-                    const filesystem::path input_path(*it);
-                    subtitle_setup.ocr_write_stem =
-                            (input_path.parent_path() / input_path.stem()).string();
-                }
-                if (cc_write) {
-                    if (file_input_type != eNtscRf)
-                        cerr << "Warning: --cc-write does nothing here: closed captions "
-                                "exist only on NTSC discs" << endl;
-                    const filesystem::path input_path(*it);
-                    subtitle_setup.cc_write_stem =
-                            (input_path.parent_path() / input_path.stem()).string();
-                }
-                if (subtitles_enabled)
-                    subtitle_setup.files = discoverSubtitleFiles(*it);
-                if (subtitles_file) {
-                    // If the discovery also found the file, keep the discovered entry
-                    // (with its short label); otherwise add it, labeled by filename.
-                    std::error_code ec;
-                    const auto canon = filesystem::weakly_canonical(*subtitles_file, ec);
-                    for (size_t i = 0; i < subtitle_setup.files.size(); i++)
-                        if (filesystem::weakly_canonical(subtitle_setup.files[i].second, ec) == canon)
-                            subtitle_setup.primary_index = (int)i;
-                    if (subtitle_setup.primary_index < 0) {
-                        subtitle_setup.files.emplace_back(
-                                filesystem::path(*subtitles_file).stem().string(), *subtitles_file);
-                        subtitle_setup.primary_index = (int)subtitle_setup.files.size() - 1;
-                    }
-                } else if (!subtitle_setup.files.empty()) {
-                    subtitle_setup.primary_index = 0;
-                }
-                if (subtitles_enabled && subtitle_setup.files.empty())
-                    cerr << "No .srt files matching " << filesystem::path(*it).stem().string()
-                         << "*.srt found next to " << *it << endl;
-
-                StreamLogger log(log_selection, std::cerr, true);
-
-                musevk::VulkanManager manager(log);
-
-                const double export_frame_after_seconds = max(0.0, export_frame_at_seconds - initial_seek_seconds);
-                if (export_frame_filename && initial_seek_seconds > 0 && export_frame_at_seconds <= initial_seek_seconds)
-                    cerr << std::format(
-                            "Warning: --export-frame will save the first decoded frame, which comes out black "
-                            "(the decoder has not locked yet). --export-frame-at takes the absolute stream "
-                            "position of the frame to save -- not a delay after --seek -- and must lie beyond "
-                            "the seek position ({} s) to give the decoder a warm-up run.",
-                            initial_seek_seconds) << endl;
-
-                switch (file_input_type) {
-                    case eNtscRf: {
-                        subtitle_setup.ntsc_cc = true;
-                        auto reader = make_unique<NtscFrameReader>(
-                                        log, executable_dir, manager, *it, input_format,
-                                        file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
-                                        efm_adaptive_filter_size, muse_output_filename);
-                        process_file<NtscInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                                     full_screen, aspect_mode, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
-                                                     audio_track,
-                                                     benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
-                                     subtitle_setup,
-                                     export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                     initial_seek_seconds);
-                        break;
-                    }
-                    case eMuse16MHz: {
-                        auto reader = make_unique<PhaseCorrect16MHzFrameReader>(
-                                log, *it, input_format, initial_seek_seconds, muse_output_filename);
-                        process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                     full_screen, aspect_mode, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
-                                     audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
-                                     subtitle_setup,
-                                     export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                     initial_seek_seconds);
-                        break;
-                    }
-                    case eMuseOversampled:
-                    case eMuseRf: {
-                        auto reader = make_unique<ResamplingFrameReader>(
-                                log, executable_dir, manager, *it, input_format,
-                                file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
-                                audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
-                        process_file<MuseInputBlock>(log, executable_dir, manager, *reader, decode_all_fields,
-                                     full_screen, aspect_mode, no_sync, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
-                                     audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
-                                     subtitle_setup,
-                                     export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                     initial_seek_seconds);
-                        break;
-                    }
-                    default:
-                        throw std::runtime_error("Unknown input type: {}");
-                }
+                play_input(*it);
                 it++;
             }
         }
+        // No file named, but something piped or redirected in: that is the input,
+        // as for the other command line tools, and the options that came last
+        // are meant for it.  A terminal (or nothing at all) on stdin is not.
+        if (!input_file_given && stdinCarriesInput())
+            play_input("-");
+        video_out.close(); // finalizes the --write file, if one is open
         // Options are applied to the files that follow them, so trailing ones were
         // parsed and then never used.  That is legal syntax -- it is how a second
         // file is given different settings -- so it cannot be an error, but it is
@@ -1716,10 +2223,12 @@ int main(int argc, char *argv[]) {
         if (!input_file_given) {
             cerr << "No input file given -- museld plays a capture file, so it needs one to play." << endl;
             cerr << "Run \"museld --help\" for the options, or give a filename:  museld capture.lds" << endl;
+            cerr << "(A capture piped in is played too:  capture-program | museld -)" << endl;
         }
     } catch (const exception &x) {
         StreamLogger log(StreamLogger::c_log_all, std::cerr, true);
         log.error(eApplication, x.what());
+        video_out.close();
         return EXIT_FAILURE;
     }
 

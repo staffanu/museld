@@ -47,6 +47,15 @@ namespace musevk {
             return; // never initialized, or already cleaned up
         if (m_logical_device) {
             m_logical_device.waitIdle();
+            // Everything created on the device must be gone by now.  Memory
+            // still sub-allocated means an object outlived the teardown
+            // order (a reader, decoder or player object owned above this
+            // call): report it here, where it is caused, rather than let the
+            // allocator's destructor assert later or the wrappers free memory
+            // from a device that no longer exists.
+            if (const size_t live = m_memory_allocator ? m_memory_allocator->liveAllocations() : 0)
+                m_log.error(eVideo, std::format("VulkanManager::cleanup: {} memory allocations still live at device "
+                                                "teardown -- an object created on the device outlives it", live));
             cleanupSwapChain();
             delete m_graphics_and_compute_queue;
             if (m_present_queue != m_graphics_and_compute_queue)
@@ -55,6 +64,10 @@ namespace musevk {
             m_present_queue = nullptr;
             m_logical_device.destroy();
             m_logical_device = nullptr;
+            // The allocator's blocks belong to the device: with it gone
+            // nothing can be freed, so the record goes too (its destructor
+            // asserts on leaks, which the message above already named)
+            m_memory_allocator.reset();
         }
         m_instance.destroy(m_surface);
         m_surface = nullptr;
@@ -64,6 +77,15 @@ namespace musevk {
         }
         m_instance.destroy();
         m_instance = nullptr;
+    }
+
+    bool VulkanManager::deviceAlive(const char *who) {
+        if (m_logical_device)
+            return true;
+        if (!m_device_gone_reported.exchange(true))
+            m_log.error(eVideo, std::format("{}: the Vulkan device is already destroyed; an object created on it "
+                                            "outlives VulkanManager::cleanup() and leaks", who));
+        return false;
     }
 
     void VulkanManager::cleanupSwapChain() {

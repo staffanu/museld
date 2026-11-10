@@ -19,12 +19,32 @@ layout (local_size_z_id = 3) in;
 #define MUSE_C_BUF_WIDTH 94
 #define MUSE_C_OFFSET 11
 
-#define NTSC_TOTAL_HEIGHT 525
-#define NTSC_TOTAL_WIDTH 910
-#define NTSC_DROPOUT_BIT_WORDS 29 // (NTSC_TOTAL_WIDTH + 31) / 32: one row of dropout flags as a bit mask
-#define NTSC_Y_BUF_WIDTH 764
-#define NTSC_CHROMA_TAP_HALO 9 // the chroma demodulation window reaches this far past the picture columns
-#define NTSC_CHROMA_TAPS_WIDTH (NTSC_Y_BUF_WIDTH + 2 * NTSC_CHROMA_TAP_HALO)
-#define NTSC_FIELD_HEIGHT 240
-#define NTSC_FIELD_START_X 129
-#define NTSC_FIELD_START_Y 22
+// The SD shaders (sdtv/sdtv_*.comp) are compiled once per video standard:
+// as ntsc_*.comp.spv with the NTSC geometry and as pal_*.comp.spv with
+// -DSDTV_PAL, where the same SDTV_* macros hold the PAL values.  The C++
+// side of these values is sdtv/VideoStandard.cpp; the two must agree.
+#ifdef SDTV_PAL
+#define SDTV_TOTAL_HEIGHT 625
+#define SDTV_TOTAL_WIDTH 1135
+#define SDTV_DROPOUT_BIT_WORDS 36 // (SDTV_TOTAL_WIDTH + 31) / 32: one row of dropout flags as a bit mask
+#define SDTV_Y_BUF_WIDTH 944
+#define SDTV_FIELD_HEIGHT 288
+#define SDTV_FIELD_START_X 180
+#define SDTV_FIELD_START_Y 23
+#define SDTV_FIELD2_OFFSET 313 // frame line of field 2's first line, less one
+#define SDTV_BURST_START 102   // the colour burst window: 32 samples from here
+#define SDTV_SYNC_END 96       // columns before this hold the sync pulse (and PAL's 3.75 MHz pilot on it)
+#else
+#define SDTV_TOTAL_HEIGHT 525
+#define SDTV_TOTAL_WIDTH 910
+#define SDTV_DROPOUT_BIT_WORDS 29 // (SDTV_TOTAL_WIDTH + 31) / 32: one row of dropout flags as a bit mask
+#define SDTV_Y_BUF_WIDTH 764
+#define SDTV_FIELD_HEIGHT 240
+#define SDTV_FIELD_START_X 129
+#define SDTV_FIELD_START_Y 22
+#define SDTV_FIELD2_OFFSET 263
+#define SDTV_BURST_START 78
+#define SDTV_SYNC_END 74
+#endif
+#define SDTV_CHROMA_TAP_HALO 9 // the chroma demodulation window reaches this far past the picture columns
+#define SDTV_CHROMA_TAPS_WIDTH (SDTV_Y_BUF_WIDTH + 2 * SDTV_CHROMA_TAP_HALO)

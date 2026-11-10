@@ -12,12 +12,15 @@
 #include "AnalogAudioDemodulator.h"
 
 AnalogAudioDemodulator::AnalogAudioDemodulator(Logger &log, double input_sample_frequency, int input_block_size,
-                                               double output_sample_frequency, bool use_simd)
+                                               double output_sample_frequency, bool use_simd,
+                                               double left_carrier_frequency, double right_carrier_frequency,
+                                               double channel_pass_hz, double channel_stop_hz)
 : m_log(log),
   m_input_sample_frequency(input_sample_frequency),
   m_input_block_size(input_block_size),
   m_output_sample_frequency(output_sample_frequency),
-  m_cx_expander(output_sample_frequency)
+  m_channel_pass_hz(channel_pass_hz),
+  m_channel_stop_hz(channel_stop_hz)
 {
     if (input_sample_frequency < 6.5e6)
         throw std::runtime_error("Analog audio decoding needs an input sample frequency of at least 6.5 MHz");
@@ -76,8 +79,8 @@ AnalogAudioDemodulator::AnalogAudioDemodulator(Logger &log, double input_sample_
     for (int i = 0; i < 1 << c_phase_accum_bits; i++)
         m_exp_lut[i] = std::polar(1.0, 2.0 * M_PI * i / (1 << c_phase_accum_bits));
 
-    buildChannel(m_channels[0], "left", c_left_carrier_frequency, mix_frequency, use_simd);
-    buildChannel(m_channels[1], "right", c_right_carrier_frequency, mix_frequency, use_simd);
+    buildChannel(m_channels[0], "left", left_carrier_frequency, mix_frequency, use_simd);
+    buildChannel(m_channels[1], "right", right_carrier_frequency, mix_frequency, use_simd);
 
     // 75 us de-emphasis via the bilinear transform, and a 5 Hz DC blocker that
     // removes the offset a carrier frequency error leaves after the discriminator.
@@ -120,13 +123,14 @@ void AnalogAudioDemodulator::buildChannel(ChannelState &channel, const std::stri
     channel.audio_buffer.resize(pre_mix_block_size / m_post_mix_decimation_factor / m_audio_decimation_factor);
 
     // Channel-select lowpass at the discriminator rate: pass the FM signal
-    // (+-150 kHz), stop by +-480 kHz where the neighboring carrier sits after
-    // mixing (the carriers are 511 kHz apart).
+    // (+-150 kHz), stop before the neighbouring carrier's inner sideband
+    // (NTSC's carriers are 511 kHz apart, PAL's 383; see the constructor)
     channel.post_mix_filter_stages.resize(post_mix_log2_decimation + 1);
     {
-        std::vector<float> filter = KaiserLowPass::design<float>(discriminator_frequency, 315e3, 330e3, 80);
+        std::vector<float> filter = KaiserLowPass::design<float>(discriminator_frequency,
+                                                                 (float)m_channel_pass_hz, (float)m_channel_stop_hz, 80);
         std::string description = std::format(
-            "Kaiser low-pass Fs={}, cutoff=315 kHz, ntaps={}", discriminator_frequency, filter.size());
+            "Kaiser low-pass Fs={}, cutoff={} kHz, ntaps={}", discriminator_frequency, m_channel_pass_hz / 1e3, filter.size());
         channel.post_mix_filter_stages[post_mix_log2_decimation] = new ComplexFirFilterStage(
             std::format("{} channel select filter", name),
             description,
@@ -308,8 +312,7 @@ void AnalogAudioDemodulator::processChannel(ChannelState &channel, std::vector<f
         resampled.push_back(sample);
 }
 
-void AnalogAudioDemodulator::demodulate(const float *input_buffer, bool cx_enabled,
-                                        std::vector<TwoChannelSample> &output) {
+void AnalogAudioDemodulator::demodulate(const float *input_buffer, std::vector<TwoChannelFloatSample> &output) {
     // Low-pass filter and decimate the input signal (shared by both channels)
     if (m_pre_mix_filter_stages.empty()) {
         memcpy(m_pre_mix_buffer.data(), input_buffer, m_input_block_size * sizeof(float));
@@ -334,7 +337,7 @@ void AnalogAudioDemodulator::demodulate(const float *input_buffer, bool cx_enabl
     processChannel(m_channels[1], m_resampled[1]);
     assert(m_resampled[0].size() == m_resampled[1].size());
 
-    // De-emphasis, DC blocking, CX expansion, squelch and conversion to s16
+    // De-emphasis, DC blocking and squelch
     for (size_t i = 0; i < m_resampled[0].size(); i++) {
         float samples[2];
         for (int c = 0; c < 2; c++) {
@@ -352,15 +355,7 @@ void AnalogAudioDemodulator::demodulate(const float *input_buffer, bool cx_enabl
             samples[c] = dc_blocked;
         }
 
-        // The sidechain runs whether or not CX is enabled so the level
-        // estimate stays warm across transitions
-        const float cx_gain = m_cx_expander.processSidechain(samples[0], samples[1]);
-        if (cx_enabled) {
-            samples[0] *= cx_gain;
-            samples[1] *= cx_gain;
-        }
-
-        TwoChannelSample out_sample{};
+        TwoChannelFloatSample out_sample{};
         for (int c = 0; c < 2; c++) {
             ChannelState &channel = m_channels[c];
             const float squelch_target = channel.squelched ? 0.0f : 1.0f;
@@ -369,8 +364,7 @@ void AnalogAudioDemodulator::demodulate(const float *input_buffer, bool cx_enabl
             else if (channel.squelch_gain > squelch_target)
                 channel.squelch_gain = std::max(squelch_target, channel.squelch_gain - m_squelch_ramp_step);
 
-            const float scaled = samples[c] * channel.squelch_gain * (32767.0f * c_output_level);
-            out_sample.samples[c] = (int16_t)std::clamp(scaled, -32768.0f, 32767.0f);
+            out_sample.samples[c] = samples[c] * channel.squelch_gain;
         }
         output.push_back(out_sample);
     }

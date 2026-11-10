@@ -6,25 +6,25 @@ option on Linux — see the [README](../README.md).
 
 ## What is published
 
-Six packages, three per platform, all built from the same commit:
+Four packages, two per platform, all built from the same commit:
 
 | Package | Zipped | Contents |
 |---|---|---|
 | `museld-windows-x86_64.zip` | ~7 MB | `museld.exe`, `ac3rf-efm-decode.exe` |
 | `museld-windows-x86_64-full.zip` | ~69 MB | the same, plus FFmpeg for `--write` and ONNX Runtime for `--ocr` |
-| `ac3rf-efm-decode-windows-x86_64.zip` | ~2 MB | `ac3rf-efm-decode.exe` alone |
 | `museld-macos-universal.zip` | ~10 MB | `museld`, `ac3rf-efm-decode` |
 | `museld-macos-universal-full.zip` | ~55 MB | the same, plus FFmpeg for `--write` and ONNX Runtime for `--ocr` |
-| `ac3rf-efm-decode-macos-universal.zip` | ~1 MB | `ac3rf-efm-decode` alone |
 
 Each is self-contained: it carries the libraries the programs need, so nothing has to be
 installed first. Only the graphics driver comes from the system.
 
 The minimal/full split exists because FFmpeg and ONNX Runtime dominate the size — FFmpeg
 alone is 92 of the 100 DLLs the Windows museld would otherwise need, all to encode H.264
-and AAC. The minimal build turns both off (`-DUSE_LIBAV=OFF -DUSE_OCR=OFF`);
-`ac3rf-efm-decode` links neither of them nor Vulkan/GLFW, so it also gets a package of
-its own, which is what most people who only want the audio decoded need. Using `--write`
+and AAC. The minimal build turns both off (`-DUSE_LIBAV=OFF -DUSE_OCR=OFF`). Up to v0.4.2
+`ac3rf-efm-decode` also had a package of its own, a couple of megabytes; it was dropped
+because the minimal package is small enough to carry both, and someone with only the
+decoder CLI cannot run `museld --probe`, the first thing to ask for when a capture does
+not decode. Using `--write`
 in a minimal build fails with "FFMPEG is not available", and `--ocr` with "requires a
 build with -DUSE_OCR=ON".
 

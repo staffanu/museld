@@ -171,7 +171,6 @@ jobs:
           mkdir -p "$out"
           "$stage" build-lean "$out/museld-macos" museld ac3rf-efm-decode
           "$stage" build-full "$out/museld-macos-full" museld ac3rf-efm-decode
-          "$stage" build-lean "$out/ac3rf-efm-decode-macos" ac3rf-efm-decode
 
       - name: Check the staged packages
         run: |
@@ -216,11 +215,10 @@ jobs:
         run: |
           set -euo pipefail
           merge=packaging/macos/merge-universal.sh
-          for name in museld-macos museld-macos-full ac3rf-efm-decode-macos; do
+          for name in museld-macos museld-macos-full; do
             case "$name" in
               museld-macos)                  out=museld-macos-universal ;;
               museld-macos-full)             out=museld-macos-universal-full ;;
-              ac3rf-efm-decode-macos)        out=ac3rf-efm-decode-macos-universal ;;
             esac
             "$merge" "stage/arm64/$name" "stage/x86_64/$name" "$out"
             zip -qry "$out.zip" "$out"
@@ -229,8 +227,7 @@ jobs:
       - name: Smoke test the packages
         run: |
           set -euo pipefail
-          for pkg in museld-macos-universal museld-macos-universal-full \
-                     ac3rf-efm-decode-macos-universal; do
+          for pkg in museld-macos-universal museld-macos-universal-full; do
             (packaging/macos/smoke-test.sh "$pkg" --universal)
           done
 
@@ -339,10 +336,31 @@ jobs:
         with:
           msystem: UCRT64
           update: true
-          install: git zip
+          install: git zip zstd
           pacboy: >-
             gcc:p cmake:p ninja:p pkgconf:p flac:p ffmpeg:p onnxruntime:p
             vulkan-headers:p vulkan-loader:p glfw:p shaderc:p
+
+      # MSYS2 moved abseil-cpp to 20260817 on 2026-10-29 without rebuilding
+      # onnxruntime (1.29.0-2, built 2026-09-25), whose onnxruntime.dll still
+      # imports the libabsl_*-2605.0.0.dll names, so the full package's museld
+      # does not start. Until onnxruntime is rebuilt, put the old abseil DLLs
+      # beside the new ones (their names differ by version, nothing collides)
+      # so the staging loop ships them. Remove this step once
+      # "ldd /ucrt64/bin/onnxruntime.dll" no longer lists 2605 names.
+      - name: Work around onnxruntime linked against an older abseil
+        run: |
+          set -euo pipefail
+          if ldd /ucrt64/bin/onnxruntime.dll | grep -q 'libabsl_.*-2605.0.0.dll => not found'; then
+            curl -fsSL -o abseil-old.pkg.tar.zst \
+              https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-abseil-cpp-20260526.0-1-any.pkg.tar.zst
+            tar --zstd -xf abseil-old.pkg.tar.zst -C / --wildcards 'ucrt64/bin/libabsl_*-2605.0.0.dll'
+            rm abseil-old.pkg.tar.zst
+            ldd /ucrt64/bin/onnxruntime.dll | grep -q 'not found' && { echo "onnxruntime.dll still has unresolved imports"; ldd /ucrt64/bin/onnxruntime.dll; exit 1; }
+            echo "onnxruntime.dll resolves again with the 20260526 abseil DLLs added"
+          else
+            echo "onnxruntime.dll resolves; this workaround step can be removed"
+          fi
 
       # The default -march=native would target whatever CPU this runner happens
       # to have; x86-64-v2 (Nehalem/Westmere and later) is the baseline for the
@@ -372,13 +390,11 @@ jobs:
           stage=packaging/windows/stage-package.sh
           "$stage" build-lean museld-windows-x86_64 museld.exe ac3rf-efm-decode.exe
           "$stage" build-full museld-windows-x86_64-full museld.exe ac3rf-efm-decode.exe
-          "$stage" build-lean ac3rf-efm-decode-windows-x86_64 ac3rf-efm-decode.exe
 
       - name: Smoke test the packages
         run: |
           set -euo pipefail
-          for pkg in museld-windows-x86_64 museld-windows-x86_64-full \
-                     ac3rf-efm-decode-windows-x86_64; do
+          for pkg in museld-windows-x86_64 museld-windows-x86_64-full; do
             (packaging/windows/smoke-test.sh "$pkg")
           done
 

@@ -2,16 +2,24 @@
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
 #include <algorithm>
+#include <pthread.h>
+#include <cassert>
+#include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstring>
-#include <filesystem>
 #include <format>
-#include <fstream>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <thread>
 #include <valarray>
 #include <vector>
 #include "InputProbe.h"
+#include "input/ByteSource.h"
 #include "input/InputReaderFactory.h"
+#include "input/PreparedInput.h"
 #include "filter/WindowedSinc.h"
 #include "filter/FFT.h"
 #include "logging/Logger.h"
@@ -31,6 +39,7 @@ constexpr int c_analytic_taps = 129;
 constexpr double c_highpass_fraction = 0.06;
 
 constexpr double c_ntsc_line_hz = 15734.2657;
+constexpr double c_pal_line_hz = 15625.0;
 constexpr double c_muse_line_hz = 33750.0;
 // The NTSC left analog audio carrier, in carrier cycles per video line
 // (2.301 MHz / line rate).  Present on virtually every NTSC laserdisc (AC3
@@ -39,6 +48,20 @@ constexpr double c_ntsc_audio_cycles_per_line = 2.301e6 / c_ntsc_line_hz;
 
 // Common capture rates to snap the line-rate estimate to (DdD, cxadc, FX3).
 constexpr double c_known_rates[] = {28.63636e6, 35.79545e6, 40e6, 46.08e6, 50e6, 62.5e6, 64e6, 80e6, 100e6};
+
+// The field period test: the lines between consecutive vertical sync
+// groups, 262.5 on NTSC and 312.5 on PAL.  A vertical sync group is a run of
+// lines that spend most of their time at sync tip (the broad pulses: 2.5-3
+// lines; a normal line spends 7 % there), found by slicing the averaged
+// instantaneous frequency between its lowest percentile (inside the tip) and
+// the blanking level above it, and walking the chunk in line periods.  The
+// count is content-independent and immune to wow (an autocorrelation at the
+// field lag is not: wow moves the pulses by more than their width over a
+// field, so nothing lines up at any one lag).  The chunk this runs on is
+// read separately, sized from the measured line period: the line-period
+// chunks hold less than two PAL fields at 100 MHz.
+constexpr double c_field_chunk_fields = 3.5;      // PAL fields per chunk
+constexpr uint32_t c_field_chunk_max = 12u << 20; // at most 12M samples (48 MB)
 
 struct ChunkStats {
     double line_period;         // samples
@@ -49,37 +72,233 @@ struct ChunkStats {
     double muse16_ratio;        // ...relative to off-period control folds
 };
 
-// Read chunk_samples floats starting at the given sample offset with a fresh
-// reader, so probing never disturbs playback state.  Returns an empty vector
-// when the file does not reach that far.
-vector<float> readChunk(const string &filename, InputFormat format,
-                        int64_t sample_offset, uint32_t chunk_samples) {
-    vector<float> samples(chunk_samples);
-    try {
-        auto reader = makeInputReader(filename, format, chunk_samples);
-        reader->initialize();
-        if (sample_offset > 0)
-            reader->seek(sample_offset);
-        if (reader->readFloats(samples.data()) != (int)chunk_samples)
-            return {};
-    } catch (const std::exception &) {
-        return {}; // unreadable at this offset (e.g. a FLAC seek past the end)
+// --- Where the measurements get their samples ------------------------------
+//
+// The measurements read windows of samples under a format, and do not care
+// where they come from.  A seekable input gives a window at any position, so
+// it is sampled at a few positions spread over its length; a live input gives
+// the next samples to arrive and nothing else, and is read window after
+// window until the verdict is clear.
+
+// A source over bytes held in memory: the first window of a live input of
+// unknown format, read once and then interpreted under each candidate format.
+class MemoryByteSource : public ByteSource {
+public:
+    MemoryByteSource(const uint8_t *data, size_t size) : m_data(data), m_size(size) {}
+
+    ssize_t read(uint8_t *buf, size_t len) override {
+        const size_t n = min(len, m_size - m_pos);
+        memcpy(buf, m_data + m_pos, n);
+        m_pos += n;
+        return (ssize_t)n;
     }
-    return samples;
+
+    int64_t seek(int64_t offset, int whence) override {
+        int64_t target = whence == SEEK_SET ? offset : whence == SEEK_CUR ? (int64_t)m_pos + offset
+                                                                          : (int64_t)m_size + offset;
+        if (target < 0 || target > (int64_t)m_size) {
+            errno = EINVAL;
+            return -1;
+        }
+        m_pos = (size_t)target;
+        return target;
+    }
+
+    int64_t size() override { return (int64_t)m_size; }
+    bool isLive() const override { return false; }
+
+private:
+    const uint8_t *m_data;
+    size_t m_size;
+    size_t m_pos = 0;
+};
+
+// A view of a source that is owned elsewhere, so that the probe's short-lived
+// readers can be opened over the player's input without taking it.
+class BorrowedByteSource : public ByteSource {
+public:
+    explicit BorrowedByteSource(ByteSource &inner) : m_inner(inner) {}
+    ssize_t read(uint8_t *buf, size_t len) override { return m_inner.read(buf, len); }
+    int64_t seek(int64_t offset, int whence) override { return m_inner.seek(offset, whence); }
+    int64_t size() override { return m_inner.size(); }
+    bool isLive() const override { return m_inner.isLive(); }
+
+private:
+    ByteSource &m_inner;
+};
+
+// The bytes a live input's first window held, followed by the rest of the
+// input: the reader that decodes the live input from here starts at the
+// stream's own start, which matters for FLAC (its header is in that window)
+// and costs nothing for raw samples.
+class ReplayByteSource : public ByteSource {
+public:
+    ReplayByteSource(vector<uint8_t> head, unique_ptr<ByteSource> rest)
+        : m_head(std::move(head)), m_rest(std::move(rest)) {}
+
+    ssize_t read(uint8_t *buf, size_t len) override {
+        if (m_pos < m_head.size()) {
+            const size_t n = min(len, m_head.size() - m_pos);
+            memcpy(buf, m_head.data() + m_pos, n);
+            m_pos += n;
+            return (ssize_t)n;
+        }
+        return m_rest->read(buf, len);
+    }
+
+    int64_t seek(int64_t, int) override {
+        errno = ESPIPE;
+        return -1;
+    }
+
+    int64_t size() override { return -1; }
+    bool isLive() const override { return true; }
+
+private:
+    vector<uint8_t> m_head;
+    size_t m_pos = 0;
+    unique_ptr<ByteSource> m_rest;
+};
+
+class SampleSource {
+public:
+    virtual ~SampleSource() = default;
+    // chunk_samples floats under `format` from `sample_offset` (a live
+    // source ignores the offset and gives the next samples).  Empty when the
+    // input does not reach that far, or the stream has ended.
+    virtual vector<float> read(InputFormat format, int64_t sample_offset, uint32_t chunk_samples) = 0;
+    // The input's length in bytes, or -1 when unknown (live).
+    virtual int64_t sizeBytes() = 0;
+    // The first bytes of the input, for the container signatures; empty when
+    // they cannot be had.
+    virtual vector<uint8_t> head(size_t n) = 0;
+};
+
+// A seekable input, read with a fresh reader per window so the readers' own
+// state (a FLAC decoder's position) never leaks between measurements; the
+// source is left wherever the last window ended, and the player rewinds it.
+class SeekableSamples : public SampleSource {
+public:
+    explicit SeekableSamples(ByteSource &source) : m_source(source) {}
+
+    vector<float> read(InputFormat format, int64_t sample_offset, uint32_t chunk_samples) override {
+        vector<float> samples(chunk_samples);
+        try {
+            if (m_source.seek(0, SEEK_SET) != 0)
+                return {};
+            auto reader = makeInputReader(make_unique<BorrowedByteSource>(m_source), format, chunk_samples);
+            reader->initialize();
+            if (sample_offset > 0 && !reader->seek(sample_offset))
+                return {};
+            if (reader->readFloats(samples.data()) != (int)chunk_samples)
+                return {};
+        } catch (const std::exception &) {
+            return {}; // unreadable at this offset (e.g. a FLAC seek past the end)
+        }
+        return samples;
+    }
+
+    int64_t sizeBytes() override { return m_source.size(); }
+
+    vector<uint8_t> head(size_t n) override {
+        vector<uint8_t> bytes(n);
+        if (m_source.seek(0, SEEK_SET) != 0)
+            return {};
+        size_t got = 0;
+        while (got < n) {
+            const ssize_t r = m_source.read(bytes.data() + got, n - got);
+            if (r <= 0)
+                break;
+            got += (size_t)r;
+        }
+        bytes.resize(got);
+        return bytes;
+    }
+
+private:
+    ByteSource &m_source;
+};
+
+// A window of bytes held in memory, interpreted under whatever format is asked
+// for: how a live input of unknown format is looked at.
+class MemorySamples : public SampleSource {
+public:
+    explicit MemorySamples(const vector<uint8_t> &bytes) : m_bytes(bytes) {}
+
+    vector<float> read(InputFormat format, int64_t sample_offset, uint32_t chunk_samples) override {
+        vector<float> samples(chunk_samples);
+        try {
+            auto reader = makeInputReader(make_unique<MemoryByteSource>(m_bytes.data(), m_bytes.size()),
+                                          format, chunk_samples);
+            reader->initialize();
+            if (sample_offset > 0 && !reader->seek(sample_offset))
+                return {};
+            if (reader->readFloats(samples.data()) != (int)chunk_samples)
+                return {};
+        } catch (const std::exception &) {
+            return {};
+        }
+        return samples;
+    }
+
+    int64_t sizeBytes() override { return (int64_t)m_bytes.size(); }
+
+    vector<uint8_t> head(size_t n) override {
+        return {m_bytes.begin(), m_bytes.begin() + (ptrdiff_t)min(n, m_bytes.size())};
+    }
+
+private:
+    const vector<uint8_t> &m_bytes;
+};
+
+// A live input decoded by one reader that keeps its place: the measurements
+// get consecutive windows, and the player takes the reader over afterwards.
+class LiveSamples : public SampleSource {
+public:
+    LiveSamples(InputReader &reader, InputFormat format) : m_reader(reader), m_format(format) {}
+
+    vector<float> read(InputFormat format, int64_t, uint32_t chunk_samples) override {
+        assert(format == m_format);
+        if (m_ended)
+            return {};
+        // Whole reader blocks: a little more than asked for does no harm
+        const uint32_t block = m_reader.block_size();
+        vector<float> samples((chunk_samples + block - 1) / block * block);
+        for (size_t at = 0; at < samples.size(); at += block) {
+            if (m_reader.readFloats(samples.data() + at) != (int)block) {
+                m_ended = true;
+                return {};
+            }
+        }
+        return samples;
+    }
+
+    int64_t sizeBytes() override { return -1; }
+    vector<uint8_t> head(size_t) override { return {}; }
+    bool ended() const { return m_ended; }
+
+private:
+    InputReader &m_reader;
+    const InputFormat m_format;
+    bool m_ended = false;
+};
+
+vector<float> readChunk(SampleSource &source, InputFormat format,
+                        int64_t sample_offset, uint32_t chunk_samples) {
+    return source.read(format, sample_offset, chunk_samples);
 }
 
 // Read a chunk at the requested offset, falling back toward the start when the
-// reader cannot get there.  Long FLAC captures need this: STREAMINFO stores the
-// sample count in 36 bits, so anything past 2^36 samples (18 minutes at 62.5
-// MHz) records a wrapped total, and libFLAC then refuses every seek beyond that
-// wrapped value even though the frames decode fine.  Backing off keeps the
+// reader cannot get there (a short file; a FLAC seek that fails for some other
+// reason -- the 36-bit STREAMINFO count that used to limit seeks in long
+// captures is hidden from libFLAC by the reader now).  Backing off keeps the
 // probe reading real data instead of reporting an unreadable file.
-vector<float> readChunkNear(Logger &log, const string &filename, InputFormat format,
+vector<float> readChunkNear(Logger &log, SampleSource &source, InputFormat format,
                             int64_t &sample_offset, uint32_t chunk_samples) {
     constexpr int c_max_backoffs = 12;
     const int64_t requested = sample_offset;
     for (int attempt = 0; ; attempt++) {
-        auto samples = readChunk(filename, format, sample_offset, chunk_samples);
+        auto samples = readChunk(source, format, sample_offset, chunk_samples);
         if (!samples.empty()) {
             if (sample_offset != requested)
                 log.debug(eInput, std::format("Probe: sample {} unreadable, used sample {} instead",
@@ -108,13 +327,13 @@ double lag1Autocorrelation(const vector<float> &x) {
     return denom > 0 ? num / denom : 0;
 }
 
-optional<InputFormat> detectFormatByMagic(const string &filename) {
-    ifstream f(filename, ios::binary);
-    char magic[4] = {};
-    f.read(magic, 4);
-    if (memcmp(magic, "fLaC", 4) == 0)
+optional<InputFormat> detectFormatByMagic(SampleSource &source) {
+    const auto magic = source.head(4);
+    if (magic.size() < 4)
+        return nullopt;
+    if (memcmp(magic.data(), "fLaC", 4) == 0)
         return eFlac;
-    if (memcmp(magic, "OggS", 4) == 0)
+    if (memcmp(magic.data(), "OggS", 4) == 0)
         return eFlacOgg;
     return nullopt;
 }
@@ -127,16 +346,16 @@ optional<InputFormat> detectFormatByMagic(const string &filename) {
 // (a u8 file read as u16 still pairs correlated bytes) and only the distance
 // to perfect correlation separates them.  When more than one candidate
 // survives, the caller breaks the tie by which one shows video line structure.
-vector<InputFormat> rawFormatCandidates(Logger &log, const string &filename) {
+vector<InputFormat> rawFormatCandidates(Logger &log, SampleSource &source) {
     constexpr InputFormat formats[] = {eUint8, eSint8, eUint16, eSint16, eUint16BE, eSint16BE, eLds};
     constexpr uint32_t score_samples = 1 << 20;
     vector<pair<double, InputFormat>> scored;
     for (InputFormat fmt : formats) {
         // Score away from the file start, where lead-in may not look like RF,
         // but fall back to the start for short files
-        auto samples = readChunk(filename, fmt, 8 << 20, score_samples);
+        auto samples = readChunk(source, fmt, 8 << 20, score_samples);
         if (samples.empty())
-            samples = readChunk(filename, fmt, 0, score_samples);
+            samples = readChunk(source, fmt, 0, score_samples);
         if (samples.empty())
             continue;
         double score = lag1Autocorrelation(samples);
@@ -150,6 +369,18 @@ vector<InputFormat> rawFormatCandidates(Logger &log, const string &filename) {
     for (const auto &[score, fmt] : scored)
         if (candidates.size() < 3 && (1 - scored.front().first) > 0.5 * (1 - score))
             candidates.push_back(fmt);
+    // The lag-1 correlation is low under every format when the carrier sits
+    // high in the band (a 30 MHz capture of NTSC: 8.1 MHz is 0.27 of the
+    // rate, where adjacent samples are nearly a quarter cycle apart), so it
+    // then cannot pick the candidates.  The line-structure analysis still
+    // can -- only the true format decodes into a video signal -- at the
+    // cost of analysing every format.
+    if (candidates.empty()) {
+        log.info(eInput, "Probe: no sample format shows adjacent-sample correlation; "
+                         "looking for video structure under each of them");
+        for (InputFormat fmt : formats)
+            candidates.push_back(fmt);
+    }
     return candidates;
 }
 
@@ -228,7 +459,16 @@ vector<double> autocorrelation(const vector<float> &d) {
 // can be a harmonic (two or three lines), so prefer a near-as-strong peak at
 // an integer fraction of its lag, then refine with a parabolic fit.
 pair<double, double> findLinePeriod(const vector<double> &ac) {
-    int best = (int)(max_element(ac.begin(), ac.end()) - ac.begin());
+    // The strongest interior local maximum: a value at the edge of the search
+    // range is the autocorrelation still rising towards a lag outside it, not
+    // a period (the GGV1011 test disc's line patterns put such a rise at the
+    // short end, and the peak there would have read as a 480-sample line)
+    int best = -1;
+    for (int i = 1; i + 1 < (int)ac.size(); i++)
+        if (ac[i] >= ac[i - 1] && ac[i] >= ac[i + 1] && (best < 0 || ac[i] > ac[best]))
+            best = i;
+    if (best < 0)
+        return {0.0, 0.0};
     for (int divisor : {3, 2}) {
         double target = (double)(best + c_min_lag) / divisor - c_min_lag;
         int j = (int)lround(target);
@@ -327,6 +567,105 @@ double foldSignificance(const vector<float> &x, int period) {
     return noise_var > 0 ? sqrt(profile_var / noise_var) : 0;
 }
 
+// Lines per field from one chunk, for a line period in input samples; 0 when
+// fewer than two vertical sync groups were found or they disagree
+// The field-period test on samples in hand: see measureFieldLines
+double fieldLinesOfSamples(Logger &log, const vector<float> &samples, int64_t offset, double line_period) {
+    auto analytic = analyticSignal(samples);
+    auto freq = instantaneousFrequency(analytic).first;
+    auto d_raw = blockAverage(freq, c_block_average);
+    const double period = line_period / c_block_average;
+    if (d_raw.size() < 2 * 313 * period)
+        return 0;
+    // PAL discs carry a 60 IRE pilot burst on the sync tip (3.75 MHz, IEC
+    // 60856 9.1.2), which straddles any slicing level set between tip and
+    // blanking and would break the vertical sync groups into fragments; a
+    // 2 us running mean removes it and leaves the pulses that matter here
+    // (the broad ones are 27 us)
+    const int smooth = max(3, (int)lround(period * 2.0 / 64.0));
+    vector<float> d(d_raw.size());
+    double acc = 0;
+    for (size_t i = 0; i < d_raw.size(); i++) {
+        acc += d_raw[i];
+        if (i >= (size_t)smooth)
+            acc -= d_raw[i - smooth];
+        d[i] = (float)(acc / (double)min(i + 1, (size_t)smooth));
+    }
+
+    // Sync tip slicing level: the tip holds the lowest ~7 % of the samples,
+    // so the 5th percentile is inside it, and the 99.5th is at or near white;
+    // blanking sits 0.3 of that span above the tip on both standards, so
+    // slice half way up to it.  (A percentile for the blanking level itself
+    // depends on the picture: on the GGV1011 colour bars the 25th sat in the
+    // picture, the level landed at blanking, and every blank VBI line read
+    // as a vertical sync line.)
+    vector<float> sorted(d);
+    nth_element(sorted.begin(), sorted.begin() + sorted.size() / 20, sorted.end());
+    const float p5 = sorted[sorted.size() / 20];
+    nth_element(sorted.begin(), sorted.begin() + sorted.size() * 199 / 200, sorted.end());
+    const float p995 = sorted[sorted.size() * 199 / 200];
+    const float threshold = p5 + 0.15f * (p995 - p5);
+
+    // Per line period, the fraction of samples at sync tip; a run of lines
+    // above one half is a vertical sync group
+    vector<double> group_starts; // in lines
+    bool in_group = false;
+    int lines = 0;
+    for (double pos = 0; pos + period <= (double)d.size(); pos += period, lines++) {
+        int low = 0, n = 0;
+        for (size_t i = (size_t)pos; i < (size_t)(pos + period); i++, n++)
+            low += d[i] < threshold;
+        const bool vertical = n > 0 && low > n / 2;
+        if (vertical && !in_group)
+            group_starts.push_back(lines);
+        in_group = vertical;
+    }
+    if (group_starts.size() < 2)
+        return 0;
+    // The groups alternate between starting on a line boundary and half way
+    // through one, so consecutive spacings alternate 262/263 (312/313); the
+    // mean of a pair is the field length.  Disagreement among the spacings
+    // (dropouts, a lead-in) leaves the test undecided.
+    vector<double> spacings;
+    for (size_t i = 1; i < group_starts.size(); i++)
+        spacings.push_back(group_starts[i] - group_starts[i - 1]);
+    double field_lines = 0;
+    for (double s : spacings) field_lines += s;
+    field_lines /= (double)spacings.size();
+    for (double s : spacings)
+        if (abs(s - field_lines) > 1.0)
+            field_lines = 0;
+    log.debug(eInput, std::format("Probe: vertical sync groups at sample {}: {} found, {:.1f} lines apart",
+                                  offset, group_starts.size(), field_lines));
+    return field_lines;
+}
+
+// The samples the field-period test wants: c_field_chunk_fields PAL fields
+uint32_t fieldChunkSamples(double line_period) {
+    const double want = c_field_chunk_fields * 312.5 * line_period + c_analytic_taps + 1;
+    // a multiple of 4: the lds reader unpacks four samples at a time
+    return (uint32_t)min<double>(want, c_field_chunk_max) / 4 * 4;
+}
+
+double measureFieldLines(Logger &log, SampleSource &source, InputFormat format,
+                         int64_t offset, double line_period) {
+    auto samples = readChunkNear(log, source, format, offset, fieldChunkSamples(line_period));
+    if (samples.empty())
+        return 0;
+    return fieldLinesOfSamples(log, samples, offset, line_period);
+}
+
+// The carrier band a mean carrier frequency (in cycles per line) falls in:
+// see classify()
+enum class CarrierBand { eSd, eMuse, eNone };
+CarrierBand bandOfCarrier(double cycles_per_line) {
+    if (cycles_per_line >= 420 && cycles_per_line <= 640)
+        return CarrierBand::eSd;
+    if (cycles_per_line >= 260 && cycles_per_line <= 430)
+        return CarrierBand::eMuse;
+    return CarrierBand::eNone;
+}
+
 ChunkStats analyzeChunk(Logger &log, const vector<float> &samples, int64_t offset) {
     auto analytic = analyticSignal(samples);
     auto [freq, mean_carrier] = instantaneousFrequency(analytic);
@@ -335,7 +674,12 @@ ChunkStats analyzeChunk(Logger &log, const vector<float> &samples, int64_t offse
     auto [period, strength] = findLinePeriod(ac);
     ChunkStats stats{period, strength, mean_carrier * period, audioCarrierRatio(samples, period), 0, 0};
     stats.muse16_significance = foldSignificance(samples, 480);
-    double control = max(foldSignificance(samples, 455), foldSignificance(samples, 509));
+    // The controls share 480's small factors (both are 8 x a prime): a byte
+    // misread of a 16-bit file repeats with period 2, an lds misread of one
+    // with period 8, and such a pattern folds as coherently at any period it
+    // divides -- at 480 and at these, so the ratio stays near 1.  Odd
+    // controls (455 and 509 once) let it through as a MUSE line structure.
+    double control = max(foldSignificance(samples, 472), foldSignificance(samples, 488));
     stats.muse16_ratio = control > 0 ? stats.muse16_significance / control : 0;
     log.debug(eInput, std::format(
             "Probe: chunk at sample {}: line period {:.1f} (autocorrelation {:.3f}), "
@@ -363,11 +707,12 @@ double formatBytesPerSample(InputFormat format) {
     }
 }
 
-vector<int64_t> chunkOffsets(const string &filename, InputFormat format) {
+vector<int64_t> chunkOffsets(int64_t size_bytes, InputFormat format) {
     double bytes_per_sample = formatBytesPerSample(format);
-    error_code ec;
-    int64_t total = (int64_t)((double)filesystem::file_size(filename, ec) / bytes_per_sample);
-    if (ec || total < (int64_t)c_chunk_samples)
+    int64_t total = (int64_t)((double)size_bytes / bytes_per_sample);
+    // An input of unknown size -- a live stream -- is probed on the one
+    // stretch it can give us: the next samples to arrive
+    if (size_bytes < 0 || total < (int64_t)c_chunk_samples)
         return {0};
     vector<int64_t> offsets;
     for (double frac : {0.08, 0.45, 0.75}) {
@@ -388,25 +733,29 @@ struct FileAnalysis {
     double audio_carrier_ratio = 0;
     double muse16_significance = 0;
     double muse16_ratio = 0;
+    int64_t reference_offset = 0;   // where the field period test should read
 
     // The fold-480 test carries muse-16 on its own; the line-period consensus
     // carries everything else
     bool isMuse16() const { return muse16_significance > 5 && muse16_ratio > 3; }
 };
 
-FileAnalysis analyzeFile(Logger &log, const string &filename, InputFormat format) {
+FileAnalysis analyzeFile(Logger &log, SampleSource &source, InputFormat format) {
     FileAnalysis analysis;
     vector<ChunkStats> chunks;
+    vector<int64_t> chunk_offsets;
     vector<double> fold_significances, fold_ratios;
-    for (int64_t offset : chunkOffsets(filename, format)) {
-        auto samples = readChunkNear(log, filename, format, offset, c_chunk_samples);
+    for (int64_t offset : chunkOffsets(source.sizeBytes(), format)) {
+        auto samples = readChunkNear(log, source, format, offset, c_chunk_samples);
         if (samples.empty())
             continue;
         ChunkStats stats = analyzeChunk(log, samples, offset);
         fold_significances.push_back(stats.muse16_significance);
         fold_ratios.push_back(stats.muse16_ratio);
-        if (stats.line_strength >= 0.25) // convincing line structure only
+        if (stats.line_strength >= 0.25) { // convincing line structure only
             chunks.push_back(stats);
+            chunk_offsets.push_back(offset);
+        }
     }
     if (!fold_significances.empty()) {
         analysis.muse16_significance = median(fold_significances);
@@ -418,12 +767,15 @@ FileAnalysis analyzeFile(Logger &log, const string &filename, InputFormat format
     // A chunk in the lead-in or a dropout can lock onto something that is not
     // the line structure, and a clean chunk can lock two or three lines apart
     // (a harmonic of the period).  Pick the reference chunk most others agree
-    // with -- counting a chunk as agreeing when an integer division of its
-    // period lands on the reference -- and require a majority so a single
-    // rogue chunk cannot decide.
+    // with -- counting a chunk as agreeing when a division of its period by
+    // two or three lands on the reference -- and require a majority so a
+    // single rogue chunk cannot decide.  Only those small factors count: a
+    // lead-in chunk once locked at a fifth of a line, and with any multiple
+    // accepted the two clean chunks were read as its fifth harmonics and
+    // elected it, which put the capture at 8 MHz instead of 40.
     auto harmonicOf = [](double period, double reference) -> int {
         int k = (int)lround(period / reference);
-        return k >= 1 && abs(period / k - reference) / reference <= 0.03 ? k : 0;
+        return k >= 1 && k <= 3 && abs(period / k - reference) / reference <= 0.03 ? k : 0;
     };
     size_t best_ref = 0, best_count = 0;
     for (size_t i = 0; i < chunks.size(); i++) {
@@ -455,24 +807,20 @@ FileAnalysis analyzeFile(Logger &log, const string &filename, InputFormat format
     analysis.line_period = median(periods);
     analysis.line_strength = median(strengths);
     analysis.cycles_per_line = median(cycles);
+    analysis.reference_offset = chunk_offsets[best_ref];
     return analysis;
 }
 
-} // namespace
+// The format of the input and, when it shows video structure, the analysis
+// behind it.  `source` is read under each candidate format: only the true one
+// decodes into a video signal.
+struct FormatVerdict {
+    optional<InputFormat> format; // the one found, or nullopt when nothing is convincing
+    FileAnalysis best{};
+    bool have_structure = false;  // best is meaningful
+};
 
-InputProbeResult probeInputFile(Logger &log, const string &filename,
-                                optional<InputFormat> known_format) {
-    InputProbeResult result;
-
-    result.format = known_format ? known_format : detectFormatByMagic(filename);
-    vector<InputFormat> candidates;
-    if (result.format)
-        candidates = {*result.format};
-    else
-        candidates = rawFormatCandidates(log, filename);
-    if (candidates.empty())
-        return result;
-
+FormatVerdict findFormat(Logger &log, SampleSource &source, const vector<InputFormat> &candidates) {
     // Analyze under each candidate format and let the video structure break
     // byte-level ties: only the true format decodes into a video signal (a
     // smooth baseband u16 capture scores high as u8 too, but shows no line
@@ -484,27 +832,26 @@ InputProbeResult probeInputFile(Logger &log, const string &filename,
     // format that shows structure is the truth, no matter how well a wider
     // one scores.  Among equal widths, a muse-16 fold hit outranks an RF line
     // lock, since the fold is the far more specific signature.
-    FileAnalysis best{};
-    bool have_best = false;
+    FormatVerdict verdict;
     auto quality = [](const FileAnalysis &a) {
         return a.isMuse16() ? 100.0 + a.muse16_significance
                             : (a.consensus ? a.line_strength : 0.0);
     };
     for (InputFormat fmt : candidates) {
-        FileAnalysis a = analyzeFile(log, filename, fmt);
+        FileAnalysis a = analyzeFile(log, source, fmt);
         if (quality(a) <= 0)
             continue;
-        bool narrower = have_best &&
-                formatBytesPerSample(fmt) < formatBytesPerSample(*result.format);
-        bool wider = have_best &&
-                formatBytesPerSample(fmt) > formatBytesPerSample(*result.format);
-        if (!have_best || narrower || (!wider && quality(a) > quality(best))) {
-            best = a;
-            result.format = fmt;
-            have_best = true;
+        bool narrower = verdict.have_structure &&
+                formatBytesPerSample(fmt) < formatBytesPerSample(*verdict.format);
+        bool wider = verdict.have_structure &&
+                formatBytesPerSample(fmt) > formatBytesPerSample(*verdict.format);
+        if (!verdict.have_structure || narrower || (!wider && quality(a) > quality(verdict.best))) {
+            verdict.best = a;
+            verdict.format = fmt;
+            verdict.have_structure = true;
         }
     }
-    if (!have_best) {
+    if (!verdict.have_structure && !candidates.empty()) {
         // No format shows video structure.  Report the byte-level winner if it
         // was unambiguous, or -- by the same asymmetry as above -- if the top
         // scorer is strictly narrower than every other candidate: the wider
@@ -513,17 +860,21 @@ InputProbeResult probeInputFile(Logger &log, const string &filename,
         for (size_t i = 1; i < candidates.size(); i++)
             narrowest &= formatBytesPerSample(candidates.front()) < formatBytesPerSample(candidates[i]);
         if (candidates.size() == 1 || narrowest)
-            result.format = candidates.front();
-        return result;
+            verdict.format = candidates.front();
     }
+    return verdict;
+}
 
+// The type and the sample rate from an analysis that found video structure;
+// the field period test reads more of `source` where it is needed.
+void classify(Logger &log, SampleSource &source, const FileAnalysis &best, InputProbeResult &result) {
     if (best.isMuse16()) {
         result.type = InputProbeResult::Type::eMuse16Baseband;
         result.line_period = 480;
         result.line_strength = best.line_strength;
         result.sample_frequency = 16.2e6;
         result.sample_frequency_snapped = true;
-        return result;
+        return;
     }
 
     result.line_period = best.line_period;
@@ -538,49 +889,403 @@ InputProbeResult probeInputFile(Logger &log, const string &filename,
         result.type = Type::eMuse16Baseband;
         result.sample_frequency = 16.2e6;
         result.sample_frequency_snapped = true;
-        return result;
+        return;
     }
 
     // Otherwise classify on the carrier frequency: NTSC deviates between 7.6
-    // and 9.3 MHz, so 483..591 cycles per line, and MUSE sits near 340.  Both
-    // bands are bounded and the space between and outside them is left
-    // unclassified rather than guessed, since content brightness moves the
-    // mean.  A count above every band means the autocorrelation locked two or
-    // three lines apart -- which happens on MUSE, where neighbouring lines can
-    // be too unlike each other to correlate -- and that scales the period and
-    // the carrier count by the same factor, so divide both back down until the
+    // and 9.3 MHz, so 483..591 cycles per line, PAL between 6.76 and 7.9 MHz,
+    // 433..506, and MUSE sits near 340.  The SD band and the MUSE band are
+    // bounded and the space between and outside them is left unclassified
+    // rather than guessed, since content brightness moves the mean.  A count
+    // above every band means the autocorrelation locked two or three lines
+    // apart -- which happens on MUSE, where neighbouring lines can be too
+    // unlike each other to correlate -- and that scales the period and the
+    // carrier count by the same factor, so divide both back down until the
     // carrier lands in a band.  The bands are the only way to tell: the
     // single-line peak of such a lock is no stronger than the half-line peak
     // of a perfectly good NTSC lock.
-    auto classifyByCarrier = [](double cycles_per_line) {
-        if (cycles_per_line >= 470 && cycles_per_line <= 640)
-            return Type::eNtscRf;
-        if (cycles_per_line >= 260 && cycles_per_line <= 430)
-            return Type::eMuseRf;
-        return Type::eUnknown;
-    };
+    //
+    // NTSC against PAL is decided by the field period: their line rates are
+    // 0.7 % apart (inside the line peak's resolution) and their carrier bands
+    // overlap, but the field lag is 262.5 or 312.5 lines, and the wrong one
+    // puts every sync pulse half a line off.  The audio carrier breaks ties
+    // (PAL discs with analog sound have their carriers elsewhere; those with
+    // digital sound have none).
+    using Band = CarrierBand;
     for (int harmonic = 1; harmonic <= 3; harmonic++) {
         // The audio carrier is decisive where it is measurable -- the ratio is
         // ~10^4 on real NTSC RF and ~1.5 elsewhere -- but it was measured at
         // the undivided period, so it only speaks for the unscaled hypothesis
-        Type type = classifyByCarrier(result.cycles_per_line / harmonic);
-        if (harmonic == 1 && result.audio_carrier_ratio > 50)
-            type = Type::eNtscRf;
-        if (type == Type::eUnknown)
+        Band band = bandOfCarrier(result.cycles_per_line / harmonic);
+        const bool ntsc_audio = harmonic == 1 && result.audio_carrier_ratio > 50;
+        if (band == Band::eNone && !ntsc_audio)
             continue;
-        result.type = type;
         result.line_period /= harmonic;
         result.cycles_per_line /= harmonic;
+        if (band == Band::eMuse) {
+            result.type = Type::eMuseRf;
+            break;
+        }
+        result.field_lines = measureFieldLines(log, source, *result.format, best.reference_offset, result.line_period);
+        if (abs(result.field_lines - 262.5) <= 1.5)
+            result.type = Type::eNtscRf;
+        else if (abs(result.field_lines - 312.5) <= 1.5)
+            result.type = Type::ePalRf;
+        else if (ntsc_audio)
+            result.type = Type::eNtscRf;
         break;
     }
     if (result.type == Type::eUnknown)
-        return result;
+        return;
 
     result.sample_frequency = estimateSampleFrequency(result, result.type);
     for (double rate : c_known_rates)
         if (result.sample_frequency == rate)
             result.sample_frequency_snapped = true;
+}
+
+// A seekable input, or one window of a live one: the format first, from the
+// signature or by trying the raw formats, then the classification.
+InputProbeResult probeSamples(Logger &log, SampleSource &source, optional<InputFormat> known_format) {
+    InputProbeResult result;
+
+    result.format = known_format ? known_format : detectFormatByMagic(source);
+    // The FLAC reader decides between plain FLAC and FLAC in Ogg from the stream
+    // itself, whatever the extension says; report what it will find
+    if (result.format == eFlac || result.format == eFlacOgg)
+        if (auto magic = detectFormatByMagic(source))
+            result.format = magic;
+    vector<InputFormat> candidates;
+    if (result.format)
+        candidates = {*result.format};
+    else
+        candidates = rawFormatCandidates(log, source);
+    if (candidates.empty())
+        return result;
+
+    const FormatVerdict verdict = findFormat(log, source, candidates);
+    if (verdict.format)
+        result.format = verdict.format;
+    if (verdict.have_structure)
+        classify(log, source, verdict.best, result);
     return result;
+}
+
+// The first window of a live input of unknown format: enough bytes for the
+// line-period chunk under the widest raw format.  The field period test needs
+// more, and gets it from the stream once the format is known.
+constexpr size_t c_live_window_bytes = (size_t)c_chunk_samples * 2;
+// The reader a live input is decoded with while it is probed, and then
+// played from: small blocks, so a window of any size is a whole number of them
+constexpr uint32_t c_live_block_samples = 1 << 16;
+// How often to say that a live input still shows nothing recognizable
+constexpr int c_live_report_every = 10;
+// A line lock this strong needs no second window (clean RF measures 0.9+)
+constexpr double c_live_clear_strength = 0.6;
+// A verdict below that is waited out: a locked disc with a picture shows
+// 0.8-0.97 even on a rotted copy (NYCSTM 0.88).  The GGV1011's capture opens
+// on black pictures and the player seeking, where the line-to-line
+// correlation is 0.28 and the autocorrelation peak wanders 1-3 % per window
+// (2414 samples through the true 2560 to 2617, with the disc locked all
+// along, as the timebase dump shows); a verdict taken there missed the
+// capture rate by 6 %.  A weak verdict is taken once the period has held
+// still for c_live_steady_windows consecutive windows to c_live_steady_period
+// (the GGV1011's black stretch settles at 2560.0 for 20 windows at 0.31
+// before the picture arrives), and after c_live_max_weak_windows without
+// either the strongest one so far is taken, with a warning.  A window is
+// 0.1-0.2 s of a 40 MHz stream.
+constexpr int c_live_steady_windows = 8;
+constexpr double c_live_steady_period = 0.002;
+constexpr int c_live_max_weak_windows = 150;
+
+// Reads `n` bytes from a live source, waiting for them; fewer at the end of
+// the stream.
+vector<uint8_t> readLiveWindow(ByteSource &source, size_t n) {
+    vector<uint8_t> bytes(n);
+    size_t got = 0;
+    while (got < n) {
+        const ssize_t r = source.read(bytes.data() + got, n - got);
+        if (r == -1 && errno == EAGAIN) {
+            this_thread::sleep_for(chrono::milliseconds(1));
+            continue;
+        }
+        if (r == -1)
+            throw runtime_error(std::format("Error reading input: {}", strerror(errno)));
+        if (r == 0)
+            break;
+        got += (size_t)r;
+    }
+    bytes.resize(got);
+    return bytes;
+}
+
+// A live input is read window after window until the verdict is clear:
+// started before the player plays, it waits through the lead-in, and whatever
+// the detection consumed is gone, which a live input does not miss.  The
+// format comes first, from windows of raw bytes interpreted under each
+// candidate (committed to only once one shows video structure, or the
+// stream's signature says FLAC); from then on one reader decodes the stream,
+// so that FLAC works too, and the player continues from that reader.
+InputProbeResult probeLive(Logger &log, PreparedInput &input, optional<InputFormat> known_format, bool need_type) {
+    InputProbeResult result;
+    optional<InputFormat> format = known_format;
+    vector<uint8_t> window;
+    unique_ptr<InputReader> reader;
+    bool have_result = false; // a verdict is in `result`
+    int weak_windows = 0;     // windows read since a verdict below c_live_clear_strength
+    int steady_windows = 0;   // consecutive verdicts whose line period agreed with the previous
+    double prev_period = 0;
+    for (int windows = 1; ; windows++) {
+        if (!format) {
+            window = readLiveWindow(input.source(), c_live_window_bytes);
+            if (window.empty())
+                return result; // the stream ended before anything came
+            MemorySamples samples(window);
+            if (auto magic = detectFormatByMagic(samples)) {
+                format = magic;
+            } else {
+                const auto candidates = rawFormatCandidates(log, samples);
+                const FormatVerdict verdict = findFormat(log, samples, candidates);
+                if (verdict.have_structure)
+                    format = verdict.format;
+            }
+            if (!format) {
+                if (window.size() < c_live_window_bytes)
+                    return result; // the stream ended
+                if (windows % c_live_report_every == 0)
+                    log.warn(eInput, std::format("Probe: no recognizable signal in the live input yet "
+                                                 "({} windows of {} MiB read); waiting for more",
+                                                 windows, c_live_window_bytes >> 20));
+                continue;
+            }
+        }
+        if (!reader) {
+            // From here one reader decodes the stream, starting with the
+            // window already read where there is one
+            reader = makeInputReader(make_unique<ReplayByteSource>(std::move(window), input.releaseSource()),
+                                     *format, c_live_block_samples, &log);
+            reader->initialize();
+            window.clear();
+        }
+        LiveSamples samples(*reader, *format);
+        InputProbeResult attempt;
+        attempt.format = format;
+        const FormatVerdict verdict = findFormat(log, samples, {*format});
+        if (verdict.have_structure)
+            classify(log, samples, verdict.best, attempt);
+        const bool decided = need_type ? attempt.type != InputProbeResult::Type::eUnknown
+                                       : attempt.line_period > 0;
+        bool steady = false;
+        if (decided) {
+            steady_windows = prev_period > 0
+                             && abs(attempt.line_period - prev_period) / prev_period < c_live_steady_period
+                             ? steady_windows + 1 : 0;
+            prev_period = attempt.line_period;
+            steady = steady_windows >= c_live_steady_windows;
+            // The latest of a steady run is the locked disc; otherwise the
+            // strongest so far is the best guess
+            if (!have_result || steady || attempt.line_strength > result.line_strength) {
+                result = attempt;
+                have_result = true;
+            }
+        } else {
+            steady_windows = 0;
+            prev_period = 0;
+        }
+        // A clear verdict is taken as it is; a weak one (the signal begins
+        // in this window, or the content gives the line period little to
+        // lock on) is waited out until the line period holds still
+        if (have_result && (result.line_strength >= c_live_clear_strength || steady))
+            break;
+        if (have_result && weak_windows >= c_live_max_weak_windows) {
+            log.warn(eInput, std::format("Probe: no clear line structure in {} windows of the live input "
+                                         "(best correlation {:.2f}); going with it",
+                                         weak_windows, result.line_strength));
+            break;
+        }
+        if (samples.ended())
+            break;
+        if (have_result)
+            weak_windows++;
+        if (!have_result && windows % c_live_report_every == 0)
+            log.warn(eInput, std::format("Probe: no recognizable signal in the live input yet "
+                                         "({} windows read); waiting for more", windows));
+    }
+    input.adoptReader(std::move(reader), *format);
+    return result;
+}
+
+} // namespace
+
+InputProbeResult probeInput(Logger &log, PreparedInput &input, optional<InputFormat> known_format, bool need_type) {
+    if (input.isLive())
+        return probeLive(log, input, known_format, need_type);
+    SeekableSamples samples(input.source());
+    return probeSamples(log, samples, known_format);
+}
+
+InputProbeResult probeInputFile(Logger &log, const string &filename, optional<InputFormat> known_format) {
+    PreparedInput input(filename, openByteSource(filename, &log), known_format);
+    return probeInput(log, input, known_format);
+}
+
+static const char *typeName(InputProbeResult::Type type) {
+    switch (type) {
+        case InputProbeResult::Type::eNtscRf: return "NTSC RF";
+        case InputProbeResult::Type::ePalRf: return "PAL RF";
+        case InputProbeResult::Type::eMuseRf: return "MUSE RF";
+        case InputProbeResult::Type::eMuse16Baseband: return "MUSE baseband";
+        case InputProbeResult::Type::eUnknown: break;
+    }
+    return "unknown";
+}
+
+// The type of one chunk of RF samples on its own, the way classify() decides
+// it for a file: the line period and carrier from the chunk analysis, the
+// field period measured on the same chunk.  eUnknown when the chunk shows no
+// convincing line structure or the measurements fall between the bands.
+// The sample rate is known here (the stream's, which never changes), so a
+// verdict must also have been measured at that type's line period in samples
+// (within 2 %, a player's speed error being a few hundred ppm): a lock on
+// something else -- lead-in, a harmonic the band logic did not catch -- is
+// no verdict.  NTSC against PAL is not decided this way, their periods being
+// 0.7 % apart, inside the line peak's resolution; the field count does that.
+static InputProbeResult::Type classifyChunk(Logger &log, const vector<float> &samples, double sample_rate) {
+    using Type = InputProbeResult::Type;
+    const ChunkStats stats = analyzeChunk(log, samples, 0);
+    if (stats.line_strength < 0.25)
+        return Type::eUnknown;
+    auto periodFits = [&](Type type, double period) {
+        const double line_hz = type == Type::eMuseRf ? c_muse_line_hz
+                             : type == Type::ePalRf ? c_pal_line_hz : c_ntsc_line_hz;
+        const double expected = sample_rate / line_hz;
+        if (abs(period - expected) / expected <= 0.02)
+            return true;
+        log.debug(eInput, std::format("Content watch: {} at a line period of {:.1f} samples, not the {:.1f} of the "
+                                      "stream's rate; disregarded", typeName(type), period, expected));
+        return false;
+    };
+    for (int harmonic = 1; harmonic <= 3; harmonic++) {
+        const CarrierBand band = bandOfCarrier(stats.cycles_per_line / harmonic);
+        const bool ntsc_audio = harmonic == 1 && stats.audio_carrier_ratio > 50;
+        if (band == CarrierBand::eNone && !ntsc_audio)
+            continue;
+        const double period = stats.line_period / harmonic;
+        if (band == CarrierBand::eMuse)
+            return periodFits(Type::eMuseRf, period) ? Type::eMuseRf : Type::eUnknown;
+        const double field_lines = fieldLinesOfSamples(log, samples, 0, period);
+        Type type = Type::eUnknown;
+        if (abs(field_lines - 262.5) <= 1.5)
+            type = Type::eNtscRf;
+        else if (abs(field_lines - 312.5) <= 1.5)
+            type = Type::ePalRf;
+        else if (ntsc_audio)
+            type = Type::eNtscRf;
+        return type != Type::eUnknown && periodFits(type, period) ? type : Type::eUnknown;
+    }
+    return Type::eUnknown;
+}
+
+constexpr int c_watch_agreeing_chunks = 3;    // consecutive verdicts of another type before a switch
+constexpr double c_watch_interval_s = 4.0;    // between chunks while the reader has sync
+constexpr double c_watch_urgent_interval_s = 1.0; // and while it has not
+
+ContentWatch::ContentWatch(Logger &log, Type current, double sample_rate)
+    : m_log(log),
+      m_current(current),
+      // Long enough for the field-period test at the slowest line rate (PAL)
+      m_sample_rate(sample_rate),
+      m_chunk_samples(fieldChunkSamples(sample_rate / c_pal_line_hz)),
+      m_interval_samples((int64_t)(c_watch_interval_s * sample_rate)),
+      m_urgent_interval_samples((int64_t)(c_watch_urgent_interval_s * sample_rate)),
+      m_since_analysis(m_interval_samples), // the first chunk right away
+      m_collecting(false),
+      m_stop(false),
+      m_candidate(Type::eUnknown),
+      m_agreeing(0),
+      m_other(-1),
+      m_thread([this]() { worker(); }) {
+}
+
+ContentWatch::~ContentWatch() {
+    {
+        std::scoped_lock lock(m_mutex);
+        m_stop = true;
+    }
+    m_cv.notify_all();
+    if (m_thread.joinable())
+        m_thread.join();
+}
+
+void ContentWatch::feed(const float *samples, size_t n, bool urgent) {
+    if (m_other >= 0)
+        return; // decided
+    if (!m_collecting) {
+        m_since_analysis += (int64_t)n;
+        if (m_since_analysis < (urgent ? m_urgent_interval_samples : m_interval_samples))
+            return;
+        m_collecting = true;
+        m_chunk.clear();
+    }
+    m_chunk.insert(m_chunk.end(), samples, samples + n);
+    if (m_chunk.size() < m_chunk_samples)
+        return;
+    m_chunk.resize(m_chunk_samples);
+    m_collecting = false;
+    m_since_analysis = 0;
+    std::scoped_lock lock(m_mutex);
+    if (m_pending.empty()) { // else the worker is behind: this chunk is skipped
+        m_pending.swap(m_chunk);
+        m_cv.notify_one();
+    }
+}
+
+std::optional<ContentWatch::Type> ContentWatch::otherType() const {
+    const int other = m_other;
+    return other >= 0 ? std::make_optional((Type)other) : std::nullopt;
+}
+
+void ContentWatch::worker() {
+#ifdef __APPLE__
+    pthread_setname_np("museld-watch");
+#elif defined(linux) || defined(__FreeBSD__)
+    pthread_setname_np(pthread_self(), "museld-watch");
+#endif
+    vector<float> chunk;
+    for (;;) {
+        {
+            std::unique_lock lock(m_mutex);
+            m_cv.wait(lock, [this]() { return m_stop || !m_pending.empty(); });
+            if (m_stop)
+                return;
+            chunk.swap(m_pending);
+            m_pending.clear();
+        }
+        classify(chunk);
+    }
+}
+
+void ContentWatch::classify(const vector<float> &chunk) {
+    if (m_other >= 0)
+        return; // decided while this chunk was on its way
+    const auto t0 = chrono::steady_clock::now();
+    const Type verdict = classifyChunk(m_log, chunk, m_sample_rate);
+    const auto ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - t0).count();
+    if (verdict == Type::eUnknown || verdict == m_current) {
+        m_candidate = verdict;
+        m_agreeing = 0;
+    } else {
+        m_agreeing = verdict == m_candidate ? m_agreeing + 1 : 1;
+        m_candidate = verdict;
+    }
+    m_log.debug(eInput, std::format("Content watch: chunk of {} samples is {} ({} ms){}", chunk.size(),
+                                    typeName(verdict), ms,
+                                    m_agreeing > 0 ? std::format(", {} of {} agreeing", m_agreeing, c_watch_agreeing_chunks) : ""));
+    if (m_agreeing >= c_watch_agreeing_chunks) {
+        m_log.info(eInput, std::format("Content watch: the input carries {} now, not {}; switching",
+                                       typeName(m_candidate), typeName(m_current)));
+        m_other = (int)m_candidate;
+    }
 }
 
 double estimateSampleFrequency(const InputProbeResult &result, InputProbeResult::Type type) {
@@ -589,7 +1294,8 @@ double estimateSampleFrequency(const InputProbeResult &result, InputProbeResult:
     if (result.line_period == 0 || type == InputProbeResult::Type::eUnknown)
         return 0;
     double fs = result.line_period *
-            (type == InputProbeResult::Type::eNtscRf ? c_ntsc_line_hz : c_muse_line_hz);
+            (type == InputProbeResult::Type::eNtscRf ? c_ntsc_line_hz :
+             type == InputProbeResult::Type::ePalRf ? c_pal_line_hz : c_muse_line_hz);
     for (double rate : c_known_rates)
         if (abs(fs - rate) / rate < 0.012)
             return rate;
