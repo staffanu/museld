@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "TextEntry.h"
 
 // The on-screen menu: pages of items driven by six keys -- up, down, left,
 // right, select, back -- so that it works the same from a keyboard, a game
@@ -54,9 +55,27 @@ public:
     Menu &operator=(const Menu &) = delete;
 
     // The pages are owned here and addressed by pointer; the root is the
-    // first one made.  Items that open a page are added with addPageItem.
+    // first one made unless setRoot says otherwise.  Items that open a page are added with addPageItem;
+    // a page whose items change (a directory listing) gets them with setItems,
+    // and pushPage opens a page from code as select on its item would.
     MenuPage *addPage(std::string title);
+    void setRoot(MenuPage *root) { m_root = root; }
     void addPageItem(MenuPage *on, std::string label, MenuPage *opens);
+    void setItems(MenuPage *page, std::vector<MenuItem> items);
+    void pushPage(MenuPage *page);
+    void popPage();
+
+    // A text entry (the browser's address field) takes the keys over while it
+    // lasts; its callbacks end it through endTextEntry, which takes effect once
+    // the key that caused it has been handled.  type() and backspace() are for
+    // a real keyboard's characters.
+    void startTextEntry(std::unique_ptr<TextEntry> entry);
+    void endTextEntry() { m_end_entry = true; }
+    TextEntry *textEntry() const { return m_entry.get(); }
+    void type(const std::string &utf8);
+    void backspace();
+    void acceptEntry();
+    void cancelEntry();
 
     bool isOpen() const { return m_open; }
     void open();
@@ -68,8 +87,9 @@ public:
     // there: close on a PC, leave the app on tvOS), nor is any key while closed.
     bool handleKey(MenuKey key);
 
-    // Whether the open page is the root
+    // Whether the open page is the root, and which page is open
     bool atRoot() const { return m_stack.size() <= 1; }
+    MenuPage *currentPage() const { return m_stack.empty() ? nullptr : m_stack.back(); }
 
     std::string title() const;
     std::vector<MenuLine> lines() const;
@@ -84,7 +104,10 @@ private:
     MenuPage *current() const { return m_stack.empty() ? nullptr : m_stack.back(); }
 
     std::vector<std::unique_ptr<MenuPage>> m_pages;
+    MenuPage *m_root = nullptr;      // the page open() shows; the first page when unset
     std::vector<MenuPage *> m_stack; // the open page last
+    std::unique_ptr<TextEntry> m_entry;
+    bool m_end_entry = false;
     bool m_open = false;
     unsigned m_revision = 0;
 };

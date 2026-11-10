@@ -38,6 +38,7 @@
 #include "Decoder.h"
 #include "ChapterSearch.h"
 #include "PlayerState.h"
+#include "PlayerActions.h"
 #include "OsdOverlay.h"
 #include "FrameBlitter.h"
 #include "DisplayGeometry.h"
@@ -46,6 +47,8 @@
 #include "ui/Menu.h"
 #include "ui/MenuOverlay.h"
 #include "ui/PlayerMenu.h"
+#include "ui/Browser.h"
+#include "ui/SavedState.h"
 #include "subtitles/Eia608Decoder.h"
 #include "subtitles/SrtParser.h"
 #include "subtitles/SubtitleFont.h"
@@ -365,6 +368,8 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                       DropoutMode dropout_mode,
                       AudioTrack audio_track,
                       bool is_muse,
+                      SavedState &saved_state,
+                      std::optional<std::string> &open_next,
                       bool benchmark_shaders,
                       bool output_yuv,
                       const std::unique_ptr<VideoFileWriter> &vfw,
@@ -425,8 +430,13 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
 #endif
         Menu menu;
         MenuOverlay menu_overlay;
+        // The browser's pages first, so the root can link to them
+        Browser browser(menu, saved_state, !is_tvos, [&open_next, &menu](const std::string &location) {
+            open_next = location;
+            menu.close();
+        });
         buildPlayerMenu(menu, PlayerMenuBindings{state, reader_controls, dropout_mode, audio_track, full_screen, window,
-                                                 log, is_muse, is_tvos, &menu_quit});
+                                                 log, is_muse, is_tvos, &menu_quit}, browser.openPage());
         input.setMenu(&menu);
         if (const char *open_page = getenv("MUSELD_MENU_OPEN"); open_page != nullptr) {
             // A screenshot or a test run: start with the menu up, on the root or on
@@ -896,10 +906,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 // The multichannel modes (4-channel MUSE, 5.1 AC3/DTS) carry
                 // no bilingual pairing, so a stereo channel choice has no
                 // meaning there.
-                if (state.audio_channel_mode != AudioChannelMode::eStereo
-                    && state.last_decoded.audio_mode != MODE_A
-                    && state.last_decoded.audio_mode != MODE_AC3
-                    && state.last_decoded.audio_mode != MODE_DTS) {
+                if (state.audio_channel_mode != AudioChannelMode::eStereo && PlayerActions::audioChannelChoiceHeard(state)) {
                     const int source = state.audio_channel_mode == AudioChannelMode::eLeft ? 0 : 1;
                     for (int i = 0; i < state.last_decoded.audio_sample_count; i++) {
                         auto &f = state.last_decoded.audio_samples[i];
@@ -993,8 +1000,11 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 state.paused = true;
                 state.osd_text = "PAUSE";
             }
-            if (!input.poll(window, state, reader_controls, dropout_mode, audio_track, full_screen) || menu_quit)
+            if (!input.poll(window, state, reader_controls, dropout_mode, audio_track, full_screen) || menu_quit || open_next)
                 break;
+            // A scripted check of playing on to another input, as the browser's choice does
+            if (static const char *next = getenv("MUSELD_OPEN_NEXT"); next != nullptr && state.field_count == 60)
+                open_next = next;
         }
 
         // Save the collected cues with their original imprint timing, as
@@ -1113,60 +1123,13 @@ struct PlayerSurface {
 struct PlayOutcome {
     std::optional<InputType> switch_to;
     std::unique_ptr<InputReader> input;
+    std::optional<std::string> open_next; // the browser chose another input to play
 };
 
-// Plays one input.  Everything with a lifetime per input type -- the reader
-// with its threads, the decoder and the player's objects -- is owned here,
-// declared in the order it must be destroyed in reverse, so an exception on
-// any path unwinds correctly without an explicit teardown: player objects and
-// decoder, then the reader (which joins its threads and frees its blocks
-// while the device exists).  The window and device are the caller's surface,
-// created here on the first call and kept across a type switch.  The reader
-// is made by make_reader once the device exists.
-// watch_type: set for a live input whose type was detected (not given), to
-// watch it for a change away from that type and end with switch_to set
-template<class InputBlock>
-PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurface &surface,
-                  const std::function<std::unique_ptr<FrameReader<InputBlock>>(musevk::VulkanManager &)> &make_reader,
-                  std::optional<InputProbeResult::Type> watch_type,
-                  const VideoStandard *video_standard,
-                  bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool full_image, double overscan,
-                  bool no_sync, bool no_keys,
-                  bool start_paused, Decoder::FieldInterpolationMode field_interpolation_mode,
-                  bool use_3d_comb, bool film_mode, Decoder::CxMode cx_mode, Decoder::BlackLevelMode black_level_mode, bool decode_video,
-                  DropoutMode dropout_mode,
-                  bool decode_audio, AudioTrack audio_track, bool benchmark_shaders,
-                  MuseAdaptiveEqualizer::Mode eq_mode, float eq_alpha,
-                  float tint_degrees, float saturation,
-                  optional<string> const &output_filename,
-                  [[maybe_unused]] VideoWriterPreset write_preset,
-                  const SubtitleSetup &subtitle_setup,
-                  optional<string> const &export_frame_filename,
-                  double export_frame_after_seconds,
-                  double write_duration_seconds,
-                  double initial_seek_seconds,
-                  std::optional<int> start_chapter) {
-    // The decoded image size (also the size of a written video file), where
-    // the picture sits in it and the shape of its pixels, and a window of the
-    // picture's shape that downscales it in neither direction
-    int initial_w, initial_h;
-    PictureFormat picture_format;
-    const char *title;
-    if constexpr (std::is_same<InputBlock, MuseInputBlock>::value) {
-        initial_w = MUSE_Y_BUF_WIDTH * 3;
-        initial_h = MUSE_BUF_HEIGHT * 2;
-        picture_format = PictureFormat::muse(initial_w, initial_h);
-        title = "MUSE";
-    } else {
-        initial_w = video_standard->y_buf_width;
-        initial_h = video_standard->field_lines * 2;
-        picture_format = video_standard->ntsc_chroma
-                ? PictureFormat::ntsc(initial_w, initial_h, video_standard->field_start_x)
-                : PictureFormat::pal(initial_w, initial_h, video_standard->field_start_x);
-        title = video_standard->name;
-    }
-    int window_w, window_h;
-    defaultWindowSize(picture_format, full_image, window_w, window_h);
+// The window and the device, made on the first call and kept across input
+// types and inputs (PlayerSurface)
+static musevk::VulkanManager &ensureSurface(PlayerSurface &surface, Logger &log, const char *title, int window_w, int window_h,
+                                            bool full_screen, bool no_keys, bool no_sync) {
     if (surface.sdl.window == nullptr) {
         // Gamepads for the Siri Remote (and any controller): InputController maps
         // their buttons onto the keys
@@ -1212,7 +1175,154 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         surface.manager.emplace(log);
         surface.manager->initVulkan(window, no_sync);
     }
-    musevk::VulkanManager &manager = *surface.manager;
+    return *surface.manager;
+}
+
+
+// The browser before any input: a black frame with the menu's Open page over
+// it, driven like the player's menu, until a location is chosen (returned) or
+// the user leaves (nullopt).  tvOS starts here, having no command line; a PC
+// gets here with --browse or by choosing Open... without an input to return to.
+static std::optional<std::string> browseForInput(Logger &log, const string &executable_dir, PlayerSurface &surface,
+                                                 SavedState &saved_state, bool full_screen, bool no_keys, bool no_sync,
+                                                 bool is_tvos) {
+    constexpr int c_w = 1920, c_h = 1080;
+    musevk::VulkanManager &manager = ensureSurface(surface, log, "museld", 1280, 720, full_screen, no_keys, no_sync);
+    SDL_Window *const window = surface.sdl.window;
+    vk::Device &device = manager.getDevice();
+    vk::UniqueSemaphore image_available_semaphore_holder = device.createSemaphoreUnique(vk::SemaphoreCreateInfo{});
+    const vk::Semaphore image_available_semaphore = image_available_semaphore_holder.get();
+    musevk::CommandPool command_pool(manager);
+    auto command_buffer = command_pool.createCommandBuffer();
+    TextRenderer text_renderer(executable_dir, manager, command_pool);
+    ResultImages images;
+    images.out_image = make_shared<musevk::VulkanImage>(manager, c_w, c_h,
+                                                        vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst,
+                                                        musevk::eHostNone);
+    FrameBlitter blitter;
+    PlayerState state;
+    state.picture_format = PictureFormat::muse(c_w, c_h);
+    state.aspect_mode = AspectMode::eNormal;
+    std::optional<std::string> chosen;
+    Menu menu;
+    MenuOverlay menu_overlay;
+    Browser browser(menu, saved_state, !is_tvos, [&](const std::string &location) { chosen = location; });
+    menu.setRoot(browser.openPage()); // the root here: Back from it leaves
+    menu.open();
+    if (const char *at = getenv("MUSELD_BROWSE_LOCATION"); at != nullptr && *at)
+        browser.browse(at); // a check of a listing in a scripted run
+    if (getenv("MUSELD_BROWSE_ENTRY") != nullptr)
+        menu.handleKey(MenuKey::eSelect); // ... and of the address field: the Open page's first item
+    if (const char *keys = getenv("MUSELD_BROWSE_KEYS"); keys != nullptr) {
+        // ... and of any sequence: comma-separated up/down/left/right/select/back
+        std::string list(keys);
+        for (size_t at = 0; at <= list.size();) {
+            const size_t comma = list.find(',', at);
+            const std::string key = list.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+            if (key == "up") menu.handleKey(MenuKey::eUp);
+            else if (key == "down") menu.handleKey(MenuKey::eDown);
+            else if (key == "left") menu.handleKey(MenuKey::eLeft);
+            else if (key == "right") menu.handleKey(MenuKey::eRight);
+            else if (key == "select") menu.handleKey(MenuKey::eSelect);
+            else if (key == "back") menu.handleKey(MenuKey::eBack);
+            if (comma == std::string::npos) break;
+            at = comma + 1;
+        }
+    }
+    InputController input(log, no_keys);
+    input.setMenu(&menu);
+    input.setMenuIsScreen(true);
+    ReaderControls no_reader;
+    DropoutMode dropout_mode = DropoutMode::eNormal;
+    AudioTrack audio_track = AudioTrack::eDefault;
+    FrameExporter frame_exporter(log, manager, command_pool);
+    const char *export_to = getenv("MUSELD_BROWSE_EXPORT"); // a check of the screen in a scripted run
+    while (!chosen) {
+        if (!input.poll(window, state, no_reader, dropout_mode, audio_track, full_screen))
+            return std::nullopt;
+        if (!menu.isOpen()) {
+            // Back from the Open page: on tvOS the app ends, on a PC too (there is nothing beneath)
+            return std::nullopt;
+        }
+        if (state.in_background) {
+            SDL_Delay(50);
+            continue;
+        }
+        auto swap_chain_image = manager.acquireNextImage(image_available_semaphore);
+        const vk::Extent2D swap_extent = manager.getSwapChainExtent();
+        const DisplayGeometry geometry = computeDisplayGeometry({
+                state.aspect_mode, state.picture_format, false, 0.0, 1, 0.5, 0.5,
+                FrameBlitter::displayPixelAspect(window, log), (int)swap_extent.width, (int)swap_extent.height});
+        state.visible_x0 = geometry.src_x0; state.visible_y0 = geometry.src_y0;
+        state.visible_x1 = geometry.src_x1; state.visible_y1 = geometry.src_y1;
+        command_buffer->begin();
+        blitter.clear(*command_buffer, images);
+        menu_overlay.render(*command_buffer, images, state, menu, text_renderer);
+        blitter.present(*command_buffer, images, geometry, swap_chain_image, image_available_semaphore);
+        manager.present(swap_chain_image);
+        if (export_to != nullptr) {
+            frame_exporter.exportFrame(*images.out_image, std::string(export_to));
+            return std::nullopt;
+        }
+        SDL_Delay(16);
+    }
+    return chosen;
+}
+
+// Plays one input.  Everything with a lifetime per input type -- the reader
+// with its threads, the decoder and the player's objects -- is owned here,
+// declared in the order it must be destroyed in reverse, so an exception on
+// any path unwinds correctly without an explicit teardown: player objects and
+// decoder, then the reader (which joins its threads and frees its blocks
+// while the device exists).  The window and device are the caller's surface,
+// created here on the first call and kept across a type switch.  The reader
+// is made by make_reader once the device exists.
+// watch_type: set for a live input whose type was detected (not given), to
+// watch it for a change away from that type and end with switch_to set
+template<class InputBlock>
+PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurface &surface, SavedState &saved_state,
+                  const std::function<std::unique_ptr<FrameReader<InputBlock>>(musevk::VulkanManager &)> &make_reader,
+                  std::optional<InputProbeResult::Type> watch_type,
+                  const VideoStandard *video_standard,
+                  bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool full_image, double overscan,
+                  bool no_sync, bool no_keys,
+                  bool start_paused, Decoder::FieldInterpolationMode field_interpolation_mode,
+                  bool use_3d_comb, bool film_mode, Decoder::CxMode cx_mode, Decoder::BlackLevelMode black_level_mode, bool decode_video,
+                  DropoutMode dropout_mode,
+                  bool decode_audio, AudioTrack audio_track, bool benchmark_shaders,
+                  MuseAdaptiveEqualizer::Mode eq_mode, float eq_alpha,
+                  float tint_degrees, float saturation,
+                  optional<string> const &output_filename,
+                  [[maybe_unused]] VideoWriterPreset write_preset,
+                  const SubtitleSetup &subtitle_setup,
+                  optional<string> const &export_frame_filename,
+                  double export_frame_after_seconds,
+                  double write_duration_seconds,
+                  double initial_seek_seconds,
+                  std::optional<int> start_chapter) {
+    // The decoded image size (also the size of a written video file), where
+    // the picture sits in it and the shape of its pixels, and a window of the
+    // picture's shape that downscales it in neither direction
+    int initial_w, initial_h;
+    PictureFormat picture_format;
+    const char *title;
+    if constexpr (std::is_same<InputBlock, MuseInputBlock>::value) {
+        initial_w = MUSE_Y_BUF_WIDTH * 3;
+        initial_h = MUSE_BUF_HEIGHT * 2;
+        picture_format = PictureFormat::muse(initial_w, initial_h);
+        title = "MUSE";
+    } else {
+        initial_w = video_standard->y_buf_width;
+        initial_h = video_standard->field_lines * 2;
+        picture_format = video_standard->ntsc_chroma
+                ? PictureFormat::ntsc(initial_w, initial_h, video_standard->field_start_x)
+                : PictureFormat::pal(initial_w, initial_h, video_standard->field_start_x);
+        title = video_standard->name;
+    }
+    int window_w, window_h;
+    defaultWindowSize(picture_format, full_image, window_w, window_h);
+    musevk::VulkanManager &manager = ensureSurface(surface, log, title, window_w, window_h, full_screen, no_keys, no_sync);
+    SDL_Window *const window = surface.sdl.window;
 
     // The reader's threads use the device, so the reader comes after the
     // manager: its destructor joins them and frees its blocks before the
@@ -1234,6 +1344,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
             reader.watchForTypeChange(*watch_type);
     }
     std::optional<InputProbeResult::Type> switched;
+    std::optional<std::string> open_next;
 
     unique_ptr<VideoFileWriter> vfw;
 #ifdef HAVE_LIBAV
@@ -1361,6 +1472,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   start_paused,
                   field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, dropout_mode, audio_track,
                   std::is_same<InputBlock, MuseInputBlock>::value,
+                  saved_state, open_next,
                   benchmark_shaders,
                   output_filename.has_value(),
                   vfw, audio_playback.get(), executable_dir,
@@ -1376,6 +1488,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
     }
 #endif
     PlayOutcome outcome;
+    outcome.open_next = open_next;
     if (switched) {
         outcome.switch_to = inputTypeOf(*switched);
         outcome.input = reader.releaseInput(); // stops the reader; the stream goes on
@@ -1487,6 +1600,7 @@ int main(int argc, char *argv[]) {
     bool full_image = false;
     double overscan = 0.0;
     bool no_sync = false;
+    bool browse = false;
     bool no_keys = false;
     std::optional<InputType> input_type_option;         // unset (the default) means auto-detect
     bool probe_only = false;      // --probe: print what probing finds and skip decoding
@@ -1834,6 +1948,10 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
     });
+    options.flag("--browse", "Start in the file browser (the on-screen menu's Open page) instead of "
+                             "with an input file; the Apple TV app always does", [&] () -> void {
+        browse = true;
+    });
     options.flag("--no-sync", "Decode as fast as the machine allows instead of at playback speed",
                  [&] () -> void {
         no_sync = true;
@@ -1931,8 +2049,17 @@ int main(int argc, char *argv[]) {
         // Options apply to the input files that follow them, so any left over when
         // the arguments run out did nothing.  Remember them to say so afterwards.
         vector<string> trailing_options;
-        // Plays (or probes) one input, with the options in effect now
-        auto play_input = [&](const string &name) {
+        // The window and the device, and what museld remembers, outlive the inputs
+        PlayerSurface surface;
+        SavedState saved_state;
+#if defined(__APPLE__) && TARGET_OS_TV
+        constexpr bool is_tvos = true;
+#else
+        constexpr bool is_tvos = false;
+#endif
+        // Plays (or probes) one input, with the options in effect now; returns the
+        // location the browser chose to play next, if any
+        auto play_input = [&](const string &name) -> std::optional<string> {
             input_file_given = true;
             trailing_options.clear(); // these applied to this file
             if (initial_seek_seconds != 0 && inputIsLive(name)) {
@@ -2007,7 +2134,7 @@ int main(int argc, char *argv[]) {
                 const InputProbeResult probe = probeInput(log, input, resolved_format, !type_given || probe_only);
                 if (probe_only) {
                     printProbeResult(name, probe);
-                    return;
+                    return std::nullopt;
                 }
                 if (!resolved_format)
                     resolved_format = probe.format;
@@ -2134,7 +2261,6 @@ int main(int argc, char *argv[]) {
             // One process_file() call per input type; a live input that turns
             // out to carry another type comes back with the stream to go on
             // from.  Only a live input whose type was detected is watched.
-            PlayerSurface surface;
             PlayOutcome outcome;
             do {
             const std::optional<InputProbeResult::Type> watch_type =
@@ -2151,7 +2277,7 @@ int main(int argc, char *argv[]) {
                                     file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
                                     efm_adaptive_filter_size, muse_output_filename, standard);
                     };
-                    outcome = process_file<SdtvInputBlock>(log, executable_dir, surface, make_reader, watch_type, &standard, decode_all_fields,
+                    outcome = process_file<SdtvInputBlock>(log, executable_dir, surface, saved_state, make_reader, watch_type, &standard, decode_all_fields,
                                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                  audio_track,
                                                  benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
@@ -2165,7 +2291,7 @@ int main(int argc, char *argv[]) {
                         return make_unique<PhaseCorrect16MHzFrameReader>(
                                 log, std::move(input), initial_seek_seconds, muse_output_filename);
                     };
-                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, make_reader, std::nullopt, nullptr, decode_all_fields,
+                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, make_reader, std::nullopt, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                  subtitle_setup,
@@ -2181,7 +2307,7 @@ int main(int argc, char *argv[]) {
                                 file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
                                 audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
                     };
-                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, make_reader, watch_type, nullptr, decode_all_fields,
+                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, make_reader, watch_type, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
                                  subtitle_setup,
@@ -2209,6 +2335,12 @@ int main(int argc, char *argv[]) {
                 start_chapter = std::nullopt;
             }
             } while (outcome.switch_to);
+            return outcome.open_next;
+        };
+        // Plays an input and whatever the browser chooses after it
+        auto play_from = [&](std::optional<string> next) {
+            while (next)
+                next = play_input(*next);
         };
         while (it != args.cend()) {
             if (const CliOptions::Option *option = options.find(*it)) {
@@ -2223,15 +2355,15 @@ int main(int argc, char *argv[]) {
                 cerr << "Unknown option: " << *it << endl;
                 usage(cerr, EXIT_FAILURE);
             } else {
-                play_input(expandHome(*it));
+                play_from(expandHome(*it));
                 it++;
             }
         }
         // No file named, but something piped or redirected in: that is the input,
         // as for the other command line tools, and the options that came last
         // are meant for it.  A terminal (or nothing at all) on stdin is not.
-        if (!input_file_given && stdinCarriesInput())
-            play_input("-");
+        if (!input_file_given && !browse && stdinCarriesInput())
+            play_from(std::string("-"));
         // Options are applied to the files that follow them, so trailing ones were
         // parsed and then never used.  That is legal syntax -- it is how a second
         // file is given different settings -- so it cannot be an error, but it is
@@ -2248,10 +2380,20 @@ int main(int argc, char *argv[]) {
         }
         // Nothing to play is not an error, but say so: an empty command line
         // otherwise looks just like the player failing to start
-        if (!input_file_given) {
+        if (!input_file_given && (is_tvos || browse)) {
+            // No input and no command line to speak of: the browser chooses, and
+            // the player returns to it when the input ends
+            StreamLogger log(log_selection, std::cerr, true);
+            for (;;) {
+                const auto chosen = browseForInput(log, executable_dir, surface, saved_state, full_screen, no_keys, no_sync, is_tvos);
+                if (!chosen)
+                    break;
+                play_from(*chosen);
+            }
+        } else if (!input_file_given) {
             cerr << "No input file given -- museld plays a capture file, so it needs one to play." << endl;
             cerr << "Run \"museld --help\" for the options, or give a filename:  museld capture.lds" << endl;
-            cerr << "(A capture piped in is played too:  capture-program | museld -)" << endl;
+            cerr << "(A capture piped in is played too:  capture-program | museld -; --browse opens the file browser)" << endl;
         }
     } catch (const exception &x) {
         StreamLogger log(StreamLogger::c_log_all, std::cerr, true);

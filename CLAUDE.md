@@ -214,7 +214,18 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   with `TextRenderer::fillRect` and `drawText`): M opens it, the arrows move in it, Escape backs out.
   `MUSELD_MENU_OPEN=1` (or a page's name) starts with it open and `MUSELD_EXPORT_OVERLAYS=1` makes
   `--export-frame` take the frame after the OSD and menu are drawn, which is how to look at it in a
-  scripted run.
+  scripted run.  The file browser (`ui/Browser` on `ui/DirectoryListing`, which lists a directory or
+  a web server's index page, `ui/TextEntry` the address field with its on-screen keyboard,
+  `ui/SavedState` the recent addresses and last directory in SDL's pref path, `MUSELD_STATE_FILE`
+  overriding) is the menu's Open page; `--browse` (always on tvOS) starts in it on a black frame
+  (`browseForInput` in museld.cpp), and a chosen file comes back as `PlayOutcome::open_next` for
+  `play_from` to play with the same window.  Scripted checks: `MUSELD_BROWSE_EXPORT=<png>` renders
+  the browser once and writes it, `MUSELD_BROWSE_LOCATION=<dir>` lists that directory first,
+  `MUSELD_BROWSE_ENTRY=1` opens the address field, `MUSELD_BROWSE_KEYS=down,down,select` (up, down,
+  left, right, select, back) presses keys in the browser before the loop (`down,down,down,select`
+  opens the first recent file on a PC), `MUSELD_OPEN_NEXT=<input>` plays on to that input
+  after 60 fields as the browser's choice would.  A `--browse` run under a tool must have stdin
+  redirected from /dev/null, or a non-terminal stdin is taken as the input.
 - Always add `--no-keys` to museld runs made for measurements or exports: the window then
   opens without taking the keyboard focus and ignores keys, so the user's typing in another
   window cannot pause the decode or toggle a stage mid-run.

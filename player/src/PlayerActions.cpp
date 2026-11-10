@@ -138,7 +138,14 @@ void cycleAudioChannels(PlayerState &state, int direction) {
         if (modes[i] == state.audio_channel_mode)
             index = i;
     state.audio_channel_mode = modes[stepped(index, 3, direction)];
-    state.osd_text = audioChannelsName(state.audio_channel_mode);
+    state.osd_text = audioChannelsName(state);
+}
+
+bool audioChannelChoiceHeard(const PlayerState &state) {
+    // The choice applies to two-channel audio; the multichannel modes (4-channel
+    // MUSE, 5.1 AC3/DTS) go to the device as they are (see the player loop)
+    const AudioMode mode = state.last_decoded.audio_mode;
+    return mode != MODE_A && mode != MODE_AC3 && mode != MODE_DTS;
 }
 
 void cycleCx(PlayerState &state, const ReaderControls &reader, AudioTrack audio_track, int direction) {
@@ -317,13 +324,13 @@ std::string audioTrackName(const ReaderControls &reader, AudioTrack track) {
          : reader.default_audio_label;
 }
 
-std::string audioChannelsName(AudioChannelMode mode) {
-    switch (mode) {
-        case AudioChannelMode::eStereo: return "STEREO";
-        case AudioChannelMode::eLeft: return "LEFT CHANNEL";
-        case AudioChannelMode::eRight: return "RIGHT CHANNEL";
-    }
-    return "";
+std::string audioChannelsName(const PlayerState &state) {
+    std::string name = state.audio_channel_mode == AudioChannelMode::eStereo ? "STEREO"
+                     : state.audio_channel_mode == AudioChannelMode::eLeft ? "LEFT CHANNEL" : "RIGHT CHANNEL";
+    // Parenthesized like the CX setting when the audio playing is multichannel
+    if (!audioChannelChoiceHeard(state))
+        name = "(" + name + ")";
+    return name;
 }
 
 std::string cxName(const PlayerState &state, const ReaderControls &reader, AudioTrack audio_track) {

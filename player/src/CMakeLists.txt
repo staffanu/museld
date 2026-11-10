@@ -321,6 +321,10 @@ if(BUILD_MUSE)
         ui/Menu.cpp ui/Menu.h
         ui/PlayerMenu.cpp ui/PlayerMenu.h
         ui/MenuOverlay.cpp ui/MenuOverlay.h
+        ui/TextEntry.cpp ui/TextEntry.h
+        ui/DirectoryListing.cpp ui/DirectoryListing.h
+        ui/SavedState.cpp ui/SavedStatePath.cpp ui/SavedState.h
+        ui/Browser.cpp ui/Browser.h
         subtitles/Eia608Decoder.cpp subtitles/Eia608Decoder.h
         subtitles/SrtParser.cpp subtitles/SrtParser.h
         subtitles/SubtitleFont.cpp subtitles/SubtitleFont.h

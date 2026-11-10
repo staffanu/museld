@@ -473,6 +473,17 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   `MUSELD_FLAC_THREADS` overrides.  Two wasted measurements on the way, both caught by
   the binary's date: Xcode rebuilt the patched library without relinking the app.
   10-bit MUSE FLAC from the NAS now plays in real time on the 2017 box with margin.
+- **The menu and the browser** (2026-11-08/09): the on-screen menu (`ui/Menu`, `PlayerMenu`,
+  `MenuOverlay`; the keys' actions shared through `PlayerActions`) and the file browser
+  (`ui/Browser` with `DirectoryListing`, `TextEntry`, `SavedState`), documented in
+  docs/museld.md.  The Apple TV app starts in the browser; the Menu button opens the
+  menu during playback and from its root page leaves the app.  The rendering goes
+  into the decoded frame like the OSD, so on the box it costs the text renderer's
+  dispatches per line while open and nothing while closed.  A recent file chosen from
+  the Open page came through as an empty name ("File not found: "): the item's lambda
+  rebuilt the Open page, which destroyed the lambda and the captured address it had
+  passed by reference.  `Browser::go` and `showListing` copy their argument first, and
+  `Menu` calls a copy of an item's function (2026-11-10).
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the

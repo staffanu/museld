@@ -19,7 +19,11 @@ add_executable(museld-tests
     HttpByteSourceTest.cpp
     ParallelOggFlacReaderTest.cpp
     MenuTest.cpp
+    BrowserPartsTest.cpp
     ../src/ui/Menu.cpp
+    ../src/ui/TextEntry.cpp
+    ../src/ui/DirectoryListing.cpp
+    ../src/ui/SavedState.cpp
     ../src/ChapterSearch.cpp
     ../src/subtitles/Eia608Decoder.cpp
     ../src/bch/BchDecoder.cpp

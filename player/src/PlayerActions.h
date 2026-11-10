@@ -52,7 +52,10 @@ namespace PlayerActions {
     // Names for the menu's value column
     std::string fieldInterpolationName(Decoder::FieldInterpolationMode mode);
     std::string audioTrackName(const ReaderControls &reader, AudioTrack track);
-    std::string audioChannelsName(AudioChannelMode mode);
+    // false while the audio playing is multichannel (4-channel MUSE, 5.1 AC3/DTS), where
+    // the channel choice is kept but not applied
+    bool audioChannelChoiceHeard(const PlayerState &state);
+    std::string audioChannelsName(const PlayerState &state);
     std::string cxName(const PlayerState &state, const ReaderControls &reader, AudioTrack audio_track);
     std::string blackLevelName(Decoder::BlackLevelMode mode);
     std::string dropoutModeName(DropoutMode mode);

@@ -22,11 +22,73 @@ void Menu::addPageItem(MenuPage *on, std::string label, MenuPage *opens) {
     on->items.push_back(std::move(item));
 }
 
+void Menu::setItems(MenuPage *page, std::vector<MenuItem> items) {
+    page->items = std::move(items);
+    page->cursor = 0;
+    m_revision++;
+}
+
+void Menu::pushPage(MenuPage *page) {
+    if (!m_open)
+        open();
+    page->cursor = 0;
+    m_stack.push_back(page);
+    m_revision++;
+}
+
+void Menu::popPage() {
+    if (m_stack.size() > 1)
+        m_stack.pop_back();
+    m_revision++;
+}
+
+void Menu::startTextEntry(std::unique_ptr<TextEntry> entry) {
+    m_entry = std::move(entry);
+    m_end_entry = false;
+    m_revision++;
+}
+
+void Menu::type(const std::string &utf8) {
+    if (m_entry) {
+        m_entry->type(utf8);
+        m_revision++;
+    }
+}
+
+void Menu::backspace() {
+    if (m_entry) {
+        m_entry->backspace();
+        m_revision++;
+    }
+}
+
+void Menu::acceptEntry() {
+    if (!m_entry)
+        return;
+    m_entry->accept();
+    if (m_end_entry) {
+        m_entry.reset();
+        m_end_entry = false;
+    }
+    m_revision++;
+}
+
+void Menu::cancelEntry() {
+    if (!m_entry)
+        return;
+    m_entry->cancel();
+    if (m_end_entry) {
+        m_entry.reset();
+        m_end_entry = false;
+    }
+    m_revision++;
+}
+
 void Menu::open() {
     if (m_pages.empty())
         return;
     m_stack.clear();
-    m_stack.push_back(m_pages.front().get());
+    m_stack.push_back(m_root != nullptr ? m_root : m_pages.front().get());
     m_stack.back()->cursor = 0;
     m_open = true;
     m_revision++;
@@ -35,6 +97,8 @@ void Menu::open() {
 void Menu::close() {
     m_open = false;
     m_stack.clear();
+    m_entry.reset();
+    m_end_entry = false;
     m_revision++;
 }
 
@@ -50,6 +114,17 @@ bool Menu::handleKey(MenuKey key) {
     MenuPage *page = current();
     if (!m_open || page == nullptr)
         return false;
+    if (m_entry) {
+        static const TextEntry::Key keys[] = {TextEntry::Key::eUp, TextEntry::Key::eDown, TextEntry::Key::eLeft,
+                                             TextEntry::Key::eRight, TextEntry::Key::eSelect, TextEntry::Key::eBack};
+        m_entry->handleKey(keys[(int)key]);
+        if (m_end_entry) {
+            m_entry.reset();
+            m_end_entry = false;
+        }
+        m_revision++;
+        return true;
+    }
     const auto items = enabledItems(*page);
     if (items.empty() && key != MenuKey::eBack)
         return true;
@@ -71,10 +146,15 @@ bool Menu::handleKey(MenuKey key) {
                 item->step(+1);
             break;
         case MenuKey::eSelect:
-            if (item->activate)
-                item->activate();
-            else if (item->step)
-                item->step(+1);
+            // A copy is called: activating may replace the page's items (the
+            // browser's pages are rebuilt by their own items)
+            if (item->activate) {
+                const auto activate = item->activate;
+                activate();
+            } else if (item->step) {
+                const auto step = item->step;
+                step(+1);
+            }
             break;
         case MenuKey::eBack:
             if (atRoot())

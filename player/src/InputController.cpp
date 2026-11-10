@@ -106,11 +106,22 @@ bool InputController::poll(SDL_Window *window,
             case SDL_EVENT_TERMINATING:
                 quit = true;
                 break;
-            case SDL_EVENT_KEY_DOWN:
-                if (!event.key.repeat) {
+            case SDL_EVENT_KEY_DOWN: {
+                // Held arrows repeat in the menu (a long listing); other keys act once per press
+                const bool arrow = event.key.scancode == SDL_SCANCODE_UP || event.key.scancode == SDL_SCANCODE_DOWN
+                                   || event.key.scancode == SDL_SCANCODE_LEFT || event.key.scancode == SDL_SCANCODE_RIGHT;
+                const bool menu_open = m_menu != nullptr && m_menu->isOpen();
+                if (!event.key.repeat || (arrow && menu_open)) {
                     m_pressed.insert(event.key.scancode);
-                    m_log.debug(eApplication, std::format("Key: {}", SDL_GetScancodeName(event.key.scancode)));
+                    if (!event.key.repeat)
+                        m_log.debug(eApplication, std::format("Key: {}", SDL_GetScancodeName(event.key.scancode)));
                 }
+                break;
+            }
+            case SDL_EVENT_TEXT_INPUT:
+                // A keyboard typing into the menu's text entry (the address field)
+                if (m_menu != nullptr && m_menu->isOpen() && m_menu->textEntry() != nullptr)
+                    m_menu->type(event.text.text);
                 break;
             // Gamepads deliver button events only once opened
             case SDL_EVENT_GAMEPAD_ADDED:
@@ -166,17 +177,51 @@ bool InputController::poll(SDL_Window *window,
 #else
     constexpr bool tvos = false;
 #endif
+    // The window takes text input while the menu's address field is up, so a
+    // keyboard types into it (and its letters are not hotkeys meanwhile)
+    const bool entry_up = m_menu != nullptr && m_menu->isOpen() && m_menu->textEntry() != nullptr;
+    if (entry_up != m_text_input_on) {
+        m_text_input_on = entry_up;
+        if (entry_up)
+            SDL_StartTextInput(window);
+        else
+            SDL_StopTextInput(window);
+    }
+    if (entry_up) {
+        if (checkKey(SDL_SCANCODE_UP)) m_menu->handleKey(MenuKey::eUp);
+        if (checkKey(SDL_SCANCODE_DOWN)) m_menu->handleKey(MenuKey::eDown);
+        if (checkKey(SDL_SCANCODE_LEFT)) m_menu->handleKey(MenuKey::eLeft);
+        if (checkKey(SDL_SCANCODE_RIGHT)) m_menu->handleKey(MenuKey::eRight);
+        // Space picks the key under the cursor on the on-screen keyboard.  Return
+        // too on tvOS, where the remote's select arrives as Return; on a PC a
+        // keyboard's Return accepts what was typed and Escape cancels
+        if (checkKey(SDL_SCANCODE_SPACE)) m_menu->handleKey(MenuKey::eSelect);
+        if (checkKey(SDL_SCANCODE_RETURN) || checkKey(SDL_SCANCODE_KP_ENTER)) {
+            if (tvos)
+                m_menu->handleKey(MenuKey::eSelect);
+            else
+                m_menu->acceptEntry();
+        }
+        if (checkKey(SDL_SCANCODE_BACKSPACE)) m_menu->backspace();
+        if (checkKey(SDL_SCANCODE_ESCAPE)) {
+            if (tvos)
+                m_menu->handleKey(MenuKey::eBack); // the Menu button: delete, cancel when empty
+            else
+                m_menu->cancelEntry();
+        }
+        return true;
+    }
     if (m_menu != nullptr && m_menu->isOpen()) {
         if (checkKey(SDL_SCANCODE_UP)) m_menu->handleKey(MenuKey::eUp);
         if (checkKey(SDL_SCANCODE_DOWN)) m_menu->handleKey(MenuKey::eDown);
         if (checkKey(SDL_SCANCODE_LEFT)) m_menu->handleKey(MenuKey::eLeft);
         if (checkKey(SDL_SCANCODE_RIGHT)) m_menu->handleKey(MenuKey::eRight);
         if (checkKey(SDL_SCANCODE_SPACE) || checkKey(SDL_SCANCODE_RETURN)) m_menu->handleKey(MenuKey::eSelect);
-        if (checkKey(SDL_SCANCODE_M)) {
+        if (checkKey(SDL_SCANCODE_M) && !m_menu_is_screen) {
             m_menu->close();
         } else if (checkKey(SDL_SCANCODE_ESCAPE) || checkKey(SDL_SCANCODE_BACKSPACE)) {
             if (!m_menu->handleKey(MenuKey::eBack)) { // on the root page
-                if (tvos && checkKey(SDL_SCANCODE_ESCAPE))
+                if ((tvos && checkKey(SDL_SCANCODE_ESCAPE)) || m_menu_is_screen)
                     return false;
                 m_menu->close();
             }

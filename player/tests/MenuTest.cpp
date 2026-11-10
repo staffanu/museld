@@ -98,3 +98,14 @@ TEST_CASE("An item whose predicate says no is left out, and the cursor stays val
     REQUIRE(f.menu.handleKey(MenuKey::eSelect));
     REQUIRE(f.menu.title() == "SUB");        // which is the page item
 }
+
+TEST_CASE("The root is the page setRoot names, whatever was made first", "[Menu]") {
+    Menu menu;
+    MenuPage *first = menu.addPage("FIRST");
+    MenuPage *root = menu.addPage("ROOT");
+    (void)first;
+    menu.setRoot(root);
+    menu.open();
+    REQUIRE(menu.title() == "ROOT");
+    REQUIRE(menu.atRoot());
+}

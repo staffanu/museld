@@ -34,7 +34,7 @@ std::string onOff(bool on) { return on ? "ON" : "OFF"; }
 
 } // namespace
 
-void buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b) {
+MenuPage *buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b, MenuPage *open_page) {
     PlayerState &s = b.state;
     ReaderControls &r = b.reader;
     Logger &log = b.log;
@@ -52,6 +52,8 @@ void buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b) {
     menu.addPageItem(root, "Subtitles", subtitles);
     menu.addPageItem(root, "Playback", playback);
     menu.addPageItem(root, "Information", info);
+    if (open_page != nullptr)
+        menu.addPageItem(root, "Open...", open_page);
     root->items.push_back(action(b.is_tvos ? "Quit" : "Quit museld", b.is_tvos ? "" : "Q", [b] { if (b.quit_request) *b.quit_request = true; }));
 
     // Picture
@@ -97,11 +99,14 @@ void buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b) {
     // Audio
     audio->items.push_back(setting("Track", "A", [b] { return audioTrackName(b.reader, b.audio_track); },
                                    [b](int d) { cycleAudioTrack(b.state, b.reader, b.audio_track, d); }));
+    // Hidden while multichannel audio plays (5.1 AC3/DTS, 4-channel MUSE): the
+    // choice applies to two-channel audio only
     audio->items.push_back(setting("Channels", "B", [&s] {
                                        return s.audio_channel_mode == AudioChannelMode::eStereo ? "STEREO"
                                             : s.audio_channel_mode == AudioChannelMode::eLeft ? "LEFT" : "RIGHT";
                                    },
-                                   [&s](int d) { cycleAudioChannels(s, d); }));
+                                   [&s](int d) { cycleAudioChannels(s, d); },
+                                   [&s] { return audioChannelChoiceHeard(s); }));
     audio->items.push_back(setting("CX expansion", "X", [b] {
                                        const char *name = b.state.analog_cx_mode == Decoder::CxMode::eAuto ? "AUTO"
                                                         : b.state.analog_cx_mode == Decoder::CxMode::eOff ? "OFF" : "ON";
@@ -142,4 +147,6 @@ void buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b) {
     info->items.push_back(setting("Pointer readout", "C", [&s] { return onOff(s.enable_cursor); },
                                   [&s](int) { toggleCursor(s); }, [b] { return !b.is_tvos; }));
     info->items.push_back(action("Export frame", "S", [&s] { exportFrame(s); }));
+    menu.setRoot(root);
+    return root;
 }

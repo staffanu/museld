@@ -72,6 +72,9 @@ public:
     // The menu the keys drive while it is open (and open with M, or the Menu
     // button on tvOS); none without one
     void setMenu(class Menu *menu) { m_menu = menu; }
+    // The menu is the whole screen (the browser before any input): M neither
+    // opens nor closes it, and Back on its root page quits
+    void setMenuIsScreen(bool is_screen) { m_menu_is_screen = is_screen; }
 
     // Pumps the window system's events and acts on the keys pressed.  Must
     // run on the main thread.  Returns false if the user requested quit (a
@@ -93,6 +96,8 @@ private:
     Logger &m_log;
 
     class Menu *m_menu = nullptr;
+    bool m_text_input_on = false; // SDL text input started for the menu's entry
+    bool m_menu_is_screen = false;
     const bool m_ignore_keys;
     std::set<int> m_pressed; // scancodes pressed since the last poll
 };

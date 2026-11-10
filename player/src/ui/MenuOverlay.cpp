@@ -29,8 +29,64 @@ void MenuOverlay::render(musevk::CommandBuffer &command_buffer, ResultImages &im
     const int line_h = glyph_h + glyph_h / 3;
     const int pad = glyph_w;
 
-    const auto lines = menu.lines();
+    if (const TextEntry *entry = menu.textEntry()) {
+        // The address field: the title, the text with a cursor, the keyboard
+        // rows with the selected key marked
+        const auto rows = entry->rows();
+        size_t row_chars = 0;
+        for (const auto &row : rows) {
+            size_t n = 0;
+            for (const auto &key : row) n += key.size() + 1;
+            row_chars = std::max(row_chars, n);
+        }
+        const size_t text_chars = std::max<size_t>(entry->text().size() + 1, 24);
+        const int panel_w = std::min(width - 2 * pad, pad * 2 + glyph_w * (int)std::max(row_chars, text_chars));
+        const int panel_h = pad * 3 + line_h * (int)(rows.size() + 2) + glyph_h / 2;
+        const int x0 = pad * 2;
+        const int y0 = std::max(pad, (height - panel_h) / 2);
+        text_renderer.fillRect(images.out_image, x0, y0, panel_w, panel_h, 0.0f, 0.0f, 0.0f, 0.7f, command_buffer);
+        text_renderer.fillRect(images.out_image, x0, y0, panel_w, line_h + pad, 0.15f, 0.15f, 0.35f, 0.85f, command_buffer);
+        int y = y0 + pad / 2;
+        text_renderer.drawText(images.out_image, x0 + pad, y, entry->title(), scale, command_buffer);
+        y += line_h + pad / 2 + glyph_h / 2;
+        // The text, its tail if it is longer than the panel
+        const int avail = (panel_w - 2 * pad) / glyph_w - 1;
+        std::string text = entry->text();
+        if ((int)text.size() > avail)
+            text = text.substr(text.size() - (size_t)avail);
+        text_renderer.fillRect(images.out_image, x0 + pad / 2, y - (line_h - glyph_h) / 2, panel_w - pad, line_h, 0.9f, 0.9f, 0.9f, 0.15f, command_buffer);
+        text_renderer.drawText(images.out_image, x0 + pad, y, text + "_", scale, command_buffer);
+        y += line_h + glyph_h / 2;
+        for (size_t r = 0; r < rows.size(); r++) {
+            int x = x0 + pad;
+            for (size_t c = 0; c < rows[r].size(); c++) {
+                const std::string &key = rows[r][c];
+                if ((int)r == entry->row() && (int)c == entry->column())
+                    text_renderer.fillRect(images.out_image, x - glyph_w / 4, y - (line_h - glyph_h) / 2,
+                                           glyph_w * (int)key.size() + glyph_w / 2, line_h, 0.9f, 0.9f, 0.9f, 0.3f, command_buffer);
+                text_renderer.drawText(images.out_image, x, y, key, scale, command_buffer);
+                x += glyph_w * (int)(key.size() + 1);
+            }
+            y += line_h;
+        }
+        return;
+    }
+
+    auto lines = menu.lines();
     const std::string title = menu.title();
+    // More lines than the frame holds: a window around the selected one, with
+    // marks for what lies above and below
+    const int max_lines = std::max(3, (height - 4 * pad) / line_h - 2);
+    bool more_above = false, more_below = false;
+    if ((int)lines.size() > max_lines) {
+        int cursor = 0;
+        for (size_t i = 0; i < lines.size(); i++)
+            if (lines[i].selected) cursor = (int)i;
+        const int first = std::clamp(cursor - max_lines / 2, 0, (int)lines.size() - max_lines);
+        more_above = first > 0;
+        more_below = first + max_lines < (int)lines.size();
+        lines = std::vector<MenuLine>(lines.begin() + first, lines.begin() + first + max_lines);
+    }
     // Column widths from the content, bounded by the frame: the key hint in
     // brackets at the left, the label, the value at the right
     size_t label_chars = title.size(), hint_chars = 0, value_chars = 0;
@@ -43,7 +99,7 @@ void MenuOverlay::render(musevk::CommandBuffer &command_buffer, ResultImages &im
     const int label_col = hint_chars ? (int)hint_chars + 1 : 0; // where the labels start, in glyphs
     const int gap = value_chars ? 3 : 0;
     const int panel_w = std::min(width - 2 * pad, pad * 2 + glyph_w * (label_col + (int)label_chars + gap + (int)value_chars));
-    const int panel_h = pad * 2 + line_h * (int)(lines.size() + 1) + glyph_h / 2;
+    const int panel_h = pad * 2 + line_h * (int)(lines.size() + 1) + glyph_h / 2 + (more_above || more_below ? glyph_h : 0);
     const int x0 = pad * 2;
     const int y0 = std::max(pad, (height - panel_h) / 2);
 
@@ -53,6 +109,9 @@ void MenuOverlay::render(musevk::CommandBuffer &command_buffer, ResultImages &im
     int y = y0 + pad / 2;
     text_renderer.drawText(images.out_image, x0 + pad, y, title, scale, command_buffer);
     y += line_h + pad / 2 + glyph_h / 2;
+    if (more_above) {
+        text_renderer.drawText(images.out_image, x0 + panel_w / 2 - glyph_w, y - glyph_h / 2, "^", scale, command_buffer);
+    }
     for (const auto &line : lines) {
         if (line.selected)
             text_renderer.fillRect(images.out_image, x0 + pad / 2, y - (line_h - glyph_h) / 2, panel_w - pad, line_h,
@@ -74,4 +133,6 @@ void MenuOverlay::render(musevk::CommandBuffer &command_buffer, ResultImages &im
         }
         y += line_h;
     }
+    if (more_below)
+        text_renderer.drawText(images.out_image, x0 + panel_w / 2 - glyph_w, y - glyph_h / 2, "v", scale, command_buffer);
 }

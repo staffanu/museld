@@ -412,7 +412,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | D | Cycle dropout handling: conceal → ignore → highlight (red = luminance dropout, green = color dropout) |
 | A | Cycle the audio track: MUSE (or NTSC analog) → EFM → AC3 (NTSC only) (RF input only) |
 | E | Cycle the EFM adaptive filter size: 3 → 5 → 9 → 17 → 35 → 71 taps → off → 3 (RF input only, see `--efm-filter-size`). The filter restarts from identity at each change. |
-| B | Cycle the audio channels heard: stereo → left only → right only (bilingual discs, or the left-only analog track on AC3 discs; `--write` output always keeps stereo) |
+| B | Cycle the audio channels heard: stereo → left only → right only (bilingual discs, or the left-only analog track on AC3 discs; `--write` output always keeps stereo). Shown in parentheses, and left out of the menu, while multichannel audio plays (4-channel MUSE, 5.1 AC3/DTS), which goes to the device as it is |
 | X | Cycle CX noise reduction for the NTSC analog audio: auto (follow the VBI flag, the default) → off → on; `--cx` sets the initial mode. Shown in parentheses when the audio playing is not the analog track (the setting is remembered but inaudible). The V info line shows the CX status: the disc's flag in auto mode, or e.g. "CX off forced (disc on)" when overridden. |
 | V | Toggle disc code / chapter / frame display (while paused, the frame number is followed by the field on screen, 1 or 2), plus the NTSC film mode and black level status |
 | J | NTSC: cycle the black level: auto → NTSC-M (7.5 IRE) → NTSC-J (0 IRE), see `--black-level` |
@@ -437,6 +437,26 @@ does quitting with Escape.  Settings that mean nothing for the disc being played
 (the 3D comb on MUSE, the equaliser on NTSC) are left out of its pages.  On the
 Apple TV the Siri Remote's Menu button opens it, and from its root page leaves
 the app; the app starts in the menu.
+
+### The file browser
+
+The menu's Open page is a file browser: an address field, the directory the
+browser was last in, this computer's directories (not on the Apple TV), and the
+addresses opened recently.  It lists a directory on this machine or on a web
+server through the server's index page (Apache, nginx, Python's `http.server`
+and the like), directories first, with the sizes the listing gives; choosing a
+file plays it, and the player comes back to the browser when the input ends.
+The address field takes anything museld opens: a path, an `http://` location
+(a bare `host/path` gets the `http://`), or a `udp://` capture stream, which
+plays as it is.  On the Apple TV the field's on-screen keyboard is driven by
+the remote, select typing the key under the cursor and Menu deleting; a
+keyboard types straight into it, Return accepts and Escape cancels.
+
+`museld --browse` starts in the browser instead of with an input file; the Apple
+TV app always does, having no command line.  What the browser remembers -- the
+recent addresses and the last directory -- is written by the player to
+`state.txt` in its per-user preferences directory (the application container
+on tvOS; `MUSELD_STATE_FILE` names another file).
 
 The C key overlay shows the cursor position both in single-field coordinates (374×516 for MUSE,
 764×240 for NTSC and 764×288 for PAL: the column over the whole decoded width, the line within

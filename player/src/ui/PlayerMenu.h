@@ -31,6 +31,7 @@ struct PlayerMenuBindings {
     bool *quit_request; // set by the menu's Quit item
 };
 
-void buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b);
+// open_page: the browser's page, linked before Quit; null for none
+MenuPage *buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b, MenuPage *open_page = nullptr);
 
 #endif //MUSELD_PLAYERMENU_H
