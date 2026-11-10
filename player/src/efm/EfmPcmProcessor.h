@@ -17,8 +17,11 @@ class Logger;
 
 class EfmPcmProcessor {
 public:
+    // concealment_debug_filename: the concealer writes six int16 per sample
+    // (input L/R, concealed L/R, erased L/R) to it
     explicit EfmPcmProcessor(Logger &log,
-        ErasureConcealer::ConcealmentImplementation impl = ErasureConcealer::AutoregressiveModel);
+        ErasureConcealer::ConcealmentImplementation impl = ErasureConcealer::AutoregressiveModel,
+        std::optional<std::string> concealment_debug_filename = std::nullopt);
     ~EfmPcmProcessor();
     EfmPcmProcessor(const EfmPcmProcessor &) = delete;
     EfmPcmProcessor &operator=(const EfmPcmProcessor &) = delete;

@@ -121,9 +121,10 @@ const std::array<std::pair<int, int>, 6> EfmDecoder::c_right_output_map =
         array<pair<int, int>, 6> { pair{6, 7}, pair{18, 19}, pair{8, 9}, pair{20, 21}, pair{10, 11}, pair{22, 23}};
 
 EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt,
-                       std::optional<std::string> t_values_filename_opt)
+                       std::optional<std::string> t_values_filename_opt, DecodingStrategy c1_strategy, int c1_gate_rank)
         : m_log(log),
           m_circ_debug_file(nullptr),
+          m_symbol_debug_file(nullptr),
           m_t_values_file(nullptr),
           m_t_value_run_length(0),
           m_t_value_carry(0),
@@ -135,14 +136,17 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
           m_bits_in_frame(0),
           m_consecutive_syncs(0),
           m_locked(false),
-          m_frames_since_sync(0), // if not at the exact expected place
+          // starts "lost": the first sync pattern seen re-frames at once, instead of waiting for a
+          // second one to confirm it (which cost the first frame on a disc whose first sync came early)
+          m_frames_since_sync(c_sync_lost_frames),
           m_efm_frames_since_lock(0),
           m_subcode_symbol_index(-3),
+          m_sync_candidate_bit(-1),
           m_frame{},
           m_subcode_p_start_flag(false),
           m_subcode_q_use(nullopt),
           m_subcode_q_undefined_control(nullopt),
-          m_c1(32, 28, 0, RS_C1, false),
+          m_c1(32, 28, 0, c1_strategy, false),
           m_c2(28, 24, 0, RS_C2, false),
           m_initial_delay_lines{},
           m_initial_delay_lines_ix{},
@@ -159,12 +163,24 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
           m_subcodes_last_second(0),
           m_q_subcode_crc_failures_last_second(0)
 {
-    for (int i = 0; i < m_initial_delay_lines.size(); i++)
+    m_c1.setGateRank(c1_gate_rank);
+    m_frame_reliability.fill(0);
+    // The delay lines start out holding erased symbols: until they are primed
+    // (about 110 frames) the output is undefined and must be flagged, not
+    // emitted as the zeros it would otherwise contain
+    for (int i = 0; i < m_initial_delay_lines.size(); i++) {
         m_initial_delay_lines[i] = new ByteWithErasureFlag[c_initial_delays[i].first + 1];
-    for (int i = 0; i < m_c1_to_c2_delay_lines.size(); i++)
+        std::fill_n(m_initial_delay_lines[i], c_initial_delays[i].first + 1, ByteWithErasureFlag(0, true));
+        m_initial_reliability_lines[i] = new float[c_initial_delays[i].first + 1]();
+    }
+    for (int i = 0; i < m_c1_to_c2_delay_lines.size(); i++) {
         m_c1_to_c2_delay_lines[i] = new ByteWithErasureFlag[c_c1_to_c2_delays[i] + 1];
-    for (int i = 0; i < m_output_delay_lines.size(); i++)
+        std::fill_n(m_c1_to_c2_delay_lines[i], c_c1_to_c2_delays[i] + 1, ByteWithErasureFlag(0, true));
+    }
+    for (int i = 0; i < m_output_delay_lines.size(); i++) {
         m_output_delay_lines[i] = new ByteWithErasureFlag[c_output_delays[i] + 1];
+        std::fill_n(m_output_delay_lines[i], c_output_delays[i] + 1, ByteWithErasureFlag(0, true));
+    }
 
     if (circ_debug_filename_opt.has_value()) {
         m_circ_debug_file = fopen(circ_debug_filename_opt.value().c_str(), "w");
@@ -179,13 +195,25 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
     }
 }
 
+void EfmDecoder::setSymbolDebugFilename(const std::string &filename) {
+    if (m_symbol_debug_file != nullptr)
+        fclose(m_symbol_debug_file);
+    m_symbol_debug_file = fopen(filename.c_str(), "wb");
+    if (m_symbol_debug_file == nullptr)
+        throw std::runtime_error(std::format("Cannot open symbol debug file {}", filename));
+}
+
 EfmDecoder::~EfmDecoder() {
     if (m_circ_debug_file != nullptr)
         fclose(m_circ_debug_file);
+    if (m_symbol_debug_file != nullptr)
+        fclose(m_symbol_debug_file);
     if (m_t_values_file != nullptr)
         fclose(m_t_values_file);
 
     for (auto p: m_initial_delay_lines)
+        delete[] p;
+    for (auto p: m_initial_reliability_lines)
         delete[] p;
     for (auto p: m_c1_to_c2_delay_lines)
         delete[] p;
@@ -242,6 +270,7 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
         if (sync && m_bits_in_frame == 588) {
             m_frames_since_sync = 0;
             m_consecutive_syncs += 1;
+            m_sync_candidate_bit = -1;
             if (m_consecutive_syncs >= 7 && !m_locked) {
                 m_locked = true;
                 m_efm_frames_since_lock = 0;
@@ -249,13 +278,31 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
             }
             new_frame = true;
         } else if (sync && m_consecutive_syncs == 0) {
-            m_frames_since_sync = 0;
-            m_consecutive_syncs = 1;
-            new_frame = true;
-        } else if (m_bits_in_frame == 588) {
+            // A sync off the lattice.  With the lattice lost (no sync for
+            // c_sync_lost_frames frames) re-frame at once; while it was
+            // recently confirmed, a lone sync pattern is more likely a
+            // damaged run than a real frame start (one missed sync would
+            // otherwise open the door to any false pattern), so re-frame
+            // only when a second sync follows exactly one frame after it
+            if (m_frames_since_sync >= c_sync_lost_frames) {
+                m_frames_since_sync = 0;
+                m_consecutive_syncs = 1;
+                new_frame = true;
+            } else if (m_sync_candidate_bit >= 0 && m_total_bits - m_sync_candidate_bit == 588) {
+                m_frames_since_sync = 0;
+                m_consecutive_syncs = 2;
+                m_sync_candidate_bit = -1;
+                m_reframes_confirmed++;
+                new_frame = true;
+            } else {
+                m_sync_candidate_bit = m_total_bits;
+                m_reframes_deferred++;
+            }
+        }
+        if (!new_frame && m_bits_in_frame == 588) {
             m_frames_since_sync += 1;
             m_consecutive_syncs = 0;
-            if (m_frames_since_sync >= 7 && m_locked) {
+            if (m_frames_since_sync >= c_sync_lost_frames && m_locked) {
                 m_locked = false;
                 m_log.debug(eAudio, std::format("efm lock lost index {}", m_total_bits));
                 if (m_efm_frames_since_lock > c_minimum_frames_before_c1_c2_valid)
@@ -273,9 +320,26 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
                 int efm_value = m_shift_register & 0x3fff; // 14 bits
                 ByteWithErasureFlag octet = c_efm_toggles_to_byte_table[efm_value];
                 m_frame[m_byte_index] = octet;
+                {
+                    float r = 1e9f;
+                    for (float v : m_symbol_history)
+                        r = std::min(r, std::abs(v));
+                    m_frame_reliability[m_byte_index] = m_symbol_history.empty() ? 0.0f : r;
+                }
                 if (octet.isErased()) {
                     m_total_erasures_in_last_second++;
                     m_frame[m_byte_index] = ByteWithErasureFlag(estimateSymbol(), true);
+                }
+                if (m_symbol_debug_file != nullptr) {
+                    uint8_t best, second;
+                    float p_best, p_second;
+                    estimateSymbolScored(best, second, p_best, p_second);
+                    float rec[24] = {(float)m_total_efm_frame_count, (float)m_byte_index, octet.isErased() ? 0.0f : 1.0f,
+                                     octet.isErased() ? 0.0f : (float)octet.byteValue(), (float)best, (float)second,
+                                     (float)efm_value, (float)p_best, (float)p_second};
+                    for (int j = 0; j < 15; j++)
+                        rec[9 + j] = j < (int)m_symbol_history.size() ? m_symbol_history[j] : 0.0f;
+                    fwrite(rec, sizeof rec, 1, m_symbol_debug_file);
                 }
 
                 if (m_byte_index == 0) {
@@ -310,7 +374,7 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
         m_log.info(eAudio | ePerformance,
                    std::format("EFM time = {:.2f} s. Time spent decoding: {:.1f} ms; frame count: {}, "
                                "input erasures: {} ({:.0f} ppm), past c1 erasures: {} ({:.0f} ppm), output erasures: {} ({:.0f} ppm), "
-                               "q crc failures: {:.1f} %",
+                               "q crc failures: {:.1f} %, off-lattice syncs deferred: {}, re-framed on confirmation: {}",
                                m_total_efm_frame_count / 7350.0,
                                (double)m_total_time_us_last_second / 1000.0,
                                m_efm_frame_count_last_second,
@@ -320,7 +384,7 @@ std::vector<TwoChannelSampleWithErasureFlags> EfmDecoder::decode(const std::vect
                                1000000.0 * m_total_erasures_past_c1_last_second / m_efm_frame_count_last_second / 28,
                                m_total_erasures_out_last_second,
                                1000000.0 * m_total_erasures_out_last_second / m_efm_frame_count_last_second / 24,
-                               100.0 * m_q_subcode_crc_failures_last_second / m_subcodes_last_second));
+                               100.0 * m_q_subcode_crc_failures_last_second / m_subcodes_last_second, m_reframes_deferred, m_reframes_confirmed));
         m_efm_frame_count_last_second = 0;
         m_total_time_us_last_second = 0;
         m_total_erasures_in_last_second = 0;
@@ -428,6 +492,13 @@ void EfmDecoder::handleSubcode() {
 
 // ML estimation of the received symbol -- used only when we do not have a perfect match
 uint8_t EfmDecoder::estimateSymbol() const {
+    uint8_t best, second;
+    float p_best, p_second;
+    estimateSymbolScored(best, second, p_best, p_second);
+    return best;
+}
+
+void EfmDecoder::estimateSymbolScored(uint8_t &best, uint8_t &second, float &p_best, float &p_second) const {
     // The most likely of the 256 valid symbols (either polarity) given the
     // soft values of the 15 channel bits, each bit's probability a clamped
     // linear function of its value.  This runs once per invalid symbol,
@@ -440,7 +511,8 @@ uint8_t EfmDecoder::estimateSymbol() const {
     // first (62 multiplications a group, doubling the table a bit at a
     // time); a candidate is then two multiplications and a compare, with
     // no branch the predictor can miss.  Same result as the plain search,
-    // first candidate on a tie.
+    // first candidate on a tie.  The runner-up is the best scoring other
+    // byte (not the other polarity of the best), for the symbol debug dump.
     float p_one[15], p_zero[15];
     for (int j = 0; j < 15; j++) {
         const float v = m_symbol_history[j];
@@ -461,17 +533,24 @@ uint8_t EfmDecoder::estimateSymbol() const {
             }
         }
     }
-    float max_p = 0;
-    int found = 0;
-    for (int i = 0; i < 512; i++) {
-        const auto &g = c_candidate_groups[i];
-        const float p_tot = table[0][g[0]] * table[1][g[1]] * table[2][g[2]];
-        if (p_tot > max_p) {
-            max_p = p_tot;
-            found = i;
+    p_best = -1;
+    p_second = -1;
+    best = second = 0;
+    for (int i = 0; i < 256; i++) {
+        const auto &g0 = c_candidate_groups[2 * i];
+        const auto &g1 = c_candidate_groups[2 * i + 1];
+        const float p_sym = std::max(table[0][g0[0]] * table[1][g0[1]] * table[2][g0[2]],
+                                     table[0][g1[0]] * table[1][g1[1]] * table[2][g1[2]]);
+        if (p_sym > p_best) {
+            p_second = p_best;
+            second = best;
+            p_best = p_sym;
+            best = (uint8_t)i;
+        } else if (p_sym > p_second) {
+            p_second = p_sym;
+            second = (uint8_t)i;
         }
     }
-    return (uint8_t)(found >> 1);
 }
 
 // Dumps data to the CIRC debug file, in the same format as can be done from the VHDL code
@@ -490,17 +569,20 @@ void EfmDecoder::handleFrame(std::vector<TwoChannelSampleWithErasureFlags> &outp
     dumpArray("F:", std::span(m_frame).subspan(1, 32));
 
     std::vector<ByteWithErasureFlag> c1_data(32);
+    std::vector<float> c1_reliability(32);
 
     for (int i = 0; i < 32; i++) {
-        m_initial_delay_lines[i][m_initial_delay_lines_ix[i]++] = m_frame[i + 1];
-        if (m_initial_delay_lines_ix[i] == c_initial_delays[i].first + 1)
+        m_initial_delay_lines[i][m_initial_delay_lines_ix[i]] = m_frame[i + 1];
+        m_initial_reliability_lines[i][m_initial_delay_lines_ix[i]] = m_frame_reliability[i + 1];
+        if (++m_initial_delay_lines_ix[i] == c_initial_delays[i].first + 1)
             m_initial_delay_lines_ix[i] = 0;
         auto v = m_initial_delay_lines[i][m_initial_delay_lines_ix[i]];
         c1_data[i] = c_initial_delays[i].second ? ByteWithErasureFlag{(uint8_t)~v.byteValue(), v.isErased()} : v;
+        c1_reliability[i] = m_initial_reliability_lines[i][m_initial_delay_lines_ix[i]];
     }
 
     dumpArray("C1:", c1_data);
-    m_c1.decode(c1_data);
+    m_c1.decode(c1_data, c1_reliability);
     dumpArray("D1:", c1_data);
 
     std::vector<ByteWithErasureFlag> c2_data(28);
@@ -529,17 +611,21 @@ void EfmDecoder::handleFrame(std::vector<TwoChannelSampleWithErasureFlags> &outp
             m_total_erasures_out_last_second++;
     }
 
+    if (!m_startup_done && m_locked && m_efm_frames_since_lock >= c_startup_frames)
+        m_startup_done = true;
+    const bool startup = !m_startup_done;
+
     for (int i = 0; i < 6; i++) {
         TwoChannelSampleWithErasureFlags sample{};
 
         auto [lh, ll] = c_left_output_map[i];
-        bool lErased = out[lh].isErased() || out[ll].isErased();
+        bool lErased = out[lh].isErased() || out[ll].isErased() || startup;
 
         sample.samples[0] = (int16_t) ((out[lh].byteValue() << 8) | out[ll].byteValue());
         sample.erased[0] = lErased;
 
         auto [rh, rl] = c_right_output_map[i];
-        bool rErased = out[rh].isErased() || out[rl].isErased();
+        bool rErased = out[rh].isErased() || out[rl].isErased() || startup;
 
         sample.samples[1] = (int16_t) ((out[rh].byteValue() << 8) | out[rl].byteValue());
         sample.erased[1] = rErased;

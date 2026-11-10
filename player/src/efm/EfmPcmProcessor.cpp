@@ -26,9 +26,9 @@ IirFilter<2> EfmPcmProcessor::makeDeemphasisFilter() {
 }
 
 EfmPcmProcessor::EfmPcmProcessor(Logger &log,
-        ErasureConcealer::ConcealmentImplementation impl)
+        ErasureConcealer::ConcealmentImplementation impl, std::optional<std::string> concealment_debug_filename)
     : m_pop_detector(log),
-      m_concealer(ErasureConcealer::create(impl, log, std::nullopt)),
+      m_concealer(ErasureConcealer::create(impl, log, std::move(concealment_debug_filename))),
       m_deemphasis{{makeDeemphasisFilter(), makeDeemphasisFilter()}} {}
 
 EfmPcmProcessor::~EfmPcmProcessor() = default;

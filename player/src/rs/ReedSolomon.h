@@ -16,7 +16,9 @@ enum DecodingStrategy {
     RS_NONE, // No correction at all
     RS_C1, // Very conservative: only corrects one error and erases the entire frame otherwise
     RS_C2, // Assumes few unflagged errors
-    RS_MAX // Tries its best to correct as many erasures/errors possible (with the risk of incorrect corrections)
+    RS_MAX, // Tries its best to correct as many erasures/errors possible (with the risk of incorrect corrections)
+    RS_C1_GATED // Like RS_C1 plus two-error correction, but a correction is accepted only if every symbol it
+                // changes ranks among the least reliable symbols of the word (see decode with reliabilities)
 };
 
 template<int irreducible_poly, int alpha_decimal> class ReedSolomon {
@@ -45,6 +47,16 @@ public:
 
     // The first symbol in the input is the highest order coefficient
     void decode(std::vector<ByteWithErasureFlag> &data);
+
+    // With a reliability per symbol (higher = more trusted; e.g. the smallest
+    // sample magnitude the slicer saw in the symbol).  RS_C1_GATED accepts a
+    // correction only if all symbols it changes are among the gateRank()
+    // least reliable ones (twice that many for a single-error correction):
+    // a wrong decode of an uncorrectable word lands on random positions and
+    // is rejected, a genuine error sits where the slicer was unsure.
+    void decode(std::vector<ByteWithErasureFlag> &data, const std::vector<float> &reliability);
+    void setGateRank(int rank) { m_gate_rank = rank; }
+    [[nodiscard]] int gateRank() const { return m_gate_rank; }
 
     void resetStatistics() {
         m_statistics.clear();
@@ -87,6 +99,8 @@ private:
     GF m_alpha_squared;
 
     std::vector<std::vector<GF>> H;
+    const std::vector<float> *m_reliability = nullptr; // reversed like data while decoding
+    int m_gate_rank = 8;
     std::map<std::string, int> m_statistics;
     std::map<std::string, int> m_diagnostics;
     std::map<std::string, int> m_total_statistics;
@@ -379,6 +393,15 @@ void ReedSolomon<irreducible_poly, alpha>::decode(std::vector<ByteWithErasureFla
 }
 
 template<int irreducible_poly, int alpha>
+void ReedSolomon<irreducible_poly, alpha>::decode(std::vector<ByteWithErasureFlag> &data, const std::vector<float> &reliability) {
+    assert(reliability.size() == m_n);
+    std::vector<float> reversed(reliability.rbegin(), reliability.rend());
+    m_reliability = &reversed;
+    decode(data);
+    m_reliability = nullptr;
+}
+
+template<int irreducible_poly, int alpha>
 void ReedSolomon<irreducible_poly, alpha>::doDecode(std::vector<ByteWithErasureFlag> &data) {
     assert(data.size() == m_n);
     int number_of_erasures = std::count_if(data.cbegin(), data.cend(), [](ByteWithErasureFlag b) -> bool { return b.isErased(); });
@@ -445,6 +468,51 @@ void ReedSolomon<irreducible_poly, alpha>::doDecode(std::vector<ByteWithErasureF
                     m_statistics["failed"]++;
                 }
                 break;
+
+            case RS_C1_GATED: {
+                const auto before = data;
+                // Every changed symbol must rank among the `rank` least reliable
+                auto inGate = [&](int rank) {
+                    if (m_reliability == nullptr) return true;
+                    std::vector<float> r(*m_reliability);
+                    rank = std::min(rank, m_n);
+                    std::nth_element(r.begin(), r.begin() + (rank - 1), r.end());
+                    const float thr = r[rank - 1];
+                    for (int i = 0; i < m_n; i++)
+                        if (data[i].byteValue() != before[i].byteValue() && (*m_reliability)[i] > thr)
+                            return false;
+                    return true;
+                };
+                if (tryCorrectOneError(syndromes, data)) {
+                    if (inGate(2 * m_gate_rank)) {
+                        uneraseAll(data);
+                        m_statistics["corrected one error"]++;
+                    } else {
+                        data = before;
+                        eraseAll(data);
+                        m_statistics["rejected by reliability gate"]++;
+                    }
+                } else if (number_of_erasures == 2) {
+                    if (tryDecodeErasures(syndromes, data))
+                        m_statistics["corrected erasures"]++;
+                    else {
+                        eraseAll(data);
+                        m_statistics["failed"]++;
+                    }
+                } else if (number_of_erasures == 0 && determinant != GF(0) && tryCorrectTwoErrors(syndromes, data)) {
+                    if (inGate(m_gate_rank))
+                        m_statistics["corrected two errors"]++;
+                    else {
+                        data = before;
+                        eraseAll(data);
+                        m_statistics["rejected by reliability gate"]++;
+                    }
+                } else {
+                    eraseAll(data);
+                    m_statistics["failed"]++;
+                }
+                break;
+            }
 
             case RS_MAX: {
                 bool corrected;

@@ -1302,6 +1302,31 @@ static std::optional<std::string> browseForInput(Logger &log, const string &exec
     return chosen;
 }
 
+// The --write file, which outlives one process_file() call: inputs that
+// follow each other with the same --write name go into one file (the sides
+// of a disc, a capture split into parts).  The format the file was opened
+// with is kept to refuse an input that does not fit it.
+struct VideoFileOutput {
+    // The writer logs through this one, not the per-input logger, which is
+    // gone by the time the file is finalized (declared first: destroyed last)
+    std::unique_ptr<StreamLogger> log;
+    std::unique_ptr<VideoFileWriter> writer;
+    std::string filename;
+    int width = 0, height = 0, fps_num = 0, fps_den = 0;
+    VideoColorStandard color_standard{};
+    bool ac3_passthrough = false;
+
+    void close() {
+#ifdef HAVE_LIBAV
+        if (writer) {
+            writer->cleanup();
+            writer.reset();
+        }
+#endif
+        log.reset();
+    }
+};
+
 // Plays one input.  Everything with a lifetime per input type -- the reader
 // with its threads, the decoder and the player's objects -- is owned here,
 // declared in the order it must be destroyed in reverse, so an exception on
@@ -1327,6 +1352,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   float tint_degrees, float saturation,
                   optional<string> const &output_filename,
                   [[maybe_unused]] VideoWriterPreset write_preset,
+                  [[maybe_unused]] VideoFileOutput &video_out,
                   const SubtitleSetup &subtitle_setup,
                   optional<string> const &export_frame_filename,
                   double export_frame_after_seconds,
@@ -1379,8 +1405,12 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
     std::optional<InputProbeResult::Type> switched;
     std::optional<std::string> open_next;
 
-    unique_ptr<VideoFileWriter> vfw;
+    // The writer is the caller's, kept open from one input to the next
+    // while the --write name stays the same; a new name ends the file
+    unique_ptr<VideoFileWriter> &vfw = video_out.writer;
 #ifdef HAVE_LIBAV
+    if (output_filename && vfw && video_out.filename != *output_filename)
+        video_out.close();
     if (output_filename) {
         VideoColorStandard color_standard;
         int dar_num, dar_den; // display aspect ratio
@@ -1406,12 +1436,34 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         // bitstream (all 5.1 channels, no transcode) instead of PCM
         const bool ac3_passthrough = !std::is_same<InputBlock, MuseInputBlock>::value
                 && audio_track == AudioTrack::eAc3 && decode_audio;
-        vfw = make_unique<VideoFileWriter>(output_filename.value(), log,
-                                           initial_w, initial_h, fps_num, fps_den,
-                                           write_preset, color_standard, dar_num, dar_den,
-                                           ac3_passthrough);
-        if (!vfw->init())
-            throw runtime_error("Cannot initialize output encoder");
+        if (vfw) {
+            // The file is open from the input before: this one must decode to
+            // the same picture and the same kind of audio stream to go on in it
+            if (initial_w != video_out.width || initial_h != video_out.height
+                    || fps_num != video_out.fps_num || fps_den != video_out.fps_den
+                    || color_standard != video_out.color_standard || ac3_passthrough != video_out.ac3_passthrough)
+                throw runtime_error(std::format(
+                        "--write {}: this input decodes to {}x{} at {}/{} frames/s{}, but the file holds {}x{} at {}/{}{} "
+                        "from the input before it; give it a --write file of its own",
+                        *output_filename, initial_w, initial_h, fps_num, fps_den, ac3_passthrough ? " with the AC3 bitstream" : "",
+                        video_out.width, video_out.height, video_out.fps_num, video_out.fps_den,
+                        video_out.ac3_passthrough ? " with the AC3 bitstream" : ""));
+            log.info(eApplication, std::format("--write: {} continues in {}", title, *output_filename));
+        } else {
+            if (!video_out.log)
+                throw std::logic_error("the --write logger must be made before process_file()");
+            vfw = make_unique<VideoFileWriter>(output_filename.value(), *video_out.log,
+                                               initial_w, initial_h, fps_num, fps_den,
+                                               write_preset, color_standard, dar_num, dar_den,
+                                               ac3_passthrough);
+            if (!vfw->init())
+                throw runtime_error("Cannot initialize output encoder");
+            video_out.filename = *output_filename;
+            video_out.width = initial_w; video_out.height = initial_h;
+            video_out.fps_num = fps_num; video_out.fps_den = fps_den;
+            video_out.color_standard = color_standard;
+            video_out.ac3_passthrough = ac3_passthrough;
+        }
     }
 #endif
 
@@ -1514,12 +1566,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   pace_slack_fields, initial_seek_seconds, start_chapter);
     }
 
-#ifdef HAVE_LIBAV
-    if (vfw) {
-        vfw->cleanup();
-        vfw = nullptr;
-    }
-#endif
+    // The writer stays open for the next input (the caller closes it)
     PlayOutcome outcome;
     outcome.open_next = open_next;
     if (switched) {
@@ -2077,6 +2124,10 @@ int main(int argc, char *argv[]) {
         usage(cout, EXIT_SUCCESS);
     });
 
+    // The --write file, kept open across the inputs that name it; declared
+    // outside the try so an error on a later input still finalizes what the
+    // earlier ones wrote
+    VideoFileOutput video_out;
     try {
         bool input_file_given = false;
         // Options apply to the input files that follow them, so any left over when
@@ -2103,6 +2154,10 @@ int main(int argc, char *argv[]) {
             }
 
             StreamLogger log(log_selection, std::cerr, true);
+            // The --write file's own logger, with the selection in effect
+            // where the file is opened (it outlives this input's logger)
+            if (output_filename && !video_out.log)
+                video_out.log = make_unique<StreamLogger>(log_selection, std::cerr, true);
 
             // What the options say about this input, each on its own: the
             // type, the sample rate and the sample format.  Whatever they
@@ -2303,7 +2358,7 @@ int main(int argc, char *argv[]) {
                     outcome = process_file<SdtvInputBlock>(log, executable_dir, surface, saved_state, make_reader, watch_type, &standard, decode_all_fields,
                                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                  audio_track,
-                                                 benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
+                                                 benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                  initial_seek_seconds, start_chapter);
@@ -2316,7 +2371,7 @@ int main(int argc, char *argv[]) {
                     };
                     outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, make_reader, std::nullopt, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
-                                 audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
+                                 audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                  initial_seek_seconds, start_chapter);
@@ -2332,7 +2387,7 @@ int main(int argc, char *argv[]) {
                     };
                     outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, make_reader, watch_type, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
-                                 audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset,
+                                 audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                  initial_seek_seconds, start_chapter);
@@ -2428,12 +2483,15 @@ int main(int argc, char *argv[]) {
             cerr << "Run \"museld --help\" for the options, or give a filename:  museld capture.lds" << endl;
             cerr << "(A capture piped in is played too:  capture-program | museld -; --browse opens the file browser)" << endl;
         }
+        video_out.close(); // finalizes the --write file, if one is open
     } catch (const InputError &x) {
         cerr << x.what() << endl;
+        video_out.close();
         return leave(EXIT_FAILURE);
     } catch (const exception &x) {
         StreamLogger log(StreamLogger::c_log_all, std::cerr, true);
         log.error(eApplication, x.what());
+        video_out.close();
         return leave(EXIT_FAILURE);
     }
 

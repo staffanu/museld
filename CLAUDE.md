@@ -82,6 +82,10 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
 fl2kmuse/          — Standalone: MUSE test signal generator via FL2K USB device
 picostream/        — Standalone: Picoscope oscilloscope capture tool (analog + MSO digital)
 ldconv/            — Standalone: converter between capture formats (.lds/.ldf/.s16/...)
+ldstack/           — Standalone: offline analysis of several RF captures of one pressing
+                     (scan/extract/stack/stackbb), plus an EFM test bench: a CIRC encoder that
+                     predicts a disc's exact symbol stream from its audio and `efmscore`, which
+                     scores an ac3rf-efm-decode --symbol-debug-filename dump against it
 octave/            — Octave/Matlab scripts for filter design and algorithm exploration
 tools/             — Miscellaneous tools (efm-filters, muse-de-emphasis, parseQ.awk,
                      srt-furigana.py for beginner-friendly Japanese subtitle variants,
@@ -95,6 +99,12 @@ packaging/         — Scripts and per-package READMEs for the Windows/macOS dow
 docs/              — Reference documentation (player, CLI, AC3-RF decoding, packaging,
                      tvos-port.md: the Apple TV plan and its state)
 ```
+
+## Developer Backlog
+
+`docs/backlog.md` is the working list of improvements still to make, with the reasoning behind
+each; it is not the user-facing limitations list in `docs/museld.md`.  Move an item there when
+the user asks to park work, and strike it when done.
 
 ## Clangd / LSP Diagnostics
 
@@ -412,7 +422,7 @@ which are 32-bit on MinGW.
 
 **SIMD-aware FIR filtering**: `FirFilterStage.h` has AVX, NEON, and scalar paths. On x86 the AVX path is compiled in regardless of `-march` (function-level target attribute) and chosen at runtime via CPUID, so `MUSELD_ARCH` sets which CPUs can run the binary without deciding whether AVX is used. `--simd`/`--no-simd` override the automatic choice; forcing `--simd` on a CPU without support is an error.
 
-**Video file output presets**: `museld --write <file> --write-preset standard|archival` (`VideoFileWriter`, `VideoWriterOptions.h`). `standard` = H.264 (libx264, CRF) + AAC in MP4; `archival` = lossless FFV1 16-bit + PCM in Matroska. Container/codecs come from the preset, not the filename extension. Color metadata (BT.709 for MUSE, SMPTE 170M for NTSC, full range) is tagged per input type. Audio is kept in sync with the video clock: small deficits (25–100 ms) are concealed by stretching/interpolation, larger gaps by silence with a fade-out, excess audio by dropping samples. For batch rendering add `--no-sync`, otherwise the display loop caps decoding at 1.0x realtime. Raw captures without a recognized extension need `--input-format` (e.g. `s16`).
+**Video file output presets**: `museld --write <file> --write-preset standard|archival` (`VideoFileWriter`, `VideoWriterOptions.h`). `standard` = H.264 (libx264, CRF) + AAC in MP4; `archival` = lossless FFV1 16-bit + PCM in Matroska. Container/codecs come from the preset, not the filename extension. Color metadata (BT.709 for MUSE, SMPTE 170M for NTSC, full range) is tagged per input type. Audio is kept in sync with the video clock: small deficits (25–100 ms) are concealed by stretching/interpolation, larger gaps by silence with a fade-out, excess audio by dropping samples. For batch rendering add `--no-sync`, otherwise the display loop caps decoding at 1.0x realtime. Raw captures without a recognized extension need `--input-format` (e.g. `s16`). The writer (`VideoFileOutput` in `museld.cpp`) is owned by `main`, not `process_file`: consecutive inputs with the same `--write` name go into one file (checked to decode to the same size, rate and audio stream kind), a new name or the end of the inputs closes it.
 
 ### Data Flow
 
@@ -425,7 +435,8 @@ Reed-Solomon C1/C2 → AC3 output
 
 **EFM path:**
 ```
-RF/baseband → decimation filters → IIR lowpass → TimingRecovery (Mueller-Müller) →
+RF/baseband → decimation filters → IIR lowpass → TimingRecovery (Mueller-Müller, integrator
+anchored to the frame-sync rate) →
 fractional resampler → EfmDecoder → CIRC C1/C2 → concealment → pop detection → PCM
 ```
 

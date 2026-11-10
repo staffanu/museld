@@ -2,6 +2,7 @@
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
 #include <iostream>
+#include <cmath>
 #include <valarray>
 #include <unistd.h>
 #include <complex.h>
@@ -30,6 +31,7 @@ EfmDemodulator::EfmDemodulator(Logger &log, double input_sample_frequency, int i
       m_timing_recovery(log, input_sample_frequency / m_decimation_factor, input_block_size / m_decimation_factor,
           adaptive_filter_size, retiming_debug_filename),
       m_adaptive_filter_size(adaptive_filter_size),
+      m_rate_source(TimingRecovery::RateSource::eSync),
       m_timing_log_period(std::max(1, (int)std::round(input_sample_frequency / input_block_size))) {
 
     assert(m_log2_decimation >= 0);
@@ -101,6 +103,21 @@ EfmDemodulator::~EfmDemodulator() {
 void EfmDemodulator::demodulate(const float *input_buffer, std::vector<float> &reclocked_data) {
     using clock = std::chrono::steady_clock;
 
+    if (m_test_noise_sigma > 0) {
+        // Box-Muller on a 64-bit LCG: reproducible, fast enough for a test aid
+        m_noisy_input.resize(m_input_block_size);
+        auto uniform = [this]() {
+            m_noise_state = m_noise_state * 6364136223846793005ull + 1442695040888963407ull;
+            return ((m_noise_state >> 11) + 1.0) / 9007199254740994.0;
+        };
+        for (int i = 0; i < m_input_block_size; i += 2) {
+            const double r = std::sqrt(-2.0 * std::log(uniform())), t = 2 * M_PI * uniform();
+            m_noisy_input[i] = input_buffer[i] + m_test_noise_sigma * (float)(r * std::cos(t));
+            if (i + 1 < m_input_block_size)
+                m_noisy_input[i + 1] = input_buffer[i + 1] + m_test_noise_sigma * (float)(r * std::sin(t));
+        }
+        input_buffer = m_noisy_input.data();
+    }
     const float *iir_input;
     auto t0 = clock::now();
     if (m_decimation_filter_stages.empty()) {
@@ -134,6 +151,10 @@ void EfmDemodulator::demodulate(const float *input_buffer, std::vector<float> &r
     if (const int size = m_adaptive_filter_size; size != m_timing_recovery.adaptiveFilterSize()) {
         m_timing_recovery.setAdaptiveFilterSize(size);
         m_log.info(eAudio, std::format("EFM adaptive filter size {}", size));
+    }
+    if (const auto source = m_rate_source.load(); source != m_timing_recovery.rateSource()) {
+        m_timing_recovery.setRateSource(source);
+        m_log.info(eAudio, std::format("EFM timing rate source: {}", source == TimingRecovery::RateSource::eSync ? "sync" : "pll"));
     }
     m_timing_recovery.reclock(m_filtered_input.data(), reclocked_data);
     auto t3 = clock::now();

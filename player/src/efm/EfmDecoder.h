@@ -17,8 +17,11 @@ class Logger;
 
 class EfmDecoder {
 public:
+    // c1_strategy: how much C1 may correct (RS_C1 is the conservative default;
+    // RS_C2 also decodes three erasures and two errors, RS_MAX two errors)
     explicit EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filename_opt,
-                        std::optional<std::string> t_values_filename_opt);
+                        std::optional<std::string> t_values_filename_opt,
+                        DecodingStrategy c1_strategy = RS_C1, int c1_gate_rank = 8);
     ~EfmDecoder();
 
     EfmDecoder(const EfmDecoder &) = delete;
@@ -34,8 +37,19 @@ public:
     // audio samples needs no compensation.  A failed Q CRC leaves the last good value in place.
     [[nodiscard]] bool preEmphasis() const { return m_subcode_q_use == Audio2ChannelWithPreEmphasis; }
 
+    // Instrumentation: write one record per EFM symbol slot to FILE, for
+    // scoring the symbol decisions against a known stream offline.  Each
+    // record is 24 little-endian floats: frame count, slot (0 = subcode),
+    // table hit (0/1), the byte from the table (0 on a miss), the ML
+    // estimate's best and second-best byte, the 14-bit pattern read, the
+    // ML scores of the best and second-best byte, and the 15 sliced samples
+    // the estimate looks at.  The ML estimate runs on every symbol here,
+    // not only on table misses, so it costs decoding speed.
+    void setSymbolDebugFilename(const std::string &filename);
+
 private:
     static constexpr int c_minimum_frames_before_c1_c2_valid = 97;
+    static constexpr int c_sync_lost_frames = 7;
 
     static const std::array<uint16_t, 256> c_byte_to_efm_toggles_table;
     static const std::array<ByteWithErasureFlag, 1 << 14> c_efm_toggles_to_byte_table;
@@ -65,9 +79,12 @@ private:
     void handleSubcode();
 
     uint8_t estimateSymbol() const;
+    // ML estimate with the runner-up and both scores (the estimate is the best)
+    void estimateSymbolScored(uint8_t &best, uint8_t &second, float &p_best, float &p_second) const;
 
     Logger &m_log;
     FILE *m_circ_debug_file;
+    FILE *m_symbol_debug_file;
     // Run lengths between NRZI transitions, written as one u8 per value (the format
     // used by ld-decode .efm files).  Values are kept in the EFM-legal range [3, 11]
     // without changing the total bit count, so consumers never lose 588-bit frame
@@ -86,6 +103,17 @@ private:
     int m_consecutive_syncs;
     bool m_locked;
     int m_frames_since_sync; // if not at the exact expected place
+    // An off-lattice sync seen while the lattice was recently confirmed: the
+    // decoder re-frames to it only when a second sync follows exactly one
+    // frame later (bit position of the candidate, -1 when none)
+    int64_t m_sync_candidate_bit;
+    int64_t m_reframes_deferred = 0, m_reframes_confirmed = 0;
+    // Output is flagged erased until the first frame lock plus the delay-line
+    // priming time: before that the frames are unaligned and the pipeline
+    // holds nothing valid, and a frame that happens to pass C1 would come out
+    // as unflagged garbage
+    bool m_startup_done = false;
+    static constexpr int c_startup_frames = 110;
     int m_efm_frames_since_lock;
 
     // -3 -- 95; the symbol itself is in m_frame[0] for indices 0--95
@@ -109,6 +137,10 @@ private:
 
     ReedSolomon<0x11d, 2> m_c1;
     ReedSolomon<0x11d, 2> m_c2;
+    // Per-symbol reliability (the smallest sample magnitude the slicer saw in
+    // the symbol), delayed like the symbols into the C1 words
+    std::array<float, 33> m_frame_reliability;
+    std::array<float *, 32> m_initial_reliability_lines;
     std::array<ByteWithErasureFlag *, 32> m_initial_delay_lines;
     std::array<int, 32> m_initial_delay_lines_ix;
     std::array<ByteWithErasureFlag *, 28> m_c1_to_c2_delay_lines;
