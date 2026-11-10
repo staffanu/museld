@@ -409,7 +409,8 @@ Reed-Solomon C1/C2 → AC3 output
 
 **EFM path:**
 ```
-RF/baseband → decimation filters → IIR lowpass → TimingRecovery (Mueller-Müller) →
+RF/baseband → decimation filters → IIR lowpass → TimingRecovery (Mueller-Müller, integrator
+anchored to the frame-sync rate) →
 fractional resampler → EfmDecoder → CIRC C1/C2 → concealment → pop detection → PCM
 ```
 

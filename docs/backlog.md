@@ -63,3 +63,5 @@ Last revised 2026-11-09.
 - 2026-11-05: picture and sound regression harness (`tests/regression/`).
 - 2026-11-06: live NTSC/PAL/MUSE type switching on a live input.
 - 2026-11-09: `--write` keeps one file across the inputs that name it (the sides of a disc).
+- 2026-11-10: EFM robustness merged: sync-anchored timing loop, confirmed re-framing, flagged
+  start-up, opt-in gated C1 (`--c1-strategy`), the symbol and concealment dumps and `ldstack`.

@@ -294,8 +294,8 @@ int main(int argc, char *argv[]) {
                           "of some players", [&] () -> void {
         operation = Efm;
     });
-    options.flag("--efm-rf", "Decode EFM audio from an RF capture (bandpass and envelope detection "
-                             "first)", [&] () -> void {
+    options.flag("--efm-rf", "Decode EFM audio from a laserdisc RF capture (a 1.7 MHz lowpass and the "
+                             "player's EFM equalizer first; a CD's RF is already equalized, use --efm)", [&] () -> void {
         operation = EfmRf;
     });
     options.flag("--efm-t-values", "Decode ld-decode EFM t-values, the run lengths between NRZI "

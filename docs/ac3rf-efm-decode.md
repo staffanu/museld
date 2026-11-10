@@ -29,7 +29,7 @@ time); `--help` lists all options.
 | `--ac3` | Decode AC3-RF surround audio (the default when no mode option is given)           |
 | `--analog` | Decode the analog FM stereo audio from an NTSC RF capture (carriers at 2.3011 and 2.8125 MHz) |
 | `--efm` | Decode EFM baseband audio (as captured from the EFM output of some players)       |
-| `--efm-rf` | Decode EFM from RF input (runs bandpass + envelope detection before EFM decoding) |
+| `--efm-rf` | Decode EFM from a laserdisc RF capture: a 1.7 MHz lowpass removes the analog audio and video carriers and the player's EFM equalizer (the Sony HIL-C1's) corrects the LD channel before decoding. Not for a CD's RF: that is already equalized, so use `--efm` |
 | `--efm-t-values` | Decode EFM T-values from ld-decode (raw run-length encoded EFM symbols; implies u8 input) |
 | `--resample <Hz>` | Resample input to the target frequency and write raw u8 output, rescaled from the input's width (no audio decoding; a 4-point interpolator, so mostly a development tool) |
 
@@ -62,6 +62,9 @@ added with the `flac` tool (e.g. `--seekpoint=100x` for 100 evenly spaced seek p
 |---|---|
 | `--decimation <n>` | Log₂ of the decimation factor applied before EFM decoding; decimation makes decoding faster. Default: the highest decimation that keeps the sample rate before the fractional resampler above 8 MHz. |
 | `--adaptive-filter-size <n>` | Adaptive FIR filter size for the EFM signal. Default 3; 0 disables adaptive filtering. Values over 15 are probably overkill, but try 9 or 11 if a distorted input signal causes many errors. |
+| `--efm-timing <mode>` | Bit rate source of the EFM timing recovery. `sync` (default): the rate is measured from the spacing of the frame sync patterns and the loop's integrator is held within ±1500 ppm of it, so biased timing errors on a noisy or spinning-up input cannot run the clock away. `pll`: the classic second-order loop alone. |
+| `--c1-strategy <mode>` | How much the C1 Reed-Solomon stage may correct: `c1` (default; one error or two erasures, otherwise the word is erased for C2), `c2` (also three erasures and two errors), `max` (two errors, no erasure decoding) or `gated` (two errors, accepted only where the slicer was unsure, see `--c1-gate`). Beyond `c1` a wrong correction can slip through to C2. |
+| `--c1-gate <n>` | With `--c1-strategy gated`: a two-error correction is accepted only if both corrected symbols rank among the n least reliable of the word's 32 (a single-error correction among the 2n least reliable). Default 8. |
 | `--error-concealment <mode>` | Erasure concealment strategy: `none`, `repeat` (repeat previous sample), `li` (linear interpolation), `ar` (autoregressive), `sar` (slower, more advanced autoregressive). Default: `ar`. |
 | `--simd` / `--no-simd` | Enable or disable SIMD (AVX/NEON) FIR filtering. Enabled by default on supported hardware. |
 | `--cx` | Apply CX noise reduction expansion to the analog audio. There is no video decode here to read the CX flag from the VBI, so choose based on the disc (most discs from the mid-80s on use CX). |
@@ -99,16 +102,20 @@ output file in effect, the output is appended.
 | `--log <level>` | Log verbosity: 0=off, 1=error, 2=warn, 3=info, 4=debug |
 | `--log-filename <file>` | Write log output to this file instead of stderr |
 | `--reclock-debug-filename <file>` | Write EFM timing recovery debug data to file |
+| `--symbol-debug-filename <file>` | Write one 24-float record per EFM symbol slot: the table result, the ML estimate with its runner-up and scores, and the sliced samples, for scoring the symbol decisions against a known stream (`ldstack efmscore`). Slows decoding: the estimate then runs on every symbol. |
+| `--concealment-debug-filename <file>` | Write six int16 per output sample: the decoded L/R, the concealed L/R and the erasure flags, to tell concealed samples from decoded ones when scoring the output against a known recording. |
+| `--test-noise <sigma>` | Test aid: add white Gaussian noise of this standard deviation (input sample units) before EFM demodulation, to degrade a clean capture reproducibly. |
 | `--t-values-output-filename <file>` | Write EFM t-values (run lengths between NRZI transitions) as one unsigned byte per value — the same format as ld-decode `.efm` files. Values are kept in the EFM-legal range 3–11 without changing the total bit count (short runs are merged into the next run, long dropout runs are split into legal chunks), so consumers never lose 588-bit frame alignment. |
 | `--circ-debug-filename <file>` | Write the CIRC decoder's frame-by-frame debug dump (data and erasure flags before and after C1 and C2) to a text file. |
 
-The reclock debug file contains binary float pairs: the first float in each pair is the symbol
-sample used by the Mueller-Müller timing detector, the second is the computed timing error. It can
+The reclock debug file contains binary float triples: the symbol sample used by the Mueller-Müller
+timing detector, the computed timing error, and the loop's step adjustment as a fraction of the
+nominal step. It can
 be plotted with e.g. gnuplot:
 
 ```
-s=1861950; l=200; plot "reclock.bin" binary format="%float%float" every ::s::(s+l) using ($1) with linespoints, \
-  "" binary format="%float%float" every ::s::(s+l) using ($2*1-1) with points
+s=1861950; l=200; plot "reclock.bin" binary format="%float%float%float" every ::s::(s+l) using ($1) with linespoints, \
+  "" binary format="%float%float%float" every ::s::(s+l) using ($2*1-1) with points
 ```
 
 ## Examples
