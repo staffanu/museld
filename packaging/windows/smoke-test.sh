@@ -26,12 +26,19 @@ clean_path="/c/Windows/System32:/c/Windows"
 status=0
 for f in *.exe *.dll; do
     [ -f "$f" ] || continue
-    for imp in $(ldd "$f" | awk '{print $1}'); do
+    while read -r imp arrow where _; do
         if [ -f "/ucrt64/bin/$imp" ] && [ ! -f "./$imp" ]; then
             echo "FAIL: $f imports $imp, which MSYS2 provides but the package does not carry"
             status=1
+        elif { [ "$where" = "not" ] || [ "$arrow" = "not" ]; } && [[ "$imp" != api-ms-win-* && "$imp" != ext-ms-* ]]; then
+            # Neither the package, MSYS2 nor Windows has it; the staging loop
+            # skips such a name silently since /ucrt64/bin does not provide it.
+            # The api-ms-win-*/ext-ms-* API sets are names the loader resolves
+            # from its own schema, not files, so ldd reports them as not found.
+            echo "FAIL: $f imports $imp, which nothing on this machine provides"
+            status=1
         fi
-    done
+    done < <(ldd "$f")
 done
 [ "$status" = 0 ] || exit 1
 
@@ -47,6 +54,8 @@ if [ -f museld.exe ]; then
     if ! grep -q "^usage: museld" help.txt; then
         echo "FAIL: museld.exe --help printed no usage; its output ($(wc -c < help.txt) bytes):"
         cat help.txt
+        echo "museld.exe resolves its imports to:"
+        ldd museld.exe
         rm help.txt
         exit 1
     fi
