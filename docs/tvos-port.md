@@ -483,7 +483,10 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   the Open page came through as an empty name ("File not found: "): the item's lambda
   rebuilt the Open page, which destroyed the lambda and the captured address it had
   passed by reference.  `Browser::go` and `showListing` copy their argument first, and
-  `Menu` calls a copy of an item's function (2026-11-10).
+  `Menu` calls a copy of an item's function (2026-11-10).  An input the browser chose
+  that cannot be played (the `exit(EXIT_FAILURE)` paths of `play_input`, now `InputError`,
+  and a reader's exception) returns to the browser with the message in a bar along the
+  bottom, until a key is pressed or 15 s pass, instead of ending the app (2026-11-10).
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the

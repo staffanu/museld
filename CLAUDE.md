@@ -219,7 +219,9 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   `ui/SavedState` the recent addresses and last directory in SDL's pref path, `MUSELD_STATE_FILE`
   overriding) is the menu's Open page; `--browse` (always on tvOS) starts in it on a black frame
   (`browseForInput` in museld.cpp), and a chosen file comes back as `PlayOutcome::open_next` for
-  `play_from` to play with the same window.  Scripted checks: `MUSELD_BROWSE_EXPORT=<png>` renders
+  `play_from` to play with the same window; an input that cannot be played throws `InputError` (the
+  command line prints it and exits as before, the browse loop shows it on the browser's screen).
+  Scripted checks (the first browser screen of a run only): `MUSELD_BROWSE_EXPORT=<png>` renders
   the browser once and writes it, `MUSELD_BROWSE_LOCATION=<dir>` lists that directory first,
   `MUSELD_BROWSE_ENTRY=1` opens the address field, `MUSELD_BROWSE_KEYS=down,down,select` (up, down,
   left, right, select, back) presses keys in the browser before the loop (`down,down,down,select`

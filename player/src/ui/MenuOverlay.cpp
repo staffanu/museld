@@ -110,7 +110,7 @@ void MenuOverlay::render(musevk::CommandBuffer &command_buffer, ResultImages &im
     text_renderer.drawText(images.out_image, x0 + pad, y, title, scale, command_buffer);
     y += line_h + pad / 2 + glyph_h / 2;
     if (more_above) {
-        text_renderer.drawText(images.out_image, x0 + panel_w / 2 - glyph_w, y - glyph_h / 2, "^", scale, command_buffer);
+        text_renderer.drawText(images.out_image, x0 + panel_w / 2 - glyph_w, y - glyph_h / 2, TextRenderer::c_arrow_up, scale, command_buffer);
     }
     for (const auto &line : lines) {
         if (line.selected)
@@ -134,5 +134,5 @@ void MenuOverlay::render(musevk::CommandBuffer &command_buffer, ResultImages &im
         y += line_h;
     }
     if (more_below)
-        text_renderer.drawText(images.out_image, x0 + panel_w / 2 - glyph_w, y - glyph_h / 2, "v", scale, command_buffer);
+        text_renderer.drawText(images.out_image, x0 + panel_w / 2 - glyph_w, y - glyph_h / 2, TextRenderer::c_arrow_down, scale, command_buffer);
 }

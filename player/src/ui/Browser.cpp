@@ -133,7 +133,7 @@ void Browser::showListing(const std::string &location_of_item) {
         if (DirectoryListing::parent(m_location) != m_location) {
             MenuItem up;
             up.label = "..";
-            up.hint = "UP";
+            up.value = [] { return std::string("UP"); }; // in the value column, where it does not shift the labels
             up.activate = [this] { showListing(DirectoryListing::parent(m_location)); };
             items.push_back(std::move(up));
         }

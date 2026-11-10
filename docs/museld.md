@@ -445,7 +445,9 @@ browser was last in, this computer's directories (not on the Apple TV), and the
 addresses opened recently.  It lists a directory on this machine or on a web
 server through the server's index page (Apache, nginx, Python's `http.server`
 and the like), directories first, with the sizes the listing gives; choosing a
-file plays it, and the player comes back to the browser when the input ends.
+file plays it, and the player comes back to the browser when the input ends,
+or at once with the reason when the file cannot be played (not found, not a
+capture museld recognizes, a stream that does not arrive).
 The address field takes anything museld opens: a path, an `http://` location
 (a bare `host/path` gets the `http://`), or a `udp://` capture stream, which
 plays as it is.  On the Apple TV the field's on-screen keyboard is driven by

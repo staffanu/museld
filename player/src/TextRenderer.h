@@ -13,6 +13,9 @@ class TextRenderer {
 public:
     static constexpr int c_glyph_width = 12;
     static constexpr int c_glyph_height = 24;
+    // The arrows, as the single bytes drawText takes (not UTF-8: the renderer is one byte per glyph)
+    static constexpr const char *c_arrow_up = "\x7f";
+    static constexpr const char *c_arrow_down = "\x80";
 
     TextRenderer(std::string const &executable_dir, musevk::VulkanManager &vulkan_manager, musevk::CommandPool &command_pool);
     TextRenderer(const TextRenderer &) = delete;
@@ -26,7 +29,7 @@ public:
 
 private:
     static const int c_font_codepoint_begin = 32;
-    static const int c_font_codepoint_end = 127; // exclusive
+    static const int c_font_codepoint_end = 129; // exclusive: ASCII and the two arrows
     static const std::vector<uint16_t> c_font_definition;
     // Must be large enough for all strings drawn in one frame (the command buffer is
     // fence-waited every frame, so only intra-frame overlap is possible), and its word

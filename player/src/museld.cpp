@@ -1179,13 +1179,17 @@ static musevk::VulkanManager &ensureSurface(PlayerSurface &surface, Logger &log,
 }
 
 
+// An input that cannot be played: on the command line the message and a
+// failure exit, from the browser the message on its screen and back to it
+struct InputError : std::runtime_error { using std::runtime_error::runtime_error; };
+
 // The browser before any input: a black frame with the menu's Open page over
 // it, driven like the player's menu, until a location is chosen (returned) or
 // the user leaves (nullopt).  tvOS starts here, having no command line; a PC
 // gets here with --browse or by choosing Open... without an input to return to.
 static std::optional<std::string> browseForInput(Logger &log, const string &executable_dir, PlayerSurface &surface,
                                                  SavedState &saved_state, bool full_screen, bool no_keys, bool no_sync,
-                                                 bool is_tvos) {
+                                                 bool is_tvos, const std::string &message = {}) {
     constexpr int c_w = 1920, c_h = 1080;
     musevk::VulkanManager &manager = ensureSurface(surface, log, "museld", 1280, 720, full_screen, no_keys, no_sync);
     SDL_Window *const window = surface.sdl.window;
@@ -1209,11 +1213,12 @@ static std::optional<std::string> browseForInput(Logger &log, const string &exec
     Browser browser(menu, saved_state, !is_tvos, [&](const std::string &location) { chosen = location; });
     menu.setRoot(browser.openPage()); // the root here: Back from it leaves
     menu.open();
-    if (const char *at = getenv("MUSELD_BROWSE_LOCATION"); at != nullptr && *at)
+    static bool hooks_done = false; // the scripted checks apply to the first screen only
+    if (const char *at = getenv("MUSELD_BROWSE_LOCATION"); at != nullptr && *at && !hooks_done)
         browser.browse(at); // a check of a listing in a scripted run
-    if (getenv("MUSELD_BROWSE_ENTRY") != nullptr)
+    if (getenv("MUSELD_BROWSE_ENTRY") != nullptr && !hooks_done)
         menu.handleKey(MenuKey::eSelect); // ... and of the address field: the Open page's first item
-    if (const char *keys = getenv("MUSELD_BROWSE_KEYS"); keys != nullptr) {
+    if (const char *keys = getenv("MUSELD_BROWSE_KEYS"); keys != nullptr && !hooks_done) {
         // ... and of any sequence: comma-separated up/down/left/right/select/back
         std::string list(keys);
         for (size_t at = 0; at <= list.size();) {
@@ -1229,6 +1234,7 @@ static std::optional<std::string> browseForInput(Logger &log, const string &exec
             at = comma + 1;
         }
     }
+    hooks_done = true;
     InputController input(log, no_keys);
     input.setMenu(&menu);
     input.setMenuIsScreen(true);
@@ -1237,9 +1243,16 @@ static std::optional<std::string> browseForInput(Logger &log, const string &exec
     AudioTrack audio_track = AudioTrack::eDefault;
     FrameExporter frame_exporter(log, manager, command_pool);
     const char *export_to = getenv("MUSELD_BROWSE_EXPORT"); // a check of the screen in a scripted run
+    // The message about the last choice stays until the user does something or 15 s pass
+    std::string shown_message = message;
+    const unsigned revision_at_start = menu.revision();
+    const auto shown_since = std::chrono::steady_clock::now();
     while (!chosen) {
         if (!input.poll(window, state, no_reader, dropout_mode, audio_track, full_screen))
             return std::nullopt;
+        if (!shown_message.empty()
+            && (menu.revision() != revision_at_start || std::chrono::steady_clock::now() - shown_since > std::chrono::seconds(15)))
+            shown_message.clear();
         if (!menu.isOpen()) {
             // Back from the Open page: on tvOS the app ends, on a PC too (there is nothing beneath)
             return std::nullopt;
@@ -1258,6 +1271,26 @@ static std::optional<std::string> browseForInput(Logger &log, const string &exec
         command_buffer->begin();
         blitter.clear(*command_buffer, images);
         menu_overlay.render(*command_buffer, images, state, menu, text_renderer);
+        if (!shown_message.empty()) {
+            const std::string &message = shown_message;
+            // The reason the last choice did not play, in a bar along the bottom
+            // (wrapped over two lines, the rest cut)
+            constexpr int scale = 2;
+            const int glyph_w = TextRenderer::c_glyph_width * scale, glyph_h = TextRenderer::c_glyph_height * scale;
+            const int line_h = glyph_h + glyph_h / 3;
+            const size_t avail = (c_w - 4 * glyph_w) / glyph_w;
+            const std::string first = message.substr(0, avail);
+            std::string second = message.size() > avail ? message.substr(avail) : "";
+            if (second.size() > avail)
+                second = second.substr(0, avail - 3) + "...";
+            const int lines = second.empty() ? 1 : 2;
+            const int y = c_h - 2 * glyph_h - line_h * lines;
+            text_renderer.fillRect(images.out_image, glyph_w, y - glyph_h / 2, c_w - 2 * glyph_w, line_h * lines + glyph_h,
+                                   0.5f, 0.0f, 0.0f, 0.75f, *command_buffer);
+            text_renderer.drawText(images.out_image, 2 * glyph_w, y, first, scale, *command_buffer);
+            if (!second.empty())
+                text_renderer.drawText(images.out_image, 2 * glyph_w, y + line_h, second, scale, *command_buffer);
+        }
         blitter.present(*command_buffer, images, geometry, swap_chain_image, image_available_semaphore);
         manager.present(swap_chain_image);
         if (export_to != nullptr) {
@@ -2063,12 +2096,10 @@ int main(int argc, char *argv[]) {
             input_file_given = true;
             trailing_options.clear(); // these applied to this file
             if (initial_seek_seconds != 0 && inputIsLive(name)) {
-                cerr << "Initial seek is not compatible with a live input (a fifo, a pipe or a udp:// stream)" << endl;
-                exit(EXIT_FAILURE);
+                throw InputError("Initial seek is not compatible with a live input (a fifo, a pipe or a udp:// stream)");
             }
             if (!inputExists(name)) {
-                cerr << "File not found: " << name << endl;
-                exit(EXIT_FAILURE);
+                throw InputError(std::string("File not found: ") + name);
             }
 
             StreamLogger log(log_selection, std::cerr, true);
@@ -2099,19 +2130,16 @@ int main(int argc, char *argv[]) {
                 cout << std::format("Waiting for the ethadc stream on {} ...", name) << endl;
                 const auto stream = networkStreamInfo(input.source(), c_stream_wait_seconds);
                 if (!stream) {
-                    cerr << std::format("No stream arrived on {} within {:.0f} s", name, c_stream_wait_seconds) << endl;
-                    exit(EXIT_FAILURE);
+                    throw InputError(std::format("No stream arrived on {} within {:.0f} s", name, c_stream_wait_seconds));
                 }
                 if (resolved_format && *resolved_format != stream->format) {
-                    cerr << std::format("{}: the stream carries {} samples, not {} as --input-format says",
-                                        name, inputFormatName(stream->format), inputFormatName(*resolved_format)) << endl;
-                    exit(EXIT_FAILURE);
+                    throw InputError(std::format("{}: the stream carries {} samples, not {} as --input-format says",
+                                        name, inputFormatName(stream->format), inputFormatName(*resolved_format)));
                 }
                 if (known_sample_frequency &&
                         abs(*known_sample_frequency - stream->sample_frequency) > 1e-6 * stream->sample_frequency) {
-                    cerr << std::format("{}: the stream is sampled at {:.4g}e6 Hz, not {:.4g}e6 as --sample-freq says",
-                                        name, stream->sample_frequency / 1e6, *known_sample_frequency / 1e6) << endl;
-                    exit(EXIT_FAILURE);
+                    throw InputError(std::format("{}: the stream is sampled at {:.4g}e6 Hz, not {:.4g}e6 as --sample-freq says",
+                                        name, stream->sample_frequency / 1e6, *known_sample_frequency / 1e6));
                 }
                 resolved_format = stream->format;
                 input.setFormat(stream->format);
@@ -2150,10 +2178,9 @@ int main(int argc, char *argv[]) {
                 }
                 if (!input_type_option) {
                     if (!type_detected) {
-                        cerr << std::format(
+                        throw InputError(std::format(
                                 "Could not determine the input type of {} -- give --input-type "
-                                "explicitly (--probe prints what the detection measured)", name) << endl;
-                        exit(EXIT_FAILURE);
+                                "explicitly (--probe prints what the detection measured)", name));
                     }
                     file_input_type = detected_type;
                 } else if (type_detected && detected_type != file_input_type) {
@@ -2174,9 +2201,8 @@ int main(int argc, char *argv[]) {
                                                             InputProbeResult::Type::eMuseRf;
                     file_sample_frequency = estimateSampleFrequency(probe, hypothesis);
                     if (file_sample_frequency == 0) {
-                        cerr << std::format("Could not measure the sample rate of {} -- "
-                                            "give --sample-freq explicitly", name) << endl;
-                        exit(EXIT_FAILURE);
+                        throw InputError(std::format("Could not measure the sample rate of {} -- "
+                                                     "give --sample-freq explicitly", name));
                     }
                 }
                 cout << std::format("{}: {} {} at {:.4g}e6 Hz",
@@ -2189,8 +2215,7 @@ int main(int argc, char *argv[]) {
             }
 
             if (!resolved_format) {
-                cerr << "No input format specified and unknown input file extension" << endl;
-                exit(EXIT_FAILURE);
+                throw InputError("No input format specified and unknown input file extension");
             }
             input.setFormat(*resolved_format);
 
@@ -2199,8 +2224,7 @@ int main(int argc, char *argv[]) {
             subtitle_setup.offset_seconds = subtitle_offset_seconds;
             subtitle_setup.ocr_models_dir = ocr_models_dir;
             if (ocr_translate_url && !ocr_models_dir) {
-                cerr << "--ocr-translate requires --ocr" << endl;
-                exit(EXIT_FAILURE);
+                throw InputError("--ocr-translate requires --ocr");
             }
             subtitle_setup.ocr_translate_url = ocr_translate_url;
             subtitle_setup.ocr_translate_model = ocr_translate_model;
@@ -2211,8 +2235,7 @@ int main(int argc, char *argv[]) {
             subtitle_setup.ocr_target_language = ocr_target_language;
             if (ocr_write) {
                 if (!ocr_models_dir) {
-                    cerr << "--ocr-write requires --ocr" << endl;
-                    exit(EXIT_FAILURE);
+                    throw InputError("--ocr-write requires --ocr");
                 }
                 const filesystem::path input_path(name);
                 subtitle_setup.ocr_write_stem =
@@ -2384,17 +2407,30 @@ int main(int argc, char *argv[]) {
             // No input and no command line to speak of: the browser chooses, and
             // the player returns to it when the input ends
             StreamLogger log(log_selection, std::cerr, true);
+            std::string message; // what went wrong with the last choice, shown in the browser
             for (;;) {
-                const auto chosen = browseForInput(log, executable_dir, surface, saved_state, full_screen, no_keys, no_sync, is_tvos);
+                const auto chosen = browseForInput(log, executable_dir, surface, saved_state, full_screen, no_keys, no_sync, is_tvos, message);
                 if (!chosen)
                     break;
-                play_from(*chosen);
+                message.clear();
+                try {
+                    play_from(*chosen);
+                } catch (const exception &x) {
+                    // An input that cannot be played (not found, unknown type, a reader's
+                    // error): back to the browser with the reason, not out of the app
+                    log.error(eApplication, x.what());
+                    message = x.what();
+                    saved_state.removeRecent(*chosen); // not worth offering again
+                }
             }
         } else if (!input_file_given) {
             cerr << "No input file given -- museld plays a capture file, so it needs one to play." << endl;
             cerr << "Run \"museld --help\" for the options, or give a filename:  museld capture.lds" << endl;
             cerr << "(A capture piped in is played too:  capture-program | museld -; --browse opens the file browser)" << endl;
         }
+    } catch (const InputError &x) {
+        cerr << x.what() << endl;
+        return leave(EXIT_FAILURE);
     } catch (const exception &x) {
         StreamLogger log(StreamLogger::c_log_all, std::cerr, true);
         log.error(eApplication, x.what());
