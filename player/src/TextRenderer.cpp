@@ -26,7 +26,7 @@ TextRenderer::TextRenderer(std::string const &executable_dir, VulkanManager &vul
                             musevk::VulkanUtil::loadSpirv(executable_dir, "render_text.comp"), musevk::Size(0)))),
   m_fill_rect_shader(std::shared_ptr<ComputeShader>(
           new ComputeShader(m_vulkan_manager,
-                            "fill_rect", {eImage}, sizeof(uint32_t) * 8,
+                            "fill_rect", std::vector<MemoryObjectType>{eImage}, sizeof(uint32_t) * 8, // spelt out for GCC
                             musevk::VulkanUtil::loadSpirv(executable_dir, "fill_rect.comp"), musevk::Size(0)))) {
 }
 
