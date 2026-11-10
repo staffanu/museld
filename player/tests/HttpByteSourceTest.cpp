@@ -61,8 +61,15 @@ std::string readAll(ByteSource &source, size_t piece) {
 }
 
 struct Env {
-    Env(const char *name, const char *value) : m_name(name) { setenv(name, value, 1); }
-    ~Env() { unsetenv(m_name); }
+    Env(const char *name, const char *value) : m_name(name) { set(name, value); }
+    ~Env() { set(m_name, ""); } // MinGW has no unsetenv; an empty value is what the code treats as unset
+    static void set(const char *name, const char *value) {
+#ifdef _WIN32
+        _putenv_s(name, value);
+#else
+        if (*value) setenv(name, value, 1); else unsetenv(name);
+#endif
+    }
     const char *m_name;
 };
 

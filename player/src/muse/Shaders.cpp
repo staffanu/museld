@@ -134,7 +134,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             VulkanUtil::loadSpirv(executable_dir, "copy_y_for_interpolation.comp"), Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT), 8));
     m_diamond_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "diamond",
-            {eBuffer}, sizeof(uint32_t) * 3,
+            vector<MemoryObjectType>{eBuffer}, sizeof(uint32_t) * 3, // spelt out: a one-element list is ambiguous to GCC
             VulkanUtil::loadSpirv(executable_dir, "filter_diamond.comp"), Size(0), 4));
     m_convert_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "convert_sample_rate",
