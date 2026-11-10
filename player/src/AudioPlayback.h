@@ -20,6 +20,9 @@ public:
             AudioMode const &audio_mode,
             int const &sample_count,
             AudioFrame output_samples[MAX_AUDIO_OUTPUT_SAMPLES]);
+    // With --no-sync the decode outruns the device and the ring overflows by
+    // design, so the discards are logged at debug level instead of as errors
+    void setDiscardsExpected(bool expected) { m_discards_expected = expected; }
 
 private:
     static constexpr int c_audio_buffer_size = 16384;
@@ -29,6 +32,7 @@ private:
     static constexpr double c_max_speed_adjust = 0.01;
 
     Logger &m_log;
+    bool m_discards_expected = false;
     AudioFrame m_audio_buffer[c_audio_buffer_size];
     std::atomic<int> m_next_audio_buffer_write_ix;
     std::atomic<int> m_next_audio_buffer_read_ix;

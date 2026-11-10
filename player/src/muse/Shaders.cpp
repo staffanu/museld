@@ -295,7 +295,8 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
                            f.get().control_data().value().frame_subsampling_phase_Y &&
                            f.get().control_data().value().frame_subsampling_phase_C;
                 })) {
-        m_log.warn(eVideo, "Unknown phases for inter frame interpolation");
+        // Normal for the first fields after a start or seek, until all five have their control data
+        m_log.debug(eVideo, "Unknown phases for inter frame interpolation");
         return false;
     }
 
@@ -323,7 +324,7 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
     if (!(field_parities[0] == field_parities[2] && field_parities[1] == field_parities[3] && field_parities[0] != field_parities[1]) ||
         !(field_phases_y[0] == field_phases_y[2] && field_phases_y[1] == field_phases_y[3] && field_phases_y[0] != field_phases_y[1]) ||
         !(frame_phases_y[0] != frame_phases_y[2] && frame_phases_y[1] != frame_phases_y[3])) {
-        m_log.error(eVideo, "Inconsistent phases for inter frame interpolation");
+        m_log.warn(eVideo, "Inconsistent phases for inter frame interpolation");
         return false;
     }
 

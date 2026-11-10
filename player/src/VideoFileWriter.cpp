@@ -191,8 +191,11 @@ void VideoFileWriter::convertAndWriteAudio(const uint8_t **in, int in_samples) {
 
 // Fill a gap of `count` input samples with silence, fading out from the last
 // written sample so the transition into the gap does not pop
-void VideoFileWriter::insertSilence(int64_t count, int in_rate) {
-    m_log.warn(eOutput, std::format("Audio {} ms behind the video clock; inserting silence", count * 1000 / in_rate));
+void VideoFileWriter::insertSilence(int64_t count, int in_rate, bool final_padding) {
+    if (final_padding)
+        m_log.info(eOutput, std::format("Padding the audio track with {} ms of silence to the end of the video", count * 1000 / in_rate));
+    else
+        m_log.warn(eOutput, std::format("Audio {} ms behind the video clock; inserting silence", count * 1000 / in_rate));
 
     const int channels = m_audio_in_channels;
     const int capacity = (int) (sizeof(m_audio_tmp_buffer) / (channels * sizeof(int16_t)));
@@ -239,7 +242,7 @@ void VideoFileWriter::cleanup() {
         int64_t deficit = (m_video_stream.next_pts - m_audio_anchor_frame) * in_rate * m_video_fps_den / m_video_fps_num
                           - m_audio_in_samples;
         if (deficit > in_rate * SYNC_DEAD_BAND_MS / 1000)
-            insertSilence(deficit, in_rate);
+            insertSilence(deficit, in_rate, true);
     }
 
     // Flush pending audio: drain the resampler, then send the final (shorter) frame

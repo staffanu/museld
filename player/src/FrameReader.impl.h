@@ -134,7 +134,9 @@ FrameReader<InputBlock>::getNextInputBuffer() {
 
         auto filled_buffers = m_filled_input_buffers.size();
         if (filled_buffers == 0 && !m_reader_thread_finished) {
-            m_log.warn(eInput, std::format("getNextInputBuffer: no filled buffers after this one"));
+            // The consumer caught up with the reader; normal when the decode runs
+            // faster than the input can be read (--no-sync), so not a warning
+            m_log.debug(eInput, std::format("getNextInputBuffer: no filled buffers after this one"));
             hint = InputStatus::eBuffersEmpty;
         } else if (m_vacant_input_buffers.empty() && m_input_is_realtime) {
             m_log.warn(eInput, std::format("getNextInputBuffer: no vacant buffers available"));
