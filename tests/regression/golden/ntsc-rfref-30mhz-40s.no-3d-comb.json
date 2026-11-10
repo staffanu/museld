@@ -5,7 +5,7 @@
   "--no-3d-comb",
   "--efm"
  ],
- "recorded": "2026-11-05",
+ "recorded": "2026-11-10",
  "golden_file": "ntsc-rfref-30mhz-40s.no-3d-comb.2c011cc11948.mkv",
  "probe": "ldf NTSC RF at 29.98e6 Hz",
  "video": {
@@ -256,9 +256,9 @@
  },
  "audio": {
   "codec": "pcm_s16le",
-  "bytes": 691500,
-  "sha256": "519f19b37662b8407ee34c214a297be51e12da45fdd2ae77286ab26626e91e47",
-  "judged_sha256": "c4ad61a54ef84a092c6871274a1bf2601b22b5341e698207477ef81b73ac34b7"
+  "bytes": 691548,
+  "sha256": "b9260f35d6f1a1416cb4e03455a00ed793cf0a26a8127483f7d37cbc5576e24a",
+  "judged_sha256": "b1ec65909603d7b9365d94d4627025ae891fb42c4ba082c5669405df1b27365a"
  },
  "codes": [
   "853245 NTSC CLV CX on ; Chapter 3 Time 0:13:53 Frame 06",
