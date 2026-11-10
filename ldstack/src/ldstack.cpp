@@ -42,7 +42,16 @@ namespace {
                 "         align per line and average into <out>.bb.f32 (Hz, half the RF rate); one input just demodulates\n"
                 "       ldstack efmpredict <audio.pcm> <circ-dump.txt> [--range MIN-MAX] [--report FILE]\n"
                 "         CIRC-encode the known audio (s16le stereo) and compare the predicted EFM data symbols with\n"
-                "         the frames an ac3rf-efm-decode --circ-debug-filename dump received; finds the frame phase and offset\n";
+                "         the frames an ac3rf-efm-decode --circ-debug-filename dump received; finds the frame phase and offset\n"
+                "       ldstack efmc1 <audio.pcm> <circ-dump.txt> [--phase P] [--range MIN-MAX]\n"
+                "         Score the C1 stage of that dump against the truth: words correct, erased or miscorrected\n"
+                "       ldstack efmscore <audio.pcm> <symbols.f32> [--phase P] [--range MIN-MAX] [--dump-symbols FILE]\n"
+                "         Score the symbol decisions of an ac3rf-efm-decode --symbol-debug-filename dump against the truth\n"
+                "       ldstack efmbits <audio.pcm> <tvalues.u8> <phase> <received_frame:predicted_frame> [--window BITS]\n"
+                "                       [--search BITS] [--min-score F] [--trace FILE]\n"
+                "         Align the predicted channel bits with a --t-values-output-filename stream and tabulate the deformation\n"
+                "       ldstack efmexport <audio.pcm> <phase> <g0> <g1> <out>\n"
+                "         Write the predicted channel bits of frames g0..g1 as <out>.toggle.u8 and <out>.known.u8\n";
         exit(EXIT_FAILURE);
     }
 

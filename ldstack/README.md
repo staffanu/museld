@@ -7,8 +7,11 @@ the captures can be aligned, compared and stacked sample by sample.  The
 first use is a disc-rot study: two or more good copies stacked into a
 reference, and a rotted copy of the same pressing measured against it.
 
-It is CPU-only and self-contained (no Vulkan, no museld code), so it also
-covers what museld does not decode yet, such as PAL discs.
+The second use is an EFM test bench: a CIRC encoder predicts a disc's exact
+EFM symbols from its known audio, so the decoder's symbol decisions, C1
+stage and framing can be scored against the truth (see below).
+
+It is CPU-only and self-contained (no Vulkan, no museld code).
 
 ## Build
 
@@ -75,6 +78,61 @@ aligned to the reference per line on the frequency deviation, and averaged
 with dropout windows from the RF envelope left out.  Output `<out>.bb.f32`
 holds the instantaneous frequency in Hz; with one input this is plain
 demodulation, e.g. of a rotted copy for comparison with a stacked reference.
+
+## EFM test bench
+
+The second half scores museld's EFM decoder against the truth.  `src/CircEncoder.cpp` is the
+exact mirror of museld's CIRC decoder (IEC 60908): given a disc's audio as s16le stereo PCM (a
+clean decode, or a verified CD rip of the same disc), it predicts the 32 data and parity symbols
+of every EFM frame, so each stage of the decoder can be checked symbol by symbol.  The *phase*
+0-5 is which stereo sample starts frame 0; the commands search it unless `--phase` fixes it.
+`--range MIN-MAX` limits the scoring to a range of received frames.
+
+    ldstack efmpredict <audio.pcm> <circ-dump.txt> [--range MIN-MAX] [--report FILE]
+
+Compares the predicted symbols with the frames an `ac3rf-efm-decode --circ-debug-filename` dump
+received (its `F:` records).  Finds the frame phase and the offset between predicted and
+received frame numbers, tracks the alignment block by block (a change of offset is a frame
+the decoder lost or invented), and reports the match over the whole capture and the erased
+symbol fraction.  `--report` writes every frame with its predicted and received symbols and the
+erasure mask.
+
+    ldstack efmc1 <audio.pcm> <circ-dump.txt> [--phase P] [--range MIN-MAX]
+
+Scores the C1 stage: from the dump's `C1:` (input word) and `D1:` (after C1) records and the
+predicted words, every C1 output is classified as correct, erased (some symbols left flagged)
+or miscorrected (an unflagged symbol that is wrong), with the input errors per word.  This is
+how the `--c1-strategy` variants were compared: a miscorrection here is what C2 may let
+through to the audio.
+
+    ldstack efmscore <audio.pcm> <symbols.f32> [--phase P] [--range MIN-MAX] [--dump-symbols FILE]
+
+Scores the per-symbol decisions in an `ac3rf-efm-decode --symbol-debug-filename` dump: how
+many 14-bit table hits are wrong (a valid code that is not the one sent), how often the ML
+estimate is right when the table misses, and how well its score margin separates right from
+wrong decisions (percentiles of the margin for each class).  `--dump-symbols` writes the
+per-symbol verdicts with their alignment.
+
+    ldstack efmbits <audio.pcm> <tvalues.u8> <phase> <received_frame:predicted_frame>
+                    [--window BITS] [--search BITS] [--min-score F] [--trace FILE]
+
+Aligns the predicted channel bits (merging bits and the subcode symbol are unknown and
+skipped) with the transition stream of an `ac3rf-efm-decode --t-values-output-filename` dump,
+window by window (default 1176 bits, two frames), following bit clock slips, from a hint of
+one received frame and the predicted frame it holds (`efmpredict` gives it).  Reports the
+windows lost, the predicted transitions found in place, shifted early or late or missing, the
+spurious received transitions, the detection rate by adjacent run length, the confusion matrix
+of received against predicted run length, and the mean run-length error by polarity class:
+the deformation of the eye, measured on the sliced bits.
+
+    ldstack efmexport <audio.pcm> <phase> <g0> <g1> <out>
+
+Writes the predicted channel bits of frames g0..g1 as two byte arrays, `<out>.toggle.u8` and
+`<out>.known.u8`, for other tools.
+
+A caution learned here: a 14-bit window cut at the wrong bit alignment is still a valid EFM
+code about 95 % of the time, so "valid symbol" never means "aligned"; and the t-values file
+normalises run lengths to 3-11, so bit-level work needs the symbol dump, not the t-values.
 
 ## What "same pressing" means here
 
