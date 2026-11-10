@@ -252,7 +252,7 @@ int main(int argc, char *argv[]) {
     double initial_seek_seconds = 0;
     std::optional<double> duration_seconds = std::nullopt;
     std::optional<int> efm_log2_decimation = std::nullopt;
-    int efm_adaptive_filter_size = 3;
+    int efm_adaptive_filter_size = 31;
     std::optional<std::string> efm_retiming_debug_filename = std::nullopt;
     std::optional<std::string> efm_t_values_output_filename = std::nullopt;
     std::optional<std::string> efm_circ_debug_filename = std::nullopt;
@@ -339,10 +339,11 @@ int main(int argc, char *argv[]) {
             throw std::runtime_error("Invalid decimation specification");
     });
     options.option("--adaptive-filter-size", "N",
-                   "Adaptive FIR filter size for the EFM signal (default 3, 0 disables it); try 9 "
-                   "or 11 when a distorted signal causes many errors", [&] () -> void {
+                   "Adaptive FIR filter size for the EFM signal (default 31, 0 disables it).  Short "
+                   "filters cannot correct a poorly equalized eye (an old player, a CD's RF); "
+                   "sizes between 5 and 23 adapt noisily and did worse than both ends on good discs", [&] () -> void {
         efm_adaptive_filter_size = stoi(*(it++));
-        if (efm_adaptive_filter_size < 0 || efm_adaptive_filter_size > 100)
+        if (efm_adaptive_filter_size < 0 || efm_adaptive_filter_size > 255)
             throw std::runtime_error("Invalid adaptive filter size");
     });
     options.flag("--simd", "Use SIMD (AVX/NEON) FIR filtering, which is the default where the CPU "

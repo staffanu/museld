@@ -302,18 +302,25 @@ bool InputController::poll(GLFWwindow *window,
         m_log.info(eApplication | eVideo, "Adaptive equaliser taps reset to identity");
     }
     if (checkKey(window, GLFW_KEY_E) && reader.efmFilterSize && reader.setEfmFilterSize) {
-        // Cycle the EFM adaptive filter through roughly doubling sizes -- some
-        // discs need a very long filter -- and then off.  A size set on the
-        // command line that is not in the list steps to the next larger one;
-        // from off (or above the largest) the cycle restarts at 3.
-        static constexpr int sizes[] = { 3, 5, 9, 17, 35, 71 };
+        // Cycle the EFM adaptive filter from the default through longer sizes,
+        // then the short ones, then off.  A size set on the command line that is
+        // not in the list steps to the next one in cycle order; from off the
+        // cycle restarts at the default.
+        static constexpr int sizes[] = { 31, 63, 127, 3, 9, 15 };
         const int current = reader.efmFilterSize();
         int next = 0;
         if (current == 0) {
             next = sizes[0];
         } else {
-            for (int s : sizes)
-                if (s > current) { next = s; break; }
+            const int n = sizeof sizes / sizeof sizes[0];
+            int i = 0;
+            while (i < n && sizes[i] != current) i++;
+            if (i < n - 1) next = sizes[i + 1];        // in the list: the next entry (off after the last)
+            else if (i == n) {                          // not in the list: the next larger size, else off
+                int best = 0;
+                for (int s : sizes) if (s > current && (best == 0 || s < best)) best = s;
+                next = best;
+            }
         }
         reader.setEfmFilterSize(next);
         state.osd_text = next == 0 ? "EFM FILTER OFF" : std::format("EFM FILTER {} TAPS", next);

@@ -1271,8 +1271,10 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
 #endif
 
     unique_ptr<AudioPlayback> audio_playback = nullptr;
-    if (decode_audio)
+    if (decode_audio) {
         audio_playback = make_unique<AudioPlayback>(log);
+        audio_playback->setDiscardsExpected(no_sync);
+    }
 
     {
         musevk::CommandPool command_pool(manager);
@@ -1479,7 +1481,7 @@ int main(int argc, char *argv[]) {
     DropoutMode dropout_mode = DropoutMode::eNormal;
     bool decode_audio = true;
     AudioTrack audio_track = AudioTrack::eDefault;
-    int efm_adaptive_filter_size = 3;
+    int efm_adaptive_filter_size = 31;
     Decoder::CxMode cx_mode = Decoder::CxMode::eAuto;
     bool benchmark_shaders = false;
     MuseAdaptiveEqualizer::Mode eq_mode = MuseAdaptiveEqualizer::Mode::eAdapt;
@@ -1605,12 +1607,11 @@ int main(int argc, char *argv[]) {
         audio_track = AudioTrack::eAc3;
     });
     options.option("--efm-filter-size", "N",
-                   "Adaptive FIR filter size in the EFM timing recovery (default 3, 0 disables it); "
-                   "try 9 or 11 when a distorted signal causes many errors.  The E key cycles it "
-                   "during playback", [&] () -> void {
+                   "Adaptive FIR filter size in the EFM timing recovery (default 31, 0 disables it).  "
+                   "The E key cycles it during playback", [&] () -> void {
         efm_adaptive_filter_size = stoi(*(it++));
-        if (efm_adaptive_filter_size < 0 || efm_adaptive_filter_size > 100)
-            throw std::runtime_error("Invalid --efm-filter-size (expected 0..100)");
+        if (efm_adaptive_filter_size < 0 || efm_adaptive_filter_size > 255)
+            throw std::runtime_error("Invalid --efm-filter-size (expected 0..255)");
     });
     options.flag("--all-fields", "Update the display once per field, at 60 Hz (default)", [&] () -> void {
         decode_all_fields = true;
