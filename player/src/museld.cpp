@@ -885,7 +885,10 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
 #endif
 
 #ifdef HAVE_LIBAV
-            if (vfw && !searching) {
+            // Only a decoded field goes into the file: next() also returns on an
+            // input timeout with nothing decoded, and the images then hold whatever
+            // was there before (zeros, before the first field)
+            if (vfw && !searching && state.last_decoded.decoded) {
                 vfw->addVideoFrameWithAudio(images.out_Y, images.out_U, images.out_V,
                                             state.last_decoded.audio_mode,
                                             state.last_decoded.audio_sample_count,
