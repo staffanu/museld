@@ -136,7 +136,9 @@ EfmDecoder::EfmDecoder(Logger &log, std::optional<std::string> circ_debug_filena
           m_bits_in_frame(0),
           m_consecutive_syncs(0),
           m_locked(false),
-          m_frames_since_sync(0), // if not at the exact expected place
+          // starts "lost": the first sync pattern seen re-frames at once, instead of waiting for a
+          // second one to confirm it (which cost the first frame on a disc whose first sync came early)
+          m_frames_since_sync(c_sync_lost_frames),
           m_efm_frames_since_lock(0),
           m_subcode_symbol_index(-3),
           m_sync_candidate_bit(-1),
