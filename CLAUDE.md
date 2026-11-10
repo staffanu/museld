@@ -187,7 +187,10 @@ and the probe verdict against the goldens in `tests/regression/golden/`. Output 
 to run on one machine, so PASS means nothing changed; DIFF reports per-frame PSNR against the
 golden render. Run it after any change to the decode (shaders, timebase, dropout, audio), and
 `run --accept --upload madeye.org:/nas/video/LD-Captures/public/museld-testdata/golden` to
-re-record the goldens of an intended change, committing the JSON with the change.
+re-record the goldens of an intended change, committing the JSON with the change. The goldens
+were recorded on the M2 Mac (2026-11-10): a run there passes bit-exact, another GPU shows DIFFs
+around 45-60 dB. The suite also catches `--write` writing on an iteration without a decoded
+field (zero planes, green frames), which shows as frames shifted by +N and an audio residual.
 
 Tests are only built when `-DBUILD_TESTING=ON` is passed. They are in `player/tests/`
 (`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`, `FilterSimdParityTest.cpp`, `InputProbeTest.cpp`,

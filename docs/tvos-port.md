@@ -487,6 +487,18 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   that cannot be played (the `exit(EXIT_FAILURE)` paths of `play_input`, now `InputError`,
   and a reader's exception) returns to the browser with the message in a bar along the
   bottom, until a key is pressed or 15 s pass, instead of ending the app (2026-11-10).
+- **Merged to master** (2026-11-10) after the picture regression suite was run against
+  master's goldens on the Mac.  It found one bug: the demodulator's read-ahead made the
+  player's first iterations return on the input timeout, and `--write` wrote the images
+  as they were (zeros, so green frames) once per such iteration, shifting every frame and
+  the audio; the write now takes decoded fields only.  What remained: NTSC and PAL within
+  tolerance at 50-105 dB PSNR (the quadrature shader's rotation before the atan, rounding
+  level), MUSE at 48-55 dB from the 35-tap band-pass and the 37-tap 4:3 video filter in
+  about equal parts (reverting both: 65-72 dB; the rest the diamond filter's border), all
+  of it edge ringing at the top of the horizontal band, 0.4% of white rms on the worst
+  frame.  The goldens were re-recorded on the Mac (M2, the Apple GPU) from this branch,
+  so a run there passes bit-exact and another machine shows GPU-level DIFFs, as before
+  in reverse.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the
