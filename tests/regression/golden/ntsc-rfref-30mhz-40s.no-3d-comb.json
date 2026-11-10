@@ -257,8 +257,8 @@
  "audio": {
   "codec": "pcm_s16le",
   "bytes": 691548,
-  "sha256": "115b9e37d576bc105412c897c17e46082a579440b2b7cf688acb6c33c1cf6404",
-  "judged_sha256": "595af7dd62dea6ae8709eb2a684213529ebfdb4ee9b463023e876e0691b1d4e2"
+  "sha256": "b9260f35d6f1a1416cb4e03455a00ed793cf0a26a8127483f7d37cbc5576e24a",
+  "judged_sha256": "b1ec65909603d7b9365d94d4627025ae891fb42c4ba082c5669405df1b27365a"
  },
  "codes": [
   "853245 NTSC CLV CX on ; Chapter 3 Time 0:13:53 Frame 06",

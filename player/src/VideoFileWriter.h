@@ -99,7 +99,7 @@ private:
     void writeAc3Frames(const std::vector<std::array<uint8_t, 1536>> &ac3_frames);
     void initResampler(AudioMode mode);
     void convertAndWriteAudio(const uint8_t **in, int in_samples);
-    void insertSilence(int64_t count, int in_rate);
+    void insertSilence(int64_t count, int in_rate, bool final_padding = false);
     void insertInterpolated(int64_t count, int in_rate, const AudioFrame &next);
     AVFrame *makeVideoFrame(OutputStream *ost, std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
                             std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V);

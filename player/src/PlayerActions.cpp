@@ -223,28 +223,29 @@ void resetEq(PlayerState &state, ReaderControls &reader, Logger &log) {
 void cycleEfmFilterSize(PlayerState &state, ReaderControls &reader, Logger &log, int direction) {
     if (!reader.efmFilterSize || !reader.setEfmFilterSize)
         return;
-    // Cycle the EFM adaptive filter through roughly doubling sizes -- some
-    // discs need a very long filter -- and then off.  A size set on the
-    // command line that is not in the list steps to the next larger one;
-    // from off (or above the largest) the cycle restarts at 3.
-    static constexpr int sizes[] = { 3, 5, 9, 17, 35, 71 };
+    // Cycle the EFM adaptive filter from the default through the longer sizes,
+    // then the short ones, then off (master's order since the 31-tap default).  A
+    // size set on the command line that is not in the list steps to the next
+    // larger (or, backwards, smaller) one, else off; from off the cycle restarts
+    // at the default (backwards: at the last short size).
+    static constexpr int sizes[] = { 31, 63, 127, 3, 9, 15 };
+    constexpr int n = (int)std::size(sizes);
     const int current = reader.efmFilterSize();
+    int at = 0;
+    while (at < n && sizes[at] != current) at++;
     int next = 0;
-    if (direction >= 0) {
-        if (current == 0) {
-            next = sizes[0];
-        } else {
-            for (int s : sizes)
-                if (s > current) { next = s; break; }
-        }
+    if (current == 0) {
+        next = direction >= 0 ? sizes[0] : sizes[n - 1];
+    } else if (at < n) {
+        const int to = at + (direction >= 0 ? 1 : -1);
+        next = to >= 0 && to < n ? sizes[to] : 0; // off beyond either end
     } else {
-        // Backwards: the next smaller size, then off, then the largest
-        if (current == 0) {
-            next = sizes[std::size(sizes) - 1];
-        } else {
-            for (int i = (int)std::size(sizes) - 1; i >= 0; i--)
-                if (sizes[i] < current) { next = sizes[i]; break; }
-        }
+        // Not in the list: the nearest size in the direction of travel, else off
+        int best = 0;
+        for (int s : sizes)
+            if (direction >= 0 ? (s > current && (best == 0 || s < best)) : (s < current && s > best))
+                best = s;
+        next = best;
     }
     reader.setEfmFilterSize(next);
     state.osd_text = next == 0 ? "EFM FILTER OFF" : std::format("EFM FILTER {} TAPS", next);

@@ -179,8 +179,12 @@ void AudioPlayback::add_samples(AudioMode const &audio_mode, int const &sample_c
         } else
             discard_count++;
     }
-    if (discard_count != 0)
-        m_log.error(eAudio, std::format("Discarded {} samples", discard_count));
+    if (discard_count != 0) {
+        if (m_discards_expected)
+            m_log.debug(eAudio, std::format("Discarded {} samples (the decode outruns the audio device)", discard_count));
+        else
+            m_log.error(eAudio, std::format("Discarded {} samples", discard_count));
+    }
 }
 
 // Real-time audio thread: no locking, allocation or logging in here.

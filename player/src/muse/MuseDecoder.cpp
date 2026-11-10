@@ -303,7 +303,7 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
                                                  decoded_field_index,
                                                  output_yuv);
         } else {
-            m_log.warn(eVideo, std::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
+            m_log.debug(eVideo, std::format("Field {} inter-frame interpolation failed -- using intra-field interpolation", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, /* force field only */ true, /* force inter frame only */ false,
                                                  decoded_field_index, output_yuv);
         }
