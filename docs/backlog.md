@@ -36,6 +36,24 @@ Last revised 2026-11-09.
   motion-gated temporal NR reusing the existing motion mask is the cheapest visible gain on SD.
 - **NTSC deinterlacing in moving areas** is plain intra-field; edge-directed interpolation would
   sharpen diagonals.
+- **Edge-template deringing of NTSC luma.**  Two artefacts sit next to every hard edge of some
+  discs and are tied to the edge, not to the channel.  A dip 150-250 ns before the edge, mirrored
+  on the two polarities (a linear-phase lowpass with a cutoff around 4-5 MHz and a first lobe of
+  3-4% of the step, in the post-production chain: the VBI code pulses of the same frames come
+  through flat within 1 IRE, so the disc, player and museld's filters are clean, and the pulses
+  are too slow, 260 ns rise against the picture's 150, to train anything above 3 MHz); and a
+  bright halo of 3-9 IRE for about 1 us after white-to-black edges, the pre-emphasis undershoot
+  clipped at the sync tip at mastering.  No linear filter removes either: inverting the source
+  lowpass boosts a band the channel has already emptied, and softening the video lowpass (what
+  ld-decode's Butterworth does) only trades it against sharpness.  The adaptive fix: estimate a
+  residual template per disc by averaging the signal around detected edges relative to their
+  plateaus, normalised by step height (zero on a disc without the source filter), and subtract it
+  at every edge scaled by that edge's height at its sub-sample crossing; the halo gets a template
+  conditioned on step height, since it only appears when the undershoot clips.  The edge itself
+  is left alone, so nothing softens.  Its limit is a real 200 ns line of a few IRE beside an
+  edge, told apart only by not being edge-correlated over the frame.  Seen on black text on a
+  white card (2026-11); the edge averaging that measured it is the template estimator's starting
+  point.
 - **PAL calibration.**  Calibrated on the GGV1011 test disc and a handful of captures; the
   dropout detector's thresholds were calibrated on NTSC; Hanover bars under heavy noise are worth
   measuring with the pal-pilot tooling.
