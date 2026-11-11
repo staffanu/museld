@@ -405,8 +405,13 @@ void SdtvRfDemodulator::demodulate() {
                 block->efm_data.clear();
             auto t_after_efm = timing_clock::now();
             block->analog_data.clear();
-            if (block->analog_wanted)
+            if (block->analog_wanted) {
                 m_analog_demodulator.demodulate(block->raw_input.data(), block->analog_data);
+                if (m_analog_demodulator.squelched(0) && m_analog_demodulator.squelched(1))
+                    m_analog_silent_blocks++;
+                else
+                    m_analog_silent_blocks = 0;
+            }
             auto t_after_analog = timing_clock::now();
             if (block->ac3_wanted)
                 block->ac3_frames = m_ac3_decoder.decodeSymbols(

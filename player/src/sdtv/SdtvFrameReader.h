@@ -61,6 +61,9 @@ public:
     void setAudioTrack(AudioTrack track) override;
     void setEfmAdaptiveFilterSize(int size) override;
     [[nodiscard]] int efmAdaptiveFilterSize() const override;
+    [[nodiscard]] double analogSilentSeconds() const override {
+        return m_demodulator != nullptr ? m_demodulator->analogSilentSeconds() : 0;
+    }
 
 protected:
     void threadFunc() override;

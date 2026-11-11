@@ -367,7 +367,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                       Decoder::CxMode initial_cx_mode,
                       Decoder::BlackLevelMode initial_black_level_mode,
                       DropoutMode dropout_mode,
-                      AudioTrack audio_track,
+                      AudioTrack audio_track, bool audio_fallback,
                       bool is_muse,
                       SavedState &saved_state, const std::string &input_name,
                       std::optional<std::string> &open_next,
@@ -1052,6 +1052,21 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             }
             if (!input.poll(window, state, reader_controls, dropout_mode, audio_track, full_screen) || menu_quit)
                 break;
+            // A disc without analog audio (a digital-only PAL disc) plays its EFM
+            // track: once, when the analog demodulator has heard no carrier for a
+            // while, and only while no track was chosen by hand or remembered
+            if (audio_fallback && reader_controls.analogSilentSeconds) {
+                constexpr double c_analog_fallback_seconds = 1.0;
+                if (audio_track != AudioTrack::eDefault) {
+                    audio_fallback = false;
+                } else if (reader_controls.analogSilentSeconds() >= c_analog_fallback_seconds) {
+                    audio_fallback = false;
+                    audio_track = AudioTrack::eEfm;
+                    reader_controls.setAudioTrack(audio_track);
+                    state.osd_text = "EFM AUDIO (NO ANALOG CARRIER)";
+                    log.info(eApplication | eAudio, "No analog audio carrier: switching to the EFM track (--analog keeps the analog track)");
+                }
+            }
             if (open_next) {
                 // The menu's Open page chose another input: one more frame says so
                 // on the OSD, since opening it takes a moment, then this player leaves
@@ -1470,7 +1485,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   bool start_paused, Decoder::FieldInterpolationMode field_interpolation_mode,
                   bool use_3d_comb, bool film_mode, Decoder::CxMode cx_mode, Decoder::BlackLevelMode black_level_mode, bool decode_video,
                   DropoutMode dropout_mode,
-                  bool decode_audio, AudioTrack audio_track, bool benchmark_shaders,
+                  bool decode_audio, AudioTrack audio_track, bool audio_fallback, bool benchmark_shaders,
                   MuseAdaptiveEqualizer::Mode eq_mode, float eq_alpha,
                   float tint_degrees, float saturation,
                   optional<string> const &output_filename,
@@ -1623,6 +1638,8 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         if (reader.efmAdaptiveFilterSize() >= 0) { // RF input: the reader runs an EFM demodulator
             reader_controls.efmFilterSize = [&reader]() { return reader.efmAdaptiveFilterSize(); };
             reader_controls.setEfmFilterSize = [&reader](int size) { reader.setEfmAdaptiveFilterSize(size); };
+            if (reader_controls.has_analog_audio)
+                reader_controls.analogSilentSeconds = [&reader]() { return reader.analogSilentSeconds(); };
         }
 
         std::unique_ptr<Decoder> decoder;
@@ -1680,7 +1697,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         switched = runPlayer(log, manager, *decoder, reader_controls, window, full_screen, no_keys, aspect_mode, picture_format,
                   full_image, overscan,
                   start_paused,
-                  field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, dropout_mode, audio_track,
+                  field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, dropout_mode, audio_track, audio_fallback,
                   std::is_same<InputBlock, MuseInputBlock>::value,
                   saved_state, input_name, open_next,
                   benchmark_shaders,
@@ -1832,6 +1849,7 @@ int main(int argc, char *argv[]) {
     DropoutMode dropout_mode = DropoutMode::eNormal;
     bool decode_audio = true;
     AudioTrack audio_track = AudioTrack::eDefault;
+    bool audio_fallback = true; // no analog carrier: play the EFM track instead
     int efm_adaptive_filter_size = 31;
     Decoder::CxMode cx_mode = Decoder::CxMode::eAuto;
     bool benchmark_shaders = false;
@@ -1957,6 +1975,12 @@ int main(int argc, char *argv[]) {
     options.flag("--ac3", "NTSC: take the audio from the AC3-RF surround track, downmixed to "
                           "stereo (RF input only; decoding needs an FFmpeg build)", [&] () -> void {
         audio_track = AudioTrack::eAc3;
+    });
+    options.flag("--analog", "NTSC/PAL: keep the analog audio track even when no carrier is found.  "
+                             "Without it a disc whose analog carriers are absent (a digital-only "
+                             "PAL disc) switches to the EFM track after a second", [&] () -> void {
+        audio_track = AudioTrack::eDefault;
+        audio_fallback = false;
     });
     options.option("--efm-filter-size", "N",
                    "Adaptive FIR filter size in the EFM timing recovery (default 31, 0 disables it).  "
@@ -2489,7 +2513,7 @@ int main(int argc, char *argv[]) {
                     };
                     outcome = process_file<SdtvInputBlock>(log, executable_dir, surface, saved_state, name, make_reader, watch_type, &standard, decode_all_fields,
                                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
-                                                 audio_track,
+                                                 audio_track, audio_fallback,
                                                  benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
@@ -2503,7 +2527,7 @@ int main(int argc, char *argv[]) {
                     };
                     outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, name, make_reader, std::nullopt, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
-                                 audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
+                                 audio_track, audio_fallback, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                  initial_seek_seconds, start_chapter, is_tvos || browse);
@@ -2519,7 +2543,7 @@ int main(int argc, char *argv[]) {
                     };
                     outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, name, make_reader, watch_type, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
-                                 audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
+                                 audio_track, audio_fallback, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                  initial_seek_seconds, start_chapter, is_tvos || browse);

@@ -84,6 +84,13 @@ public:
         m_analog_enabled = track == AudioTrack::eDefault;
         m_ac3_enabled = track == AudioTrack::eAc3;
     }
+    // How long the analog track has had no carrier on either channel: the
+    // seconds of input demodulated since the squelch last opened (0 while a
+    // carrier is heard, or while the analog track is not the one demodulated).
+    // The player falls back to the EFM track on it
+    [[nodiscard]] double analogSilentSeconds() const {
+        return m_analog_silent_blocks * (double)SdtvRfDemodulatorConstants::c_sample_block_size / m_sample_frequency;
+    }
     // Taps in the EFM timing recovery's adaptive filter (0 disables it); applied at the next block
     void setEfmAdaptiveFilterSize(int size) { m_efm_demodulator.setAdaptiveFilterSize(size); }
     [[nodiscard]] int efmAdaptiveFilterSize() const { return m_efm_demodulator.adaptiveFilterSize(); }
@@ -106,6 +113,7 @@ private:
     std::atomic<bool> m_efm_enabled;
     std::atomic<bool> m_analog_enabled;
     std::atomic<bool> m_ac3_enabled;
+    std::atomic<int64_t> m_analog_silent_blocks{0}; // consecutive blocks with both channels squelched
 };
 
 #endif //MUSECPP_SDTVRFDEMODULATOR_H

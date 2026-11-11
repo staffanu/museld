@@ -30,7 +30,8 @@ timebase, VBI, analog or EFM audio, `--write` and content detection; calibrated 
 test disc.  `docs/pal-decoding.md` describes the PAL path and what it was calibrated against.
 
 NTSC playback in museld selects between the analog, EFM and AC3-RF tracks (`AudioTrack`,
-A key / `--efm` / `--ac3`); a DTS bitstream on the EFM track is auto-detected. AC3 and DTS
+A key / `--efm` / `--ac3`; a disc whose analog carriers stay squelched for a second switches to
+EFM by itself unless a track was chosen or remembered, `--analog` keeps it); a DTS bitstream on the EFM track is auto-detected. AC3 and DTS
 are decoded by `CompressedAudioDecoder` (libavcodec + libswresample), which is gated on
 `HAVE_LIBAV` — in builds without FFmpeg those tracks are selectable but silent. `AudioFrame`
 carries up to 6 channels (5.1 slot order FL FR FC LFE SL SR); playback opens a 6-channel

@@ -80,6 +80,10 @@ public:
     // efmAdaptiveFilterSize() is negative when the reader has no EFM demodulator.
     virtual void setEfmAdaptiveFilterSize(int) {}
     [[nodiscard]] virtual int efmAdaptiveFilterSize() const { return -1; }
+    // Seconds of input the analog audio track has gone without a carrier on
+    // either channel, 0 while one is heard; only the SDTV reader knows an
+    // analog track (see SdtvRfDemodulator::analogSilentSeconds)
+    [[nodiscard]] virtual double analogSilentSeconds() const { return 0; }
 
 protected:
     // Hands the frames already read but not yet collected back to the reader

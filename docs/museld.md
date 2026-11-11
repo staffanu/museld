@@ -44,7 +44,8 @@ The input types:
 - `ntsc-rf` — RF of a standard NTSC laserdisc, typically a DomesDay Duplicator capture at 40 MHz.
 - `pal-rf` — RF of a PAL laserdisc, decoded in colour (spatial and temporal combs, as NTSC),
   with the Philips code (chapter, CLV time, picture number), the analog or EFM track
-  (`--efm`; PAL discs carry one or the other) and `--write`
+  (PAL discs carry one or the other: a disc without analog carriers switches to the EFM
+  track by itself, `--efm` and `--analog` choose) and `--write`
   (colour metadata tagged BT.470BG; 50 frames/s, one per field, or 25 with `--full-frames-only`,
   as 59.94/29.97 for NTSC). See `docs/pal-decoding.md`.
 - `muse-16` — MUSE baseband resampled to exactly one sample per pixel at 16.2 MHz, phase locked to the line structure (480 samples per line). This is museld's own intermediate format, produced with `--write-muse16` (see below); `--sample-freq` does not apply.
@@ -169,6 +170,7 @@ a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at 
 |---|---|
 | `--efm` | Use EFM data for audio instead of the MUSE audio, or of the NTSC analog audio (RF input only). A DTS bitstream on the track (DTS laserdiscs) is detected and decoded automatically. |
 | `--ac3` | NTSC: use the AC3-RF surround track (RF input only; decoding requires an FFmpeg build — without it the track is silent). All 5.1 channels go to the audio device, and `--write` files carry the original AC3 bitstream (stream copy, no transcode). |
+| `--analog` | NTSC/PAL: keep the analog audio track even when no carrier is heard. Without it, a disc whose analog carriers are absent (a digital-only PAL disc) switches to the EFM track once the analog demodulator has been squelched on both channels for a second, with "EFM AUDIO (NO ANALOG CARRIER)" on the OSD; `--efm`, `--ac3`, a track chosen with the A key or the menu, or one remembered for the disc also turn the automatic choice off. |
 | `--efm-filter-size <n>` | Number of taps in the adaptive FIR filter ahead of the EFM timing detector (default 31, 0 disables it). A short filter cannot correct a poorly equalized eye, and sizes between about 5 and 23 adapt noisily and did worse than both ends on good discs; the default is the shortest length that was at least as good as 3 taps on every capture tried. Try 63 or more when a distorted signal causes many errors; the same setting as `ac3rf-efm-decode --adaptive-filter-size`. The E key cycles it during playback. |
 | `--no-video` / `--no-audio` | Do not decode video, or audio, at all (not merely silence the output): a `--write` file made with `--no-audio` has an empty audio stream |
 | `--no-sync` | Display frames as fast as possible (benchmark mode). Without it playback runs at real time: the display's refresh sets the cadence when it matches the field rate (NTSC on a 60 Hz display), with the clock as a guard a few fields behind in case the refresh stops pacing (macOS does not block on it while the window is covered or minimized); slower material (PAL on 60 Hz) is paced by the clock itself |
@@ -412,7 +414,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | 4 | NTSC: toggle the 3D comb (temporal Y/C separation on still parts) |
 | 5 | NTSC: film mode auto / off (reverse-telecine weave on a 3:2 cadence lock) |
 | D | Cycle dropout handling: conceal → ignore → highlight (red = luminance dropout, green = color dropout) |
-| A | Cycle the audio track: MUSE (or NTSC analog) → EFM → AC3 (NTSC only) (RF input only) |
+| A | Cycle the audio track: MUSE (or NTSC/PAL analog) → EFM → AC3 (NTSC only) (RF input only). A disc without analog carriers starts on EFM by itself (see `--analog`) |
 | E | Cycle the EFM adaptive filter size: 31 → 63 → 127 → 3 → 9 → 15 taps → off → 31 (RF input only, see `--efm-filter-size`). The filter restarts from identity at each change. |
 | B | Cycle the audio channels heard: stereo → left only → right only (bilingual discs, or the left-only analog track on AC3 discs; `--write` output always keeps stereo). Shown in parentheses, and left out of the menu, while multichannel audio plays (4-channel MUSE, 5.1 AC3/DTS), which goes to the device as it is |
 | X | Cycle CX noise reduction for the NTSC analog audio: auto (follow the VBI flag, the default) → off → on; `--cx` sets the initial mode. Shown in parentheses when the audio playing is not the analog track (the setting is remembered but inaudible). The V info line shows the CX status: the disc's flag in auto mode, or e.g. "CX off forced (disc on)" when overridden. |
@@ -630,7 +632,8 @@ DTS: EFM stereo samples → DTS sync detection → byte stream → libavcodec dc
   the demodulator worker to run several sources at once.
 
 - **Motion vectors**: MUSE specifies motion compensation in control data (3+4 bits), but these bits are
-  always zero on every disc tested. It is unclear whether this feature was ever used on MUSE laserdiscs.
+  always zero on every disc tested, so the decoder does not use them. Computing motion vectors on the
+  decoder's side instead was tried (2026-10) and gained nothing over the still/moving decision.
 - **Non-linear de-emphasis**: Unclear whether it has already been applied on baseband (player output) input; use the L key to toggle.
 - **Direct USB input**: Currently requires an external capture program writing to a pipe or a FIFO (e.g., picostream).
 - **Picture filters**: Most filters were computed early in the project; picture quality could probably be improved by spending more time on them.

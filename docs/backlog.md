@@ -3,7 +3,7 @@
 Work worth doing, in rough order of value, with the reasoning behind each item so it can be
 picked up cold.  This is a working list for development, not the list of known limitations in
 `museld.md`: nothing here is promised, and items leave when done or when they stop making sense.
-Last revised 2026-11-09.
+Last revised 2026-11-11.
 
 ## Housekeeping
 
@@ -16,8 +16,6 @@ Last revised 2026-11-09.
   and 62.5 MHz (NTSC/PAL/MUSE in either direction, 1-3 s per switch); the decoder box is not.
   Judge the "NO SIGNAL" pacing on a real disc change, and whether three agreeing chunks is the
   right count.
-- **EFM-only PAL discs play silent** with the default analog track (the Stu samples).  An automatic
-  fallback to EFM when the analog carriers are absent would fix it; today it needs `--efm`.
 - **PAL CAV picture stop** has not been checked on a PAL CAV disc.
 - **muse-16 (16.2 MHz baseband) input type** is legacy: keep it working for existing u16 files,
   no new formats or level work, remove when nothing needs it.
@@ -83,3 +81,5 @@ Last revised 2026-11-09.
 - 2026-11-09: `--write` keeps one file across the inputs that name it (the sides of a disc).
 - 2026-11-10: EFM robustness merged: sync-anchored timing loop, confirmed re-framing, flagged
   start-up, opt-in gated C1 (`--c1-strategy`), the symbol and concealment dumps and `ldstack`.
+- 2026-11-11: discs without analog audio carriers switch to the EFM track by themselves
+  (`--analog` keeps the analog track).

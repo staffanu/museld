@@ -57,6 +57,9 @@ struct ReaderControls {
     // number of taps and a setter, empty when the reader has no EFM demodulator.
     std::function<int()> efmFilterSize;
     std::function<void(int)> setEfmFilterSize;
+    // Seconds the analog track has had no carrier (RF input with an analog
+    // track only): the automatic fallback to the EFM track reads it
+    std::function<double()> analogSilentSeconds;
 };
 
 // Begins a chapter search from the displayed frame: the next or previous
