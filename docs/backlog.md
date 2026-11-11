@@ -50,8 +50,16 @@ Last revised 2026-11-11.
   conditioned on step height, since it only appears when the undershoot clips.  The edge itself
   is left alone, so nothing softens.  Its limit is a real 200 ns line of a few IRE beside an
   edge, told apart only by not being edge-correlated over the frame.  Seen on black text on a
-  white card (2026-11); the edge averaging that measured it is the template estimator's starting
-  point.
+  white card (2026-11).  Tried offline on that frame (2026-11-11), three model levels: a
+  per-edge template outside the transition (the dip fell from 5.0% to 3.6% of white), the
+  measured edge response minus a clean step over the whole edge (3.7%), and a per-line step
+  fit with joint least squares of the heights and per-edge softness (4.2%).  None cleared it,
+  because the glyphs are anti-aliased by their character generator and so softer than the
+  card's own edges: the ringing they carry is the same chain's, but smeared and shifted, and a
+  response learned from the sharp edges misfits them on the foot of the edge rather than on
+  the lobe.  A joint non-linear fit of position, width and height per edge might, but not at
+  real-time cost and not safely on noisy film; the practical lever stays a softer video lowpass
+  as a per-disc option.  Parked.
 - **PAL calibration.**  Calibrated on the GGV1011 test disc and a handful of captures; the
   dropout detector's thresholds were calibrated on NTSC; Hanover bars under heavy noise are worth
   measuring with the pal-pilot tooling.
