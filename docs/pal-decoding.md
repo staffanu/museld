@@ -275,7 +275,8 @@ standard.
   bars at ~190-210 s, colour fields, window / crosshatch / dots / zone plate, CAV still
   photos from ~800 s.  Analog sound: left carrier unmodulated, right a 1 kHz tone.
 - **GGV1069**, its NTSC twin (`~/Downloads`, `.ogg` = ldf): the like-for-like noise
-  comparison, a real picture stop at picture 475.
+  comparison, a real picture stop at picture 475 -- the GGV1011 has the same stop at its
+  picture 475, and the player pauses on it (checked 2026-11-11).
 - **NYCSTM** CLV captures with EFM audio (`~/Downloads/rotter-samples`, 40 MHz `.lds`,
   D515 and LD-V4400 players): a colour programme mixed with black-and-white archive film,
   27 dB on the good copy, 13 dB on the rotted one.  Sync supported on 610 of 625 lines (the
@@ -283,7 +284,5 @@ standard.
 
 ## Still to check
 
-- The GGV1011's CAV behaviour in the player: picture stops and the P key share NTSC's code
-  but have not been exercised on a PAL disc.
 - The saturation spread on the bars (bright high, dark low) is differential gain; nothing
   in the decoder to adjust, but a disc with a known-good staircase would settle it.

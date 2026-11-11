@@ -16,7 +16,6 @@ Last revised 2026-11-11.
   and 62.5 MHz (NTSC/PAL/MUSE in either direction, 1-3 s per switch); the decoder box is not.
   Judge the "NO SIGNAL" pacing on a real disc change, and whether three agreeing chunks is the
   right count.
-- **PAL CAV picture stop** has not been checked on a PAL CAV disc.
 - **muse-16 (16.2 MHz baseband) input type** is legacy: keep it working for existing u16 files,
   no new formats or level work, remove when nothing needs it.
 - **Settings changed with keys do not carry to the next input** on a multi-file command line
@@ -93,3 +92,5 @@ Last revised 2026-11-11.
   (`--analog` keeps the analog track).
 - 2026-11-11: motion-gated temporal noise reduction on SD (`--nr off|low|high`, key 6, the
   menu's Picture page), off by default.
+- 2026-11-11: the PAL CAV picture stop checked on the PAL test disc: the player pauses on its stop
+  code as on NTSC.
