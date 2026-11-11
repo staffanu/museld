@@ -1073,7 +1073,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                         audio_track = AudioTrack::eEfm;
                         reader_controls.setAudioTrack(audio_track);
                         fallback_verify_until = state.field_count + c_efm_lock_fields;
-                        state.osd_text = "NO ANALOG";
+                        state.osd_text = "EFM AUDIO (NO ANALOG)";
                         log.info(eApplication | eAudio, "No analog audio carrier: switching to the EFM track (--analog keeps the analog track)");
                     }
                 } else if (audio_track != AudioTrack::eEfm) {
@@ -1085,7 +1085,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                     audio_fallback = false;
                     audio_track = AudioTrack::eDefault;
                     reader_controls.setAudioTrack(audio_track);
-                    state.osd_text = "NO EFM";
+                    state.osd_text = "ANALOG AUDIO (NO EFM)";
                     log.info(eApplication | eAudio, "No EFM track either: back to the analog track");
                 }
             }
