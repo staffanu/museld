@@ -26,7 +26,7 @@ TextRenderer::TextRenderer(std::string const &executable_dir, VulkanManager &vul
                             musevk::VulkanUtil::loadSpirv(executable_dir, "render_text.comp"), musevk::Size(0)))),
   m_fill_rect_shader(std::shared_ptr<ComputeShader>(
           new ComputeShader(m_vulkan_manager,
-                            "fill_rect", std::vector<MemoryObjectType>{eImage}, sizeof(uint32_t) * 8, // spelt out for GCC
+                            "fill_rect", std::vector<MemoryObjectType>{eImage, eImage}, sizeof(uint32_t) * 8, // spelt out for GCC
                             musevk::VulkanUtil::loadSpirv(executable_dir, "fill_rect.comp"), musevk::Size(0)))) {
 }
 
@@ -41,9 +41,10 @@ void TextRenderer::fillRect(std::shared_ptr<VulkanImage> const &image, int x, in
                                    vk::PipelineStageFlagBits::eTopOfPipe,
                                    vk::PipelineStageFlagBits::eComputeShader,
                                    vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
+    // The image twice: read-only and write-only bindings (see the shader)
     auto current = m_fill_rect_shader->getBuffersForDescriptorSet(0);
-    if (current.size() != 1 || current[0] != image)
-        m_fill_rect_shader->updateBufferDescriptorsInSet(0, {image});
+    if (current.size() != 2 || current[0] != image)
+        m_fill_rect_shader->updateBufferDescriptorsInSet(0, {image, image});
     // The colour rides in the push constants as the bits of floats
     const std::vector<uint32_t> push_constants = {
             (uint32_t)x0, (uint32_t)y0, (uint32_t)(x1 - x0), (uint32_t)(y1 - y0),
@@ -51,6 +52,18 @@ void TextRenderer::fillRect(std::shared_ptr<VulkanImage> const &image, int x, in
             std::bit_cast<uint32_t>(blue), std::bit_cast<uint32_t>(alpha)};
     m_fill_rect_shader->updateWorkgroup(Size(x1 - x0, y1 - y0));
     command_buffer.enqueueComputeShader(m_fill_rect_shader, push_constants);
+}
+
+// The glyph of a byte: printable ASCII, the two arrows after it (c_arrow_up and
+// c_arrow_down), a space for anything else
+int TextRenderer::glyphIndex(unsigned char c) {
+    if (c >= c_font_codepoint_begin && c < c_font_codepoint_end)
+        return c - c_font_codepoint_begin;
+    if (c == (unsigned char)c_arrow_up[0])
+        return c_font_codepoint_end - c_font_codepoint_begin;
+    if (c == (unsigned char)c_arrow_down[0])
+        return c_font_codepoint_end - c_font_codepoint_begin + 1;
+    return 0;
 }
 
 void TextRenderer::drawText(std::shared_ptr<VulkanImage> const &image, int x, int y, std::string s, int scale, CommandBuffer &command_buffer) {
@@ -74,8 +87,8 @@ void TextRenderer::drawText(std::shared_ptr<VulkanImage> const &image, int x, in
     for (int i = 0; i < s.length(); i += 2) {
         const unsigned char c1 = (unsigned char)s[i];
         const unsigned char c2 = i + 1 < s.length() ? (unsigned char)s[i + 1] : ' ';
-        int glyph_index1 = c1 >= c_font_codepoint_begin && c1 < c_font_codepoint_end ? c1 - c_font_codepoint_begin : 0;
-        int glyph_index2 = c2 >= c_font_codepoint_begin && c2 < c_font_codepoint_end ? c2 - c_font_codepoint_begin : 0;
+        const int glyph_index1 = glyphIndex(c1);
+        const int glyph_index2 = glyphIndex(c2);
         uint32_t pair = (glyph_index1 << 8) | glyph_index2;
         if (i % 4 == 0)
             text_words[i / 4] = pair;
@@ -209,8 +222,8 @@ const std::vector<uint16_t> TextRenderer::c_font_definition = {
         0x0000, 0x0000, 0x0000, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0000, 0x0000, 0x0000, // 124 (|)
         0x0000, 0x3C00, 0x0600, 0x0300, 0x0300, 0x0300, 0x0300, 0x0300, 0x0300, 0x0300, 0x0180, 0x00E0, 0x00E0, 0x0180, 0x0300, 0x0300, 0x0300, 0x0300, 0x0300, 0x0300, 0x0300, 0x0600, 0x3C00, 0x0000, // 125 (})
         0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x3860, 0x6C60, 0xC6C0, 0xC380, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, // 126 (~)
-        // codepoint 127: an up arrow, 128: a down arrow (c_arrow_up, c_arrow_down); drawn here,
-        // not from the Spleen bdf file
+        // after the ASCII range: an up arrow and a down arrow (c_arrow_up, c_arrow_down);
+        // drawn here, not from the Spleen bdf file
         0x0000, 0x0000, 0x0600, 0x0F00, 0x1F80, 0x3FC0, 0x7FE0, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
         0x0000, 0x0000, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x0600, 0x7FE0, 0x3FC0, 0x1F80, 0x0F00, 0x0600, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
 };

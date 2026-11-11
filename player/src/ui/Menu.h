@@ -106,8 +106,11 @@ private:
     std::vector<std::unique_ptr<MenuPage>> m_pages;
     MenuPage *m_root = nullptr;      // the page open() shows; the first page when unset
     std::vector<MenuPage *> m_stack; // the open page last
+    void dispatchToEntry(const std::function<void(TextEntry &)> &call);
+
     std::unique_ptr<TextEntry> m_entry;
     bool m_end_entry = false;
+    bool m_in_entry_call = false;
     bool m_open = false;
     unsigned m_revision = 0;
 };

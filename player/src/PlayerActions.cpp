@@ -42,7 +42,10 @@ void seekOrPan(PlayerState &state, ReaderControls &reader, double seconds) {
                                              0.5 / state.zoom_factor, 1.0 - 0.5 / state.zoom_factor);
         return;
     }
-    reader.seek(seconds);
+    if (!reader.seek(seconds)) {
+        state.osd_text = "SEEK FAILED"; // a live input, or past the end of the file
+        return;
+    }
     // Keep the stream clock (subtitle fallback time base) in step.  The
     // input readers clamp backward seeks at the start of the input, so
     // clamp the clock the same way; stream_seconds goes negative when

@@ -487,6 +487,18 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   that cannot be played (the `exit(EXIT_FAILURE)` paths of `play_input`, now `InputError`,
   and a reader's exception) returns to the browser with the message in a bar along the
   bottom, until a key is pressed or 15 s pass, instead of ending the app (2026-11-10).
+  A review of the merged branch (2026-11-11) fixed: the address field's DONE closed the
+  menu from inside the entry's own callback, destroying the running `std::function`
+  (`Menu::close` now defers the entry's end to `dispatchToEntry`); a PC keyboard's space
+  bar reached the field twice, as text and as the on-screen select (the text event's space
+  is dropped); `fill_rect.comp` read and wrote one rgba32f image, the construct the A10X's
+  Metal refused for the subtitle shader (the frame is bound twice now); a web server's
+  index page was fetched on the main thread, up to 15 s of frozen picture (`Browser::poll`
+  applies a background fetch); the arrows of the menu were bytes 0x7f/0x80, and a UTF-8
+  continuation byte drew as the down arrow (0xfe/0xff now); `seekOrPan` dropped a refused
+  seek's result, moving the subtitle clock while the picture stayed; the parallel FLAC
+  reader's decoders had no bound on the decoded runs waiting for the reader, and a seek
+  into a frame that spans Ogg pages started its run on the continuation page, a frame late.
 - **Merged to master** (2026-11-10) after the picture regression suite was run against
   master's goldens on the Mac.  It found one bug: the demodulator's read-ahead made the
   player's first iterations return on the input timeout, and `--write` wrote the images

@@ -15,7 +15,10 @@ layout(push_constant) uniform PushConstants {
     float alpha;
 };
 
-layout(set = 0, binding = 0, rgba32f) uniform image2D frame_out_image;
+// The frame bound twice, read-only and write-only: a read-write rgba32f image is
+// not available on Metal GPU family 3 (the A10X), see render_subtitle.comp
+layout(set = 0, binding = 0, rgba32f) uniform readonly image2D frame_in_image;
+layout(set = 0, binding = 1, rgba32f) uniform writeonly image2D frame_out_image;
 
 void main() {
     uint x = gl_GlobalInvocationID.x;
@@ -23,6 +26,6 @@ void main() {
     if (x >= width || y >= height)
         return;
     const ivec2 at = ivec2(x + top_left_x, y + top_left_y);
-    const vec4 was = imageLoad(frame_out_image, at);
+    const vec4 was = imageLoad(frame_in_image, at);
     imageStore(frame_out_image, at, vec4(mix(was.rgb, vec3(red, green, blue), alpha), 1.0));
 }

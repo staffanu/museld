@@ -36,8 +36,8 @@
 // only known modulo 2 pi, and the two readings (as is, or plus the sample rate) are
 // both spikes the lowpass spreads into the picture, one dark and one bright; the
 // atan of the rotated product gives the one nearer the carrier, never further than
-// half the sample rate from it, which is what the unwrap_below threshold of the
-// earlier (atan, then subtract) form chose.  (ld-decode adds 2 pi to every negative
+// half the sample rate from it, which is what the unwrap threshold of the earlier
+// (atan, then subtract) form chose.  (ld-decode adds 2 pi to every negative
 // step, and its brightest specks come from the readings near zero.)  Replacing the wrapped sample by a
 // neighbour instead was tried and left half the hole: the phase it carried is
 // real.  A real dropout is noise with steps in both directions, and stays noise
@@ -54,7 +54,6 @@ layout(push_constant) uniform PushConstants {
     float carrier_rotation_im;
     float output_scale;
     float output_add;
-    float unwrap_below; // fm_out below this is a wrapped step and gets 2 pi added
 };
 
 layout(set = 0, binding = 0) buffer readonly filter_buffer {

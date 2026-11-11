@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <thread>
 #include "Browser.h"
 #include "SavedState.h"
 
@@ -120,8 +121,38 @@ void Browser::go(const std::string &location_of_item) {
 void Browser::showListing(const std::string &location_of_item) {
     const std::string location = location_of_item; // see go()
     m_location = DirectoryListing::withSlash(location);
-    const DirListing listing = DirectoryListing::list(m_location);
     m_listing_page->title = shortLocation(m_location, 60);
+    if (!DirectoryListing::isHttp(m_location)) {
+        m_fetch.reset(); // a fetch still under way is for a listing no longer shown
+        applyListing(DirectoryListing::list(m_location));
+        return;
+    }
+    // An index page takes up to 15 s from a slow or absent server (the client's
+    // timeouts), too long to freeze the picture for: fetched in the background,
+    // the page says so meanwhile, and poll() fills it in
+    m_fetch = std::make_shared<Fetch>();
+    m_fetch->location = m_location;
+    std::thread([fetch = m_fetch] {
+        fetch->result = DirectoryListing::list(fetch->location);
+        fetch->done.store(true, std::memory_order_release);
+    }).detach();
+    std::vector<MenuItem> items;
+    MenuItem wait;
+    wait.label = "Listing...";
+    items.push_back(std::move(wait));
+    m_menu.setItems(m_listing_page, std::move(items));
+    pushListingPage();
+}
+
+void Browser::poll() {
+    if (!m_fetch || !m_fetch->done.load(std::memory_order_acquire))
+        return;
+    const std::shared_ptr<Fetch> fetch = std::move(m_fetch);
+    if (fetch->location == m_location) // not navigated away from meanwhile
+        applyListing(fetch->result);
+}
+
+void Browser::applyListing(const DirListing &listing) {
     std::vector<MenuItem> items;
     if (!listing.error.empty()) {
         MenuItem error;
@@ -156,7 +187,11 @@ void Browser::showListing(const std::string &location_of_item) {
         }
     }
     m_menu.setItems(m_listing_page, std::move(items));
-    // From the Open page the listing is pushed; within a listing its items change
+    pushListingPage();
+}
+
+// From the Open page the listing is pushed; within a listing its items change
+void Browser::pushListingPage() {
     if (m_menu.currentPage() != m_listing_page)
         m_menu.pushPage(m_listing_page);
 }

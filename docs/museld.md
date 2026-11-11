@@ -445,7 +445,8 @@ The menu's Open page is a file browser: an address field, the directory the
 browser was last in, this computer's directories (not on the Apple TV), and the
 addresses opened recently.  It lists a directory on this machine or on a web
 server through the server's index page (Apache, nginx, Python's `http.server`
-and the like), directories first, with the sizes the listing gives; choosing a
+and the like; the page is fetched in the background, the picture keeps playing
+meanwhile), directories first, with the sizes the listing gives; choosing a
 file plays it, and the player comes back to the browser when the input ends,
 or at once with the reason when the file cannot be played (not found, not a
 capture museld recognizes, a stream that does not arrive).
@@ -453,7 +454,9 @@ The address field takes anything museld opens: a path, an `http://` location
 (a bare `host/path` gets the `http://`), or a `udp://` capture stream, which
 plays as it is.  On the Apple TV the field's on-screen keyboard is driven by
 the remote, select typing the key under the cursor and Menu deleting; a
-keyboard types straight into it, Return accepts and Escape cancels.
+keyboard types straight into it, Return accepts and Escape cancels (the space
+bar picks the on-screen key under the cursor, as a gamepad's select does; a
+space is typed with the on-screen SPACE key).
 
 `museld --browse` starts in the browser instead of with an input file; the Apple
 TV app always does, having no command line.  What the browser remembers -- the

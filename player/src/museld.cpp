@@ -953,6 +953,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 if (state.no_signal)
                     blitter.clear(*command_buffer, images); // black, not the last picture
                 state.last_cursor_string = osd.render(*command_buffer, images, state, decoder, window, text_renderer);
+                browser.poll(); // a web server's listing that has arrived
                 menu_overlay.render(*command_buffer, images, state, menu, text_renderer);
                 if (subtitle_primary_overlay)
                     subtitle_primary_overlay->render(*command_buffer, images, state, decoder,
@@ -1271,6 +1272,11 @@ static std::optional<std::string> browseForInput(Logger &log, const string &exec
                 FrameBlitter::displayPixelAspect(window, log), (int)swap_extent.width, (int)swap_extent.height});
         state.visible_x0 = geometry.src_x0; state.visible_y0 = geometry.src_y0;
         state.visible_x1 = geometry.src_x1; state.visible_y1 = geometry.src_y1;
+        browser.poll(); // a web server's listing that has arrived
+        if (export_to != nullptr && browser.listingPending()) {
+            SDL_Delay(16); // the scripted check wants the listing, not "Listing..."
+            continue;
+        }
         command_buffer->begin();
         blitter.clear(*command_buffer, images);
         menu_overlay.render(*command_buffer, images, state, menu, text_renderer);

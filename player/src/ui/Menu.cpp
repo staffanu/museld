@@ -62,10 +62,13 @@ void Menu::backspace() {
     }
 }
 
-void Menu::acceptEntry() {
-    if (!m_entry)
-        return;
-    m_entry->accept();
+// The entry's callbacks may end the entry (endTextEntry) or close the menu, and
+// the std::function running is the entry's own: it is destroyed here, once
+// the call has returned, never inside it
+void Menu::dispatchToEntry(const std::function<void(TextEntry &)> &call) {
+    m_in_entry_call = true;
+    call(*m_entry);
+    m_in_entry_call = false;
     if (m_end_entry) {
         m_entry.reset();
         m_end_entry = false;
@@ -73,15 +76,14 @@ void Menu::acceptEntry() {
     m_revision++;
 }
 
+void Menu::acceptEntry() {
+    if (m_entry)
+        dispatchToEntry([](TextEntry &entry) { entry.accept(); });
+}
+
 void Menu::cancelEntry() {
-    if (!m_entry)
-        return;
-    m_entry->cancel();
-    if (m_end_entry) {
-        m_entry.reset();
-        m_end_entry = false;
-    }
-    m_revision++;
+    if (m_entry)
+        dispatchToEntry([](TextEntry &entry) { entry.cancel(); });
 }
 
 void Menu::open() {
@@ -97,8 +99,10 @@ void Menu::open() {
 void Menu::close() {
     m_open = false;
     m_stack.clear();
-    m_entry.reset();
-    m_end_entry = false;
+    if (m_in_entry_call)
+        m_end_entry = true; // the entry's callback called us: dispatchToEntry ends it
+    else
+        m_entry.reset();
     m_revision++;
 }
 
@@ -117,12 +121,7 @@ bool Menu::handleKey(MenuKey key) {
     if (m_entry) {
         static const TextEntry::Key keys[] = {TextEntry::Key::eUp, TextEntry::Key::eDown, TextEntry::Key::eLeft,
                                              TextEntry::Key::eRight, TextEntry::Key::eSelect, TextEntry::Key::eBack};
-        m_entry->handleKey(keys[(int)key]);
-        if (m_end_entry) {
-            m_entry.reset();
-            m_end_entry = false;
-        }
-        m_revision++;
+        dispatchToEntry([key](TextEntry &entry) { entry.handleKey(keys[(int)key]); });
         return true;
     }
     const auto items = enabledItems(*page);

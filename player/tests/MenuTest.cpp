@@ -109,3 +109,33 @@ TEST_CASE("The root is the page setRoot names, whatever was made first", "[Menu]
     REQUIRE(menu.title() == "ROOT");
     REQUIRE(menu.atRoot());
 }
+
+TEST_CASE("A text entry whose callback closes the menu is destroyed after the call, not inside it", "[Menu]") {
+    // The browser's address field: DONE opens the file, and opening closes the
+    // menu, from inside the entry's own on_done
+    Fixture f;
+    f.menu.open();
+    std::string done_with;
+    f.menu.startTextEntry(std::make_unique<TextEntry>(
+            "ADDRESS", "x",
+            [&](const std::string &text) {
+                f.menu.endTextEntry();
+                done_with = text;
+                f.menu.close();
+                done_with += "/closed"; // still inside the callback: its captures must be alive
+            },
+            [&] { f.menu.endTextEntry(); }));
+    REQUIRE(f.menu.textEntry() != nullptr);
+    SECTION("from a keyboard's Return") {
+        f.menu.acceptEntry();
+    }
+    SECTION("from the on-screen DONE key") {
+        f.menu.handleKey(MenuKey::eUp); // the last row: SHIFT SPACE DELETE CANCEL DONE
+        for (int i = 0; i < 4; i++)
+            f.menu.handleKey(MenuKey::eRight);
+        f.menu.handleKey(MenuKey::eSelect);
+    }
+    REQUIRE(done_with == "x/closed");
+    REQUIRE(!f.menu.isOpen());
+    REQUIRE(f.menu.textEntry() == nullptr);
+}

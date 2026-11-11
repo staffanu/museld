@@ -462,9 +462,13 @@ void ParallelOggFlacReader::decode(int which) {
     setThreadRole(ThreadRole::eInput, "flac-decode");
     (void)which;
     std::unique_ptr<RunDecoder> decoder;
+    // Decoded runs waiting for readFloats, counting those being decoded: the
+    // decoders would otherwise run ahead of a real-time reader without bound
+    // (a 2 MiB run of 10-bit FLAC is 30 MB of samples)
+    const size_t max_decoded = (size_t)m_threads * 2 + 2;
     std::unique_lock lock(m_mutex);
     while (!m_stop) {
-        if (m_runs.empty() || !m_failure.empty()) {
+        if (m_runs.empty() || !m_failure.empty() || m_decoded.size() + (size_t)m_decoding >= max_decoded) {
             m_cv.wait(lock);
             continue;
         }
@@ -549,8 +553,9 @@ int64_t ParallelOggFlacReader::findRunStartFor(int64_t target_sample) {
         if (info.fresh)
             last_fresh = p;
         if (info.granule > target_sample) {
-            // The target's frame ends on this page: it began on the last fresh page
-            start = last_fresh >= 0 ? last_fresh : p;
+            // The target's frame ends on this page: it began on the last fresh page,
+            // which may lie before the walk's start
+            start = last_fresh >= 0 ? last_fresh : freshPageBefore(p);
             break;
         }
         p += (int64_t)info.length;
@@ -558,6 +563,32 @@ int64_t ParallelOggFlacReader::findRunStartFor(int64_t target_sample) {
     if (start < 0)
         start = last_fresh >= 0 ? last_fresh : lo; // the target is in the last page or beyond
     return start;
+}
+
+// The last page before the page at `p` that begins a packet, so that a run
+// started there decodes the frame continuing onto p (libogg drops the partial
+// packet of a run that starts on a continuation page, and playback would begin
+// a frame late).  Walks forward from a page boundary found a page's worth
+// earlier, further back if that stretch held no fresh page.  `p` itself when
+// none is found.
+int64_t ParallelOggFlacReader::freshPageBefore(int64_t p) {
+    int64_t back = p;
+    while (back > m_data_start) {
+        back = std::max(m_data_start, back - (int64_t)c_max_page);
+        int64_t q = pageStartAfter(back, p), last_fresh = -1;
+        std::vector<uint8_t> buf;
+        while (q >= 0 && q < p) {
+            PageInfo info;
+            if (!readPagesFrom(q, buf, c_page_header + 255) || !parsePage(buf.data(), buf.size(), info))
+                break;
+            if (info.fresh)
+                last_fresh = q;
+            q += (int64_t)info.length;
+        }
+        if (last_fresh >= 0)
+            return last_fresh;
+    }
+    return p;
 }
 
 bool ParallelOggFlacReader::seek(int64_t no_samples) {

@@ -257,10 +257,13 @@ struct HttpByteSource::Impl {
             m_cv.wait(lock);
             m_stats_wait_us += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t_wait).count();
         }
+        Chunk &chunk = current->second;
+        const int64_t within = m_pos - chunk.offset;
+        const size_t n = std::min(len, (size_t)(chunk.end() - m_pos));
         if (m_log) {
             if (m_stats_bytes == 0)
                 m_stats_start = std::chrono::steady_clock::now();
-            m_stats_bytes += (int64_t)len;
+            m_stats_bytes += (int64_t)n;
             if (m_stats_bytes >= (int64_t)256 << 20) {
                 const double elapsed_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - m_stats_start).count();
                 m_log->info(ePerformance, std::format("http input: {:.1f} MB/s consumed, the reader waited for the network {:.0f}% of the time",
@@ -269,9 +272,6 @@ struct HttpByteSource::Impl {
                 m_stats_wait_us = 0;
             }
         }
-        Chunk &chunk = current->second;
-        const int64_t within = m_pos - chunk.offset;
-        const size_t n = std::min(len, (size_t)(chunk.end() - m_pos));
         memcpy(buf, chunk.data.data() + within, n);
         m_pos += (int64_t)n;
         if (m_pos == chunk.end()) {

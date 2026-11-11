@@ -26,7 +26,7 @@ int16_t sampleAt(int64_t i) {
     return (int16_t)(noise + (i % 777) * 8 - 3000);
 }
 
-std::string encodeOgg(int64_t n) {
+std::string encodeOgg(int64_t n, int blocksize = c_block) {
     static int counter = 0;
     const auto path = (std::filesystem::temp_directory_path()
                        / std::format("museld-pogg-test-{}-{}.ldf", ::getpid(), counter++)).string();
@@ -34,12 +34,13 @@ std::string encodeOgg(int64_t n) {
     enc.set_channels(1);
     enc.set_bits_per_sample(16);
     enc.set_sample_rate(40000);
-    enc.set_blocksize(c_block);
+    enc.set_blocksize((unsigned)blocksize);
+    enc.set_streamable_subset(false); // the subset caps the block size at 4608 for 40 kHz
     enc.set_ogg_serial_number(4321);
     REQUIRE(enc.init_ogg(path.c_str()) == FLAC__STREAM_ENCODER_INIT_STATUS_OK);
-    std::vector<FLAC__int32> buf(c_block);
+    std::vector<FLAC__int32> buf((size_t)blocksize);
     for (int64_t i = 0; i < n;) {
-        const int count = (int)std::min<int64_t>(c_block, n - i);
+        const int count = (int)std::min<int64_t>(blocksize, n - i);
         for (int k = 0; k < count; k++)
             buf[k] = sampleAt(i + k);
         REQUIRE(enc.process_interleaved(buf.data(), count));
@@ -150,5 +151,25 @@ TEST_CASE("A seek while runs are in flight does not deliver stale samples", "[Pa
         const int64_t target = std::clamp<int64_t>(at + hop, 0, n - 2 * block);
         REQUIRE(reader.seek(target - at));
         at = target;
+    }
+}
+
+TEST_CASE("Seeks into frames that span pages land on the sample they name", "[ParallelOggFlacReader]") {
+    // Frames of 32768 samples are 60 KB packets, longer than an Ogg page can
+    // hold, so most pages continue a packet from the page before: the run of
+    // a seek has to start on the page where the target's frame begins, not on
+    // the continuation page that ends it (libogg drops a partial first packet,
+    // and playback would begin a frame late)
+    constexpr int64_t n = 2'000'000;
+    constexpr uint32_t block = 10'000;
+    TempFile file(encodeOgg(n, 32768));
+    ParallelOggFlacReader reader(openByteSource(file.path), block, 2);
+    reader.initialize();
+    int64_t at = 0;
+    for (int round = 0; round < 60; round++) {
+        const int64_t target = ((int64_t)round * 1'234'567 + 5'000) % (n - 2 * block);
+        REQUIRE(reader.seek(target - at));
+        at = target;
+        expectBlock(reader, at, block); at += block;
     }
 }

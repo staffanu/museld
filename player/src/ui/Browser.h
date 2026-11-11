@@ -4,7 +4,9 @@
 #ifndef MUSELD_BROWSER_H
 #define MUSELD_BROWSER_H
 
+#include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 #include "DirectoryListing.h"
 #include "Menu.h"
@@ -25,6 +27,10 @@ public:
     MenuPage *openPage() const { return m_open_page; }
     // Lists a directory (pushing the listing page)
     void browse(const std::string &location) { showListing(location); }
+    // A web server's listing is fetched in the background: this applies it
+    // once it has arrived.  Call it every frame while the menu is up.
+    void poll();
+    bool listingPending() const { return m_fetch != nullptr; }
 
     // An address as the user typed it, made into a location: a bare host or
     // host/path gets http://, ~ is the home directory
@@ -35,6 +41,8 @@ private:
     void enterAddress();
     void go(const std::string &location);
     void showListing(const std::string &location);
+    void applyListing(const DirListing &listing);
+    void pushListingPage();
 
     Menu &m_menu;
     SavedState &m_state;
@@ -43,6 +51,14 @@ private:
     MenuPage *m_open_page;
     MenuPage *m_listing_page;
     std::string m_location;
+    // A fetch of an index page under way, on a thread of its own that also
+    // owns this (detached: a fetch that is no longer wanted finishes alone)
+    struct Fetch {
+        std::string location;
+        DirListing result;
+        std::atomic<bool> done{false};
+    };
+    std::shared_ptr<Fetch> m_fetch;
 };
 
 #endif //MUSELD_BROWSER_H

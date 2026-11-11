@@ -9,6 +9,7 @@
 #include "ui/Menu.h"
 
 #include <algorithm>
+#include <cstring>
 #include <format>
 
 #include <SDL3/SDL.h>
@@ -119,8 +120,12 @@ bool InputController::poll(SDL_Window *window,
                 break;
             }
             case SDL_EVENT_TEXT_INPUT:
-                // A keyboard typing into the menu's text entry (the address field)
-                if (m_menu != nullptr && m_menu->isOpen() && m_menu->textEntry() != nullptr)
+                // A keyboard typing into the menu's text entry (the address field).
+                // Not a space: the space bar picks the key under the cursor on the
+                // on-screen keyboard (below, as a gamepad's select does), and the
+                // keyboard's SPACE key there types one
+                if (m_menu != nullptr && m_menu->isOpen() && m_menu->textEntry() != nullptr
+                    && strcmp(event.text.text, " ") != 0)
                     m_menu->type(event.text.text);
                 break;
             // Gamepads deliver button events only once opened

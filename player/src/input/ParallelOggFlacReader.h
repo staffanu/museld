@@ -69,6 +69,7 @@ private:
     bool readPagesFrom(int64_t offset, std::vector<uint8_t> &buf, size_t wanted);
     int64_t pageStartAfter(int64_t offset, int64_t limit);
     int64_t findRunStartFor(int64_t target_sample);
+    int64_t freshPageBefore(int64_t page_offset);
     void parkScanner(std::unique_lock<std::mutex> &lock);
     void unparkScanner();
 
