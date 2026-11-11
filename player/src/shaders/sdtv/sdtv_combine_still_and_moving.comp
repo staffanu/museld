@@ -106,17 +106,29 @@ float16_t diagonalMismatch(uint n0, uint n1, int col, int d) {
          + abs(currentFieldY(n0, col - d + 1) - currentFieldY(n1, col + d + 1));
 }
 
+// Whether the three pixels of row i around col hold an edge: the match of
+// a diagonal has to run across one on both rows, else it is a match of two
+// flat stretches, which is what the end of a horizontal stroke offers (the
+// row above holds the stroke, the row below background beside it) and
+// which a shift would cut short
+bool windowHasEdge(uint i, int col) {
+    const float16_t threshold = 0.08hf;
+    float16_t a = currentFieldY(i, col - 1), b = currentFieldY(i, col), c = currentFieldY(i, col + 1);
+    return max(max(a, b), c) - min(min(a, b), c) > threshold;
+}
+
 // The missing row interpolated from the current field's rows above (n0) and
 // below (n1) along the direction in which they match best: the average of
 // the pixel d to the left on the row above and d to the right on the row
 // below, d chosen by a greedy search out from vertical (yadif's), which a
 // diagonal edge rewards and a texture or noise does not.  The vertical
 // average keeps the tie: a direction has to beat it by a margin above the
-// noise, else a diagonal of the noise alone would steer thin lines about.
-// A directional result is held within the range of the six nearest pixels
-// of the two rows, which catches a match across a stroke thinner than the
-// line pitch (the dot of an i joined to a diagonal).  Shifts beyond two
-// pixels found more such mismatches than diagonals on a text card.
+// noise, else a diagonal of the noise alone would steer thin lines about,
+// and its match has to cross an edge on both rows.  A directional result
+// is held within the range of the six nearest pixels of the two rows, which
+// catches a match across a stroke thinner than the line pitch (the dot of
+// an i joined to a diagonal).  Shifts beyond two pixels found more such
+// mismatches than diagonals on a text card.
 f16vec3 directionalBob(uint n0, uint n1, uint col) {
     const float16_t margin = 0.06hf; // three pixels of 2 IRE
     const int c = int(col);
@@ -125,7 +137,7 @@ f16vec3 directionalBob(uint n0, uint n1, uint col) {
     for (int sign = -1; sign <= 1; sign += 2) {
         for (int d = sign; abs(d) <= 2; d += sign) {
             float16_t score = diagonalMismatch(n0, n1, c, d);
-            if (score >= best)
+            if (score >= best || !windowHasEdge(n0, c - d) || !windowHasEdge(n1, c + d))
                 break;
             best = score;
             best_d = d;

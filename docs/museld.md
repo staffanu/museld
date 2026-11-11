@@ -312,10 +312,11 @@ parts are interpolated from the current field (keys 1/2/3 select adaptive/bob/we
 interpolation follows the local edge: for each missing pixel the rows above and below are
 compared along the vertical and along diagonals up to two pixels of shift either way, and the
 pair that matches best is averaged, so a diagonal edge in motion comes out as a line rather
-than a staircase. A diagonal has to beat the vertical by a margin above the noise, and the
-result is held within the range of the nearest pixels of the two rows, which keeps noise and
-strokes thinner than the line pitch from steering it; `--no-edge-directed` is the plain
-vertical average for comparison.
+than a staircase. A diagonal has to beat the vertical by a margin above the noise, its match
+has to run across an edge on both rows (the end of a horizontal stroke offers a match of two
+flat stretches, which would cut the stroke short), and the result is held within the range of
+the nearest pixels of the two rows, which keeps noise and strokes thinner than the line pitch
+from steering it; `--no-edge-directed` is the plain vertical average for comparison.
 
 **NTSC reverse telecine (film mode)**: film-sourced discs carry 24 fps film as a 3:2 field
 cadence, where one field in five repeats the same-parity field of the previous frame. The decoder
