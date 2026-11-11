@@ -43,6 +43,8 @@ void SavedState::load() {
                     else if (name == "audio") settings.audio = v;
                     else if (name == "subtitle") settings.subtitle = v;
                     else if (name == "subtitle2") settings.subtitle2 = v;
+                    else if (name == "black_level") settings.black_level = v;
+                    else if (name == "cx") settings.cx = v;
                 }
                 if (end == std::string::npos) break;
                 at = end + 1;
@@ -67,7 +69,8 @@ bool SavedState::save() const {
         out << "last_directory=" << m_last_directory << "\n";
     for (const auto &[address, d] : m_discs)
         out << "disc=" << address << "\taspect=" << d.aspect << "\toverscan=" << d.overscan << "\taudio=" << d.audio
-            << "\tsubtitle=" << d.subtitle << "\tsubtitle2=" << d.subtitle2 << "\n";
+            << "\tsubtitle=" << d.subtitle << "\tsubtitle2=" << d.subtitle2
+            << "\tblack_level=" << d.black_level << "\tcx=" << d.cx << "\n";
     return (bool)out;
 }
 

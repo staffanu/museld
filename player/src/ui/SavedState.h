@@ -24,6 +24,8 @@ struct DiscSettings {
     std::string audio;     // default, efm, ac3
     std::string subtitle;  // a track's label, "off", or empty for the default choice
     std::string subtitle2;
+    std::string black_level; // auto, m, j (NTSC)
+    std::string cx;          // auto, off, on (the analog audio's CX expansion)
     bool operator==(const DiscSettings &) const = default;
 };
 

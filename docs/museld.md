@@ -491,11 +491,12 @@ recent addresses and the last directory -- is written by the player to
 `state.txt` in its per-user preferences directory (the application container
 on tvOS; `MUSELD_STATE_FILE` names another file).  The same file remembers, per
 capture, what it was last played with where that belongs to the disc: the aspect
-mode, the overscan, the audio track and the subtitle tracks chosen (or turned
-off).  They come back when the capture is opened again, from the browser or the
-command line, over the command line's defaults.  Full screen and the decode
-toggles (field interpolation, 3D comb, film mode, black level, dropouts, the
-equaliser) are not remembered and start from their defaults every time.
+mode, the overscan, the audio track, the subtitle tracks chosen (or turned
+off), the black level mode and the CX mode.  They come back when the capture is
+opened again, from the browser or the command line, over the command line's
+defaults.  Full screen and the other decode toggles (field interpolation, 3D
+comb, film mode, noise reduction, dropouts, the equaliser) are not remembered
+and start from their defaults every time.
 `--no-state` leaves all of it out of a run: nothing remembered is applied and
 nothing is recorded.
 

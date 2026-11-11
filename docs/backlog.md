@@ -19,8 +19,8 @@ Last revised 2026-11-11.
 - **muse-16 (16.2 MHz baseband) input type** is legacy: keep it working for existing u16 files,
   no new formats or level work, remove when nothing needs it.
 - **Settings changed with keys do not carry to the next input** on a multi-file command line
-  (tint, black level, audio track, subtitle track, CX).  Options do.  A per-capture sidecar
-  (below) would also cover this.
+  (tint; black level, audio track, subtitle track and CX are remembered per disc instead).
+  Options do.  A per-capture sidecar (below) would also cover this.
 
 ## Picture quality
 
@@ -67,7 +67,9 @@ Last revised 2026-11-11.
 ## Functionality
 
 - **Per-capture remembered settings:** a sidecar file next to the input, written on quit and
-  read on open (tint, black level, aspect, overscan, audio track, subtitle track, CX).
+  read on open, for what the state file remembers (aspect, overscan, audio track, subtitle
+  tracks, black level, CX) plus tint, which first needs to become a live setting (it is set at
+  the decoder's construction, from `--tint` only).
 - **Player-like navigation:** frame search by CAV frame number and time search by CLV time code
   with numeric entry (the chapter probe infrastructure does the hard part), step backwards,
   slow motion, fast scan with picture.
@@ -92,5 +94,6 @@ Last revised 2026-11-11.
   menu's Picture page), off by default.
 - 2026-11-11: the PAL CAV picture stop checked on the PAL test disc: the player pauses on its stop
   code as on NTSC.
+- 2026-11-11: the black level and CX modes remembered per disc with the other disc settings.
 - 2026-11-11: edge-directed interpolation of the moving parts on SD (`--no-edge-directed` for the
   vertical average).

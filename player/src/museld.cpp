@@ -397,9 +397,10 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         state.full_image = initial_full_image;
         state.overscan = initial_overscan;
         // What this disc was last played with, over the command line's defaults:
-        // the aspect, the overscan and the audio track belong to the disc (the
-        // subtitle choice below, once the tracks exist); the decode toggles and
-        // full screen do not, and start from their defaults every time
+        // the aspect, the overscan, the audio track, the black level and the CX
+        // mode belong to the disc (the subtitle choice below, once the tracks
+        // exist); the other decode toggles and full screen do not, and start
+        // from their defaults every time
         const std::optional<DiscSettings> remembered = saved_state.discSettings(input_name);
         if (remembered) {
             static const std::pair<const char *, AspectMode> aspects[] = {
@@ -422,9 +423,16 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 audio_track = track;
                 reader_controls.setAudioTrack(audio_track);
             }
-            log.info(eApplication, std::format("Remembered for this disc: aspect {}, overscan {}, audio {}, subtitles {} / {}",
+            if (remembered->black_level == "auto") state.black_level_mode = Decoder::BlackLevelMode::eAuto;
+            else if (remembered->black_level == "m") state.black_level_mode = Decoder::BlackLevelMode::eM;
+            else if (remembered->black_level == "j") state.black_level_mode = Decoder::BlackLevelMode::eJ;
+            if (remembered->cx == "auto") state.analog_cx_mode = Decoder::CxMode::eAuto;
+            else if (remembered->cx == "off") state.analog_cx_mode = Decoder::CxMode::eOff;
+            else if (remembered->cx == "on") state.analog_cx_mode = Decoder::CxMode::eOn;
+            log.info(eApplication, std::format("Remembered for this disc: aspect {}, overscan {}, audio {}, subtitles {} / {}, black level {}, CX {}",
                                                remembered->aspect, remembered->overscan, remembered->audio,
-                                               remembered->subtitle, remembered->subtitle2));
+                                               remembered->subtitle, remembered->subtitle2,
+                                               remembered->black_level, remembered->cx));
         }
 
         OsdOverlay osd;
@@ -1158,6 +1166,10 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 now.subtitle = slot_label(state.subtitle_primary);
                 now.subtitle2 = slot_label(state.subtitle_secondary);
             }
+            now.black_level = state.black_level_mode == Decoder::BlackLevelMode::eM ? "m"
+                            : state.black_level_mode == Decoder::BlackLevelMode::eJ ? "j" : "auto";
+            now.cx = state.analog_cx_mode == Decoder::CxMode::eOff ? "off"
+                   : state.analog_cx_mode == Decoder::CxMode::eOn ? "on" : "auto";
             if (!input_name.empty() && !inputIsLive(input_name) && saved_state.discSettings(input_name) != now)
                 saved_state.setDiscSettings(input_name, now);
         }

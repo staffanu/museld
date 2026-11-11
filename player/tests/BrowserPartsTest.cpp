@@ -172,9 +172,9 @@ TEST_CASE("The saved state remembers what a disc was played with", "[Browser]") 
     {
         SavedState state(path);
         REQUIRE(!state.discSettings("http://nas/a.s8"));
-        state.setDiscSettings("http://nas/a.s8", DiscSettings{"zoom", "0.05", "efm", "FILE: a.srt", "off"});
-        state.setDiscSettings("/local/b.lds", DiscSettings{"normal", "full", "ac3", "", ""});
-        state.setDiscSettings("http://nas/a.s8", DiscSettings{"squeeze", "0", "default", "", ""}); // replaces
+        state.setDiscSettings("http://nas/a.s8", DiscSettings{"zoom", "0.05", "efm", "FILE: a.srt", "off", "j", "on"});
+        state.setDiscSettings("/local/b.lds", DiscSettings{"normal", "full", "ac3", "", "", "auto", "off"});
+        state.setDiscSettings("http://nas/a.s8", DiscSettings{"squeeze", "0", "default", "", "", "m", "auto"}); // replaces
     }
     {
         SavedState state(path);
@@ -183,9 +183,11 @@ TEST_CASE("The saved state remembers what a disc was played with", "[Browser]") 
         CHECK(a->aspect == "squeeze");
         CHECK(a->overscan == "0");
         CHECK(a->audio == "default");
+        CHECK(a->black_level == "m");
+        CHECK(a->cx == "auto");
         const auto b = state.discSettings("/local/b.lds");
         REQUIRE(b);
-        CHECK(*b == DiscSettings{"normal", "full", "ac3", "", ""});
+        CHECK(*b == DiscSettings{"normal", "full", "ac3", "", "", "auto", "off"});
         CHECK(!state.discSettings("nothing"));
     }
     std::filesystem::remove(path);
