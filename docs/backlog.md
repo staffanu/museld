@@ -19,8 +19,11 @@ Last revised 2026-11-11.
 - **muse-16 (16.2 MHz baseband) input type** is legacy: keep it working for existing u16 files,
   no new formats or level work, remove when nothing needs it.
 - **Settings changed with keys do not carry to the next input** on a multi-file command line
-  (tint; black level, audio track, subtitle track and CX are remembered per disc instead).
-  Options do.  A per-capture sidecar (below) would also cover this.
+  (tint, black level, audio track, subtitle track, CX).  Options do.  The per-disc memory does
+  not cover it either: it brings a setting back for the same capture, and the next input is
+  another file, usually the disc's other side.  A per-capture sidecar (below) would not cover
+  it either, for the same reason; what would is carrying the player state from one input to
+  the next within a run where the inputs decode alike.
 
 ## Picture quality
 
