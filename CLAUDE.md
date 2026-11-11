@@ -194,7 +194,7 @@ first use, 1.5 GB) with lossless `--write` and compares every frame, the audio, 
 and the probe verdict against the goldens in `tests/regression/golden/`. Output is bit-exact run
 to run on one machine, so PASS means nothing changed; DIFF reports per-frame PSNR against the
 golden render. Run it after any change to the decode (shaders, timebase, dropout, audio), and
-`run --accept --upload madeye.org:/nas/video/LD-Captures/public/museld-testdata/golden` to
+`run --accept --upload multivac.madeye.org:/nas/video/LD-Captures/public/museld-testdata/golden` to
 re-record the goldens of an intended change, committing the JSON with the change. The goldens
 were recorded on the M2 Mac (2026-11-10): a run there passes bit-exact, another GPU shows DIFFs
 around 45-60 dB. The suite also catches `--write` writing on an iteration without a decoded

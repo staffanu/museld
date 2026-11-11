@@ -70,7 +70,7 @@ A change that is meant to alter the picture is accepted by re-recording:
 
 ```
 tests/regression/regress.py run --accept [clips...] [--stage ...] \
-    --upload madeye.org:/nas/video/LD-Captures/public/museld-testdata/golden
+    --upload multivac.madeye.org:/nas/video/LD-Captures/public/museld-testdata/golden
 ```
 
 This writes the JSON files (commit them with the change that caused the difference, so
