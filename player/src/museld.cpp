@@ -624,6 +624,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         // not advance the stream (a pause, an input timeout).
         auto pace_origin = chrono::steady_clock::now();
         int64_t paced_fields = 0;
+        int fallback_verify_until = -1; // the field count by which a provisional switch to EFM must have locked
 
         auto make_controls = [&](bool redo) {
             return Decoder::DecodeControls{
@@ -1057,17 +1058,35 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 break;
             // A disc without analog audio (a digital-only PAL disc) plays its EFM
             // track: once, when the analog demodulator has heard no carrier for a
-            // while, and only while no track was chosen by hand or remembered
+            // while, and only while no track was chosen by hand or remembered.
+            // The switch is provisional until the EFM decoder locks: a capture
+            // that starts before the player has its carriers up (the NTSC test
+            // disc's first second) would otherwise be left on a track the disc
+            // does not have, so without a lock in time the analog track is back
             if (audio_fallback && reader_controls.analogSilentSeconds) {
-                constexpr double c_analog_fallback_seconds = 1.0;
-                if (audio_track != AudioTrack::eDefault) {
+                constexpr double c_analog_fallback_seconds = 2.0;
+                constexpr int c_efm_lock_fields = 150; // 2.5 s to find the EFM track after the switch
+                if (audio_track != AudioTrack::eDefault && fallback_verify_until < 0) {
+                    audio_fallback = false; // chosen by hand or remembered
+                } else if (fallback_verify_until < 0) {
+                    if (reader_controls.analogSilentSeconds() >= c_analog_fallback_seconds) {
+                        audio_track = AudioTrack::eEfm;
+                        reader_controls.setAudioTrack(audio_track);
+                        fallback_verify_until = state.field_count + c_efm_lock_fields;
+                        state.osd_text = "EFM AUDIO (NO ANALOG CARRIER)";
+                        log.info(eApplication | eAudio, "No analog audio carrier: switching to the EFM track (--analog keeps the analog track)");
+                    }
+                } else if (audio_track != AudioTrack::eEfm) {
+                    audio_fallback = false; // changed by hand meanwhile
+                } else if (state.last_decoded.efm_locked.value_or(false)) {
+                    audio_fallback = false; // the EFM track is there: the switch stands
+                    log.info(eApplication | eAudio, "EFM track locked: the switch stands");
+                } else if (state.field_count >= fallback_verify_until) {
                     audio_fallback = false;
-                } else if (reader_controls.analogSilentSeconds() >= c_analog_fallback_seconds) {
-                    audio_fallback = false;
-                    audio_track = AudioTrack::eEfm;
+                    audio_track = AudioTrack::eDefault;
                     reader_controls.setAudioTrack(audio_track);
-                    state.osd_text = "EFM AUDIO (NO ANALOG CARRIER)";
-                    log.info(eApplication | eAudio, "No analog audio carrier: switching to the EFM track (--analog keeps the analog track)");
+                    state.osd_text = "ANALOG AUDIO (NO EFM TRACK)";
+                    log.info(eApplication | eAudio, "No EFM track either: back to the analog track");
                 }
             }
             if (open_next) {

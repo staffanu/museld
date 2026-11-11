@@ -117,6 +117,10 @@ public:
         // Black level setting and the measured picture black, for the same
         // overlay; empty for MUSE
         std::string level_status;
+        // Whether the EFM decoder is locked to frame syncs, on the fields
+        // where the EFM track was decoded (SDTV): the automatic fallback from
+        // a silent analog track checks that the EFM track exists at all
+        std::optional<bool> efm_locked;
     };
 
     Decoder(const Decoder&) = delete;

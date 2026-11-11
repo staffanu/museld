@@ -36,6 +36,8 @@ public:
     // during a pause of at least 2 s, so the CIRC delay between a frame's control byte and its
     // audio samples needs no compensation.  A failed Q CRC leaves the last good value in place.
     [[nodiscard]] bool preEmphasis() const { return m_subcode_q_use == Audio2ChannelWithPreEmphasis; }
+    // Frame syncs are arriving where expected: there is an EFM signal
+    [[nodiscard]] bool locked() const { return m_locked; }
 
     // Instrumentation: write one record per EFM symbol slot to FILE, for
     // scoring the symbol decisions against a known stream offline.  Each

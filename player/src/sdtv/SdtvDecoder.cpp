@@ -134,6 +134,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
     out.audio_sample_count = 0;
     out.ac3_frames.clear();
     out.decoded = false;
+    out.efm_locked.reset();
     out.cc_bytes.reset();
 
     if (redo_last_field) // undo the field advance from the previous call
@@ -721,6 +722,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         };
         if (audio_track == AudioTrack::eEfm && input_block != nullptr) {
             auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
+            out.efm_locked = m_efm_decoder.locked();
             if (detectDtsBitstream(raw)) {
                 // A DTS disc's EFM track is a bitstream, not PCM: concealment,
                 // de-emphasis and pop detection would corrupt it (and playing
