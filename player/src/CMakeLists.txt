@@ -327,6 +327,7 @@ if(BUILD_MUSE)
         ui/Browser.cpp ui/Browser.h
         subtitles/Eia608Decoder.cpp subtitles/Eia608Decoder.h
         subtitles/SrtParser.cpp subtitles/SrtParser.h
+        subtitles/SubtitleDiscovery.cpp subtitles/SubtitleDiscovery.h
         subtitles/SubtitleFont.cpp subtitles/SubtitleFont.h
         subtitles/SubtitleOverlay.cpp subtitles/SubtitleOverlay.h
         FrameBlitter.cpp FrameBlitter.h

@@ -62,6 +62,8 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
                      smoother, finalized curve) shared by the SDTV and MUSE frame readers
     musevk/        — Vulkan abstraction layer (buffers, images, command pools, compute)
     subtitles/     — SRT parser, stb_truetype-based glyph atlas, GPU subtitle overlay,
+                     SubtitleDiscovery (the .srt files beside an input, in its directory or
+                     on its web server's index page; always looked for on tvOS),
                      EIA-608 closed caption decoder (live "CC" track on NTSC discs,
                      line 21 sliced in sdtv/SdtvFrame; --cc-write saves <input>.CC.srt)
     ocr/           — Live subtitle OCR + translation (PP-OCR on ONNX Runtime, no OpenCV):
@@ -196,7 +198,7 @@ around 45-60 dB. The suite also catches `--write` writing on an iteration withou
 field (zero planes, green frames), which shows as frames shifted by +N and an audio residual.
 
 Tests are only built when `-DBUILD_TESTING=ON` is passed. They are in `player/tests/`
-(`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`, `FilterSimdParityTest.cpp`, `InputProbeTest.cpp`,
+(`ReedSolomonTest.cpp`, `BchDecoderTest.cpp`, `FilterSimdParityTest.cpp`, `InputProbeTest.cpp`, `SubtitleDiscoveryTest.cpp`,
 `NtscCadenceTrackerTest.cpp`, `PalCadenceTrackerTest.cpp`, `PrefetchingInputReaderTest.cpp`, `SrtParserTest.cpp`,
 `DisplayGeometryTest.cpp`). On macOS
 the Homebrew Catch2 is not ASan-instrumented, so run them with

@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <climits>
+#include <cmath>
+#include <format>
 #include <optional>
 
 #include "Decoder.h"
@@ -87,13 +89,26 @@ void SubtitleOverlay::render(musevk::CommandBuffer &command_buffer,
     if (state.last_decoded.disc_info)
         t_opt = state.last_decoded.disc_info->playbackTimeSeconds();
     if (t_opt) {
-        m_disc_time_seen = true;
+        if (!m_disc_time_seen) {
+            m_disc_time_seen = true;
+            const int seconds = static_cast<int>(*t_opt);
+            m_log.info(eApplication, std::format(
+                "Subtitles [{}] synced to the disc's time code from here on: disc time {}:{:02}:{:02} "
+                "at {:.1f} s into the stream{}",
+                (*m_tracks)[track_index].label, seconds / 3600, seconds / 60 % 60, seconds % 60,
+                state.stream_seconds,
+                m_fallback_logged ? " (the playback position was used until now)" : ""));
+        }
     } else if (!m_disc_time_seen) {
         // No disc code on this capture (a player's baseband output strips it):
         // fall back to the decoded-stream clock.  Once disc time has been seen,
         // stick with it -- momentary decode failures should not flip the clock.
+        // The first fields never carry a code yet (the decoder has to lock), so
+        // the absence is only reported once it has lasted
         t_opt = state.stream_seconds;
-        if (!m_fallback_logged) {
+        if (!m_fallback_start)
+            m_fallback_start = state.stream_seconds;
+        if (!m_fallback_logged && std::abs(state.stream_seconds - *m_fallback_start) >= c_fallback_report_seconds) {
             m_fallback_logged = true;
             m_log.warn(eApplication,
                        "No disc code in the stream -- syncing subtitles to the playback "

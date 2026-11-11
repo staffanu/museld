@@ -182,47 +182,55 @@ std::vector<DirEntry> parseHtmlIndex(const std::string &html) {
     return entries;
 }
 
+std::string httpGet(const std::string &url, bool as_directory, std::string &body, std::string &final_url) {
+    // The server's redirects are followed (a directory asked for without its
+    // slash gets one from Apache, nginx and the like), and where they lead is
+    // what the caller is told it got
+    std::string at = url;
+    for (int hops = 0; ; hops++) {
+        const auto scheme_end = at.find("://");
+        const auto path_start = at.find('/', scheme_end + 3);
+        const std::string origin = at.substr(0, path_start);
+        std::string path = path_start == std::string::npos ? "/" : at.substr(path_start);
+        if (as_directory)
+            path = withSlash(path);
+        httplib::Client client(origin);
+        client.set_connection_timeout(std::chrono::seconds(5));
+        client.set_read_timeout(std::chrono::seconds(10));
+        auto response = client.Get(path);
+        if (!response)
+            return std::format("Cannot reach {}: {}", origin, httplib::to_string(response.error()));
+        const int status = response->status;
+        if ((status == 301 || status == 302 || status == 303 || status == 307 || status == 308)
+                && response->has_header("Location") && hops < 5) {
+            const std::string target = response->get_header_value("Location");
+            if (isUrl(target))
+                at = target;
+            else if (!target.empty() && target[0] == '/')
+                at = origin + target;
+            else
+                at = origin + path.substr(0, path.rfind('/') + 1) + target;
+            continue;
+        }
+        if (status != 200)
+            return std::format("HTTP status {} for {}", status, at);
+        final_url = origin + path;
+        body = std::move(response->body);
+        return {};
+    }
+}
+
 DirListing list(const std::string &location) {
     DirListing result;
     result.location = withSlash(location);
     if (isHttp(location)) {
-        // The server's redirects are followed (a directory asked for without its
-        // slash gets one from Apache, nginx and the like), and where they lead is
-        // what the listing is of
-        std::string at = location;
-        for (int hops = 0; ; hops++) {
-            const auto scheme_end = at.find("://");
-            const auto path_start = at.find('/', scheme_end + 3);
-            const std::string origin = at.substr(0, path_start);
-            const std::string path = withSlash(path_start == std::string::npos ? "/" : at.substr(path_start));
-            httplib::Client client(origin);
-            client.set_connection_timeout(std::chrono::seconds(5));
-            client.set_read_timeout(std::chrono::seconds(10));
-            auto response = client.Get(path);
-            if (!response) {
-                result.error = std::format("Cannot reach {}: {}", origin, httplib::to_string(response.error()));
-                return result;
-            }
-            const int status = response->status;
-            if ((status == 301 || status == 302 || status == 303 || status == 307 || status == 308)
-                    && response->has_header("Location") && hops < 5) {
-                const std::string target = response->get_header_value("Location");
-                if (isUrl(target))
-                    at = target;
-                else if (!target.empty() && target[0] == '/')
-                    at = origin + target;
-                else
-                    at = origin + path + target;
-                continue;
-            }
-            if (status != 200) {
-                result.error = std::format("HTTP status {} for {}", status, at);
-                return result;
-            }
+        std::string body, at;
+        result.error = httpGet(location, true, body, at);
+        if (result.error.empty()) {
             result.location = withSlash(at);
-            result.entries = parseHtmlIndex(response->body);
-            return result;
+            result.entries = parseHtmlIndex(body);
         }
+        return result;
     }
     if (isUrl(location)) {
         result.error = "Not a directory";

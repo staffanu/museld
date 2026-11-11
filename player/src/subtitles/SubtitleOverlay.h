@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -68,6 +69,9 @@ private:
     double m_offset_seconds;
     bool m_disc_time_seen = false;
     bool m_fallback_logged = false;
+    // The playback position at which the fallback clock was first used
+    std::optional<double> m_fallback_start;
+    static constexpr double c_fallback_report_seconds = 3.0;
     int m_last_track_index = -1;
     int m_last_entry_index = -1;
     int m_last_vis_x = -1, m_last_vis_y = -1, m_last_vis_w = -1, m_last_vis_h = -1;

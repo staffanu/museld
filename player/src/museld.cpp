@@ -52,6 +52,7 @@
 #include "ui/SavedState.h"
 #include "subtitles/Eia608Decoder.h"
 #include "subtitles/SrtParser.h"
+#include "subtitles/SubtitleDiscovery.h"
 #include "subtitles/SubtitleFont.h"
 #include "subtitles/SubtitleOverlay.h"
 #include "input/InputReader.h"
@@ -323,32 +324,6 @@ static std::string languageCode(const std::string &language) {
     return code.empty() ? "XX" : code;
 }
 
-// Find the .srt files next to the input whose names start with the input's own
-// name minus its extension: capture.raw matches capture.srt, capture.ja.srt,
-// capture.ja-hira.srt, ...  The label is what follows the shared stem ("ja"
-// for capture.ja.srt).
-static std::vector<std::pair<std::string, std::string>> discoverSubtitleFiles(
-        const std::filesystem::path &input_path) {
-    std::vector<std::pair<std::string, std::string>> found;
-    const std::string stem = input_path.stem().string();
-    std::filesystem::path dir = input_path.parent_path();
-    if (dir.empty()) dir = ".";
-    std::error_code ec;
-    for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
-        if (!entry.is_regular_file()) continue;
-        const std::string name = entry.path().filename().string();
-        if (name.size() <= 4 || name.compare(name.size() - 4, 4, ".srt") != 0) continue;
-        if (name.compare(0, stem.size(), stem) != 0) continue;
-        std::string label = name.substr(stem.size(), name.size() - stem.size() - 4);
-        while (!label.empty() && label.front() == '.') label.erase(label.begin());
-        if (label.empty()) label = "DEFAULT";
-        found.emplace_back(std::move(label), entry.path().string());
-    }
-    std::sort(found.begin(), found.end(),
-              [](const auto &a, const auto &b) { return a.second < b.second; });
-    return found;
-}
-
 // Returns the other type the content watch found, when the loop ended for
 // that; nullopt when the input ended or the user quit
 static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
@@ -502,7 +477,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             try {
                 auto tracks = std::make_shared<std::vector<SubtitleTrack>>();
                 for (const auto &[label, path] : subtitle_setup.files) {
-                    auto entries = parseSrt(path);
+                    auto entries = loadSubtitleFile(path);
                     log.info(eApplication, std::format("Loaded {} subtitle entries from {} [{}]",
                                                        entries.size(), path, label));
                     tracks->push_back({label, std::move(entries)});
@@ -2117,17 +2092,19 @@ int main(int argc, char *argv[]) {
     options.flag("--subtitles", "Display SRT subtitles synced to the disc's own time code, or to "
                                 "the playback position when the capture carries no disc code "
                                 "(baseband captures usually do not).  The "
-                                "tracks are the .srt files next to the input file whose names "
+                                "tracks are the .srt files next to the input file (in its directory, or "
+                                "on the index page of an http:// input's directory) whose names "
                                 "start with the input's name minus its extension "
                                 "(capture.ja.srt for capture.raw); the first one alphabetically "
                                 "starts as the primary track, and the [ and ] keys cycle the "
                                 "primary and secondary track", [&] () -> void {
         subtitles_enabled = true;
     });
-    options.option("--subtitles-file", "FILE", "Start with the SRT subtitles in FILE as the "
-                                               "primary track (implies --subtitles)", [&] () -> void {
+    options.option("--subtitles-file", "FILE", "Start with the SRT subtitles in FILE (a path or "
+                                               "an http:// address) as the primary track "
+                                               "(implies --subtitles)", [&] () -> void {
         subtitles_file = expandHome(*(it++));
-        if (!filesystem::exists(*subtitles_file)) {
+        if (!inputIsUrl(*subtitles_file) && !filesystem::exists(*subtitles_file)) {
             cerr << "Subtitle file not found: " << *subtitles_file << endl;
             exit(EXIT_FAILURE);
         }
@@ -2492,15 +2469,21 @@ int main(int argc, char *argv[]) {
                 subtitle_setup.cc_write_stem =
                         (input_path.parent_path() / input_path.stem()).string();
             }
-            if (subtitles_enabled && !inputIsStdin(name))
-                subtitle_setup.files = discoverSubtitleFiles(name);
+            // The Apple TV has no command line to ask with: there the subtitle
+            // files beside the input are always looked for, and the disc's
+            // remembered choice (which may be "off") decides what is shown
+            if ((subtitles_enabled || is_tvos) && !inputIsStdin(name))
+                for (auto &file : discoverSubtitleFiles(name))
+                    subtitle_setup.files.emplace_back(std::move(file.label), std::move(file.location));
             if (subtitles_file) {
                 // If the discovery also found the file, keep the discovered entry
                 // (with its short label); otherwise add it, labeled by filename.
+                const bool is_url = inputIsUrl(*subtitles_file);
                 std::error_code ec;
                 const auto canon = filesystem::weakly_canonical(*subtitles_file, ec);
                 for (size_t i = 0; i < subtitle_setup.files.size(); i++)
-                    if (filesystem::weakly_canonical(subtitle_setup.files[i].second, ec) == canon)
+                    if (is_url ? subtitle_setup.files[i].second == *subtitles_file
+                               : filesystem::weakly_canonical(subtitle_setup.files[i].second, ec) == canon)
                         subtitle_setup.primary_index = (int)i;
                 if (subtitle_setup.primary_index < 0) {
                     subtitle_setup.files.emplace_back(

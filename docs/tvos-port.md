@@ -99,10 +99,16 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   single-channel formats; it binds the frame twice now, read-only and write-only.
   Verified with the line-21 captions of the White Squall excerpt and `--cc`, which
   puts the CC track in the primary slot from the start (a TV remote has no `[` key).
-  An .srt file cannot be handed to the app yet: `--subtitles-file` opens local files
-  only, and a file put into the app's data container with `devicectl device copy to`
-  is there but the app's stat of it fails with "Operation not permitted".  A leading
-  `~/` in file arguments is expanded (`expandHome`) for when that works.
+  An .srt file reaches the app from the web server the capture is on: the tracks are
+  the `.srt` files the index page of the capture's directory lists with the capture's
+  name minus its extension (`subtitles/SubtitleDiscovery`), fetched over HTTP, and on
+  tvOS they are looked for without `--subtitles` (the first is shown, and the disc's
+  remembered choice, "off" included, overrides that).  `--subtitles-file` takes an
+  http:// address too.  Seen on the box 2026-11-11: the blue1 capture from the NAS with
+  its en, ja and sv tracks beside it.  A file in the app's data container still cannot be read (put there
+  with `devicectl device copy to`, the app's stat of it fails with "Operation not
+  permitted"); a leading `~/` in file arguments is expanded (`expandHome`) for when
+  that works.
 - Speed: 40 MHz NTSC plays in real time with audio and margin.  Two steps after the
   pre-decimation: the FIR shader's outputs per invocation went to 1 on tvOS (on the
   A10X the fastest by far, the 40 MHz block's GPU time 14.7 -> 9.7 ms; the M2 wants

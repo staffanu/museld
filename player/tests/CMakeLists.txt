@@ -13,6 +13,7 @@ add_executable(museld-tests
     DtsSyncDetectorTest.cpp
     PrefetchingInputReaderTest.cpp
     SrtParserTest.cpp
+    SubtitleDiscoveryTest.cpp
     DisplayGeometryTest.cpp
     ChapterSearchTest.cpp
     LdfInputReaderTest.cpp
@@ -40,6 +41,7 @@ add_executable(museld-tests
     ../src/sdtv/NtscCadenceTracker.cpp
     ../src/sdtv/PalCadenceTracker.cpp
     ../src/subtitles/SrtParser.cpp
+    ../src/subtitles/SubtitleDiscovery.cpp
     ../src/DisplayGeometry.cpp
 )
 

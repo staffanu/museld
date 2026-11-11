@@ -39,6 +39,10 @@ namespace DirectoryListing {
     // no query strings, nothing with a scheme or an absolute path), a trailing
     // slash meaning a directory.  Pure, for the test.
     std::vector<DirEntry> parseHtmlIndex(const std::string &html);
+    // Fetches an http:// address into `body`, following the server's redirects
+    // (`final_url` is where they led); `as_directory` asks for the address with
+    // a trailing slash.  Returns the error, empty when it worked.  Blocks.
+    std::string httpGet(const std::string &url, bool as_directory, std::string &body, std::string &final_url);
     // Lists a directory or an index page.  Blocks for the fetch.
     DirListing list(const std::string &location);
 }
