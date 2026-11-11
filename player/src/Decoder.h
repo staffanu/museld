@@ -77,6 +77,9 @@ public:
         // decoded, which makes a probe cost little more than the seek
         bool metadata_only = false;
         TemporalNr temporal_nr = TemporalNr::eOff; // SDTV only
+        // SDTV: interpolate the moving parts' missing lines along the local
+        // edge direction (off: from the two vertical neighbours only)
+        bool edge_directed = true;
     };
 
     struct DecodedField {

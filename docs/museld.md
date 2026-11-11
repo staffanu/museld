@@ -196,6 +196,7 @@ a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at 
 | `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |
 | `--field-interpolation <mode>` | Initial de-interlacing mode: `normal` (motion-adaptive), `intra-field`, or `inter-frame` — same as keys 1/2/3 |
 | `--no-3d-comb` | Start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4 |
+| `--no-edge-directed` | NTSC/PAL: interpolate the moving parts of the picture from the two vertical neighbours only, instead of along the local edge direction (see the de-interlacing notes below) |
 | `--nr <level>` | NTSC/PAL: temporal noise reduction, `off` (default), `low` or `high` — same as key 6. A first-order recursion over the fields on the decoded luma and chroma, gated per pixel by the motion masks that also gate the de-interlacer's weave, so only the still parts of the picture are averaged and nothing that moves is smeared. Low keeps half of the previous output, high three quarters; on still parts that is about 5 and 8 dB less noise on top of the 3D comb's frame averaging. The price is a trail of a few fields behind anything the motion detector misses, such as a slow fade or very low-contrast motion in noise. |
 | `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
 | `--black-level <mode>` | NTSC: where the disc puts black — `auto` (default) reads it off the picture, `m` forces NTSC-M (US discs: 7.5 IRE above blanking), `j` forces NTSC-J (Japanese discs: black at blanking). Same as the J key. Wrong in the M direction, a Japanese disc loses its darkest 7.5 IRE; wrong in the J direction, a US disc shows black as dark grey and slightly desaturated |
@@ -307,7 +308,14 @@ band of the comb's chroma estimate, so horizontal edges and thin strokes keep th
 sharpness, and only fine horizontal detail is averaged over the lines. Still parts average that
 luma over the three frames as well, which is where most of the noise reduction comes from. The
 same masks drive motion-adaptive de-interlacing: still parts weave the previous field, moving
-parts are interpolated from the current field (keys 1/2/3 select adaptive/bob/weave).
+parts are interpolated from the current field (keys 1/2/3 select adaptive/bob/weave). That
+interpolation follows the local edge: for each missing pixel the rows above and below are
+compared along the vertical and along diagonals up to two pixels of shift either way, and the
+pair that matches best is averaged, so a diagonal edge in motion comes out as a line rather
+than a staircase. A diagonal has to beat the vertical by a margin above the noise, and the
+result is held within the range of the nearest pixels of the two rows, which keeps noise and
+strokes thinner than the line pitch from steering it; `--no-edge-directed` is the plain
+vertical average for comparison.
 
 **NTSC reverse telecine (film mode)**: film-sourced discs carry 24 fps film as a 3:2 field
 cadence, where one field in five repeats the same-parity field of the previous frame. The decoder

@@ -15,6 +15,7 @@ layout(push_constant) uniform PushConstants {
     float nr_feedback;      // temporal noise reduction: the share of the previous output kept where still; 0 off
     uint nr_valid;          // the previous output in the nr buffers continues this picture
     uint nr_state_only;     // advance the noise reduction's state and write no picture (a film mode hold)
+    uint edge_directed;     // interpolate the moving parts along the local edge direction, not just vertically
 };
 
 // The decoded fields, one buffer set per parity.  The set of the current
@@ -92,6 +93,58 @@ f16vec3 previousField(uint i, uint col) {
                              : f16vec3(field0_Y[i][col], field0_U[i][col], field0_V[i][col]);
 }
 
+float16_t currentFieldY(uint i, int col) {
+    col = clamp(col, 0, SDTV_Y_BUF_WIDTH - 1);
+    return field_parity == 0 ? field0_Y[i][col] : field1_Y[i][col];
+}
+
+// How badly the row above, shifted left by d, matches the row below shifted
+// right by d: the sum of three absolute luma differences along that diagonal
+float16_t diagonalMismatch(uint n0, uint n1, int col, int d) {
+    return abs(currentFieldY(n0, col - d - 1) - currentFieldY(n1, col + d - 1))
+         + abs(currentFieldY(n0, col - d)     - currentFieldY(n1, col + d))
+         + abs(currentFieldY(n0, col - d + 1) - currentFieldY(n1, col + d + 1));
+}
+
+// The missing row interpolated from the current field's rows above (n0) and
+// below (n1) along the direction in which they match best: the average of
+// the pixel d to the left on the row above and d to the right on the row
+// below, d chosen by a greedy search out from vertical (yadif's), which a
+// diagonal edge rewards and a texture or noise does not.  The vertical
+// average keeps the tie: a direction has to beat it by a margin above the
+// noise, else a diagonal of the noise alone would steer thin lines about.
+// A directional result is held within the range of the six nearest pixels
+// of the two rows, which catches a match across a stroke thinner than the
+// line pitch (the dot of an i joined to a diagonal).  Shifts beyond two
+// pixels found more such mismatches than diagonals on a text card.
+f16vec3 directionalBob(uint n0, uint n1, uint col) {
+    const float16_t margin = 0.06hf; // three pixels of 2 IRE
+    const int c = int(col);
+    float16_t best = diagonalMismatch(n0, n1, c, 0) - margin;
+    int best_d = 0;
+    for (int sign = -1; sign <= 1; sign += 2) {
+        for (int d = sign; abs(d) <= 2; d += sign) {
+            float16_t score = diagonalMismatch(n0, n1, c, d);
+            if (score >= best)
+                break;
+            best = score;
+            best_d = d;
+        }
+    }
+    if (best_d == 0)
+        return 0.5hf * (currentField(n0, col) + currentField(n1, col));
+    const uint left = uint(clamp(c - best_d, 0, SDTV_Y_BUF_WIDTH - 1));
+    const uint right = uint(clamp(c + best_d, 0, SDTV_Y_BUF_WIDTH - 1));
+    f16vec3 lo = min(currentField(n0, col), currentField(n1, col));
+    f16vec3 hi = max(currentField(n0, col), currentField(n1, col));
+    for (int k = -1; k <= 1; k += 2) {
+        const uint cc = uint(clamp(c + k, 0, SDTV_Y_BUF_WIDTH - 1));
+        lo = min(lo, min(currentField(n0, cc), currentField(n1, cc)));
+        hi = max(hi, max(currentField(n0, cc), currentField(n1, cc)));
+    }
+    return clamp(0.5hf * (currentField(n0, left) + currentField(n1, right)), lo, hi);
+}
+
 void main() {
     uint row = gl_GlobalInvocationID.y;
     uint col = gl_GlobalInvocationID.x;
@@ -129,7 +182,8 @@ void main() {
         // comb, so interpolate the current field's neighbours instead.
         uint n0 = row / 2;
         uint n1 = uint(clamp(int(row / 2) + (field_parity == 0 ? 1 : -1), 0, SDTV_FIELD_HEIGHT - 1));
-        f16vec3 bob = 0.5hf * (currentField(n0, col) + currentField(n1, col));
+        f16vec3 bob = edge_directed != 0u ? directionalBob(n0, n1, col)
+                                          : 0.5hf * (currentField(n0, col) + currentField(n1, col));
         f16vec3 weave = nr && nr_valid != 0u ? f16vec3(nr_Y[row][col], nr_U[row][col], nr_V[row][col])
                                              : previousField(row / 2, col);
         // Each field consults the evidence window that brackets its weave:

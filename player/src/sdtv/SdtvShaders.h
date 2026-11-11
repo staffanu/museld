@@ -78,7 +78,7 @@ public:
   // on the output, continuing from the previous field's output when nr_valid
   void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only,
                                   unsigned int field_parity, bool output_yuv, float black_setup,
-                                  float nr_feedback, bool nr_valid, bool nr_state_only = false);
+                                  float nr_feedback, bool nr_valid, bool nr_state_only = false, bool edge_directed = true);
 
   // Keep a copy of the combine's output image, and bring it back.  A film
   // mode hold re-shows the previous film frame this way: the copy is taken

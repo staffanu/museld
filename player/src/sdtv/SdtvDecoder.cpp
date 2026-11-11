@@ -560,7 +560,8 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
                     field_interpolation_mode == FieldInterpolationMode::eForceIntraField || !m_decode_all_fields,
                     field_interpolation_mode == FieldInterpolationMode::eForceInterFrame
                             || action == NtscCadenceTracker::FieldAction::eWeave,
-                    decoded_field_index, output_yuv, m_black_ire / 100.0f, nr_feedback, nr_valid);
+                    decoded_field_index, output_yuv, m_black_ire / 100.0f, nr_feedback, nr_valid, false,
+                    controls.edge_directed);
             // Keep a clean copy (no OSD or subtitles drawn yet) for a
             // following hold to re-show
             m_shaders.saveCombinedOutput(*m_second_stage_command_buffer);

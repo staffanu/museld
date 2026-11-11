@@ -24,7 +24,10 @@ once per standard, as `ntsc_*.spv` and as `pal_*.spv` with `-DSDTV_PAL` (the `SD
 (`SdtvFrameReader`, `SdtvDecoder`, ...), `Ntsc…`/`Pal…` only what belongs to one of them
 (`NtscCadenceTracker` for 3:2, `PalCadenceTracker` for 2:2).  `--nr low|high` (key 6) adds a motion-gated
 first-order temporal recursion on the decoded Y/U/V in `sdtv_combine_still_and_moving.comp`, advanced
-once per frame per row (on hold fields in a state-only pass), off by default.  `--input-type pal-rf` plays PAL discs in colour: a 3-line comb over
+once per frame per row (on hold fields in a state-only pass), off by default.  The same shader's
+interpolation of the moving parts is edge-directed (a greedy search over diagonals of up to two
+pixels, the result held within the range of the neighbouring pixels; `--no-edge-directed` is the
+vertical average).  `--input-type pal-rf` plays PAL discs in colour: a 3-line comb over
 the ±90° neighbours, a line-pair burst reference for the swinging burst with the V switch voted
 over five lines, the delay-line U/V average and a temporal comb over frames N ± 2 (the decoder
 keeps 3d + 1 frames with d = 2 on PAL and shows frame N two reads behind), the pilot-refined

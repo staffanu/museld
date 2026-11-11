@@ -31,8 +31,6 @@ Last revised 2026-11-11.
 - **Noise reduction, spatial.**  The temporal NR (`--nr`, key 6, 2026-11-11) averages still parts
   only; moving parts and PAL's 2.4x noise on them would need a spatial or motion-compensated
   stage, which is a different order of work.
-- **NTSC deinterlacing in moving areas** is plain intra-field; edge-directed interpolation would
-  sharpen diagonals.
 - **Edge-template deringing of NTSC luma.**  Two artefacts sit next to every hard edge of some
   discs and are tied to the edge, not to the channel.  A dip 150-250 ns before the edge, mirrored
   on the two polarities (a linear-phase lowpass with a cutoff around 4-5 MHz and a first lobe of
@@ -94,3 +92,5 @@ Last revised 2026-11-11.
   menu's Picture page), off by default.
 - 2026-11-11: the PAL CAV picture stop checked on the PAL test disc: the player pauses on its stop
   code as on NTSC.
+- 2026-11-11: edge-directed interpolation of the moving parts on SD (`--no-edge-directed` for the
+  vertical average).

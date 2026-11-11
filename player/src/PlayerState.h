@@ -32,6 +32,7 @@ struct PlayerState {
     bool use_3d_comb = true; // NTSC: temporal Y/C separation on still parts
     bool film_mode = true;   // NTSC: reverse-telecine weave on a 3:2 cadence lock
     Decoder::TemporalNr temporal_nr = Decoder::TemporalNr::eOff; // SDTV: motion-gated temporal noise reduction
+    bool edge_directed = true; // SDTV: the moving parts' missing lines interpolated along the edge direction
     bool enable_cursor = false;
     AudioChannelMode audio_channel_mode = AudioChannelMode::eStereo;
     Decoder::CxMode analog_cx_mode = Decoder::CxMode::eAuto;
