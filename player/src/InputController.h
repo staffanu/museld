@@ -74,6 +74,9 @@ public:
     void setMenu(class Menu *menu) { m_menu = menu; }
     // The menu is the whole screen (the browser before any input): M neither
     // opens nor closes it, and Back on its root page quits
+    // Drops the key and button presses queued so far (those made while an
+    // input was opening are not meant for the player that then starts)
+    void discardPending();
     void setMenuIsScreen(bool is_screen) { m_menu_is_screen = is_screen; }
 
     // Pumps the window system's events and acts on the keys pressed.  Must

@@ -21,7 +21,7 @@ cached under `~/.cache/museld-regression` (`MUSELD_REGRESSION_CACHE` moves it).
 
 ## What is compared
 
-Each clip is rendered with `--no-keys --no-sync --write --write-preset archival`
+Each clip is rendered with `--no-keys --no-sync --no-state --write --write-preset archival`
 (lossless FFV1 at 16 bits and the audio as PCM, or the AC3 bitstream for the AC3
 track), once per *stage*. A stage is a set of museld options that isolates part of the
 decode, so a difference can be placed: `default`, `intra-field` (no motion-adaptive

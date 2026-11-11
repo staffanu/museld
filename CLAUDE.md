@@ -229,8 +229,11 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   `--export-frame` take the frame after the OSD and menu are drawn, which is how to look at it in a
   scripted run.  The file browser (`ui/Browser` on `ui/DirectoryListing`, which lists a directory or
   a web server's index page, `ui/TextEntry` the address field with its on-screen keyboard,
-  `ui/SavedState` the recent addresses and last directory in SDL's pref path, `MUSELD_STATE_FILE`
-  overriding) is the menu's Open page; `--browse` (always on tvOS) starts in it on a black frame
+  `ui/SavedState` the recent addresses, last directory and per-disc settings -- aspect, overscan,
+  audio track, subtitle tracks, applied in `runPlayer` at start and recorded at its end -- in SDL's
+  pref path, `MUSELD_STATE_FILE` overriding) is the menu's Open page (its `fill_rect.comp` binds the image twice, read-only
+  and write-only: a storage image both loaded and stored is a read-write texture to Metal, which
+  the Apple TV's A10X has for single-channel formats only); `--browse` (always on tvOS) starts in it on a black frame
   (`browseForInput` in museld.cpp), and a chosen file comes back as `PlayOutcome::open_next` for
   `play_from` to play with the same window; an input that cannot be played throws `InputError` (the
   command line prints it and exits as before, the browse loop shows it on the browser's screen).
@@ -241,9 +244,11 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   opens the first recent file on a PC), `MUSELD_OPEN_NEXT=<input>` plays on to that input
   after 60 fields as the browser's choice would.  A `--browse` run under a tool must have stdin
   redirected from /dev/null, or a non-terminal stdin is taken as the input.
-- Always add `--no-keys` to museld runs made for measurements or exports: the window then
-  opens without taking the keyboard focus and ignores keys, so the user's typing in another
-  window cannot pause the decode or toggle a stage mid-run.
+- Always add `--no-keys --no-state` to museld runs made for measurements or exports: the window
+  then opens without taking the keyboard focus and ignores keys, so the user's typing in another
+  window cannot pause the decode or toggle a stage mid-run, and the run neither applies what
+  museld remembers between runs (per-disc aspect, overscan, audio and subtitle choices, the
+  browser's recent addresses) nor leaves a record of itself in the user's state file.
 
 **Dumps** (environment variables, append to the file; delete old dumps first):
 - `MUSELD_DUMP_DEMOD=<path>` with `MUSELD_DUMP_DEMOD_BLOCKS=<n>` (default 32; a block

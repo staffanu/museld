@@ -165,7 +165,7 @@ def parse_log(text):
 
 
 def render(museld, clip_file, args, out_mkv, log_file, timeout):
-    cmd = [str(museld), "--no-keys", "--no-sync", "--write", str(out_mkv), "--write-preset", "archival",
+    cmd = [str(museld), "--no-keys", "--no-sync", "--no-state", "--write", str(out_mkv), "--write-preset", "archival",
            "--log", "M4A2V2D2I2O2", *args, str(clip_file)]
     t0 = time.time()
     with open(log_file, "w") as lf:

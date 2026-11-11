@@ -51,6 +51,7 @@ private:
     MenuPage *m_open_page;
     MenuPage *m_listing_page;
     std::string m_location;
+    std::string m_last_typed; // the address field's last text, prefilled next time
     // A fetch of an index page under way, on a thread of its own that also
     // owns this (detached: a fetch that is no longer wanted finishes alone)
     struct Fetch {

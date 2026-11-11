@@ -27,7 +27,8 @@ struct PlayerMenuBindings {
     SDL_Window *window;
     Logger &log;
     bool is_muse;       // the input is a MUSE disc (else NTSC or PAL)
-    bool is_tvos;       // no full screen toggle, "Quit" leaves the app
+    bool is_tvos;       // no full screen toggle
+    bool returns_to_browser; // ending playback shows the file browser (tvOS, --browse): the item says Stop
     bool *quit_request; // set by the menu's Quit item
 };
 

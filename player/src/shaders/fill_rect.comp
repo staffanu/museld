@@ -15,8 +15,10 @@ layout(push_constant) uniform PushConstants {
     float alpha;
 };
 
-// The frame bound twice, read-only and write-only: a read-write rgba32f image is
-// not available on Metal GPU family 3 (the A10X), see render_subtitle.comp
+// The image is bound twice, read-only and write-only: a storage image both
+// loaded and stored is a read-write texture to Metal, which the Apple A10X
+// (read-write texture tier 1) supports for 32-bit single-channel formats only
+// -- the shader compiler failed on it and the app did not start on the Apple TV
 layout(set = 0, binding = 0, rgba32f) uniform readonly image2D frame_in_image;
 layout(set = 0, binding = 1, rgba32f) uniform writeonly image2D frame_out_image;
 

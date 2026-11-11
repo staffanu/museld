@@ -43,7 +43,7 @@ void TextRenderer::fillRect(std::shared_ptr<VulkanImage> const &image, int x, in
                                    vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
     // The image twice: read-only and write-only bindings (see the shader)
     auto current = m_fill_rect_shader->getBuffersForDescriptorSet(0);
-    if (current.size() != 2 || current[0] != image)
+    if (current.size() != 2 || current[0] != image || current[1] != image)
         m_fill_rect_shader->updateBufferDescriptorsInSet(0, {image, image});
     // The colour rides in the push constants as the bits of floats
     const std::vector<uint32_t> push_constants = {

@@ -54,7 +54,10 @@ MenuPage *buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b, MenuPage *ope
     menu.addPageItem(root, "Information", info);
     if (open_page != nullptr)
         menu.addPageItem(root, "Open...", open_page);
-    root->items.push_back(action(b.is_tvos ? "Quit" : "Quit museld", b.is_tvos ? "" : "Q", [b] { if (b.quit_request) *b.quit_request = true; }));
+    // Where the player returns to the browser (tvOS, a PC with --browse) this
+    // ends the playback; started with a file on the command line it quits museld
+    root->items.push_back(action(b.returns_to_browser ? "Stop" : "Quit museld", b.is_tvos ? "" : "Q",
+                                 [b] { if (b.quit_request) *b.quit_request = true; }));
 
     // Picture
     picture->items.push_back(setting("Aspect", "F", [&s] { return std::string(aspectModeName(s.aspect_mode)); },

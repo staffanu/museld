@@ -22,6 +22,7 @@ struct DirEntry {
 struct DirListing {
     std::vector<DirEntry> entries; // directories first, then files, each sorted by name
     std::string error;             // empty when the listing succeeded
+    std::string location;          // the location listed, after the server's redirects (with its slash)
 };
 
 namespace DirectoryListing {

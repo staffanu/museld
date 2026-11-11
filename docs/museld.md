@@ -173,6 +173,7 @@ a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at 
 | `--no-video` / `--no-audio` | Do not decode video, or audio, at all (not merely silence the output): a `--write` file made with `--no-audio` has an empty audio stream |
 | `--no-sync` | Display frames as fast as possible (benchmark mode). Without it playback runs at real time: the display's refresh sets the cadence when it matches the field rate (NTSC on a 60 Hz display), with the clock as a guard a few fields behind in case the refresh stops pacing (macOS does not block on it while the window is covered or minimized); slower material (PAL on 60 Hz) is paced by the clock itself |
 | `--no-keys` | Ignore the keyboard and open the window without taking input focus. For runs made beside other work (measurements, scripts): nothing typed into another window can pause or change the decode. The window's close button still quits. |
+| `--no-state` | Neither read nor write what museld remembers between runs (the browser's recent addresses and last directory, and per disc the aspect, overscan, audio track and subtitle choices, see the file browser section): the run starts from the options alone and leaves no record. For tests, measurements and picture comparisons; the regression suite passes it |
 | `--full-frames-only` | Skip every other field update (reduces CPU/GPU load) |
 | `--all-fields` | Update display at 60 Hz (default) |
 | `--full-screen` | Start full screen (at the monitor's current mode; the picture is scaled to it) |
@@ -436,8 +437,14 @@ from its root, and M closes it from anywhere.  While the menu is open the arrows
 and Space belong to it, so seeking and pausing wait until it is closed, and so
 does quitting with Escape.  Settings that mean nothing for the disc being played
 (the 3D comb on MUSE, the equaliser on NTSC) are left out of its pages.  On the
-Apple TV the Siri Remote's Menu button opens it, and from its root page leaves
-the app; the app starts in the menu.
+Apple TV the remote's back button (the Siri Remote's Menu button; a TV remote
+over HDMI-CEC sends the arrows, OK and back, nothing else) opens it over the
+picture, and from its root page closes it again; select pauses, left and right
+seek, up and down find chapters.  Playback ends through the menu's Stop item,
+which returns to the file browser, and back from the browser's page leaves the
+app, which starts there.  A PC started with `--browse` works the same way: the
+menu's last item is Stop and returns to the browser; started with a file on the
+command line it is Quit museld and ends the program.
 
 ### The file browser
 
@@ -447,12 +454,16 @@ addresses opened recently.  It lists a directory on this machine or on a web
 server through the server's index page (Apache, nginx, Python's `http.server`
 and the like; the page is fetched in the background, the picture keeps playing
 meanwhile), directories first, with the sizes the listing gives; choosing a
-file plays it, and the player comes back to the browser when the input ends,
+file plays it (a bar says what is being opened while the input starts; keys
+pressed meanwhile are dropped), and the player comes back to the browser when the input ends,
 or at once with the reason when the file cannot be played (not found, not a
 capture museld recognizes, a stream that does not arrive).
 The address field takes anything museld opens: a path, an `http://` location
-(a bare `host/path` gets the `http://`), or a `udp://` capture stream, which
-plays as it is.  On the Apple TV the field's on-screen keyboard is driven by
+(a bare `host/path` gets the `http://`; a web address is listed as a directory
+unless its name has a capture's extension, and the server's redirects are
+followed, so the trailing slash is optional), or a `udp://` capture stream,
+which plays as it is.  The field opens with what was typed last, so a wrong
+address is corrected rather than retyped.  On the Apple TV the field's on-screen keyboard is driven by
 the remote, select typing the key under the cursor and Menu deleting; a
 keyboard types straight into it, Return accepts and Escape cancels (the space
 bar picks the on-screen key under the cursor, as a gamepad's select does; a
@@ -462,7 +473,15 @@ space is typed with the on-screen SPACE key).
 TV app always does, having no command line.  What the browser remembers -- the
 recent addresses and the last directory -- is written by the player to
 `state.txt` in its per-user preferences directory (the application container
-on tvOS; `MUSELD_STATE_FILE` names another file).
+on tvOS; `MUSELD_STATE_FILE` names another file).  The same file remembers, per
+capture, what it was last played with where that belongs to the disc: the aspect
+mode, the overscan, the audio track and the subtitle tracks chosen (or turned
+off).  They come back when the capture is opened again, from the browser or the
+command line, over the command line's defaults.  Full screen and the decode
+toggles (field interpolation, 3D comb, film mode, black level, dropouts, the
+equaliser) are not remembered and start from their defaults every time.
+`--no-state` leaves all of it out of a run: nothing remembered is applied and
+nothing is recorded.
 
 The C key overlay shows the cursor position both in single-field coordinates (374×516 for MUSE,
 764×240 for NTSC and 764×288 for PAL: the column over the whole decoded width, the line within
