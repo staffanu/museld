@@ -29,9 +29,9 @@ Last revised 2026-11-11.
   MUSE quality is dominated by the still/moving decision and the reconstruction filters far more
   than NTSC is.  The motion-vector investigation (2026-10) closed off the other avenue: a
   client-side recompute gives no gain.  The regression set has two MUSE clips to iterate against.
-- **Noise reduction.**  There is no temporal or spatial luma/chroma NR as such; the 3D comb only
-  separates Y/C on still areas.  PAL noise is 2.4x NTSC's and worn-disc captures are noisy.  A
-  motion-gated temporal NR reusing the existing motion mask is the cheapest visible gain on SD.
+- **Noise reduction, spatial.**  The temporal NR (`--nr`, key 6, 2026-11-11) averages still parts
+  only; moving parts and PAL's 2.4x noise on them would need a spatial or motion-compensated
+  stage, which is a different order of work.
 - **NTSC deinterlacing in moving areas** is plain intra-field; edge-directed interpolation would
   sharpen diagonals.
 - **Edge-template deringing of NTSC luma.**  Two artefacts sit next to every hard edge of some
@@ -91,3 +91,5 @@ Last revised 2026-11-11.
   start-up, opt-in gated C1 (`--c1-strategy`), the symbol and concealment dumps and `ldstack`.
 - 2026-11-11: discs without analog audio carriers switch to the EFM track by themselves
   (`--analog` keeps the analog track).
+- 2026-11-11: motion-gated temporal noise reduction on SD (`--nr off|low|high`, key 6, the
+  menu's Picture page), off by default.

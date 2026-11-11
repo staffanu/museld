@@ -29,6 +29,8 @@ namespace PlayerActions {
     void setFieldInterpolation(PlayerState &state, Logger &log, Decoder::FieldInterpolationMode mode);
     void cycleFieldInterpolation(PlayerState &state, Logger &log, int direction);
     void toggle3dComb(PlayerState &state, Logger &log);
+    void cycleTemporalNr(PlayerState &state, Logger &log, int direction);
+    const char *temporalNrName(Decoder::TemporalNr nr);
     void toggleFilmMode(PlayerState &state, Logger &log);
     void cycleAudioTrack(PlayerState &state, ReaderControls &reader, AudioTrack &audio_track, int direction);
     void cycleAudioChannels(PlayerState &state, int direction);

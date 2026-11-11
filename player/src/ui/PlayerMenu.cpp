@@ -79,6 +79,8 @@ MenuPage *buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b, MenuPage *ope
                                      [&s, &log](int) { toggle3dComb(s, log); }, [sd] { return sd; }));
     picture->items.push_back(setting("Film mode", "5", [&s] { return s.film_mode ? "AUTO" : "OFF"; },
                                      [&s, &log](int) { toggleFilmMode(s, log); }, [sd] { return sd; }));
+    picture->items.push_back(setting("Noise reduction", "6", [&s] { return std::string(temporalNrName(s.temporal_nr)); },
+                                     [&s, &log](int d) { cycleTemporalNr(s, log, d); }, [sd] { return sd; }));
     picture->items.push_back(setting("Black level", "J", [&s] {
                                          return s.black_level_mode == Decoder::BlackLevelMode::eAuto ? "AUTO"
                                               : s.black_level_mode == Decoder::BlackLevelMode::eM ? "7.5 IRE (NTSC-M)" : "0 IRE (NTSC-J)";

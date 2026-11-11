@@ -288,6 +288,8 @@ bool InputController::poll(SDL_Window *window,
         PlayerActions::toggle3dComb(state, m_log);
     if (checkKey(SDL_SCANCODE_5))
         PlayerActions::toggleFilmMode(state, m_log);
+    if (checkKey(SDL_SCANCODE_6))
+        PlayerActions::cycleTemporalNr(state, m_log, +1);
     if (checkKey(SDL_SCANCODE_A))
         PlayerActions::cycleAudioTrack(state, reader, audio_track, +1);
     if (checkKey(SDL_SCANCODE_B))

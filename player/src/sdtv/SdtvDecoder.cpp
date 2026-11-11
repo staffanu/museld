@@ -538,12 +538,19 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
                                     dropout_mode, use_3d_comb, m_rot_re, m_rot_im, level_floor, level_ceiling,
                                     15.0f * sigma_out, m_pal_v_flip);
         m_field_buffer_frame_no[decoded_field_index] = m_frame_no - d;
+        const float nr_feedback = temporalNrFeedback(controls.temporal_nr);
+        const uint32_t generation = m_frame_seek_generation[d];
+        const bool nr_valid = m_nr_primed && m_nr_seek_generation == generation;
         if (action == NtscCadenceTracker::FieldAction::eHold) {
             // Re-show the previous film frame from the held copy of the last
             // combine output.  The YUV buffers are left as they are, so
             // --write repeats the previous frame -- which is exactly the 3:2
             // presentation.  The field itself was still decoded above: the
-            // next field's weave needs it.
+            // next field's weave needs it -- and so does the noise
+            // reduction's state of its rows, advanced here without a picture
+            if (nr_feedback > 0)
+                m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer, false, true,
+                        decoded_field_index, false, m_black_ire / 100.0f, nr_feedback, nr_valid, true);
             m_shaders.restoreHeldOutput(*m_second_stage_command_buffer);
         } else {
             // Weaving the still parts needs the previous field's decode,
@@ -552,11 +559,13 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
                     field_interpolation_mode == FieldInterpolationMode::eForceIntraField || !m_decode_all_fields,
                     field_interpolation_mode == FieldInterpolationMode::eForceInterFrame
                             || action == NtscCadenceTracker::FieldAction::eWeave,
-                    decoded_field_index, output_yuv, m_black_ire / 100.0f);
+                    decoded_field_index, output_yuv, m_black_ire / 100.0f, nr_feedback, nr_valid);
             // Keep a clean copy (no OSD or subtitles drawn yet) for a
             // following hold to re-show
             m_shaders.saveCombinedOutput(*m_second_stage_command_buffer);
         }
+        m_nr_primed = nr_feedback > 0;
+        m_nr_seek_generation = generation;
     }
 
     m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});

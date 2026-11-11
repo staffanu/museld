@@ -122,6 +122,10 @@ private:
     // cadence weave/hold must not touch a buffer one frame older than the
     // cadence assumes
     std::array<int, 2> m_field_buffer_frame_no;
+    // The temporal noise reduction's state buffers hold the previous field's
+    // output of this seek generation (false: off last field, or just started)
+    bool m_nr_primed = false;
+    uint32_t m_nr_seek_generation = 0;
     EfmDecoder m_efm_decoder;
     EfmPcmProcessor m_efm_pcm_processor;
     bool m_pal_v_flip;

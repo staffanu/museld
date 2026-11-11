@@ -196,6 +196,7 @@ a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at 
 | `--eq <mode>` | MUSE adaptive equaliser mode: `on` (default, taps adapt continuously via LMS), `frozen` (use current taps without further adaptation), `off` (bypass the equaliser) |
 | `--field-interpolation <mode>` | Initial de-interlacing mode: `normal` (motion-adaptive), `intra-field`, or `inter-frame` — same as keys 1/2/3 |
 | `--no-3d-comb` | Start with the temporal Y/C separation off (spatial 3-line comb everywhere) — same as key 4 |
+| `--nr <level>` | NTSC/PAL: temporal noise reduction, `off` (default), `low` or `high` — same as key 6. A first-order recursion over the fields on the decoded luma and chroma, gated per pixel by the motion masks that also gate the de-interlacer's weave, so only the still parts of the picture are averaged and nothing that moves is smeared. Low keeps half of the previous output, high three quarters; on still parts that is about 5 and 8 dB less noise on top of the 3D comb's frame averaging. The price is a trail of a few fields behind anything the motion detector misses, such as a slow fade or very low-contrast motion in noise. |
 | `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
 | `--black-level <mode>` | NTSC: where the disc puts black — `auto` (default) reads it off the picture, `m` forces NTSC-M (US discs: 7.5 IRE above blanking), `j` forces NTSC-J (Japanese discs: black at blanking). Same as the J key. Wrong in the M direction, a Japanese disc loses its darkest 7.5 IRE; wrong in the J direction, a US disc shows black as dark grey and slightly desaturated |
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
@@ -413,6 +414,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | 3 | Force inter-frame interpolation (treat everything as still) |
 | 4 | NTSC: toggle the 3D comb (temporal Y/C separation on still parts) |
 | 5 | NTSC: film mode auto / off (reverse-telecine weave on a 3:2 cadence lock) |
+| 6 | NTSC/PAL: cycle the temporal noise reduction: off → low → high, see `--nr` |
 | D | Cycle dropout handling: conceal → ignore → highlight (red = luminance dropout, green = color dropout) |
 | A | Cycle the audio track: MUSE (or NTSC/PAL analog) → EFM → AC3 (NTSC only) (RF input only). A disc without analog carriers starts on EFM by itself (see `--analog`) |
 | E | Cycle the EFM adaptive filter size: 31 → 63 → 127 → 3 → 9 → 15 taps → off → 31 (RF input only, see `--efm-filter-size`). The filter restarts from identity at each change. |

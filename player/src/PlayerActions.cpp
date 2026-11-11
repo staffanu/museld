@@ -114,6 +114,23 @@ void toggle3dComb(PlayerState &state, Logger &log) {
     state.osd_text = state.use_3d_comb ? "3D COMB ON" : "3D COMB OFF";
 }
 
+const char *temporalNrName(Decoder::TemporalNr nr) {
+    return nr == Decoder::TemporalNr::eLow ? "LOW" : nr == Decoder::TemporalNr::eHigh ? "HIGH" : "OFF";
+}
+
+void cycleTemporalNr(PlayerState &state, Logger &log, int direction) {
+    static constexpr Decoder::TemporalNr levels[] = {Decoder::TemporalNr::eOff, Decoder::TemporalNr::eLow,
+                                                     Decoder::TemporalNr::eHigh};
+    int index = 0;
+    for (int i = 0; i < 3; i++)
+        if (levels[i] == state.temporal_nr)
+            index = i;
+    state.temporal_nr = levels[stepped(index, 3, direction)];
+    redoIfPaused(state);
+    log.info(eApplication | eVideo, std::format("Temporal noise reduction {}", temporalNrName(state.temporal_nr)));
+    state.osd_text = std::format("NOISE REDUCTION {}", temporalNrName(state.temporal_nr));
+}
+
 void toggleFilmMode(PlayerState &state, Logger &log) {
     state.film_mode = !state.film_mode;
     redoIfPaused(state);

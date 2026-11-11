@@ -12,6 +12,9 @@ layout(push_constant) uniform PushConstants {
     int field_parity;       // parity of the current field: 0 owns even output rows, 1 odd
     uint output_yuv;
     float black_setup;      // the disc's black level above blanking, as a fraction of blanking-to-white
+    float nr_feedback;      // temporal noise reduction: the share of the previous output kept where still; 0 off
+    uint nr_valid;          // the previous output in the nr buffers continues this picture
+    uint nr_state_only;     // advance the noise reduction's state and write no picture (a film mode hold)
 };
 
 // The decoded fields, one buffer set per parity.  The set of the current
@@ -65,6 +68,20 @@ layout(set = 0, binding = 11) buffer writeonly frame_out_v_buffer {
     uint16_t frame_out_V[][SDTV_Y_BUF_WIDTH / 2];
 };
 
+// The temporal noise reduction's state: the previous field's output of
+// this row, before the setup and gamma; read and written in place
+layout(set = 0, binding = 12) buffer restrict nr_y_buffer {
+    float16_t nr_Y[][SDTV_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 13) buffer restrict nr_u_buffer {
+    float16_t nr_U[][SDTV_Y_BUF_WIDTH];
+};
+
+layout(set = 0, binding = 14) buffer restrict nr_v_buffer {
+    float16_t nr_V[][SDTV_Y_BUF_WIDTH];
+};
+
 f16vec3 currentField(uint i, uint col) {
     return field_parity == 0 ? f16vec3(field0_Y[i][col], field0_U[i][col], field0_V[i][col])
                              : f16vec3(field1_Y[i][col], field1_U[i][col], field1_V[i][col]);
@@ -82,10 +99,29 @@ void main() {
     if (row >= SDTV_FIELD_HEIGHT * 2 || col >= SDTV_Y_BUF_WIDTH)
         return;
 
+    // Temporal noise reduction: a first-order recursion over the frames on
+    // each row, out = in + k (prev_out - in), with k the feedback where the
+    // picture is still and 0 where the motion masks say it moves (the same
+    // masks that gate the weave, so what moves is never smeared).  A row's
+    // state advances once per frame, on the field that samples it; the
+    // other field's weave of that row shows the filtered state in place of
+    // the raw decode, so the recursion is not fed the same sample twice.
+    // The comb's 3-frame luma average sits before it.  Noise power falls by
+    // (1 - k) / (1 + k) on white noise: 4.8 dB at 0.5, 8.5 dB at 0.75, on
+    // still parts only.
+    const bool nr = nr_feedback > 0.0;
     f16vec3 yuv;
     if (int(row & 1u) == field_parity) {
         // A row the current field sampled: use it directly
         yuv = currentField(row / 2, col);
+        if (nr) {
+            f16vec3 prev = nr_valid != 0u ? f16vec3(nr_Y[row][col], nr_U[row][col], nr_V[row][col]) : yuv;
+            float16_t k = float16_t(nr_feedback) * (1.hf - clamp(past_movement[row][col], 0.hf, 1.hf));
+            yuv = mix(yuv, prev, k);
+            nr_Y[row][col] = yuv.x;
+            nr_U[row][col] = yuv.y;
+            nr_V[row][col] = yuv.z;
+        }
     } else {
         // A row the current field did not sample.  Where the picture is
         // still, the previous field's row (which sits exactly here) is the
@@ -94,7 +130,8 @@ void main() {
         uint n0 = row / 2;
         uint n1 = uint(clamp(int(row / 2) + (field_parity == 0 ? 1 : -1), 0, SDTV_FIELD_HEIGHT - 1));
         f16vec3 bob = 0.5hf * (currentField(n0, col) + currentField(n1, col));
-        f16vec3 weave = previousField(row / 2, col);
+        f16vec3 weave = nr && nr_valid != 0u ? f16vec3(nr_Y[row][col], nr_U[row][col], nr_V[row][col])
+                                             : previousField(row / 2, col);
         // Each field consults the evidence window that brackets its weave:
         // field 0 weaves the previous frame's field 1, whose staleness
         // interval lies in the past window; field 1 weaves this frame's
@@ -106,6 +143,8 @@ void main() {
                                         : future_movement[row][col];
         yuv = mix(weave, bob, m);
     }
+    if (nr_state_only != 0u)
+        return;
     float16_t Y = yuv.x, U = yuv.y, V = yuv.z;
     // The decoded signal has blanking at 0 and white at 1.  NTSC-M puts
     // black 7.5 IRE above blanking and squeezes the whole picture, chroma

@@ -74,8 +74,11 @@ public:
                     std::shared_ptr<musevk::VulkanBuffer> const &frame2,
                     bool use_prev_movement, float motion_none, float motion_full, bool box_aligned);
 
+  // nr_feedback > 0 runs the temporal noise reduction (Decoder::TemporalNr)
+  // on the output, continuing from the previous field's output when nr_valid
   void combineStillAndMovingParts(musevk::CommandBuffer &sq, bool force_field_only, bool force_inter_frame_only,
-                                  unsigned int field_parity, bool output_yuv, float black_setup);
+                                  unsigned int field_parity, bool output_yuv, float black_setup,
+                                  float nr_feedback, bool nr_valid, bool nr_state_only = false);
 
   // Keep a copy of the combine's output image, and bring it back.  A film
   // mode hold re-shows the previous film frame this way: the copy is taken
@@ -145,6 +148,7 @@ private:
   // used for final result
   std::shared_ptr<musevk::VulkanImage> m_image_out;
   std::shared_ptr<musevk::VulkanImage> m_image_held; // previous combine output, for film mode holds
+  std::array<std::shared_ptr<musevk::VulkanBuffer>, 3> m_nr_buffers; // the temporal noise reduction's previous output, Y U V
   std::shared_ptr<musevk::VulkanBuffer> m_image_Y_out; // only used if writing to file using ffmpeg
   std::shared_ptr<musevk::VulkanBuffer> m_image_U_out; // ..
   std::shared_ptr<musevk::VulkanBuffer> m_image_V_out; // ..

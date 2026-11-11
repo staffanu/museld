@@ -33,6 +33,16 @@ public:
         eAuto, eM, eJ
     };
 
+    // SDTV temporal noise reduction: a motion-gated first-order recursion on
+    // the decoded Y, U and V, off or with a feedback of 0.5 (low) or 0.75
+    // (high) per field
+    enum class TemporalNr {
+        eOff, eLow, eHigh
+    };
+    static float temporalNrFeedback(TemporalNr nr) {
+        return nr == TemporalNr::eLow ? 0.5f : nr == TemporalNr::eHigh ? 0.75f : 0.0f;
+    }
+
     struct SourceDimensions {
         int width;          // full image, both fields, all chroma planes laid out as in out_image
         int height;
@@ -66,6 +76,7 @@ public:
         // input): the video stays at the previous frame and no audio is
         // decoded, which makes a probe cost little more than the seek
         bool metadata_only = false;
+        TemporalNr temporal_nr = TemporalNr::eOff; // SDTV only
     };
 
     struct DecodedField {

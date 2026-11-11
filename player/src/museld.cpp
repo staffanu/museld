@@ -364,6 +364,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                       Decoder::FieldInterpolationMode initial_field_interpolation_mode,
                       bool initial_use_3d_comb,
                       bool initial_film_mode,
+                      Decoder::TemporalNr initial_temporal_nr,
                       Decoder::CxMode initial_cx_mode,
                       Decoder::BlackLevelMode initial_black_level_mode,
                       DropoutMode dropout_mode,
@@ -411,6 +412,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         state.field_interpolation_mode = initial_field_interpolation_mode;
         state.use_3d_comb = initial_use_3d_comb;
         state.film_mode = initial_film_mode;
+        state.temporal_nr = initial_temporal_nr;
         state.analog_cx_mode = initial_cx_mode;
         state.black_level_mode = initial_black_level_mode;
         state.aspect_mode = initial_aspect_mode;
@@ -638,6 +640,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                     // metadata_only: a probe; a redo during the search is the
                     // one clean decode of the displayed field it starts with
                     state.chapter_search != nullptr && !redo,
+                    state.temporal_nr,
             };
         };
 
@@ -1483,7 +1486,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   bool decode_all_fields, bool full_screen, AspectMode aspect_mode, bool full_image, double overscan,
                   bool no_sync, bool no_keys,
                   bool start_paused, Decoder::FieldInterpolationMode field_interpolation_mode,
-                  bool use_3d_comb, bool film_mode, Decoder::CxMode cx_mode, Decoder::BlackLevelMode black_level_mode, bool decode_video,
+                  bool use_3d_comb, bool film_mode, Decoder::TemporalNr temporal_nr, Decoder::CxMode cx_mode, Decoder::BlackLevelMode black_level_mode, bool decode_video,
                   DropoutMode dropout_mode,
                   bool decode_audio, AudioTrack audio_track, bool audio_fallback, bool benchmark_shaders,
                   MuseAdaptiveEqualizer::Mode eq_mode, float eq_alpha,
@@ -1697,7 +1700,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         switched = runPlayer(log, manager, *decoder, reader_controls, window, full_screen, no_keys, aspect_mode, picture_format,
                   full_image, overscan,
                   start_paused,
-                  field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, dropout_mode, audio_track, audio_fallback,
+                  field_interpolation_mode, use_3d_comb, film_mode, temporal_nr, cx_mode, black_level_mode, dropout_mode, audio_track, audio_fallback,
                   std::is_same<InputBlock, MuseInputBlock>::value,
                   saved_state, input_name, open_next,
                   benchmark_shaders,
@@ -1836,6 +1839,7 @@ int main(int argc, char *argv[]) {
     bool start_paused = false;
     auto field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
     bool use_3d_comb = true;
+    Decoder::TemporalNr temporal_nr = Decoder::TemporalNr::eOff;
     bool film_mode = true;
     optional<string> export_frame_filename; // save one frame as PNG and quit
     double export_frame_at_seconds = 0;     // stream position of the exported frame (like --seek)
@@ -2007,6 +2011,14 @@ int main(int argc, char *argv[]) {
     });
     options.flag("--no-3d-comb", "NTSC: start with the temporal Y/C separation off, as key 4", [&] () -> void {
         use_3d_comb = false;
+    });
+    options.option("--nr", "LEVEL", "NTSC/PAL: temporal noise reduction on the still parts of the picture, "
+                                     "off (default), low or high; also cycled with the 6 key", [&] () -> void {
+        const string level = *(it++);
+        if (level == "off")       temporal_nr = Decoder::TemporalNr::eOff;
+        else if (level == "low")  temporal_nr = Decoder::TemporalNr::eLow;
+        else if (level == "high") temporal_nr = Decoder::TemporalNr::eHigh;
+        else throw std::runtime_error(std::format("Unknown --nr {} (expected off|low|high)", level));
     });
     options.flag("--no-film-mode", "NTSC: start with the film mode off instead of auto, as key 5 "
                                    "(auto weaves fields by the film frame they came from while "
@@ -2512,7 +2524,7 @@ int main(int argc, char *argv[]) {
                                     efm_adaptive_filter_size, muse_output_filename, standard);
                     };
                     outcome = process_file<SdtvInputBlock>(log, executable_dir, surface, saved_state, name, make_reader, watch_type, &standard, decode_all_fields,
-                                                 full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
+                                                 full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, temporal_nr, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                  audio_track, audio_fallback,
                                                  benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
                                  subtitle_setup,
@@ -2526,7 +2538,7 @@ int main(int argc, char *argv[]) {
                                 log, std::move(input), initial_seek_seconds, muse_output_filename);
                     };
                     outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, name, make_reader, std::nullopt, nullptr, decode_all_fields,
-                                 full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
+                                 full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, temporal_nr, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, audio_fallback, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
@@ -2542,7 +2554,7 @@ int main(int argc, char *argv[]) {
                                 audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
                     };
                     outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, name, make_reader, watch_type, nullptr, decode_all_fields,
-                                 full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
+                                 full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, temporal_nr, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, audio_fallback, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
