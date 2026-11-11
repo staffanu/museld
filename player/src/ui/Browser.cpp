@@ -6,6 +6,7 @@
 #include <format>
 #include "Browser.h"
 #include "SavedState.h"
+#include "input/InputReaderFactory.h"
 
 namespace {
 
@@ -28,9 +29,15 @@ bool looksLikeDirectory(const std::string &location) {
     if (location.empty() || location.back() == '/')
         return true;
     if (DirectoryListing::isUrl(location)) {
-        // http://host (no path) is the server's root
+        // On a web server only the name tells: a capture's extension is a file,
+        // anything else is taken for a directory (http://host alone is the root)
+        if (!DirectoryListing::isHttp(location))
+            return false;
         const auto after_scheme = location.find("://") + 3;
-        return !DirectoryListing::isHttp(location) ? false : location.find('/', after_scheme) == std::string::npos;
+        if (location.find('/', after_scheme) == std::string::npos)
+            return true;
+        const std::string name = location.substr(location.rfind('/') + 1);
+        return !inputFormatFromFilename(name).has_value();
     }
     std::error_code ec;
     return std::filesystem::is_directory(location, ec);
@@ -89,11 +96,15 @@ void Browser::rebuildOpenPage() {
 }
 
 void Browser::enterAddress() {
-    const std::string initial = m_state.recent().empty() ? std::string("http://") : m_state.recent().front();
+    // Prefilled with what was typed last (so a failed address can be corrected),
+    // else the most recent address, else the scheme
+    const std::string initial = !m_last_typed.empty() ? m_last_typed
+                              : m_state.recent().empty() ? std::string("http://") : m_state.recent().front();
     m_menu.startTextEntry(std::make_unique<TextEntry>(
             "ADDRESS", initial,
             [this](const std::string &text) {
                 m_menu.endTextEntry();
+                m_last_typed = text;
                 const std::string location = normalizeAddress(text);
                 if (!location.empty())
                     go(location);
@@ -121,6 +132,8 @@ void Browser::showListing(const std::string &location_of_item) {
     const std::string location = location_of_item; // see go()
     m_location = DirectoryListing::withSlash(location);
     const DirListing listing = DirectoryListing::list(m_location);
+    if (!listing.location.empty())
+        m_location = listing.location; // where the server's redirects led
     m_listing_page->title = shortLocation(m_location, 60);
     std::vector<MenuItem> items;
     if (!listing.error.empty()) {

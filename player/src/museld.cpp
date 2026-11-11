@@ -7,6 +7,7 @@
 #include <format>
 #include <functional>
 #include <chrono>
+#include <csignal>
 #include <thread>
 #include <utility>
 
@@ -368,7 +369,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                       DropoutMode dropout_mode,
                       AudioTrack audio_track,
                       bool is_muse,
-                      SavedState &saved_state,
+                      SavedState &saved_state, const std::string &input_name,
                       std::optional<std::string> &open_next,
                       bool benchmark_shaders,
                       bool output_yuv,
@@ -382,7 +383,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                       double seconds_per_iteration,
                       int pace_slack_fields,
                       double initial_seek_seconds,
-                      std::optional<int> start_chapter) {
+                      std::optional<int> start_chapter, bool returns_to_browser) {
     vk::Device &device = manager.getDevice();
     std::optional<InputProbeResult::Type> switched;
 
@@ -416,6 +417,36 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         state.picture_format = picture_format;
         state.full_image = initial_full_image;
         state.overscan = initial_overscan;
+        // What this disc was last played with, over the command line's defaults:
+        // the aspect, the overscan and the audio track belong to the disc (the
+        // subtitle choice below, once the tracks exist); the decode toggles and
+        // full screen do not, and start from their defaults every time
+        const std::optional<DiscSettings> remembered = saved_state.discSettings(input_name);
+        if (remembered) {
+            static const std::pair<const char *, AspectMode> aspects[] = {
+                    {"normal", AspectMode::eNormal}, {"zoom", AspectMode::eZoom},
+                    {"squeeze", AspectMode::eSqueeze}, {"stretch", AspectMode::eStretch}};
+            for (const auto &[name, mode] : aspects)
+                if (remembered->aspect == name && (mode != AspectMode::eSqueeze || picture_format.can_squeeze))
+                    state.aspect_mode = mode;
+            if (remembered->overscan == "full") {
+                state.full_image = true;
+            } else if (!remembered->overscan.empty()) {
+                state.full_image = false;
+                state.overscan = std::clamp(atof(remembered->overscan.c_str()), 0.0, 0.1);
+            }
+            AudioTrack track = audio_track;
+            if (remembered->audio == "default") track = AudioTrack::eDefault;
+            else if (remembered->audio == "efm") track = AudioTrack::eEfm;
+            else if (remembered->audio == "ac3" && reader_controls.has_ac3_audio) track = AudioTrack::eAc3;
+            if (track != audio_track && reader_controls.setAudioTrack) {
+                audio_track = track;
+                reader_controls.setAudioTrack(audio_track);
+            }
+            log.info(eApplication, std::format("Remembered for this disc: aspect {}, overscan {}, audio {}, subtitles {} / {}",
+                                               remembered->aspect, remembered->overscan, remembered->audio,
+                                               remembered->subtitle, remembered->subtitle2));
+        }
 
         OsdOverlay osd;
         FrameBlitter blitter;
@@ -436,7 +467,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             menu.close();
         });
         buildPlayerMenu(menu, PlayerMenuBindings{state, reader_controls, dropout_mode, audio_track, full_screen, window,
-                                                 log, is_muse, is_tvos, &menu_quit}, browser.openPage());
+                                                 log, is_muse, is_tvos, returns_to_browser, &menu_quit}, browser.openPage());
         input.setMenu(&menu);
         if (const char *open_page = getenv("MUSELD_MENU_OPEN"); open_page != nullptr) {
             // A screenshot or a test run: start with the menu up, on the root or on
@@ -510,6 +541,17 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                     : (ocr_en_track_index >= 0 ? ocr_en_track_index : ocr_track_index);
                 if (state.subtitle_primary < 0 && subtitle_setup.cc_show && cc_track_index >= 0)
                     state.subtitle_primary = cc_track_index;
+                // The disc's remembered tracks, by their labels ("off" is a choice too)
+                const auto remembered_slot = [&](const std::string &label, int &slot) {
+                    if (label == "off") { slot = -1; return; }
+                    for (size_t i = 0; i < state.subtitle_track_names.size(); i++)
+                        if (state.subtitle_track_names[i] == label)
+                            slot = (int)i;
+                };
+                if (remembered) {
+                    remembered_slot(remembered->subtitle, state.subtitle_primary);
+                    remembered_slot(remembered->subtitle2, state.subtitle_secondary);
+                }
                 subtitle_tracks = std::move(tracks);
                 subtitle_font = std::move(font);
             } catch (const std::exception &x) {
@@ -656,6 +698,10 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             }
         };
 
+        // Keys pressed while the input was opening (a second or two from the
+        // browser) are not meant for the player: dropped before the first poll
+        input.discardPending();
+        bool opening_announced = false;
         while ((state.paused && !state.redo_last_field)
                || decoder.next(make_controls(state.redo_last_field), state.last_decoded)) {
 
@@ -1003,8 +1049,17 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 state.paused = true;
                 state.osd_text = "PAUSE";
             }
-            if (!input.poll(window, state, reader_controls, dropout_mode, audio_track, full_screen) || menu_quit || open_next)
+            if (!input.poll(window, state, reader_controls, dropout_mode, audio_track, full_screen) || menu_quit)
                 break;
+            if (open_next) {
+                // The menu's Open page chose another input: one more frame says so
+                // on the OSD, since opening it takes a moment, then this player leaves
+                if (opening_announced)
+                    break;
+                opening_announced = true;
+                const std::string name = open_next->substr(open_next->find_last_of('/') + 1);
+                state.osd_text = "OPENING " + (name.size() > 40 ? "..." + name.substr(name.size() - 37) : name);
+            }
             // A scripted check of playing on to another input, as the browser's choice does
             if (static const char *next = getenv("MUSELD_OPEN_NEXT"); next != nullptr && state.field_count == 60)
                 open_next = next;
@@ -1072,6 +1127,24 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         }
         if (benchmark_shaders)
             decoder.outputBenchmarkResults();
+        {
+            // What to play this disc with next time
+            DiscSettings now;
+            now.aspect = state.aspect_mode == AspectMode::eZoom ? "zoom" : state.aspect_mode == AspectMode::eSqueeze ? "squeeze"
+                       : state.aspect_mode == AspectMode::eStretch ? "stretch" : "normal";
+            now.overscan = state.full_image ? "full" : std::format("{:g}", state.overscan);
+            now.audio = audio_track == AudioTrack::eEfm ? "efm" : audio_track == AudioTrack::eAc3 ? "ac3" : "default";
+            const auto slot_label = [&](int slot) {
+                return slot < 0 ? std::string("off")
+                     : slot < (int)state.subtitle_track_names.size() ? state.subtitle_track_names[(size_t)slot] : std::string();
+            };
+            if (!state.subtitle_track_names.empty()) {
+                now.subtitle = slot_label(state.subtitle_primary);
+                now.subtitle2 = slot_label(state.subtitle_secondary);
+            }
+            if (!input_name.empty() && !inputIsLive(input_name) && saved_state.discSettings(input_name) != now)
+                saved_state.setDiscSettings(input_name, now);
+        }
     }
     return switched;
 }
@@ -1136,9 +1209,34 @@ static musevk::VulkanManager &ensureSurface(PlayerSurface &surface, Logger &log,
     if (surface.sdl.window == nullptr) {
         // Gamepads for the Siri Remote (and any controller): InputController maps
         // their buttons onto the keys
+        // Diagnostic hook: MUSELD_TRACE_EVENTS=1 prints every application, display
+        // and window event SDL posts, and takes SIGINT/SIGTERM itself (printing
+        // them) so that SDL does not turn a signal into a quit event
+        static const bool trace_events = getenv("MUSELD_TRACE_EVENTS") != nullptr;
+        if (trace_events) {
+            struct sigaction action {};
+            action.sa_handler = [](int sig) {
+                const char *m = sig == SIGTERM ? "museld: SIGTERM received\n" : "museld: SIGINT received\n";
+                (void)!write(2, m, strlen(m));
+            };
+            sigaction(SIGTERM, &action, nullptr);
+            sigaction(SIGINT, &action, nullptr);
+        }
+#if defined(__APPLE__) && TARGET_OS_TV
+        // No terminal on tvOS, so a SIGINT/SIGTERM cannot mean "quit" the way
+        // SDL takes it: a devicectl console launch sends one as the app comes up
+        // (seen 2026-11-10), which ended the browser screen at once
+        SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+#endif
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
             throw runtime_error(std::format("SDL_Init: {}", SDL_GetError()));
         surface.sdl.initialized = true;
+        if (trace_events)
+            SDL_AddEventWatch([](void *, SDL_Event *e) {
+                if (e->type < SDL_EVENT_KEY_DOWN)
+                    fprintf(stderr, "SDL event %#x\n", (unsigned)e->type);
+                return true;
+            }, nullptr);
         // Full screen is the desktop's mode, borderless -- no mode switch; the
         // blit scales.  The window keeps its windowed size underneath, which is
         // what Tab returns to.
@@ -1250,20 +1348,9 @@ static std::optional<std::string> browseForInput(Logger &log, const string &exec
     std::string shown_message = message;
     const unsigned revision_at_start = menu.revision();
     const auto shown_since = std::chrono::steady_clock::now();
-    while (!chosen) {
-        if (!input.poll(window, state, no_reader, dropout_mode, audio_track, full_screen))
-            return std::nullopt;
-        if (!shown_message.empty()
-            && (menu.revision() != revision_at_start || std::chrono::steady_clock::now() - shown_since > std::chrono::seconds(15)))
-            shown_message.clear();
-        if (!menu.isOpen()) {
-            // Back from the Open page: on tvOS the app ends, on a PC too (there is nothing beneath)
-            return std::nullopt;
-        }
-        if (state.in_background) {
-            SDL_Delay(50);
-            continue;
-        }
+    // One frame: the menu, and a bar along the bottom with a message (the reason
+    // the last choice did not play, in red; what is being opened, in grey)
+    const auto present_frame = [&](const std::string &message, bool error) {
         auto swap_chain_image = manager.acquireNextImage(image_available_semaphore);
         const vk::Extent2D swap_extent = manager.getSwapChainExtent();
         const DisplayGeometry geometry = computeDisplayGeometry({
@@ -1274,9 +1361,7 @@ static std::optional<std::string> browseForInput(Logger &log, const string &exec
         command_buffer->begin();
         blitter.clear(*command_buffer, images);
         menu_overlay.render(*command_buffer, images, state, menu, text_renderer);
-        if (!shown_message.empty()) {
-            const std::string &message = shown_message;
-            // The reason the last choice did not play, in a bar along the bottom
+        if (!message.empty()) {
             // (wrapped over two lines, the rest cut)
             constexpr int scale = 2;
             const int glyph_w = TextRenderer::c_glyph_width * scale, glyph_h = TextRenderer::c_glyph_height * scale;
@@ -1289,18 +1374,46 @@ static std::optional<std::string> browseForInput(Logger &log, const string &exec
             const int lines = second.empty() ? 1 : 2;
             const int y = c_h - 2 * glyph_h - line_h * lines;
             text_renderer.fillRect(images.out_image, glyph_w, y - glyph_h / 2, c_w - 2 * glyph_w, line_h * lines + glyph_h,
-                                   0.5f, 0.0f, 0.0f, 0.75f, *command_buffer);
+                                   error ? 0.5f : 0.2f, error ? 0.0f : 0.2f, error ? 0.0f : 0.25f, 0.75f, *command_buffer);
             text_renderer.drawText(images.out_image, 2 * glyph_w, y, first, scale, *command_buffer);
             if (!second.empty())
                 text_renderer.drawText(images.out_image, 2 * glyph_w, y + line_h, second, scale, *command_buffer);
         }
         blitter.present(*command_buffer, images, geometry, swap_chain_image, image_available_semaphore);
         manager.present(swap_chain_image);
+    };
+    while (!chosen) {
+        if (!input.poll(window, state, no_reader, dropout_mode, audio_track, full_screen)) {
+            log.debug(eApplication, "Browser: the input controller asked to leave");
+            return std::nullopt;
+        }
+        if (!shown_message.empty()
+            && (menu.revision() != revision_at_start || std::chrono::steady_clock::now() - shown_since > std::chrono::seconds(15)))
+            shown_message.clear();
+        if (!menu.isOpen()) {
+            // Back from the Open page: on tvOS the app ends, on a PC too (there is nothing beneath)
+            log.debug(eApplication, "Browser: the menu closed, leaving");
+            return std::nullopt;
+        }
+        if (state.in_background) {
+            SDL_Delay(50);
+            continue;
+        }
+        present_frame(shown_message, true);
         if (export_to != nullptr) {
             frame_exporter.exportFrame(*images.out_image, std::string(export_to));
             return std::nullopt;
         }
         SDL_Delay(16);
+    }
+    // Opening the input takes a moment (the probe, a network connection, the
+    // reader's start): say so, over a cleared screen rather than the menu
+    menu.close();
+    if (!state.in_background)
+        present_frame("Opening " + *chosen + " ...", false);
+    if (export_to != nullptr) { // the scripted check of this frame
+        frame_exporter.exportFrame(*images.out_image, std::string(export_to));
+        return std::nullopt;
     }
     return chosen;
 }
@@ -1342,6 +1455,7 @@ struct VideoFileOutput {
 // watch it for a change away from that type and end with switch_to set
 template<class InputBlock>
 PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurface &surface, SavedState &saved_state,
+                  const string &input_name,
                   const std::function<std::unique_ptr<FrameReader<InputBlock>>(musevk::VulkanManager &)> &make_reader,
                   std::optional<InputProbeResult::Type> watch_type,
                   const VideoStandard *video_standard,
@@ -1361,7 +1475,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   double export_frame_after_seconds,
                   double write_duration_seconds,
                   double initial_seek_seconds,
-                  std::optional<int> start_chapter) {
+                  std::optional<int> start_chapter, bool returns_to_browser) {
     // The decoded image size (also the size of a written video file), where
     // the picture sits in it and the shape of its pixels, and a window of the
     // picture's shape that downscales it in neither direction
@@ -1562,13 +1676,13 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   start_paused,
                   field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, dropout_mode, audio_track,
                   std::is_same<InputBlock, MuseInputBlock>::value,
-                  saved_state, open_next,
+                  saved_state, input_name, open_next,
                   benchmark_shaders,
                   output_filename.has_value(),
                   vfw, audio_playback.get(), executable_dir,
                   subtitle_setup,
                   export_frame_filename, export_frame_after_seconds, write_duration_seconds, seconds_per_iteration,
-                  pace_slack_fields, initial_seek_seconds, start_chapter);
+                  pace_slack_fields, initial_seek_seconds, start_chapter, returns_to_browser);
     }
 
     // The writer stays open for the next input (the caller closes it)
@@ -1686,6 +1800,9 @@ int main(int argc, char *argv[]) {
     double overscan = 0.0;
     bool no_sync = false;
     bool browse = false;
+    // What museld remembers between runs (the browser's lists, the per-disc
+    // settings); declared before the options, which may turn it off
+    SavedState saved_state;
     bool no_keys = false;
     std::optional<InputType> input_type_option;         // unset (the default) means auto-detect
     bool probe_only = false;      // --probe: print what probing finds and skip decoding
@@ -2036,6 +2153,12 @@ int main(int argc, char *argv[]) {
                              "with an input file; the Apple TV app always does", [&] () -> void {
         browse = true;
     });
+    options.flag("--no-state", "Neither read nor write what museld remembers between runs (the recent "
+                               "addresses, and per disc the aspect, overscan, audio and subtitle choices): "
+                               "the run starts from the options alone and leaves no record, for tests and "
+                               "measurements", [&] () -> void {
+        saved_state.disable();
+    });
     options.flag("--no-sync", "Decode as fast as the machine allows instead of at playback speed",
                  [&] () -> void {
         no_sync = true;
@@ -2137,9 +2260,8 @@ int main(int argc, char *argv[]) {
         // Options apply to the input files that follow them, so any left over when
         // the arguments run out did nothing.  Remember them to say so afterwards.
         vector<string> trailing_options;
-        // The window and the device, and what museld remembers, outlive the inputs
+        // The window and the device outlive the inputs (as does saved_state, above)
         PlayerSurface surface;
-        SavedState saved_state;
 #if defined(__APPLE__) && TARGET_OS_TV
         constexpr bool is_tvos = true;
 #else
@@ -2359,13 +2481,13 @@ int main(int argc, char *argv[]) {
                                     file_sample_frequency, initial_seek_seconds, benchmark_shaders, audio_track,
                                     efm_adaptive_filter_size, muse_output_filename, standard);
                     };
-                    outcome = process_file<SdtvInputBlock>(log, executable_dir, surface, saved_state, make_reader, watch_type, &standard, decode_all_fields,
+                    outcome = process_file<SdtvInputBlock>(log, executable_dir, surface, saved_state, name, make_reader, watch_type, &standard, decode_all_fields,
                                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                  audio_track,
                                                  benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                 initial_seek_seconds, start_chapter);
+                                 initial_seek_seconds, start_chapter, is_tvos || browse);
                     break;
                 }
                 case eMuse16MHz: {
@@ -2373,12 +2495,12 @@ int main(int argc, char *argv[]) {
                         return make_unique<PhaseCorrect16MHzFrameReader>(
                                 log, std::move(input), initial_seek_seconds, muse_output_filename);
                     };
-                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, make_reader, std::nullopt, nullptr, decode_all_fields,
+                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, name, make_reader, std::nullopt, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                 initial_seek_seconds, start_chapter);
+                                 initial_seek_seconds, start_chapter, is_tvos || browse);
                     break;
                 }
                 case eMuseOversampled:
@@ -2389,12 +2511,12 @@ int main(int argc, char *argv[]) {
                                 file_sample_frequency, initial_seek_seconds, file_input_type == eMuseRf, benchmark_shaders,
                                 audio_track == AudioTrack::eEfm, efm_adaptive_filter_size, muse_output_filename);
                     };
-                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, make_reader, watch_type, nullptr, decode_all_fields,
+                    outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, name, make_reader, watch_type, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                  audio_track, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                 initial_seek_seconds, start_chapter);
+                                 initial_seek_seconds, start_chapter, is_tvos || browse);
                     break;
                 }
                 default:

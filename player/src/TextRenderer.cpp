@@ -26,7 +26,7 @@ TextRenderer::TextRenderer(std::string const &executable_dir, VulkanManager &vul
                             musevk::VulkanUtil::loadSpirv(executable_dir, "render_text.comp"), musevk::Size(0)))),
   m_fill_rect_shader(std::shared_ptr<ComputeShader>(
           new ComputeShader(m_vulkan_manager,
-                            "fill_rect", std::vector<MemoryObjectType>{eImage}, sizeof(uint32_t) * 8, // spelt out for GCC
+                            "fill_rect", std::vector<MemoryObjectType>{eImage, eImage}, sizeof(uint32_t) * 8, // spelt out for GCC
                             musevk::VulkanUtil::loadSpirv(executable_dir, "fill_rect.comp"), musevk::Size(0)))) {
 }
 
@@ -41,9 +41,10 @@ void TextRenderer::fillRect(std::shared_ptr<VulkanImage> const &image, int x, in
                                    vk::PipelineStageFlagBits::eTopOfPipe,
                                    vk::PipelineStageFlagBits::eComputeShader,
                                    vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
+    // The image twice: read-only and write-only bindings (see the shader)
     auto current = m_fill_rect_shader->getBuffersForDescriptorSet(0);
-    if (current.size() != 1 || current[0] != image)
-        m_fill_rect_shader->updateBufferDescriptorsInSet(0, {image});
+    if (current.size() != 2 || current[0] != image || current[1] != image)
+        m_fill_rect_shader->updateBufferDescriptorsInSet(0, {image, image});
     // The colour rides in the push constants as the bits of floats
     const std::vector<uint32_t> push_constants = {
             (uint32_t)x0, (uint32_t)y0, (uint32_t)(x1 - x0), (uint32_t)(y1 - y0),

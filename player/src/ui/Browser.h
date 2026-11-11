@@ -43,6 +43,7 @@ private:
     MenuPage *m_open_page;
     MenuPage *m_listing_page;
     std::string m_location;
+    std::string m_last_typed; // the address field's last text, prefilled next time
 };
 
 #endif //MUSELD_BROWSER_H

@@ -87,6 +87,13 @@ int InputController::gamepadButtonScancode(int button) {
     }
 }
 
+void InputController::discardPending() {
+    SDL_PumpEvents();
+    SDL_FlushEvents(SDL_EVENT_KEY_DOWN, SDL_EVENT_KEY_UP);
+    SDL_FlushEvents(SDL_EVENT_GAMEPAD_BUTTON_DOWN, SDL_EVENT_GAMEPAD_BUTTON_UP);
+    m_pressed.clear();
+}
+
 bool InputController::poll(SDL_Window *window,
                            PlayerState &state,
                            ReaderControls &reader,
@@ -104,6 +111,7 @@ bool InputController::poll(SDL_Window *window,
             case SDL_EVENT_QUIT:
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             case SDL_EVENT_TERMINATING:
+                m_log.debug(eApplication, std::format("Quit event {:#x}", (unsigned)event.type));
                 quit = true;
                 break;
             case SDL_EVENT_KEY_DOWN: {
@@ -180,7 +188,10 @@ bool InputController::poll(SDL_Window *window,
     // The window takes text input while the menu's address field is up, so a
     // keyboard types into it (and its letters are not hotkeys meanwhile)
     const bool entry_up = m_menu != nullptr && m_menu->isOpen() && m_menu->textEntry() != nullptr;
-    if (entry_up != m_text_input_on) {
+    // Not on tvOS: SDL's text input there is the system's full-screen keyboard
+    // dialog, which would come up over the menu's own keyboard (the one the
+    // remote drives, with the address prefilled)
+    if (!tvos && entry_up != m_text_input_on) {
         m_text_input_on = entry_up;
         if (entry_up)
             SDL_StartTextInput(window);
@@ -221,8 +232,14 @@ bool InputController::poll(SDL_Window *window,
             m_menu->close();
         } else if (checkKey(SDL_SCANCODE_ESCAPE) || checkKey(SDL_SCANCODE_BACKSPACE)) {
             if (!m_menu->handleKey(MenuKey::eBack)) { // on the root page
-                if ((tvos && checkKey(SDL_SCANCODE_ESCAPE)) || m_menu_is_screen)
+                // Back from the root closes the menu, back to the picture; only
+                // the browser screen, with nothing beneath it, is left this way.
+                // Leaving playback is the menu's own Stop/Quit item (a TV remote
+                // over HDMI-CEC has the arrows, select and back, nothing else)
+                if (m_menu_is_screen) {
+                    m_log.debug(eApplication, "Back from the menu's root: leaving");
                     return false;
+                }
                 m_menu->close();
             }
         }

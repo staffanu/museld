@@ -499,6 +499,35 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   frame.  The goldens were re-recorded on the Mac (M2, the Apple GPU) from this branch,
   so a run there passes bit-exact and another machine shows GPU-level DIFFs, as before
   in reverse.
+- **First run of the merged build on the box** (2026-11-10): three things.  (1) The app
+  died in Vulkan set-up: `fill_rect.comp` (the menu's panels) loaded and stored the same
+  rgba32f image, which Metal compiles as a read-write texture, and the A10X (read-write
+  texture tier 1) has that for 32-bit single-channel formats only -- the shader compiler
+  service failed (`XPC_ERROR_CONNECTION_INTERRUPTED`) and MoltenVK reported
+  `ErrorInitializationFailed`.  The image is now bound twice, read-only and write-only, as
+  `render_subtitle.comp` always did.  Rule: a shader that reads and writes one image binds
+  it twice.  (2) A devicectl console launch sends the app a SIGTERM as it comes up (seen with
+  `MUSELD_TRACE_EVENTS=1`, which prints SDL's events and takes the signals itself), and SDL
+  turned it into its quit event, so the browser screen left at once; from the home screen
+  the app was fine.  tvOS has no terminal, so `SDL_HINT_NO_SIGNAL_HANDLERS` is set there.
+  (3) The address field started SDL text input, which on tvOS is the system's full-screen
+  keyboard dialog, over the menu's own keyboard; not started on tvOS now.
+  Then from using it (2026-11-11): a web address without its slash went to the player
+  (HTTP status 301); the browser now takes a web address for a directory unless its
+  name has a capture's extension, follows the server's redirects and keeps the field's
+  last text for correcting.  Opening a file from the browser took a second or two
+  with the Open page still up and its cursor reset: a bar says "Opening ..." over a
+  cleared screen meanwhile (and the player's OSD says OPENING when its Open page
+  chose), and the keys pressed while waiting are dropped before the player's first
+  poll -- a swipe on the remote then had started a chapter search ("NO CHAPTER CODE").
+  A TV remote over HDMI-CEC (no Siri Remote at hand) sends the arrows, Return for OK and
+  Escape for back, nothing else (logged at M4 on 2026-11-11), so the player is driven with
+  those: Back opens the menu over the picture and, from its root, closes it again rather
+  than leaving; the menu's Stop item returns to the browser, whose Back leaves the app.
+  The aspect mode set for a disc was gone when it was opened again: the state file now
+  keeps, per address, the aspect, overscan, audio track and subtitle choice (the disc's
+  own properties; not full screen, which is a testing convenience on a PC, nor the decode
+  toggles), applied over the command line's defaults when the disc is opened.
   Input: cpp-httplib received in 16 KiB pieces, which read 45 MB/s on the A10X from a
   gigabit LAN; 256 KiB pieces (`input/HttpClient.h`) read 60-100 MB/s, the NAS varying
   run to run.  Receiving at 100 MB/s (the raw s16 at 125 MB/s wanted) costs the

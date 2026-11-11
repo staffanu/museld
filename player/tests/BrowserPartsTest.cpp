@@ -152,3 +152,28 @@ TEST_CASE("Menu: an item that replaces its own page's items when activated", "[m
     menu.handleKey(MenuKey::eSelect);
     CHECK(chosen == "item 1");
 }
+
+TEST_CASE("The saved state remembers what a disc was played with", "[Browser]") {
+    const auto path = (std::filesystem::temp_directory_path() / std::format("museld-state-disc-test-{}.txt", ::getpid())).string();
+    std::filesystem::remove(path);
+    {
+        SavedState state(path);
+        REQUIRE(!state.discSettings("http://nas/a.s8"));
+        state.setDiscSettings("http://nas/a.s8", DiscSettings{"zoom", "0.05", "efm", "FILE: a.srt", "off"});
+        state.setDiscSettings("/local/b.lds", DiscSettings{"normal", "full", "ac3", "", ""});
+        state.setDiscSettings("http://nas/a.s8", DiscSettings{"squeeze", "0", "default", "", ""}); // replaces
+    }
+    {
+        SavedState state(path);
+        const auto a = state.discSettings("http://nas/a.s8");
+        REQUIRE(a);
+        CHECK(a->aspect == "squeeze");
+        CHECK(a->overscan == "0");
+        CHECK(a->audio == "default");
+        const auto b = state.discSettings("/local/b.lds");
+        REQUIRE(b);
+        CHECK(*b == DiscSettings{"normal", "full", "ac3", "", ""});
+        CHECK(!state.discSettings("nothing"));
+    }
+    std::filesystem::remove(path);
+}
