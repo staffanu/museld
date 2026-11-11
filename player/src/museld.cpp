@@ -1227,13 +1227,13 @@ static musevk::VulkanManager &ensureSurface(PlayerSurface &surface, Logger &log,
         // them) so that SDL does not turn a signal into a quit event
         static const bool trace_events = getenv("MUSELD_TRACE_EVENTS") != nullptr;
         if (trace_events) {
-            struct sigaction action {};
-            action.sa_handler = [](int sig) {
+            // std::signal, not sigaction: Windows has no sigaction
+            void (*const handler)(int) = [](int sig) {
                 const char *m = sig == SIGTERM ? "museld: SIGTERM received\n" : "museld: SIGINT received\n";
                 (void)!write(2, m, strlen(m));
             };
-            sigaction(SIGTERM, &action, nullptr);
-            sigaction(SIGINT, &action, nullptr);
+            std::signal(SIGTERM, handler);
+            std::signal(SIGINT, handler);
         }
 #if defined(__APPLE__) && TARGET_OS_TV
         // No terminal on tvOS, so a SIGINT/SIGTERM cannot mean "quit" the way
