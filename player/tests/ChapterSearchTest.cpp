@@ -156,6 +156,42 @@ TEST_CASE("no next chapter on the capture fails instead of reading past the end"
     CHECK(out.action.reason == "NO MORE CHAPTERS");
 }
 
+TEST_CASE("a capture whose tail has no signal ends a forward search", "[chaptersearch]") {
+    // Nothing decodes in the last three seconds: the probe aimed at the
+    // input's end reads no frame, and the search looks before it
+    Disc disc{{0, 310}, 1, 0, 900};
+    const int64_t origin = (int64_t)(400 * c_fs);
+    const int64_t signal_end = (int64_t)(897 * c_fs);
+    const int64_t frame = (int64_t)(c_fs / c_fps);
+    for (bool chapter_near_end : {false, true}) {
+        if (chapter_near_end)
+            disc.chapter_starts.push_back(880);
+        ChapterSearch search(params(disc), disc.readingAt(origin, 1), ChapterSearch::Direction::eNext);
+        int ended = 0;
+        for (int guard = 0; guard < 100; guard++) {
+            const auto &a = search.action();
+            if (a.kind != ChapterSearch::Action::Kind::eSeek)
+                break;
+            const int64_t landed = (a.offset / frame + 1) * frame;
+            if (landed >= signal_end) {
+                search.probeReachedEnd();
+                ended++;
+            } else {
+                search.feed(disc.readingAt(landed, 1));
+            }
+        }
+        CHECK(ended >= 1);
+        if (chapter_near_end) {
+            REQUIRE(search.action().kind == ChapterSearch::Action::Kind::eDone);
+            CHECK(search.action().chapter == 3);
+            CHECK(std::abs(discSeconds(disc, search.action().offset) - 880) < 0.3);
+        } else {
+            REQUIRE(search.action().kind == ChapterSearch::Action::Kind::eFailed);
+            CHECK(search.action().reason == "NO MORE CHAPTERS");
+        }
+    }
+}
+
 TEST_CASE("the lead-out ends a forward search", "[chaptersearch]") {
     Disc disc{{0, 310}, 1, 0, 1800, 900.0};
     const int64_t origin = (int64_t)(400 * c_fs);

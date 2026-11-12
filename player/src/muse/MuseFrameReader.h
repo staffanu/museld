@@ -70,6 +70,8 @@ public:
         return m_demodulator != nullptr ? m_sample_rate * MuseDemodulatedBlock::c_video_decimation_rate : 0;
     }
     [[nodiscard]] int64_t inputSampleCount() const override;
+    void holdAtInputEnd(bool hold) override { if (m_demodulator != nullptr) m_demodulator->holdAtEnd(hold); }
+    [[nodiscard]] bool atInputEnd() const override { return m_demodulator != nullptr && m_demodulator->atEnd(); }
     void setEfmEnabled(bool enabled) override;
     void setEfmAdaptiveFilterSize(int size) override;
     [[nodiscard]] int efmAdaptiveFilterSize() const override;

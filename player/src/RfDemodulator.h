@@ -153,6 +153,18 @@ public:
         return seekLocked(samples_to_seek);
     }
 
+    // While held, the demodulator thread waits at the end of the input for
+    // a seek instead of finishing, which it does for good: the chapter
+    // search probes near the end, where a capture may have no signal left,
+    // and has to get back from there.  Releasing the hold lets a waiting
+    // thread finish.  atEnd() is true while it waits.
+    void holdAtEnd(bool hold) {
+        std::unique_lock<std::mutex> input_lock(m_input_mutex);
+        m_hold_at_end = hold;
+        m_cv_input.notify_all();
+    }
+    [[nodiscard]] bool atEnd() const { return m_at_end; }
+
     [[nodiscard]] int64_t inputSampleCount() const {
         return m_input_reader ? m_input_reader->sampleCount() : -1;
     }
@@ -219,10 +231,26 @@ protected:
             return false;
         }
         std::unique_lock<std::mutex> input_lock(m_input_mutex);
-        int got = m_input_reader->readFloats(out);
-        if (got == 0) {
-            m_log.info(eInput, "RfDemodulator: end of file");
-            return false;
+        while (m_input_reader->readFloats(out) == 0) {
+            if (!m_hold_at_end) {
+                m_log.info(eInput, "RfDemodulator: end of file");
+                return false;
+            }
+            // Asked to wait here (holdAtEnd): a seek brings the stream back
+            m_log.info(eInput, "RfDemodulator: end of file, waiting for a seek");
+            const uint32_t generation = m_seek_generation;
+            m_at_end = true;
+            while (!m_stop_request && m_hold_at_end && m_seek_generation == generation)
+                m_cv_input.wait_for(input_lock, std::chrono::milliseconds(50)); // the stop request has no notify here
+            m_at_end = false;
+            if (m_stop_request) {
+                m_log.info(eInput, "RfDemodulator: stop requested");
+                return false;
+            }
+            if (m_seek_generation == generation) {
+                m_log.info(eInput, "RfDemodulator: end of file");
+                return false;
+            }
         }
         block_input_offset = m_total_samples_read;
         seek_generation = m_seek_generation;
@@ -240,6 +268,8 @@ protected:
         }
         m_total_samples_read = std::max<int64_t>(0, m_total_samples_read + samples_to_seek);
         const uint32_t generation = ++m_seek_generation;
+        m_at_end = false;
+        m_cv_input.notify_all(); // a demodulator thread waiting at the end of the input
 
         // Discard any filled buffers
         std::unique_lock<std::mutex> lock(m_demodulated_block_mutex);
@@ -262,6 +292,9 @@ protected:
     std::mutex m_input_mutex; // the input reader's position and the two fields below
     int64_t m_total_samples_read;
     uint32_t m_seek_generation = 0;
+    bool m_hold_at_end = false;
+    std::condition_variable m_cv_input; // with m_input_mutex: a seek or the hold's release, for a thread waiting at the end
+    std::atomic<bool> m_at_end{false};
     std::unique_ptr<ContentWatch> m_content_watch;
     std::atomic<bool> m_signal_lost{false};
     std::deque<std::unique_ptr<B>> m_vacant_blocks;

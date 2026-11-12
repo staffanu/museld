@@ -68,6 +68,10 @@ public:
     // keep its probes inside the file
     [[nodiscard]] virtual double inputSampleRate() const { return 0; }
     [[nodiscard]] virtual int64_t inputSampleCount() const { return -1; }
+    // Keeps the reader alive at the end of the input, waiting for a seek,
+    // and tells when it waits there (see RfDemodulator::holdAtEnd)
+    virtual void holdAtInputEnd(bool) {}
+    [[nodiscard]] virtual bool atInputEnd() const { return false; }
     // A pipe, fifo or udp:// stream: it cannot be positioned and has a
     // transport of its own (see PlayerState::honor_picture_stops)
     [[nodiscard]] bool inputIsLive() const { return m_input_is_realtime; }

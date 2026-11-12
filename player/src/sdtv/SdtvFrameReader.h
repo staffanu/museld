@@ -58,6 +58,8 @@ public:
     std::optional<uint32_t> seekToInputSample(int64_t sample) override;
     [[nodiscard]] double inputSampleRate() const override { return m_input_sample_rate; }
     [[nodiscard]] int64_t inputSampleCount() const override;
+    void holdAtInputEnd(bool hold) override { m_demodulator->holdAtEnd(hold); }
+    [[nodiscard]] bool atInputEnd() const override { return m_demodulator->atEnd(); }
     void setAudioTrack(AudioTrack track) override;
     void setEfmAdaptiveFilterSize(int size) override;
     [[nodiscard]] int efmAdaptiveFilterSize() const override;

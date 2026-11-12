@@ -22,6 +22,8 @@ ChapterSearch::ChapterSearch(const Params &params, const Reading &current, Direc
           m_probes(0),
           m_wasted(0),
           m_chained(false),
+          m_past_end(false),
+          m_back_step(seconds(5.0)),
           m_action{Action::Kind::eFailed} {
     if (!current.chapter.has_value()) {
         m_action = {Action::Kind::eFailed, 0, 0, "NO CHAPTER CODE"};
@@ -193,7 +195,7 @@ const ChapterSearch::Action &ChapterSearch::feed(const Reading &reading) {
         }
         const bool at_input_end = m_params.input_sample_count >= 0
                 && m_requested >= clampToInput(m_params.input_sample_count);
-        if (at_input_end && m_direction == Direction::eNext && !m_hi) {
+        if ((at_input_end || m_past_end) && m_direction == Direction::eNext && !m_hi) {
             m_action = {Action::Kind::eFailed, 0, 0, "NO MORE CHAPTERS"};
             return m_action;
         }
@@ -235,5 +237,28 @@ const ChapterSearch::Action &ChapterSearch::feed(const Reading &reading) {
         m_wasted = 0;
     }
     decide();
+    return m_action;
+}
+
+const ChapterSearch::Action &ChapterSearch::probeReachedEnd() {
+    if (m_action.kind != Action::Kind::eSeek && m_action.kind != Action::Kind::eWait)
+        return m_action;
+    if (m_hi || !m_lo) {
+        // Only a forward gallop probes towards the end; anything else that
+        // gets there has lost its way
+        m_action = {Action::Kind::eFailed, 0, 0, "SEARCH FAILED"};
+        return m_action;
+    }
+    // The last frames of the capture are somewhere before this probe.  One
+    // of them that still reads below the target says what a reading at the
+    // input's end would: the chapter is not on this capture.
+    m_past_end = true;
+    const int64_t next = m_requested - m_back_step;
+    m_back_step *= 2;
+    if (next <= m_lo->offset) {
+        m_action = {Action::Kind::eFailed, 0, 0, "NO MORE CHAPTERS"};
+        return m_action;
+    }
+    probe(next);
     return m_action;
 }

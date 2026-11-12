@@ -392,7 +392,10 @@ when it is plausible for the file size and hidden only when wrapped (the Technid
 (`InputReader::seek`, `RfDemodulator::seekLocked`, `FrameReader::seek`) and nothing moves. Readers
 reset their timebase/PLL on the reader thread when a block's generation changes, never from
 the seeking thread, and the NTSC reader drops the partial frame after a reset. A probe costs
-about 50 ms. `DiscInfo` exposes chapter, lead-in/out and the CAV picture stop (which pauses
+about 50 ms. End of file finishes the demodulator and reader threads for good, and a probe near the end
+of a capture may find no signal left there and run into it: while a search is on, the demodulator
+waits at the end for a seek instead (`RfDemodulator::holdAtEnd`), the player loop tells the search
+(`ChapterSearch::probeReachedEnd`), and the search looks further back for the last frames there are. `DiscInfo` exposes chapter, lead-in/out and the CAV picture stop (which pauses
 playback unless turned off with P).
 
 **Input format abstraction**: `InputReader` specializations (raw widths, lds, FLAC; a seekable

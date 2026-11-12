@@ -45,6 +45,11 @@ struct ReaderControls {
     // Live input whose type was detected: whether the reader has a signal,
     // and the other type the content watch found (the player then ends to
     // be restarted for that type).  Empty when the type is not watched.
+    // The chapter search's probes near the end of the input: keeps the
+    // reader waiting there for a seek instead of finishing, and tells when
+    // it waits (FrameReader::holdAtInputEnd).  Empty: the reader cannot.
+    std::function<void(bool)> holdAtInputEnd;
+    std::function<bool()> atInputEnd;
     std::function<bool()> signalPresent;
     std::function<std::optional<InputProbeResult::Type>()> otherTypeDetected;
     // Adaptive equalizer controls (MUSE only).  cycleEqMode returns a short label

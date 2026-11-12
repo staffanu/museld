@@ -711,6 +711,8 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         // browser) are not meant for the player: dropped before the first poll
         input.discardPending();
         bool opening_announced = false;
+        bool search_holds_input_end = false;
+        int search_idle_at_end = 0; // input timeouts in a row with the reader waiting at the end
         while ((state.paused && !state.redo_last_field)
                || decoder.next(make_controls(state.redo_last_field), state.last_decoded)) {
 
@@ -718,6 +720,13 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             // frames are not played (no clock, picture, audio, captions or
             // file output), only read for their disc code
             const bool searching = state.chapter_search != nullptr;
+            // A probe near the end of a capture may find no signal there and
+            // run into the end of the input, which would finish the reader:
+            // it waits there instead while a search is on
+            if (searching != search_holds_input_end && reader_controls.holdAtInputEnd) {
+                reader_controls.holdAtInputEnd(searching);
+                search_holds_input_end = searching;
+            }
 
             // A live input that now carries another type: this player is
             // done, the caller starts one for that type on the same stream
@@ -767,9 +776,22 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                     }
                     if (state.chapter_search->feed(reading).kind != ChapterSearch::Action::Kind::eWait)
                         state.search_action_pending = true;
+                    search_idle_at_end = 0;
+                } else if (!state.search_action_pending && !state.last_decoded.decoded
+                           && reader_controls.atInputEnd && reader_controls.atInputEnd()) {
+                    // The probe reached the end of the input, and what was
+                    // read on the way has had three timeouts to come out as
+                    // a frame: there is none
+                    if (++search_idle_at_end >= 3) {
+                        log.info(eApplication, "Chapter search: no frame between the probe and the end of the input");
+                        if (state.chapter_search->probeReachedEnd().kind != ChapterSearch::Action::Kind::eWait)
+                            state.search_action_pending = true;
+                        search_idle_at_end = 0;
+                    }
                 }
                 if (state.search_action_pending) {
                     state.search_action_pending = false;
+                    search_idle_at_end = 0;
                     runChapterSearchAction();
                 }
             } else if (state.honor_picture_stops && !vfw && !export_frame_filename && !no_keys && !state.paused
@@ -1688,6 +1710,10 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                 !is_muse && video_standard->ntsc_chroma, // has_ac3_audio: AC3-RF exists on NTSC discs only
                 reader.inputIsLive(),
         };
+        if (!reader.inputIsLive()) {
+            reader_controls.holdAtInputEnd = [&reader](bool hold) { reader.holdAtInputEnd(hold); };
+            reader_controls.atInputEnd = [&reader]() { return reader.atInputEnd(); };
+        }
         if (watch_type) {
             reader_controls.signalPresent = [&reader]() { return reader.signalPresent(); };
             reader_controls.otherTypeDetected = [&reader]() { return reader.otherTypeDetected(); };

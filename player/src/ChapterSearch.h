@@ -83,6 +83,13 @@ public:
     // action, also available from action().
     const Action &feed(const Reading &reading);
 
+    // The pending probe ran into the end of the input without a frame: the
+    // capture's tail has no signal (the player had stopped, or the capture
+    // ran on past the disc).  A forward search then looks a little earlier,
+    // further back each time, for the last frames there are; what they read
+    // decides as a reading at the input's end would.  Returns the next action.
+    const Action &probeReachedEnd();
+
     [[nodiscard]] int targetChapter() const { return m_target; }
     [[nodiscard]] int probes() const { return m_probes; }
     [[nodiscard]] int64_t originOffset() const { return m_origin.offset; }
@@ -115,6 +122,8 @@ private:
     int m_probes;
     int m_wasted;                       // consecutive probes that moved no bound
     bool m_chained;                     // ePrevious already moved on to the chapter before
+    bool m_past_end;                    // a probe found nothing up to the input's end
+    int64_t m_back_step;                // how far before it the next probe looks
     Action m_action;
 };
 
