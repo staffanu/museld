@@ -271,7 +271,7 @@ int main(int argc, char *argv[]) {
     auto it = args.cbegin();
 
     CliOptions options;
-Ï
+
     auto usage = [&options] (std::ostream &out, int status) -> void {
         options.printHelp(out, "ac3rf-efm-decode [options] [<input_file> ...]");
         out << "\nInput is read from stdin when no file is given (or when the file is named \"-\"),\n"
