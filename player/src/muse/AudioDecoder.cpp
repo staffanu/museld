@@ -61,7 +61,7 @@ AudioDecoder::AudioDecoder(Logger &log)
 : m_log(log),
   m_deinterleave_data{},
   m_deinterleave_buffer_start(0),
-  m_total_deinterleaved_bits(0),
+  m_deinterleave_fill_bits(0),
   m_q(0),
   m_consecutive_failed_syncs(100), // start by searching for sync pattern
   m_symbol_locations(defaultSymbolLocations()),
@@ -148,11 +148,15 @@ void AudioDecoder::decodeFrame(int frame_no,
                 m_deinterleave_data[m_deinterleave_buffer_start] = b;
 
                 bool out = m_deinterleave_data[(m_q * 1350 + m_deinterleave_buffer_start) % c_deinterleave_buffer_size];
-                m_total_deinterleaved_bits += 1;
                 m_q = (m_q + 1) % c_deinterleave_stages;
-                if (m_total_deinterleaved_bits > c_deinterleave_stages * 1350) {
+                // Nothing comes out until the deinterleaver has filled.  The
+                // count stops there: it once ran on, and as an int it wrapped
+                // after 2^31 bits, 26.5 minutes of playing, which closed this
+                // gate and with it the audio for as long again
+                if (m_deinterleave_fill_bits < c_deinterleave_stages * 1350)
+                    m_deinterleave_fill_bits++;
+                else
                     m_queue.push_back(out);
-                }
             }
         }
     }

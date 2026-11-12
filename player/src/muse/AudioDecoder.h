@@ -44,7 +44,7 @@ private:
     Logger &m_log;
     bool m_deinterleave_data[c_deinterleave_buffer_size];
     int m_deinterleave_buffer_start; // start of circular buffer
-    int m_total_deinterleaved_bits;
+    int m_deinterleave_fill_bits; // bits taken in so far, counted only until the deinterleaver is full
     int m_q;
 
     int m_consecutive_failed_syncs;

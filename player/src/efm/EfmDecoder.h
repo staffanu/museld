@@ -95,7 +95,7 @@ private:
     FILE *m_t_values_file;
     int m_t_value_run_length;
     int m_t_value_carry;
-    int m_total_bits;
+    int64_t m_total_bits; // 64 bits: channel bits come at 4.3 Mbit/s, an int wraps after eight minutes
     float m_prev_symbol;
     int m_shift_register;
     std::deque<float> m_symbol_history;

@@ -24,6 +24,16 @@ Last revised 2026-11-12.
   another file, usually the disc's other side.  A per-capture sidecar (below) would not cover
   it either, for the same reason; what would is carrying the player state from one input to
   the next within a run where the inputs decode alike.
+- **MUSE audio: the sync search checks for the pattern it has just consumed.**  When the search
+  in `AudioDecoder::decodeFrame` finds the sync pattern with less than a frame of bits after it,
+  it removes the pattern and leaves the loop with the failure count at zero; the next call then
+  takes the locked branch and tests the first 16 bits of the queue, which are the control
+  signal, not a sync.  That costs three "Sync pattern not recognized!" warnings, two audio
+  frames decoded 16 bits out of place (their control words also go into the mode vote) and a
+  second search before the lock holds.  It heals by itself, so it is audible only as a slightly
+  longer gap after a seek or a dropout.  The fix is to remember that the sync of the next frame
+  is already consumed (or to leave the pattern in the queue until the frame is complete); the
+  first frames of audio after start-up may move, so expect to re-record the MUSE goldens.
 
 ## Picture quality
 
