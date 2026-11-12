@@ -94,6 +94,7 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     out.audio_sample_count = 0;
     out.ac3_frames.clear();
+    out.track_audio.clear();
     out.decoded = false;
 
     if (redo_last_field) // undo the field advance from the previous call

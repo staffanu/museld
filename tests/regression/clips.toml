@@ -18,6 +18,7 @@ no-3d-comb = ["--no-3d-comb"]
 no-film-mode = ["--no-film-mode"]
 no-dropout = ["--no-dropout"]
 eq-off = ["--eq", "off"]
+all-audio = ["--write-audio", "analog,efm,ac3"]
 
 [standard_stages]
 ntsc = ["default", "intra-field", "no-3d-comb", "no-film-mode", "no-dropout"]
@@ -40,9 +41,9 @@ file = "ntsc-alien1-ac3-full.ldf"
 sha256 = "d48a70d4cb4ea0ef84dbe6e14e775c35b56cb4665918b7e998ae776a6fb9f61f"
 standard = "ntsc"
 source = "alien1.ldf, 40 MHz DdD, the whole 6.7 s capture"
-why = "AC3-RF track: QPSK demodulation, framing, Reed-Solomon, and the AC3 stream copy in --write."
+why = "AC3-RF track: QPSK demodulation, framing, Reed-Solomon, and the AC3 stream copy in --write.  The all-audio stage writes the analog, EFM and AC3 tracks as three streams (the first, judged, is the analog one)."
 args = ["--ac3"]
-stages = ["default"]
+stages = ["default", "all-audio"]
 
 [[clip]]
 name = "ntsc-zero-effect-ac3-30s"

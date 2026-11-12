@@ -47,6 +47,7 @@ SdtvRfDemodulator::SdtvRfDemodulator(Logger &log, std::string executable_dir, Pr
   m_ac3_demodulator(log, sample_frequency, SdtvRfDemodulatorConstants::c_sample_block_size,
                     FirFilterStage::simdSupported()),
   m_ac3_decoder(log),
+  m_track(audio_track),
   m_efm_enabled(audio_track == AudioTrack::eEfm),
   m_analog_enabled(audio_track == AudioTrack::eDefault),
   m_ac3_enabled(audio_track == AudioTrack::eAc3) {

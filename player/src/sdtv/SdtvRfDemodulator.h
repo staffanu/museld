@@ -78,11 +78,15 @@ public:
         cleanup();
     }
 
-    // The three audio sources are alternatives; enable the selected one only
+    // The audio sources run on the worker as wanted: the selected track, and
+    // the ones a --write file takes besides it (both set from the main thread)
     void setAudioTrack(AudioTrack track) {
-        m_efm_enabled = track == AudioTrack::eEfm;
-        m_analog_enabled = track == AudioTrack::eDefault;
-        m_ac3_enabled = track == AudioTrack::eAc3;
+        m_track = track;
+        applyTracks();
+    }
+    void setExtraAudioTracks(const std::vector<AudioTrack> &tracks) {
+        m_extra_tracks = tracks;
+        applyTracks();
     }
     // How long the analog track has had no carrier on either channel: the
     // seconds of input demodulated since the squelch last opened (0 while a
@@ -110,9 +114,19 @@ private:
     AnalogAudioDemodulator m_analog_demodulator;
     Ac3RfDemodulator m_ac3_demodulator;
     Ac3Decoder m_ac3_decoder;
+    AudioTrack m_track;
+    std::vector<AudioTrack> m_extra_tracks;
     std::atomic<bool> m_efm_enabled;
     std::atomic<bool> m_analog_enabled;
     std::atomic<bool> m_ac3_enabled;
+    void applyTracks() {
+        const auto wanted = [this](AudioTrack t) {
+            return m_track == t || std::find(m_extra_tracks.begin(), m_extra_tracks.end(), t) != m_extra_tracks.end();
+        };
+        m_efm_enabled = wanted(AudioTrack::eEfm);
+        m_analog_enabled = wanted(AudioTrack::eDefault);
+        m_ac3_enabled = wanted(AudioTrack::eAc3);
+    }
     std::atomic<int64_t> m_analog_silent_blocks{0}; // consecutive blocks with both channels squelched
 };
 

@@ -136,12 +136,6 @@ private:
     std::vector<uint8_t> m_dts_bitstream; // per-frame staging of the EFM bytes for the DTS decoder
     // DTS detection on the EFM track, deciding MODE_EFM (PCM) vs MODE_DTS
     DtsSyncDetector m_dts_detector;
-    // Audio decoded from the newest read block, held back one frame so it
-    // stays in sync with the picture (which displays one frame behind the
-    // read for the 3D comb lookahead).  A FIFO: AC3 and DTS produce PCM in
-    // whole-frame quanta, so a delivery can leave a remainder for the next.
-    std::vector<AudioFrame> m_pending_audio;
-    AudioMode m_pending_audio_mode;
     // CX expansion of the analog track, applied here rather than in the
     // demodulator's worker so that it follows the CX flag of the frame the
     // audio belongs to: the worker runs ahead of the VBI decode by a
@@ -149,12 +143,26 @@ private:
     // point differ from run to run
     CxExpander m_cx_expander;
     bool m_analog_cx_from_vbi; // the last CX flag the VBI carried, for CxMode::eAuto
-    // Per-read audio batches held back beyond the one frame m_pending_audio
-    // gives, for a display latency of more than one frame (PAL: two)
-    std::deque<std::vector<AudioFrame>> m_audio_hold;
-    // The raw sync frames behind the pending MODE_AC3 audio, held back the
-    // same one frame, so the file writer can mux the original bitstream
-    std::vector<std::array<uint8_t, 1536>> m_pending_ac3_frames;
+    // The delivery FIFO of one audio track.  Audio decoded from the newest
+    // read block is held back one frame so it stays in sync with the
+    // picture (which displays one frame behind the read for the 3D comb
+    // lookahead), and further reads beyond that where the display lags the
+    // read by more (PAL: two frames), in hold; AC3 and DTS produce PCM in
+    // whole-frame quanta, so a delivery can leave a remainder in pending.
+    // One per track: the played track and the ones a --write file takes
+    // besides it (DecodeControls::extra_tracks) are decoded side by side
+    struct TrackFifo {
+        AudioMode pending_mode = MODE_UNKNOWN;
+        std::vector<AudioFrame> pending;
+        std::deque<std::vector<AudioFrame>> hold;
+        // The raw sync frames behind the pending MODE_AC3 audio, held back
+        // the same way, so the file writer can mux the original bitstream
+        std::vector<std::array<uint8_t, 1536>> pending_ac3;
+    };
+    std::array<TrackFifo, 3> m_track_fifo; // by AudioTrack
+    // Decodes a track's audio of this read into batch, setting mode
+    void decodeTrackAudio(AudioTrack track, const SdtvInputBlock *input_block, const DecodeControls &controls,
+                          std::vector<AudioFrame> &batch, AudioMode &mode, DecodedField &out);
     // The temporal comb's frame distance d: 1 on NTSC, where the subcarrier
     // inverts from one frame to the next, 2 on PAL, where it takes two
     // frames to invert (270 degrees per frame, and the V switch flips).

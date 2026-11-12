@@ -632,6 +632,14 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         int64_t paced_fields = 0;
         int fallback_verify_until = -1; // the field count by which a provisional switch to EFM must have locked
 
+        // The tracks a --write file takes besides the one played, decoded
+        // alongside it (the reader demodulates them, set by process_file)
+        std::vector<AudioTrack> extra_tracks;
+#ifdef HAVE_LIBAV
+        if (vfw)
+            for (const auto &stream : vfw->audioStreams())
+                extra_tracks.push_back(stream.track);
+#endif
         auto make_controls = [&](bool redo) {
             return Decoder::DecodeControls{
                     audio_track,
@@ -649,6 +657,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                     state.chapter_search != nullptr && !redo,
                     state.temporal_nr,
                     state.edge_directed,
+                    extra_tracks,
             };
         };
 
@@ -979,11 +988,29 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                     disc_seconds = disc_info->playbackTimeSeconds();
                     disc_chapter = disc_info->chapter();
                 }
-                vfw->addVideoFrameWithAudio(images.out_Y, images.out_U, images.out_V,
-                                            state.last_decoded.audio_mode,
-                                            state.last_decoded.audio_sample_count,
-                                            state.last_decoded.audio_samples,
-                                            state.last_decoded.ac3_frames,
+                // Each stream's track: from the per-track output where the
+                // decoder gives one (several tracks decoded), else the played
+                // track's audio, which is the one stream's
+                const auto &decoded = state.last_decoded;
+                std::vector<VideoFileWriter::AudioInput> audio;
+                for (const auto &stream : vfw->audioStreams()) {
+                    VideoFileWriter::AudioInput input;
+                    const auto per_track = std::find_if(decoded.track_audio.begin(), decoded.track_audio.end(),
+                                                        [&](const auto &t) { return t.track == stream.track; });
+                    if (per_track != decoded.track_audio.end()) {
+                        input.mode = per_track->mode;
+                        input.count = (int)per_track->samples.size();
+                        input.samples = per_track->samples.data();
+                        input.ac3_frames = &per_track->ac3_frames;
+                    } else if (decoded.track_audio.empty() && stream.track == audio_track) {
+                        input.mode = decoded.audio_mode;
+                        input.count = decoded.audio_sample_count;
+                        input.samples = decoded.audio_samples;
+                        input.ac3_frames = &decoded.ac3_frames;
+                    }
+                    audio.push_back(input);
+                }
+                vfw->addVideoFrameWithAudio(images.out_Y, images.out_U, images.out_V, audio,
                                             disc_seconds, disc_chapter);
                 // Breaking out finalizes the file in the writer's destructor
                 if (state.field_count * seconds_per_iteration >= write_duration_seconds)
@@ -1523,7 +1550,7 @@ struct VideoFileOutput {
     std::string filename;
     int width = 0, height = 0, fps_num = 0, fps_den = 0;
     VideoColorStandard color_standard{};
-    bool ac3_passthrough = false;
+    std::vector<WriterAudioStream> audio_streams;
     bool closed_captions = false;
 
     void close() {
@@ -1563,6 +1590,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   float tint_degrees, float saturation,
                   optional<string> const &output_filename,
                   [[maybe_unused]] VideoWriterPreset write_preset,
+                  [[maybe_unused]] const std::vector<AudioTrack> &write_audio,
                   [[maybe_unused]] VideoFileOutput &video_out,
                   const SubtitleSetup &subtitle_setup,
                   optional<string> const &export_frame_filename,
@@ -1643,27 +1671,46 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
             dar_num = initial_w * par_num / g; dar_den = initial_h * par_den / g;
             fps_num = video_standard->fps_num * (decode_all_fields ? 2 : 1); fps_den = video_standard->fps_den;
         }
-        // With the AC3 track selected, the file gets the original AC3
-        // bitstream (all 5.1 channels, no transcode) instead of PCM
-        const bool ac3_passthrough = !std::is_same<InputBlock, MuseInputBlock>::value
-                && audio_track == AudioTrack::eAc3 && decode_audio;
+        // The file's audio streams: the --write-audio list, or the track
+        // played.  The AC3 track's stream is the original AC3 bitstream
+        // (all 5.1 channels, no transcode) instead of PCM
+        constexpr bool is_muse = std::is_same<InputBlock, MuseInputBlock>::value;
+        if (is_muse && !write_audio.empty())
+            throw InputError("--write-audio applies to NTSC and PAL inputs, which have several audio tracks");
+        std::vector<WriterAudioStream> audio_streams;
+        for (const AudioTrack track : write_audio.empty() ? std::vector<AudioTrack>{audio_track} : write_audio) {
+            const char *title = is_muse ? "MUSE" : track == AudioTrack::eAc3 ? "AC3" : track == AudioTrack::eEfm ? "EFM" : "Analog";
+            audio_streams.push_back({track, !is_muse && track == AudioTrack::eAc3 && decode_audio, title});
+        }
+        const auto same_streams = [](const std::vector<WriterAudioStream> &a, const std::vector<WriterAudioStream> &b) {
+            if (a.size() != b.size()) return false;
+            for (size_t i = 0; i < a.size(); i++)
+                if (a[i].track != b[i].track || a[i].ac3_passthrough != b[i].ac3_passthrough) return false;
+            return true;
+        };
+        const auto describe_streams = [](const std::vector<WriterAudioStream> &streams) {
+            std::string text;
+            for (const auto &stream : streams)
+                text += (text.empty() ? " with audio " : ", ") + stream.title + (stream.ac3_passthrough ? " (bitstream)" : "");
+            return text;
+        };
         // An NTSC disc's closed captions go into a subtitle stream (empty on
         // a disc without them: the stream must exist before the header)
         const bool closed_captions = subtitle_setup.ntsc_cc;
         if (vfw) {
             // The file is open from the input before: this one must decode to
-            // the same picture and the same kind of audio stream to go on in it
+            // the same picture and the same audio streams to go on in it
             if (initial_w != video_out.width || initial_h != video_out.height
                     || fps_num != video_out.fps_num || fps_den != video_out.fps_den
-                    || color_standard != video_out.color_standard || ac3_passthrough != video_out.ac3_passthrough
+                    || color_standard != video_out.color_standard || !same_streams(audio_streams, video_out.audio_streams)
                     || closed_captions != video_out.closed_captions)
                 throw runtime_error(std::format(
                         "--write {}: this input decodes to {}x{} at {}/{} frames/s{}{}, but the file holds {}x{} at {}/{}{}{} "
                         "from the input before it; give it a --write file of its own",
-                        *output_filename, initial_w, initial_h, fps_num, fps_den, ac3_passthrough ? " with the AC3 bitstream" : "",
+                        *output_filename, initial_w, initial_h, fps_num, fps_den, describe_streams(audio_streams),
                         closed_captions ? " with closed captions" : "",
                         video_out.width, video_out.height, video_out.fps_num, video_out.fps_den,
-                        video_out.ac3_passthrough ? " with the AC3 bitstream" : "",
+                        describe_streams(video_out.audio_streams),
                         video_out.closed_captions ? " with closed captions" : ""));
             log.info(eApplication, std::format("--write: {} continues in {}", title, *output_filename));
             vfw->newInput();
@@ -1673,16 +1720,18 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
             vfw = make_unique<VideoFileWriter>(output_filename.value(), *video_out.log,
                                                initial_w, initial_h, fps_num, fps_den,
                                                write_preset, color_standard, dar_num, dar_den,
-                                               ac3_passthrough, closed_captions);
+                                               audio_streams, closed_captions);
             if (!vfw->init())
                 throw runtime_error("Cannot initialize output encoder");
             video_out.filename = *output_filename;
             video_out.width = initial_w; video_out.height = initial_h;
             video_out.fps_num = fps_num; video_out.fps_den = fps_den;
             video_out.color_standard = color_standard;
-            video_out.ac3_passthrough = ac3_passthrough;
+            video_out.audio_streams = audio_streams;
             video_out.closed_captions = closed_captions;
         }
+        // The listed tracks are demodulated besides the one played
+        reader.setExtraAudioTracks(write_audio);
     }
 #endif
 
@@ -1929,6 +1978,7 @@ int main(int argc, char *argv[]) {
     optional<string> muse_output_filename; // always written as little endian unsigned short values
     optional<string> output_filename; // container/codec selected by --write-preset
     VideoWriterPreset write_preset = VideoWriterPreset::eStandard;
+    std::vector<AudioTrack> write_audio; // --write-audio: the file's audio streams; empty: the track played
     // "Run to the end" is a finite sentinel: infinity does not exist under -ffast-math,
     // and comparing against it is undefined there (same trap as NaN sentinels).
     double write_duration_seconds = std::numeric_limits<double>::max();
@@ -2312,6 +2362,28 @@ int main(int argc, char *argv[]) {
         throw std::runtime_error("FFMPEG is not available");
 #endif
     });
+    options.option("--write-audio", "TRACKS",
+                   "NTSC/PAL: the audio streams of the --write file, a comma-separated list of "
+                   "analog, efm and ac3 in the order the streams are to have (default: the track "
+                   "played, as one stream).  Every listed track is demodulated and decoded besides "
+                   "the one played, the AC3 track as its original bitstream; a listed track the "
+                   "disc does not have gives a silent stream", [&] () -> void {
+        const std::string list = *(it++);
+        write_audio.clear();
+        for (size_t at = 0; at <= list.size();) {
+            const size_t comma = std::min(list.find(',', at), list.size());
+            const std::string name = list.substr(at, comma - at);
+            AudioTrack track;
+            if (name == "analog") track = AudioTrack::eDefault;
+            else if (name == "efm") track = AudioTrack::eEfm;
+            else if (name == "ac3") track = AudioTrack::eAc3;
+            else throw std::runtime_error(std::format("--write-audio: unknown track '{}' (expected analog, efm or ac3)", name));
+            if (std::find(write_audio.begin(), write_audio.end(), track) != write_audio.end())
+                throw std::runtime_error(std::format("--write-audio: {} listed twice", name));
+            write_audio.push_back(track);
+            at = comma + 1;
+        }
+    });
     options.option("--write-preset", "PRESET",
                    "Media file preset: standard (H.264 + AAC in MP4, default) or archival "
                    "(lossless FFV1 16-bit + PCM in Matroska)", [&] () -> void {
@@ -2617,7 +2689,7 @@ int main(int argc, char *argv[]) {
                     outcome = process_file<SdtvInputBlock>(log, executable_dir, surface, saved_state, name, make_reader, watch_type, &standard, decode_all_fields,
                                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, temporal_nr, edge_directed, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
                                                  audio_track, audio_fallback,
-                                                 benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
+                                                 benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, write_audio, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                  initial_seek_seconds, start_chapter, is_tvos || browse);
@@ -2630,7 +2702,7 @@ int main(int argc, char *argv[]) {
                     };
                     outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, name, make_reader, std::nullopt, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, temporal_nr, edge_directed, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
-                                 audio_track, audio_fallback, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
+                                 audio_track, audio_fallback, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, write_audio, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                  initial_seek_seconds, start_chapter, is_tvos || browse);
@@ -2646,7 +2718,7 @@ int main(int argc, char *argv[]) {
                     };
                     outcome = process_file<MuseInputBlock>(log, executable_dir, surface, saved_state, name, make_reader, watch_type, nullptr, decode_all_fields,
                                  full_screen, aspect_mode, full_image, overscan, no_sync, no_keys, start_paused, field_interpolation_mode, use_3d_comb, film_mode, temporal_nr, edge_directed, cx_mode, black_level_mode, decode_video, dropout_mode, decode_audio,
-                                 audio_track, audio_fallback, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, video_out,
+                                 audio_track, audio_fallback, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, write_audio, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
                                  initial_seek_seconds, start_chapter, is_tvos || browse);

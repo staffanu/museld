@@ -80,6 +80,18 @@ public:
         // SDTV: interpolate the moving parts' missing lines along the local
         // edge direction (off: from the two vertical neighbours only)
         bool edge_directed = true;
+        // SDTV: audio tracks decoded besides audio_track, for a --write file
+        // with a stream per track (DecodedField::track_audio); the reader
+        // must demodulate them too (FrameReader::setExtraAudioTracks)
+        std::vector<AudioTrack> extra_tracks;
+    };
+
+    // One audio track's output of a field, for the file writer
+    struct TrackAudio {
+        AudioTrack track;
+        AudioMode mode;
+        std::vector<AudioFrame> samples;
+        std::vector<std::array<uint8_t, 1536>> ac3_frames; // MODE_AC3: the originals
     };
 
     struct DecodedField {
@@ -95,6 +107,11 @@ public:
         // the file writer can mux the original bitstream instead of PCM;
         // empty for every other mode
         std::vector<std::array<uint8_t, 1536>> ac3_frames;
+        // Every track decoded this field, the played one (audio_samples
+        // above, repeated here) and DecodeControls::extra_tracks, for a
+        // --write file with a stream per track; empty for decoders with one
+        // track (MUSE), whose writer takes audio_samples
+        std::vector<TrackAudio> track_audio;
         int field_parity;
         int64_t last_frame_buffer_input_offset;
         double input_samples_per_muse_sample;

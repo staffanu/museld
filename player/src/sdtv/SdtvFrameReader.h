@@ -61,6 +61,7 @@ public:
     void holdAtInputEnd(bool hold) override { m_demodulator->holdAtEnd(hold); }
     [[nodiscard]] bool atInputEnd() const override { return m_demodulator->atEnd(); }
     void setAudioTrack(AudioTrack track) override;
+    void setExtraAudioTracks(const std::vector<AudioTrack> &tracks) override;
     void setEfmAdaptiveFilterSize(int size) override;
     [[nodiscard]] int efmAdaptiveFilterSize() const override;
     [[nodiscard]] double analogSilentSeconds() const override {

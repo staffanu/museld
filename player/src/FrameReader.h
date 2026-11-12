@@ -80,6 +80,9 @@ public:
     // default maps the track onto the EFM on/off switch; the NTSC reader
     // overrides this with its three-way selection (analog/EFM/AC3-RF).
     virtual void setAudioTrack(AudioTrack track) { setEfmEnabled(track == AudioTrack::eEfm); }
+    // Tracks demodulated besides the selected one, for a --write file with a
+    // stream per track (SDTV only; the others have one track)
+    virtual void setExtraAudioTracks(const std::vector<AudioTrack> &) {}
     // Taps in the EFM timing recovery's adaptive filter (0 disables it).
     // efmAdaptiveFilterSize() is negative when the reader has no EFM demodulator.
     virtual void setEfmAdaptiveFilterSize(int) {}

@@ -168,9 +168,14 @@ int64_t SdtvFrameReader::inputSampleCount() const {
 }
 
 void SdtvFrameReader::setAudioTrack(AudioTrack track) {
-    // The audio tracks are alternatives: only the selected one is demodulated
+    // The selected track is demodulated, plus the extra ones a file takes
     if (m_demodulator != nullptr)
         m_demodulator->setAudioTrack(track);
+}
+
+void SdtvFrameReader::setExtraAudioTracks(const std::vector<AudioTrack> &tracks) {
+    if (m_demodulator != nullptr)
+        m_demodulator->setExtraAudioTracks(tracks);
 }
 
 void SdtvFrameReader::setEfmAdaptiveFilterSize(int size) {

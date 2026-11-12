@@ -28,17 +28,16 @@ extern "C" {
 
 class VideoFileWriter {
 public:
-    // With ac3_passthrough the audio stream is the original AC3 bitstream
-    // (stream copy of the sync frames passed to addVideoFrameWithAudio)
-    // instead of PCM encoded to the preset's audio codec.  With
-    // closed_captions the file has a text subtitle stream for the cues
+    // audio_streams: the file's audio streams, one per decoded track, each
+    // PCM encoded to the preset's audio codec or, with ac3_passthrough, the
+    // original AC3 bitstream (stream copy of the sync frames passed in).
+    // With closed_captions the file has a text subtitle stream for the cues
     // passed to addClosedCaption (an NTSC disc's line-21 captions).
     VideoFileWriter(std::string filename, Logger &log, int video_width, int video_height,
                     int video_fps_num, int video_fps_den,
                     VideoWriterPreset preset, VideoColorStandard color_standard,
                     int display_aspect_num, int display_aspect_den,
-                    bool ac3_passthrough, bool closed_captions) :
-            m_ac3_passthrough(ac3_passthrough),
+                    std::vector<WriterAudioStream> audio_streams, bool closed_captions) :
             m_closed_captions(closed_captions),
             m_filename(std::move(filename)),
             m_log(log),
@@ -50,19 +49,15 @@ public:
             m_color_standard(color_standard),
             m_display_aspect{display_aspect_num, display_aspect_den},
             m_video_stream{},
-            m_audio_stream{},
             m_format_context(nullptr),
             m_have_video(false),
-            m_have_audio(false),
             m_encode_video(false),
-            m_encode_audio(false),
-            m_swr_ctx(nullptr),
-            m_audio_input_mode(MODE_UNKNOWN),
-            m_audio_anchor_frame(0),
-            m_audio_in_samples(0),
-            m_last_sample{},
-            m_samples_in_frame(0),
             m_timeline(video_fps_num, video_fps_den) {
+        for (auto &spec : audio_streams) {
+            AudioStream stream;
+            stream.spec = std::move(spec);
+            m_audio.push_back(std::move(stream));
+        }
     }
     VideoFileWriter(const VideoFileWriter &) = delete;
     VideoFileWriter(VideoFileWriter &&) = delete;
@@ -70,11 +65,26 @@ public:
     VideoFileWriter &operator=(VideoFileWriter &&) = delete;
 
     bool init();
+    // One audio stream's input of a frame, in the order of the constructor's
+    // audio_streams; a stream given nothing (or fewer entries than streams)
+    // gets no audio for the frame and catches up with silence
+    struct AudioInput {
+        AudioMode mode = MODE_UNKNOWN;
+        int count = 0;
+        const AudioFrame *samples = nullptr;
+        const std::vector<std::array<uint8_t, 1536>> *ac3_frames = nullptr; // MODE_AC3: the sync frames
+    };
     void addVideoFrameWithAudio(std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
                                 std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V,
-                                AudioMode audio_mode, int number_of_samples, AudioFrame *audio_samples,
-                                const std::vector<std::array<uint8_t, 1536>> &ac3_frames,
+                                const std::vector<AudioInput> &audio,
                                 std::optional<double> disc_seconds, std::optional<int> chapter);
+    // The audio streams, as constructed
+    [[nodiscard]] std::vector<WriterAudioStream> audioStreams() const {
+        std::vector<WriterAudioStream> specs;
+        for (const auto &stream : m_audio)
+            specs.push_back(stream.spec);
+        return specs;
+    }
     // A closed caption cue for the subtitle stream.  start and end are the
     // cue's on-screen span in the input's playback time, now that time at
     // the frame last added: the cue is placed relative to that frame, so the
@@ -108,16 +118,33 @@ private:
     };
     static PresetSpec presetSpec(VideoWriterPreset preset);
 
+    // One audio stream with its sync state against the video clock
+    struct AudioStream {
+        WriterAudioStream spec;
+        OutputStream ost{};  // codec_context null for the passthrough stream
+        bool encode = true;  // false after a write error: the stream is given up
+        struct SwrContext *swr = nullptr; // resampling; created lazily when the input sample rate is known
+        AudioMode input_mode = MODE_UNKNOWN; // audio mode the resampler was created for
+        int in_channels = 2;  // AudioFrame slots the mode fills; the resampler downmixes to the file's stereo
+        int64_t anchor_frame = 0; // video frame where the audio sync schedule starts
+        int64_t in_samples = 0;   // input-rate samples fed to the resampler since the anchor
+        int16_t last_sample[MAX_AUDIO_CHANNELS]{}; // last real sample written; start point for interpolation/fade-out
+        int samples_in_frame = 0;
+        int64_t ac3_next_pts = 0;      // passthrough: in samples at 48 kHz
+        bool ac3_pause_logged = false; // passthrough: the track's audio left AC3 mid-write
+    };
+
     void initStream(OutputStream *ost, const char *codec_name);
     void initVideo(const PresetSpec &spec);
-    void initAudio(const PresetSpec &spec);
-    void initAudioPassthrough();
+    void initAudio(AudioStream &stream, const PresetSpec &spec);
+    void initAudioPassthrough(AudioStream &stream);
     void initClosedCaptions(const PresetSpec &spec);
-    void writeAc3Frames(const std::vector<std::array<uint8_t, 1536>> &ac3_frames);
-    void initResampler(AudioMode mode);
-    void convertAndWriteAudio(const uint8_t **in, int in_samples);
-    void insertSilence(int64_t count, int in_rate, bool final_padding = false);
-    void insertInterpolated(int64_t count, int in_rate, const AudioFrame &next);
+    void addAudio(AudioStream &stream, const AudioInput &input);
+    void writeAc3Frames(AudioStream &stream, const std::vector<std::array<uint8_t, 1536>> &ac3_frames);
+    void initResampler(AudioStream &stream, AudioMode mode);
+    void convertAndWriteAudio(AudioStream &stream, const uint8_t **in, int in_samples);
+    void insertSilence(AudioStream &stream, int64_t count, int in_rate, bool final_padding = false);
+    void insertInterpolated(AudioStream &stream, int64_t count, int in_rate, const AudioFrame &next);
     AVFrame *makeVideoFrame(OutputStream *ost, std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
                             std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V);
     bool writeFrame(AVCodecContext *c, AVStream *st, AVFrame *frame, AVPacket *pkt);
@@ -141,10 +168,7 @@ private:
         return av_ts_make_time_string(str, ts, tb);
     }
 
-    const bool m_ac3_passthrough;
     const bool m_closed_captions;
-    int64_t m_ac3_next_pts = 0;        // in samples at 48 kHz
-    bool m_ac3_pause_logged = false;   // the selected track left AC3 mid-write
     std::string m_filename;
     Logger &m_log;
     int m_video_width;
@@ -155,25 +179,14 @@ private:
     VideoColorStandard m_color_standard;
     AVRational m_display_aspect;
     OutputStream m_video_stream;
-    OutputStream m_audio_stream;
+    std::vector<AudioStream> m_audio;
     AVStream *m_caption_stream = nullptr; // the closed caption text stream, muxed without an encoder
     int64_t m_caption_last_pts = -1;      // ms; a cue is not written before the one preceding it
     AVFormatContext *m_format_context;
     bool m_have_video; // if the output supports video
-    bool m_have_audio; // if the output supports audio
     bool m_encode_video; // if we want to encode video
-    bool m_encode_audio; // if we want to encode audio
 
-    struct SwrContext *m_swr_ctx; // resampling; created lazily when the input sample rate is known
-    AudioMode m_audio_input_mode; // audio mode the resampler was created for
-    int m_audio_in_channels = 2;  // AudioFrame slots the mode fills; the resampler downmixes to the file's stereo
-
-    int64_t m_audio_anchor_frame; // video frame where the audio sync schedule starts
-    int64_t m_audio_in_samples;   // input-rate samples fed to the resampler since the anchor
-    int16_t m_last_sample[MAX_AUDIO_CHANNELS]; // last real sample written; start point for interpolation/fade-out
-
-    uint8_t m_audio_tmp_buffer[MAX_AUDIO_OUTPUT_SAMPLES * MAX_AUDIO_CHANNELS * sizeof(int16_t)];
-    int m_samples_in_frame;
+    uint8_t m_audio_tmp_buffer[MAX_AUDIO_OUTPUT_SAMPLES * MAX_AUDIO_CHANNELS * sizeof(int16_t)]; // shared by the streams, used one at a time
 
     // The disc time of the first frame goes into the container's header as
     // its start timecode, and is known only once the disc code runs steadily

@@ -72,8 +72,6 @@ SdtvDecoder::SdtvDecoder(
   m_ac3_pcm_decoder(log, CompressedAudioDecoder::Codec::eAc3),
   m_dts_pcm_decoder(log, CompressedAudioDecoder::Codec::eDts),
   m_dts_detector(),
-  m_pending_audio(),
-  m_pending_audio_mode(MODE_UNKNOWN),
   m_cx_expander(48000.0),
   m_analog_cx_from_vbi(false),
   m_temporal_distance(video_standard.ntsc_chroma ? 1 : 2),
@@ -113,6 +111,62 @@ bool SdtvDecoder::initialize() {
 
 // DTS laserdiscs put a DTS bitstream where the EFM track normally carries PCM;
 // DtsSyncDetector tells the two apart by the density of DTS sync words.
+void SdtvDecoder::decodeTrackAudio(AudioTrack track, const SdtvInputBlock *input_block, const DecodeControls &controls,
+                                   std::vector<AudioFrame> &batch, AudioMode &mode, DecodedField &out) {
+    mode = MODE_UNKNOWN;
+    if (input_block == nullptr)
+        return;
+    auto pendStereo = [&batch](const auto &samples) {
+        for (const auto &s : samples) {
+            AudioFrame f{};
+            f.samples[0] = s.samples[0];
+            f.samples[1] = s.samples[1];
+            batch.push_back(f);
+        }
+    };
+    if (track == AudioTrack::eEfm) {
+        auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
+        out.efm_locked = m_efm_decoder.locked();
+        if (detectDtsBitstream(raw)) {
+            // A DTS disc's EFM track is a bitstream, not PCM: concealment,
+            // de-emphasis and pop detection would corrupt it (and playing
+            // it as PCM is loud noise), so hand the raw bytes to the DTS
+            // decoder instead
+            mode = MODE_DTS;
+            m_dts_bitstream.clear();
+            for (const auto &s : raw)
+                for (int ch = 0; ch < 2; ch++) { // L then R, little endian: the disc's frame order
+                    m_dts_bitstream.push_back((uint8_t)(s.samples[ch] & 0xff));
+                    m_dts_bitstream.push_back((uint8_t)((uint16_t)s.samples[ch] >> 8));
+                }
+            const auto pcm = m_dts_pcm_decoder.decode(m_dts_bitstream.data(), m_dts_bitstream.size());
+            batch.insert(batch.end(), pcm.begin(), pcm.end());
+        } else {
+            mode = MODE_EFM;
+            pendStereo(m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis()));
+        }
+    } else if (track == AudioTrack::eAc3) {
+        mode = MODE_AC3;
+        for (const auto &frame : input_block->ac3_frames) {
+            const auto pcm = m_ac3_pcm_decoder.decode(frame.data(), frame.size());
+            batch.insert(batch.end(), pcm.begin(), pcm.end());
+        }
+    } else if (!input_block->analog_data.empty()) {
+        mode = MODE_ANALOG;
+        const bool cx = controls.analog_cx == CxMode::eAuto ? m_analog_cx_from_vbi
+                                                             : controls.analog_cx == CxMode::eOn;
+        constexpr float scale = 32767.0f * AnalogAudioDemodulator::c_output_level;
+        for (const auto &s : input_block->analog_data) {
+            float left = s.samples[0], right = s.samples[1];
+            m_cx_expander.process(left, right, cx);
+            AudioFrame f{};
+            f.samples[0] = (int16_t)std::clamp(left * scale, -32768.0f, 32767.0f);
+            f.samples[1] = (int16_t)std::clamp(right * scale, -32768.0f, 32767.0f);
+            batch.push_back(f);
+        }
+    }
+}
+
 bool SdtvDecoder::detectDtsBitstream(const std::vector<TwoChannelSampleWithErasureFlags> &raw_samples) {
     const bool was_dts = m_dts_detector.active();
     const bool is_dts = m_dts_detector.update(raw_samples);
@@ -133,6 +187,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     out.audio_sample_count = 0;
     out.ac3_frames.clear();
+    out.track_audio.clear();
     out.decoded = false;
     out.efm_locked.reset();
     out.cc_bytes.reset();
@@ -665,112 +720,86 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
     }
 
     if (decode_audio && m_field_index == 0) {
-        // Deliver the audio held from the previous read (it belongs to the
-        // frame being displayed), then decode and hold this block's audio --
-        // one read further back where the display lags the read by two
-        // frames (PAL), see m_audio_hold below.
-        // AC3/DTS decode in whole compressed frames, so a delivery can exceed
-        // the per-field cap now and then; the remainder carries over.
-        out.audio_mode = m_pending_audio_mode;
-        // AC3/DTS decode in whole compressed frames (32 ms for AC3), so
-        // uncapped delivery would jitter by a full frame against the video
-        // clock -- past the file writer's sync dead band.  Capping just above
-        // the nominal per-video-frame rate keeps about one compressed frame
-        // queued as a jitter buffer, and the small surplus drains any larger
-        // backlog instead of letting it become permanent latency.  PCM gets
-        // the same cap: the surplus (16 samples, 0.8 %) stays within the 1 %
-        // the playback buffer's speed adjustment absorbs, where delivering
-        // MAX_AUDIO_OUTPUT_SAMPLES per frame overflowed it and discarded
-        // samples for seconds after any backlog.
-        const int rate = m_pending_audio_mode == MODE_DTS || m_pending_audio_mode == MODE_EFM ? 44100 : 48000;
-        const int nominal = rate * m_standard.fps_den / m_standard.fps_num;
-        const int cap = std::min(nominal + 16, MAX_AUDIO_OUTPUT_SAMPLES);
-        const int delivered = std::min((int)m_pending_audio.size(), cap);
-        for (int i = 0; i < delivered; i++)
-            out.audio_samples[out.audio_sample_count++] = m_pending_audio[i];
-        m_pending_audio.erase(m_pending_audio.begin(), m_pending_audio.begin() + delivered);
-        // A backlog beyond two frames is audio of frames that were never
-        // shown (lost at the input, or held across a reset): cut it in one
-        // piece, where the picture also jumps, rather than drain it over
-        // seconds at a surplus the playback cannot follow
-        if ((int)m_pending_audio.size() > 2 * nominal) {
-            const int drop = (int)m_pending_audio.size() - nominal;
-            m_log.info(eAudio, std::format("frame {}: dropping an audio backlog of {} samples", m_frame_no, drop));
-            m_pending_audio.erase(m_pending_audio.begin(), m_pending_audio.begin() + drop);
-        }
-        out.ac3_frames = std::move(m_pending_ac3_frames);
-        m_pending_ac3_frames.clear();
+        // The tracks decoded this read: the played one and the ones a
+        // --write file takes besides it.  A track that drops out of the set
+        // starts afresh when it comes back
+        std::vector<AudioTrack> tracks{audio_track};
+        for (const AudioTrack t : controls.extra_tracks)
+            if (std::find(tracks.begin(), tracks.end(), t) == tracks.end())
+                tracks.push_back(t);
+        for (int i = 0; i < 3; i++)
+            if (std::find(tracks.begin(), tracks.end(), (AudioTrack)i) == tracks.end())
+                m_track_fifo[i] = TrackFifo{};
+        out.track_audio.clear();
+        if (tracks.size() > 1)
+            out.track_audio.reserve(tracks.size());
 
-        // Any leftovers belong to m_pending_audio_mode; a mode change (track
-        // switch, DTS detection flipping) must not deliver them under the new
-        // mode's label and sample rate
-        auto beginMode = [this](AudioMode mode) {
-            if (mode != m_pending_audio_mode) {
-                m_pending_audio.clear();
-                m_audio_hold.clear();
-                m_cx_expander.reset();
+        for (const AudioTrack track : tracks) {
+            TrackFifo &fifo = m_track_fifo[(int)track];
+            // Deliver the audio held from the previous read (it belongs to
+            // the frame being displayed), then decode and hold this block's
+            // audio -- one read further back where the display lags the read
+            // by two frames (PAL), see TrackFifo::hold.
+            // AC3/DTS decode in whole compressed frames (32 ms for AC3), so
+            // uncapped delivery would jitter by a full frame against the video
+            // clock -- past the file writer's sync dead band.  Capping just above
+            // the nominal per-video-frame rate keeps about one compressed frame
+            // queued as a jitter buffer, and the small surplus drains any larger
+            // backlog instead of letting it become permanent latency.  PCM gets
+            // the same cap: the surplus (16 samples, 0.8 %) stays within the 1 %
+            // the playback buffer's speed adjustment absorbs, where delivering
+            // MAX_AUDIO_OUTPUT_SAMPLES per frame overflowed it and discarded
+            // samples for seconds after any backlog.
+            const int rate = fifo.pending_mode == MODE_DTS || fifo.pending_mode == MODE_EFM ? 44100 : 48000;
+            const int nominal = rate * m_standard.fps_den / m_standard.fps_num;
+            const int cap = std::min(nominal + 16, MAX_AUDIO_OUTPUT_SAMPLES);
+            const int delivered = std::min((int)fifo.pending.size(), cap);
+            TrackAudio delivery{track, fifo.pending_mode, {}, {}};
+            if (track == audio_track) {
+                out.audio_mode = fifo.pending_mode;
+                for (int i = 0; i < delivered; i++)
+                    out.audio_samples[out.audio_sample_count++] = fifo.pending[i];
+                out.ac3_frames = fifo.pending_ac3;
             }
-            m_pending_audio_mode = mode;
-        };
-        std::vector<AudioFrame> batch; // this read's audio
-        auto pendStereo = [&batch](const auto &samples) {
-            for (const auto &s : samples) {
-                AudioFrame f{};
-                f.samples[0] = s.samples[0];
-                f.samples[1] = s.samples[1];
-                batch.push_back(f);
+            if (tracks.size() > 1) {
+                delivery.samples.assign(fifo.pending.begin(), fifo.pending.begin() + delivered);
+                delivery.ac3_frames = std::move(fifo.pending_ac3);
+                out.track_audio.push_back(std::move(delivery));
             }
-        };
-        if (audio_track == AudioTrack::eEfm && input_block != nullptr) {
-            auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
-            out.efm_locked = m_efm_decoder.locked();
-            if (detectDtsBitstream(raw)) {
-                // A DTS disc's EFM track is a bitstream, not PCM: concealment,
-                // de-emphasis and pop detection would corrupt it (and playing
-                // it as PCM is loud noise), so hand the raw bytes to the DTS
-                // decoder instead
-                beginMode(MODE_DTS);
-                m_dts_bitstream.clear();
-                for (const auto &s : raw)
-                    for (int ch = 0; ch < 2; ch++) { // L then R, little endian: the disc's frame order
-                        m_dts_bitstream.push_back((uint8_t)(s.samples[ch] & 0xff));
-                        m_dts_bitstream.push_back((uint8_t)((uint16_t)s.samples[ch] >> 8));
-                    }
-                const auto pcm = m_dts_pcm_decoder.decode(m_dts_bitstream.data(), m_dts_bitstream.size());
-                batch.insert(batch.end(), pcm.begin(), pcm.end());
-            } else {
-                beginMode(MODE_EFM);
-                pendStereo(m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis()));
+            fifo.pending_ac3.clear();
+            fifo.pending.erase(fifo.pending.begin(), fifo.pending.begin() + delivered);
+            // A backlog beyond two frames is audio of frames that were never
+            // shown (lost at the input, or held across a reset): cut it in one
+            // piece, where the picture also jumps, rather than drain it over
+            // seconds at a surplus the playback cannot follow
+            if ((int)fifo.pending.size() > 2 * nominal) {
+                const int drop = (int)fifo.pending.size() - nominal;
+                m_log.info(eAudio, std::format("frame {}: dropping an audio backlog of {} samples", m_frame_no, drop));
+                fifo.pending.erase(fifo.pending.begin(), fifo.pending.begin() + drop);
             }
-        } else if (audio_track == AudioTrack::eAc3 && input_block != nullptr) {
-            beginMode(MODE_AC3);
-            for (const auto &frame : input_block->ac3_frames) {
-                const auto pcm = m_ac3_pcm_decoder.decode(frame.data(), frame.size());
-                batch.insert(batch.end(), pcm.begin(), pcm.end());
+
+            std::vector<AudioFrame> batch; // this read's audio
+            AudioMode mode = MODE_UNKNOWN;
+            decodeTrackAudio(track, input_block.get(), controls, batch, mode, out);
+            // Any leftovers belong to pending_mode; a mode change (track
+            // switch, DTS detection flipping) must not deliver them under the
+            // new mode's label and sample rate
+            if (mode != fifo.pending_mode) {
+                fifo.pending.clear();
+                fifo.hold.clear();
+                if (track == AudioTrack::eDefault)
+                    m_cx_expander.reset();
             }
-            m_pending_ac3_frames = input_block->ac3_frames; // originals for the file writer
-        } else if (input_block != nullptr && !input_block->analog_data.empty()) {
-            beginMode(MODE_ANALOG);
-            const bool cx = controls.analog_cx == CxMode::eAuto ? m_analog_cx_from_vbi
-                                                                 : controls.analog_cx == CxMode::eOn;
-            constexpr float scale = 32767.0f * AnalogAudioDemodulator::c_output_level;
-            for (const auto &s : input_block->analog_data) {
-                float left = s.samples[0], right = s.samples[1];
-                m_cx_expander.process(left, right, cx);
-                AudioFrame f{};
-                f.samples[0] = (int16_t)std::clamp(left * scale, -32768.0f, 32767.0f);
-                f.samples[1] = (int16_t)std::clamp(right * scale, -32768.0f, 32767.0f);
-                batch.push_back(f);
+            fifo.pending_mode = mode;
+            if (mode == MODE_AC3 && input_block != nullptr)
+                fifo.pending_ac3 = input_block->ac3_frames; // originals for the file writer
+            // The batch joins the delivery FIFO after d - 1 further reads, so
+            // that it reaches the output together with its own frame
+            fifo.hold.push_back(std::move(batch));
+            while ((int)fifo.hold.size() > m_temporal_distance - 1) {
+                fifo.pending.insert(fifo.pending.end(), fifo.hold.front().begin(), fifo.hold.front().end());
+                fifo.hold.pop_front();
             }
-        } else {
-            beginMode(MODE_UNKNOWN);
-        }
-        // The batch joins the delivery FIFO after d - 1 further reads, so
-        // that it reaches the output together with its own frame
-        m_audio_hold.push_back(std::move(batch));
-        while ((int)m_audio_hold.size() > m_temporal_distance - 1) {
-            m_pending_audio.insert(m_pending_audio.end(), m_audio_hold.front().begin(), m_audio_hold.front().end());
-            m_audio_hold.pop_front();
         }
     }
     section_ms(m_sec_audio_ms);
