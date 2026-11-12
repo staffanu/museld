@@ -70,10 +70,15 @@ public:
     static constexpr int c_atlas_width = 2048;
     static constexpr int c_atlas_height = 2048;
 
+    // pixel_aspect: width over height of an image pixel on the display
+    // (PictureFormat::pixel_aspect).  The glyphs are drawn into the image
+    // and shown with its pixels, so they are rasterized narrower or wider by
+    // it to come out with the same shape on every format.
     // Throws std::runtime_error on failure.
     SubtitleFont(Logger &log,
                  const std::filesystem::path &ttf_path,
                  int pixel_height,
+                 double pixel_aspect,
                  musevk::VulkanManager &vulkan_manager,
                  musevk::CommandPool &command_pool);
     ~SubtitleFont();
@@ -119,6 +124,7 @@ private:
 
     int m_pixel_height;
     double m_scale = 0.0;
+    double m_pixel_aspect;
     int m_ascent = 0;
     int m_descent = 0;
     int m_line_gap = 0;

@@ -47,9 +47,11 @@ std::vector<uint32_t> utf8ToCodepoints(const std::string &s) {
 SubtitleFont::SubtitleFont(Logger &log,
                            const std::filesystem::path &ttf_path,
                            int pixel_height,
+                           double pixel_aspect,
                            musevk::VulkanManager &vulkan_manager,
                            musevk::CommandPool & /*command_pool*/)
     : m_pixel_height(pixel_height),
+      m_pixel_aspect(pixel_aspect > 0 ? pixel_aspect : 1.0),
       m_atlas_cpu(static_cast<size_t>(c_atlas_width) * c_atlas_height, 0),
       m_stb(std::make_unique<StbHolder>()),
       m_log(log),
@@ -86,7 +88,9 @@ SubtitleFont::~SubtitleFont() = default;
 // Horizontal compression applied to every glyph. Noto Sans JP has no condensed
 // variant; rasterizing at a smaller x-scale than y-scale gives narrower text
 // that's closer to typical broadcast subtitling without changing the font.
-// Tweak this constant and rebuild.
+// Tweak this constant and rebuild.  It is the width on the display: the
+// image's pixels are not square (0.86 wide on NTSC, 1.64 on MUSE), and the
+// rasterizing scale is divided by their aspect.
 static constexpr double c_width_scale = 0.85;
 
 bool SubtitleFont::rasterizeCodepoint(uint32_t codepoint) {
@@ -103,7 +107,7 @@ bool SubtitleFont::rasterizeCodepoint(uint32_t codepoint) {
         return false;
     }
 
-    const double scale_x = m_scale * c_width_scale;
+    const double scale_x = m_scale * c_width_scale / m_pixel_aspect;
     const double scale_y = m_scale;
 
     int x0, y0, x1, y1;

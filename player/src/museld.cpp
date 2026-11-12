@@ -508,8 +508,9 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                     ? std::filesystem::path(*subtitle_setup.font_path)
                     : std::filesystem::path(executable_dir) / "fonts" / "NotoSansJP-Regular.ttf";
                 const int frame_h = (int)decoder.getResultImages().out_image->getHeight();
-                const int pixel_height = std::max(20, frame_h / 18);
-                auto font = std::make_shared<SubtitleFont>(log, font_path, pixel_height, manager, command_pool);
+                const int pixel_height = std::max(20, frame_h / 12);
+                auto font = std::make_shared<SubtitleFont>(log, font_path, pixel_height, picture_format.pixel_aspect,
+                                                           manager, command_pool);
                 for (const auto &track : *tracks)
                     for (const auto &e : track.entries)
                         for (const auto &line : e.lines)
