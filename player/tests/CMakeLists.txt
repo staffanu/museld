@@ -16,6 +16,7 @@ add_executable(museld-tests
     SubtitleDiscoveryTest.cpp
     DisplayGeometryTest.cpp
     ChapterSearchTest.cpp
+    VideoFileTimelineTest.cpp
     LdfInputReaderTest.cpp
     HttpByteSourceTest.cpp
     ParallelOggFlacReaderTest.cpp
@@ -26,6 +27,7 @@ add_executable(museld-tests
     ../src/ui/DirectoryListing.cpp
     ../src/ui/SavedState.cpp
     ../src/ChapterSearch.cpp
+    ../src/VideoFileTimeline.cpp
     ../src/subtitles/Eia608Decoder.cpp
     ../src/bch/BchDecoder.cpp
     ../src/InputProbe.cpp

@@ -925,11 +925,20 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             // input timeout with nothing decoded, and the images then hold whatever
             // was there before (zeros, before the first field)
             if (vfw && !searching && state.last_decoded.decoded) {
+                // The frame's disc time and chapter, for the file's start
+                // timecode and chapter marks
+                std::optional<double> disc_seconds;
+                std::optional<int> disc_chapter;
+                if (const auto &disc_info = state.last_decoded.disc_info) {
+                    disc_seconds = disc_info->playbackTimeSeconds();
+                    disc_chapter = disc_info->chapter();
+                }
                 vfw->addVideoFrameWithAudio(images.out_Y, images.out_U, images.out_V,
                                             state.last_decoded.audio_mode,
                                             state.last_decoded.audio_sample_count,
                                             state.last_decoded.audio_samples,
-                                            state.last_decoded.ac3_frames);
+                                            state.last_decoded.ac3_frames,
+                                            disc_seconds, disc_chapter);
                 // Breaking out finalizes the file in the writer's destructor
                 if (state.field_count * seconds_per_iteration >= write_duration_seconds)
                     break;
@@ -1599,6 +1608,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                         video_out.width, video_out.height, video_out.fps_num, video_out.fps_den,
                         video_out.ac3_passthrough ? " with the AC3 bitstream" : ""));
             log.info(eApplication, std::format("--write: {} continues in {}", title, *output_filename));
+            vfw->newInput();
         } else {
             if (!video_out.log)
                 throw std::logic_error("the --write logger must be made before process_file()");

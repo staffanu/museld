@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <format>
 #include <vector>
@@ -13,6 +14,7 @@
 #include "logging/Logger.h"
 #include "AudioDefs.h"
 #include "VideoWriterOptions.h"
+#include "VideoFileTimeline.h"
 
 extern "C" {
 #include <libavutil/channel_layout.h>
@@ -56,7 +58,8 @@ public:
             m_audio_anchor_frame(0),
             m_audio_in_samples(0),
             m_last_sample{},
-            m_samples_in_frame(0) {
+            m_samples_in_frame(0),
+            m_timeline(video_fps_num, video_fps_den) {
     }
     VideoFileWriter(const VideoFileWriter &) = delete;
     VideoFileWriter(VideoFileWriter &&) = delete;
@@ -67,7 +70,10 @@ public:
     void addVideoFrameWithAudio(std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
                                 std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V,
                                 AudioMode audio_mode, int number_of_samples, AudioFrame *audio_samples,
-                                const std::vector<std::array<uint8_t, 1536>> &ac3_frames);
+                                const std::vector<std::array<uint8_t, 1536>> &ac3_frames,
+                                std::optional<double> disc_seconds, std::optional<int> chapter);
+    // The frames that follow come from another input (the disc's next side)
+    void newInput() { m_timeline.newInput(); }
     void cleanup();
 
 private:
@@ -104,6 +110,9 @@ private:
     AVFrame *makeVideoFrame(OutputStream *ost, std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
                             std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V);
     bool writeFrame(AVCodecContext *c, AVStream *st, AVFrame *frame, AVPacket *pkt);
+    int mux(AVPacket *pkt, AVRational packet_time_base, AVStream *st);
+    void writeHeader();
+    void addChapters();
     static void close_stream(OutputStream *ost);
 
     static std::string av_err2string(int errnum) {
@@ -151,6 +160,21 @@ private:
 
     uint8_t m_audio_tmp_buffer[MAX_AUDIO_OUTPUT_SAMPLES * MAX_AUDIO_CHANNELS * sizeof(int16_t)];
     int m_samples_in_frame;
+
+    // The disc time of the first frame goes into the container's header as
+    // its start timecode, and is known only once the disc code runs steadily
+    // (see VideoFileTimeline).  Until then the header is not written and the
+    // packets wait here, in their encoder's time base: the muxer may change
+    // a stream's time base when it writes the header.
+    struct PendingPacket {
+        AVPacket *packet;
+        AVRational time_base;
+        AVStream *stream;
+    };
+    VideoFileTimeline m_timeline;
+    bool m_header_written = false;
+    std::vector<PendingPacket> m_pending;
+    int64_t m_pending_bytes = 0;
 };
 
 #endif //MUSECPP_VIDEOFILEWRITER_H

@@ -385,7 +385,8 @@ if(BUILD_MUSE)
     )
 
     if(HAVE_LIBAV)
-        target_sources(museld PRIVATE VideoFileWriter.cpp VideoFileWriter.h)
+        target_sources(museld PRIVATE VideoFileWriter.cpp VideoFileWriter.h
+                VideoFileTimeline.cpp VideoFileTimeline.h)
     endif()
 
     target_include_directories(museld PRIVATE

@@ -1,6 +1,7 @@
 // Copyright 2025-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <cmath>
 #include "VbiData.h"
 #include <format>
 
@@ -80,10 +81,12 @@ std::vector<std::string> VbiData::asStrings() const {
 std::optional<double> VbiData::playbackTimeSeconds() const {
   if (m_is_clv) {
     if (!m_clv_time_seconds.has_value()) return std::nullopt;
-    double t = static_cast<double>(m_clv_time_seconds.value());
+    // A second of the CLV time code is 30 frames (25 on PAL) like a second
+    // of non-drop timecode, which on NTSC is 1.001 s of playing time
+    double frames = static_cast<double>(m_clv_time_seconds.value()) * std::round(m_frames_per_second);
     if (m_clv_picture_number.has_value())
-      t += (m_clv_picture_number.value() - 1) / m_frames_per_second;
-    return t;
+      frames += m_clv_picture_number.value() - 1;
+    return frames / m_frames_per_second;
   }
   if (m_cav_picture_number.has_value())
     return (m_cav_picture_number.value() - 1) / m_frames_per_second;

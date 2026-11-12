@@ -16,6 +16,12 @@
 static constexpr int SYNC_DEAD_BAND_MS = 25;
 static constexpr int SYNC_MAX_STRETCH_MS = 100;
 
+// The most the packets waiting for the header may hold.  The standard preset
+// never comes near it in the minute the timeline waits for a steady disc
+// code; the lossless preset reaches it in a few seconds of HD video, and a
+// file whose disc code starts later than that goes without a start timecode.
+static constexpr int64_t MAX_PENDING_BYTES = 256LL << 20;
+
 VideoFileWriter::PresetSpec VideoFileWriter::presetSpec(VideoWriterPreset preset) {
     switch (preset) {
         case VideoWriterPreset::eStandard:
@@ -74,22 +80,122 @@ bool VideoFileWriter::init() {
             throw std::runtime_error(std::format("Could not open '{}': {}", m_filename, av_err2string(ret)));
     }
 
-    // Write the stream header, if any
+    // The header is written by writeHeader(), once the timeline knows the
+    // start timecode that goes into it
+    return true;
+}
+
+// Writes the container header, with the start timecode if the disc gave one,
+// and then the packets that waited for it
+void VideoFileWriter::writeHeader() {
+    if (m_header_written)
+        return;
+    m_timeline.giveUp();
+    if (auto timecode = m_timeline.startTimecode()) {
+        av_dict_set(&m_format_context->metadata, "timecode", timecode->c_str(), 0);
+        m_log.info(eOutput, std::format("{}: start timecode {} at {} frames/s (the first frame is at {:+.3f} s of disc time)",
+                                        m_filename, *timecode, m_timeline.timecodeFps(),
+                                        (double)*m_timeline.startFrames() * m_video_fps_den / m_video_fps_num));
+    } else {
+        m_log.info(eOutput, std::format("{}: no start timecode, the disc code gave no steady time", m_filename));
+    }
+
     int ret = avformat_write_header(m_format_context, nullptr);
     if (ret < 0)
         throw std::runtime_error(std::format("Error occurred when opening output file: {}", av_err2string(ret)));
+    m_header_written = true;
 
-    return true;
+    std::vector<PendingPacket> pending;
+    pending.swap(m_pending);
+    m_pending_bytes = 0;
+    int write_error = 0;
+    for (auto &p : pending) {
+        if (write_error == 0)
+            write_error = mux(p.packet, p.time_base, p.stream);
+        av_packet_free(&p.packet);
+    }
+    if (write_error < 0)
+        throw std::runtime_error(std::format("Error while writing output packet: {}", av_err2string(write_error)));
+}
+
+// Hands a packet to the muxer, or keeps it until the header is written.
+// Takes the packet's contents either way; returns the muxer's error, if any.
+int VideoFileWriter::mux(AVPacket *pkt, AVRational packet_time_base, AVStream *st) {
+    if (!m_header_written) {
+        AVPacket *kept = av_packet_alloc();
+        if (!kept)
+            throw std::runtime_error("Could not allocate AVPacket");
+        av_packet_move_ref(kept, pkt);
+        m_pending_bytes += kept->size;
+        m_pending.push_back({kept, packet_time_base, st});
+        return 0;
+    }
+
+    // rescale the packet's timestamps from its encoder's to the stream's time base
+    av_packet_rescale_ts(pkt, packet_time_base, st->time_base);
+    pkt->stream_index = st->index;
+
+    if (m_log.isEnabled(eDebug, eOutput))
+        m_log.debug(eOutput, std::format("pts:{} pts_time:{} dts:{} dts_time:{} duration:{} duration_time:{} stream_index:{}",
+                                         av_ts2string(pkt->pts), av_ts2timestring(pkt->pts, &st->time_base),
+                                         av_ts2string(pkt->dts), av_ts2timestring(pkt->dts, &st->time_base),
+                                         av_ts2string(pkt->duration), av_ts2timestring(pkt->duration, &st->time_base),
+                                         pkt->stream_index));
+
+    // av_interleaved_write_frame() takes ownership of the packet's contents
+    // and resets it, so no unreferencing is necessary
+    return av_interleaved_write_frame(m_format_context, pkt);
+}
+
+// The chapters the timeline found, each running to the next and the last to
+// the end of the video.  Both muxers write chapters that appear before the
+// trailer.  The MP4 muxer moves a first chapter that starts later to the
+// start of the file and all that follow with it, so the stretch before the
+// first mark (lead-in, pre-roll, frames without a code) is a chapter too.
+void VideoFileWriter::addChapters() {
+    struct Mark {
+        int64_t frame;
+        std::string title;
+    };
+    std::vector<Mark> marks;
+    for (const auto &chapter : m_timeline.chapters()) {
+        if (marks.empty() && chapter.frame > 0)
+            marks.push_back({0, "Start"});
+        marks.push_back({chapter.frame, std::format("Chapter {}", chapter.number)});
+    }
+    if (marks.empty() || m_format_context->nb_chapters != 0)
+        return;
+    auto **list = (AVChapter **) av_calloc(marks.size(), sizeof(AVChapter *));
+    if (!list)
+        return;
+    unsigned int count = 0;
+    for (size_t i = 0; i < marks.size(); i++) {
+        auto *chapter = (AVChapter *) av_mallocz(sizeof(AVChapter));
+        if (!chapter)
+            break;
+        chapter->id = (int64_t)i + 1;
+        chapter->time_base = (AVRational){m_video_fps_den, m_video_fps_num};
+        chapter->start = marks[i].frame;
+        chapter->end = i + 1 < marks.size() ? marks[i + 1].frame : m_video_stream.next_pts;
+        av_dict_set(&chapter->metadata, "title", marks[i].title.c_str(), 0);
+        list[count++] = chapter;
+    }
+    m_format_context->chapters = list;
+    m_format_context->nb_chapters = count;
+    m_log.info(eOutput, std::format("{}: {} chapter mark{}", m_filename, m_timeline.chapters().size(),
+                                    m_timeline.chapters().size() == 1 ? "" : "s"));
 }
 
 void VideoFileWriter::addVideoFrameWithAudio(
         std::shared_ptr<musevk::VulkanBuffer> const &image_Y,
         std::shared_ptr<musevk::VulkanBuffer> const &image_U, std::shared_ptr<musevk::VulkanBuffer> const &image_V,
         AudioMode audio_mode, int number_of_samples, AudioFrame *audio_samples,
-        const std::vector<std::array<uint8_t, 1536>> &ac3_frames) {
+        const std::vector<std::array<uint8_t, 1536>> &ac3_frames,
+        std::optional<double> disc_seconds, std::optional<int> chapter) {
 
-    //av_compare_ts(m_video_stream.next_pts, m_video_stream.codec_context->time_base,
-    //              m_audio_stream.next_pts, m_audio_stream.codec_context->time_base)
+    m_timeline.addFrame(disc_seconds, chapter);
+    if (!m_header_written && (m_timeline.startDecided() || m_pending_bytes > MAX_PENDING_BYTES))
+        writeHeader();
 
     if (m_encode_video) {
         assert(image_Y->size().x_size == m_video_stream.codec_context->width);
@@ -235,6 +341,8 @@ void VideoFileWriter::insertInterpolated(int64_t count, int in_rate, const Audio
 }
 
 void VideoFileWriter::cleanup() {
+    writeHeader(); // a file shorter than the wait for the disc code
+
     // Pad the audio track with silence up to the video clock, so the streams
     // end together even if audio was lost at the end of the recording
     if (m_encode_audio && m_swr_ctx) {
@@ -262,7 +370,12 @@ void VideoFileWriter::cleanup() {
     if (m_encode_audio && !m_ac3_passthrough) // the passthrough stream has no encoder to drain
         writeFrame(m_audio_stream.codec_context, m_audio_stream.stream, nullptr, m_audio_stream.tmp_pkt);
 
+    addChapters();
     av_write_trailer(m_format_context);
+
+    for (auto &p : m_pending) // none unless the header could not be written
+        av_packet_free(&p.packet);
+    m_pending.clear();
 
     if (m_have_video)
         close_stream(&m_video_stream);
@@ -314,6 +427,8 @@ void VideoFileWriter::initVideo(const PresetSpec &spec) {
     c->width = m_video_width;   // Resolution must be a multiple of two.
     c->height = m_video_height;
     m_video_stream.stream->time_base = (AVRational) {m_video_fps_den, m_video_fps_num};
+    // The frame rate, said outright: the MP4 muxer counts the start timecode in it
+    m_video_stream.stream->avg_frame_rate = (AVRational) {m_video_fps_num, m_video_fps_den};
     c->time_base = m_video_stream.stream->time_base;
     c->pix_fmt = spec.pix_fmt;
     c->thread_count = 0; // auto
@@ -508,10 +623,8 @@ void VideoFileWriter::writeAc3Frames(const std::vector<std::array<uint8_t, 1536>
         pkt->pts = pkt->dts = m_ac3_next_pts;
         pkt->duration = 1536;
         pkt->flags |= AV_PKT_FLAG_KEY;
-        pkt->stream_index = m_audio_stream.stream->index;
-        av_packet_rescale_ts(pkt, (AVRational){1, 48000}, m_audio_stream.stream->time_base);
         m_ac3_next_pts += 1536;
-        int ret = av_interleaved_write_frame(m_format_context, pkt);
+        int ret = mux(pkt, (AVRational){1, 48000}, m_audio_stream.stream);
         if (ret < 0) {
             m_log.error(eOutput, std::format("Error while writing AC3 packet: {}", av_err2string(ret)));
             m_encode_audio = false;
@@ -633,22 +746,7 @@ bool VideoFileWriter::writeFrame(AVCodecContext *c, AVStream *st, AVFrame *frame
         else if (ret < 0)
             throw std::runtime_error(std::format("Error encoding a frame: {}", av_err2string(ret)));
 
-        // rescale output packet timestamp values from codec to stream timebase
-        av_packet_rescale_ts(pkt, c->time_base, st->time_base);
-        pkt->stream_index = st->index;
-
-        AVRational *time_base = &m_format_context->streams[pkt->stream_index]->time_base;
-        m_log.debug(eOutput, std::format("pts:{} pts_time:{} dts:{} dts_time:{} duration:{} duration_time:{} stream_index:{}",
-                                         av_ts2string(pkt->pts), av_ts2timestring(pkt->pts, time_base),
-                                         av_ts2string(pkt->dts), av_ts2timestring(pkt->dts, time_base),
-                                         av_ts2string(pkt->duration), av_ts2timestring(pkt->duration, time_base),
-                                         pkt->stream_index));
-
-        // Write the compressed frame to the media file
-        ret = av_interleaved_write_frame(m_format_context, pkt);
-        /* pkt is now blank (av_interleaved_write_frame() takes ownership of
-         * its contents and resets pkt), so that no unreferencing is necessary.
-         * This would be different if one used av_write_frame(). */
+        ret = mux(pkt, c->time_base, st);
         if (ret < 0)
             throw std::runtime_error(std::format("Error while writing output packet: {}", av_err2string(ret)));
     }
