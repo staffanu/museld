@@ -203,10 +203,20 @@ a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at 
 | `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
 | `--saturation <factor>` | NTSC: scale the chroma gain (default 1.0, applied on top of the burst-referenced AGC) |
 | `--cx <mode>` | NTSC analog audio CX expansion: `auto` (default, follow the disc's VBI flag), `on`, or `off` — same as the X key. `off` is also how to record the un-expanded signal for comparisons |
-| `--subtitles` | Display SRT subtitles synced to the disc's own time code — or to the playback position when the capture carries no disc code (baseband captures usually do not). The available tracks are the `.srt` files next to the input file whose names start with the input's name minus its extension (`capture.srt`, `capture.ja.srt`, … for `capture.raw`); next to an `http://` input they are the ones its directory's index page on the web server lists. On the Apple TV they are always looked for, and the disc's remembered choice decides which is shown. The first one alphabetically starts as the primary (bottom) track; the `[` and `]` keys cycle the primary and secondary (top) track through all of them |
-| `--subtitles-file <file.srt>` | Start with this file (a path or an `http://` address) as the primary subtitle track (implies `--subtitles`; the file need not match the naming pattern) |
+| `--subtitles-file <file.srt>` | Start with this file (a path or an `http://` address) as the primary subtitle track; it need not match the naming pattern below |
 | `--subtitle-offset <seconds>` | Delay the subtitles by this much; negative shows them earlier. Useful for tracks timed against a `--write` render rather than the disc's own time code (the render's start timecode is that difference: subtitle time on the disc = time in the file + start timecode) |
 | `--subtitle-font <file.ttf>` | Override the default subtitle font (bundled Noto Sans JP) |
+
+SRT subtitles need no option: the tracks are the `.srt` files next to the input whose names
+start with the input's name minus its extension (`capture.srt`, `capture.ja.srt`, … for
+`capture.raw`), on the file system or, for an `http://` input, in the web server's index of the
+capture's directory, as the file browser lists it. The first one alphabetically starts as the
+primary (bottom) track; the `[` and `]` keys cycle the primary and secondary (top) track through
+all of them, and the choice, "off" included, is remembered per disc. They are synced to the
+disc's own time code, or to the playback position when the capture carries no disc code
+(baseband captures usually do not). A file whose label is a live track's, `capture.CC.srt` from
+`--cc-write` beside an NTSC disc's live CC track, is left out, the live track being the same
+captions.
 
 ### Closed captions (NTSC)
 
@@ -217,7 +227,7 @@ are supported; the channel-2 services and field 2 (CC3/CC4, XDS) are not.
 
 | Option | Description |
 |---|---|
-| `--cc-write` | Save the captions collected during playback at exit as `<input>.CC.srt` next to the input, with their original on-screen timing — `--subtitles` finds the file on the next playback |
+| `--cc-write` | Save the captions collected during playback at exit as `<input>.CC.srt` next to the input, with their original on-screen timing — it is found on the next playback of a capture that is not NTSC RF (where the live CC track is the same captions) |
 
 A `--write` file carries the captions as a subtitle stream as well, timed against the file.
 
@@ -253,7 +263,7 @@ is script-independent. On a successful start, `--log M3` logs
 | `--ocr-translate-model <name>` | Model to use (default: the first one the server reports) |
 | `--ocr-language <name>` | Language of the burned-in subtitles, for the translation prompt (default Japanese) |
 | `--ocr-translate-to <name>` | Language to translate into (default English). The live track and the saved file are named after its first two letters ("OCR-EN", "OCR-SV", …) |
-| `--ocr-write` | Save the collected cues at exit as `<input>.OCR.srt` (and `<input>.OCR-XX.srt` with `--ocr-translate`) next to the input, with the cues' original on-screen timing — `--subtitles` finds them on the next playback, so one watched pass extracts a finished subtitle pair |
+| `--ocr-write` | Save the collected cues at exit as `<input>.OCR.srt` (and `<input>.OCR-XX.srt` with `--ocr-translate`) next to the input, with the cues' original on-screen timing — they are found on the next playback, so one watched pass extracts a finished subtitle pair |
 
 The OCR watches the bottom of the frame and runs only when the subtitle area
 changes, so the model cost is per cue, not per frame. Text appears on the live

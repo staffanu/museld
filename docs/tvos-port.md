@@ -101,9 +101,9 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   puts the CC track in the primary slot from the start (a TV remote has no `[` key).
   An .srt file reaches the app from the web server the capture is on: the tracks are
   the `.srt` files the index page of the capture's directory lists with the capture's
-  name minus its extension (`subtitles/SubtitleDiscovery`), fetched over HTTP, and on
-  tvOS they are looked for without `--subtitles` (the first is shown, and the disc's
-  remembered choice, "off" included, overrides that).  `--subtitles-file` takes an
+  name minus its extension (`subtitles/SubtitleDiscovery`), fetched over HTTP, and looked
+  for without an option on every platform (the first is shown, and the disc's remembered
+  choice, "off" included, overrides that; `--subtitles` is gone).  `--subtitles-file` takes an
   http:// address too.  Seen on the box 2026-11-11: the blue1 capture from the NAS with
   its en, ja and sv tracks beside it.  A file in the app's data container still cannot be read (put there
   with `devicectl device copy to`, the app's stat of it fails with "Operation not

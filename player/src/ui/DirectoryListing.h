@@ -4,6 +4,7 @@
 #ifndef MUSELD_DIRECTORYLISTING_H
 #define MUSELD_DIRECTORYLISTING_H
 
+#include <optional>
 #include <string>
 #include <vector>
 

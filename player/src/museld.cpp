@@ -49,6 +49,7 @@
 #include "ui/MenuOverlay.h"
 #include "ui/PlayerMenu.h"
 #include "ui/Browser.h"
+#include "ui/DirectoryListing.h"
 #include "ui/SavedState.h"
 #include "subtitles/Eia608Decoder.h"
 #include "subtitles/SrtParser.h"
@@ -1944,7 +1945,6 @@ int main(int argc, char *argv[]) {
     Decoder::BlackLevelMode black_level_mode = Decoder::BlackLevelMode::eAuto;
     float tint_degrees = 0.0f;
     float saturation = 1.0f;
-    bool subtitles_enabled = false;
     optional<string> subtitles_file;
     optional<string> subtitle_font_path;
     double subtitle_offset_seconds = 0.0;
@@ -2181,20 +2181,13 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
     });
-    options.flag("--subtitles", "Display SRT subtitles synced to the disc's own time code, or to "
-                                "the playback position when the capture carries no disc code "
-                                "(baseband captures usually do not).  The "
-                                "tracks are the .srt files next to the input file (in its directory, or "
-                                "on the index page of an http:// input's directory) whose names "
-                                "start with the input's name minus its extension "
-                                "(capture.ja.srt for capture.raw); the first one alphabetically "
-                                "starts as the primary track, and the [ and ] keys cycle the "
-                                "primary and secondary track", [&] () -> void {
-        subtitles_enabled = true;
-    });
-    options.option("--subtitles-file", "FILE", "Start with the SRT subtitles in FILE (a path or "
-                                               "an http:// address) as the primary track "
-                                               "(implies --subtitles)", [&] () -> void {
+    options.option("--subtitles-file", "FILE", "Start with the SRT subtitles in FILE (a path or an "
+                                               "http:// address) as the primary track.  The subtitle tracks are otherwise the "
+                                               ".srt files next to the input whose names start with "
+                                               "the input's name minus its extension (capture.ja.srt "
+                                               "for capture.raw), found without an option; the first "
+                                               "one alphabetically starts as the primary track, and "
+                                               "the [ and ] keys cycle the primary and secondary track", [&] () -> void {
         subtitles_file = expandHome(*(it++));
         if (!inputIsUrl(*subtitles_file) && !filesystem::exists(*subtitles_file)) {
             cerr << "Subtitle file not found: " << *subtitles_file << endl;
@@ -2561,12 +2554,19 @@ int main(int argc, char *argv[]) {
                 subtitle_setup.cc_write_stem =
                         (input_path.parent_path() / input_path.stem()).string();
             }
-            // The Apple TV has no command line to ask with: there the subtitle
-            // files beside the input are always looked for, and the disc's
-            // remembered choice (which may be "off") decides what is shown
-            if ((subtitles_enabled || is_tvos) && !inputIsStdin(name))
+            // The .srt files next to the input are its subtitle tracks, no
+            // option needed (none for stdin, whose neighbours are unknown).  A
+            // file whose label is a live track's (the "CC" track of an NTSC
+            // disc, which --cc-write saved the file from) is left out: the
+            // live track is the same captions
+            if (!inputIsStdin(name)) {
+                std::vector<std::string> live_labels;
+                if (file_input_type == eNtscRf && VideoStandard::ntsc().has_closed_captions)
+                    live_labels.emplace_back("CC");
                 for (auto &file : discoverSubtitleFiles(name))
-                    subtitle_setup.files.emplace_back(std::move(file.label), std::move(file.location));
+                    if (std::find(live_labels.begin(), live_labels.end(), file.label) == live_labels.end())
+                        subtitle_setup.files.emplace_back(std::move(file.label), std::move(file.location));
+            }
             if (subtitles_file) {
                 // If the discovery also found the file, keep the discovered entry
                 // (with its short label); otherwise add it, labeled by filename.
@@ -2585,9 +2585,6 @@ int main(int argc, char *argv[]) {
             } else if (!subtitle_setup.files.empty()) {
                 subtitle_setup.primary_index = 0;
             }
-            if (subtitles_enabled && !inputIsStdin(name) && subtitle_setup.files.empty())
-                cerr << "No .srt files matching " << filesystem::path(name).stem().string()
-                     << "*.srt found next to " << name << endl;
 
             const double export_frame_after_seconds = max(0.0, export_frame_at_seconds - initial_seek_seconds);
             if (export_frame_filename && initial_seek_seconds > 0 && export_frame_at_seconds <= initial_seek_seconds)
