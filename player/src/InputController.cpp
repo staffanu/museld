@@ -116,11 +116,14 @@ bool InputController::poll(SDL_Window *window,
                 quit = true;
                 break;
             case SDL_EVENT_KEY_DOWN: {
-                // Held arrows repeat in the menu (a long listing); other keys act once per press
+                // Held arrows repeat in the menu (a long listing), and a held Backspace
+                // in its address field; other keys act once per press
                 const bool arrow = event.key.scancode == SDL_SCANCODE_UP || event.key.scancode == SDL_SCANCODE_DOWN
                                    || event.key.scancode == SDL_SCANCODE_LEFT || event.key.scancode == SDL_SCANCODE_RIGHT;
                 const bool menu_open = m_menu != nullptr && m_menu->isOpen();
-                if (!event.key.repeat || (arrow && menu_open)) {
+                const bool erasing = event.key.scancode == SDL_SCANCODE_BACKSPACE && menu_open
+                                     && m_menu->textEntry() != nullptr;
+                if (!event.key.repeat || (arrow && menu_open) || erasing) {
                     m_pressed.insert(event.key.scancode);
                     if (!event.key.repeat)
                         m_log.debug(eApplication, std::format("Key: {}", SDL_GetScancodeName(event.key.scancode)));

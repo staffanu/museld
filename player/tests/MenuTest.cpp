@@ -130,8 +130,8 @@ TEST_CASE("A text entry whose callback closes the menu is destroyed after the ca
         f.menu.acceptEntry();
     }
     SECTION("from the on-screen DONE key") {
-        f.menu.handleKey(MenuKey::eUp); // the last row: SHIFT SPACE DELETE CANCEL DONE
-        for (int i = 0; i < 4; i++)
+        f.menu.handleKey(MenuKey::eUp); // the last row: SHIFT SPACE DELETE CLEAR CANCEL DONE
+        for (int i = 0; i < 5; i++)
             f.menu.handleKey(MenuKey::eRight);
         f.menu.handleKey(MenuKey::eSelect);
     }

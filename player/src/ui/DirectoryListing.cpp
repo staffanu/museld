@@ -188,16 +188,29 @@ std::string httpGet(const std::string &url, bool as_directory, std::string &body
     // what the caller is told it got
     std::string at = url;
     for (int hops = 0; ; hops++) {
+        // Plain http only (no TLS in the build): said here, where httplib would
+        // throw -- a server sending a mistyped address to its https site is the
+        // common way to get one
+        if (!startsWith(at, "http://"))
+            // (short: the browser shows the end of a long message)
+            return at == url ? std::string("Only http:// addresses are supported")
+                             : std::format("The server redirects to {}, which is not supported",
+                                           at.substr(0, at.find("://") + 3));
         const auto scheme_end = at.find("://");
         const auto path_start = at.find('/', scheme_end + 3);
         const std::string origin = at.substr(0, path_start);
         std::string path = path_start == std::string::npos ? "/" : at.substr(path_start);
         if (as_directory)
             path = withSlash(path);
-        httplib::Client client(origin);
-        client.set_connection_timeout(std::chrono::seconds(5));
-        client.set_read_timeout(std::chrono::seconds(10));
-        auto response = client.Get(path);
+        httplib::Result response;
+        try {
+            httplib::Client client(origin);
+            client.set_connection_timeout(std::chrono::seconds(5));
+            client.set_read_timeout(std::chrono::seconds(10));
+            response = client.Get(path);
+        } catch (const std::exception &x) { // an address httplib will not take
+            return std::format("Cannot read {}: {}", at, x.what());
+        }
         if (!response)
             return std::format("Cannot reach {}: {}", origin, httplib::to_string(response.error()));
         const int status = response->status;

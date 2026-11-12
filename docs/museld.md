@@ -467,7 +467,10 @@ The address field takes anything museld opens: a path, an `http://` location
 unless its name has a capture's extension, and the server's redirects are
 followed, so the trailing slash is optional), or a `udp://` capture stream,
 which plays as it is.  The field opens with what was typed last, so a wrong
-address is corrected rather than retyped.  On the Apple TV the field's on-screen keyboard is driven by
+address is corrected rather than retyped; the on-screen CLEAR key empties it to
+start over, and a held Backspace repeats.  A redirect to an `https://` address
+(what some servers answer a mistyped path with) is reported in the listing: only
+`http://` is read.  On the Apple TV the field's on-screen keyboard is driven by
 the remote, select typing the key under the cursor and Menu deleting; a
 keyboard types straight into it, Return accepts and Escape cancels (the space
 bar picks the on-screen key under the cursor, as a gamepad's select does; a

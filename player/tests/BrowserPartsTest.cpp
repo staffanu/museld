@@ -6,7 +6,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
+#include <format>
+#include <thread>
 #include <unistd.h>
+#include "input/HttpClient.h"
 #include "ui/DirectoryListing.h"
 #include "ui/Menu.h"
 #include "ui/SavedState.h"
@@ -98,6 +101,16 @@ TEST_CASE("The text entry types from its keyboard and from keys, and ends by DON
     REQUIRE(cancelled == 0);
     e2.handleKey(TextEntry::Key::eBack);
     REQUIRE(cancelled == 1);
+    // CLEAR empties the line in one press and the entry stays up
+    TextEntry e3("A", "http://nas/a/long/path/capture.ldf", [](const std::string &) {}, [&] { cancelled++; });
+    e3.handleKey(TextEntry::Key::eUp); // the word row
+    while (e3.rows()[e3.row()][e3.column()] != "CLEAR")
+        e3.handleKey(TextEntry::Key::eRight);
+    e3.handleKey(TextEntry::Key::eSelect);
+    REQUIRE(e3.text().empty());
+    REQUIRE(cancelled == 1);
+    e3.type("x");
+    REQUIRE(e3.text() == "x");
 }
 
 TEST_CASE("The saved state keeps the recent addresses and the last directory across a reload", "[Browser]") {
@@ -176,4 +189,22 @@ TEST_CASE("The saved state remembers what a disc was played with", "[Browser]") 
         CHECK(!state.discSettings("nothing"));
     }
     std::filesystem::remove(path);
+}
+
+TEST_CASE("A redirect to https, or an https address, is a listing error and not an exception", "[Browser]") {
+    // What a server does that sends unknown paths to its https site
+    httplib::Server server;
+    server.Get("/gone/", [](const httplib::Request &, httplib::Response &response) {
+        response.set_redirect("https://127.0.0.1/gone/", 301);
+    });
+    const int port = server.bind_to_any_port("127.0.0.1");
+    std::thread thread([&] { server.listen_after_bind(); });
+    server.wait_until_ready();
+    const auto redirected = DirectoryListing::list(std::format("http://127.0.0.1:{}/gone", port));
+    server.stop();
+    thread.join();
+    REQUIRE(redirected.entries.empty());
+    REQUIRE(redirected.error == "The server redirects to https://, which is not supported");
+    REQUIRE(DirectoryListing::list("https://127.0.0.1/").error == "Only http:// addresses are supported");
+    REQUIRE(!DirectoryListing::list("http://[bad/").error.empty());
 }

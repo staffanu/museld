@@ -14,7 +14,7 @@ const std::vector<std::vector<std::string>> c_rows_lower = {
         {"q", "w", "e", "r", "t", "y", "u", "i", "o", "p", ".", ":"},
         {"a", "s", "d", "f", "g", "h", "j", "k", "l", "/", "~", "="},
         {"z", "x", "c", "v", "b", "n", "m", ",", "@", "%", "+", "?"},
-        {"SHIFT", "SPACE", "DELETE", "CANCEL", "DONE"},
+        {"SHIFT", "SPACE", "DELETE", "CLEAR", "CANCEL", "DONE"},
 };
 
 std::vector<std::vector<std::string>> upperOf(const std::vector<std::vector<std::string>> &rows) {
@@ -62,6 +62,7 @@ void TextEntry::handleKey(Key key) {
             if (k == "SHIFT") m_upper = !m_upper;
             else if (k == "SPACE") type(" ");
             else if (k == "DELETE") backspace();
+            else if (k == "CLEAR") clear();
             else if (k == "CANCEL") { if (m_on_cancel) m_on_cancel(); }
             else if (k == "DONE") { if (m_on_done) m_on_done(m_text); }
             else type(k);

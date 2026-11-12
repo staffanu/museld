@@ -12,8 +12,9 @@
 // arrows move over the keys, select types the key under the cursor, back
 // deletes (and cancels the entry when the text is empty).  A real keyboard
 // types straight into it through type() and backspace().  The rows hold the
-// characters an address needs; two keys shift between the cases and two end
-// the entry, accepting or cancelling.  Nothing here draws: lines() is what the
+// characters an address needs; the word keys below them shift between the
+// cases, delete a character or the whole line (the field starts with the last
+// address, which is long), and end the entry, accepting or cancelling.  Nothing here draws: lines() is what the
 // overlay shows.
 class TextEntry {
 public:
@@ -25,6 +26,7 @@ public:
     void handleKey(Key key);
     void type(const std::string &utf8);
     void backspace();
+    void clear() { m_text.clear(); } // the CLEAR key: start over from an empty line
     void accept() { if (m_on_done) m_on_done(m_text); }   // a keyboard's Return
     void cancel() { if (m_on_cancel) m_on_cancel(); }      // a keyboard's Escape
 
