@@ -561,6 +561,25 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         Eia608Decoder cc_decoder(log);
         LiveSubtitleFeed cc_feed;
         double cc_last_seconds = -1e9;
+#ifdef HAVE_LIBAV
+        // The cues written to the --write file's caption stream so far.  A
+        // cue goes in once it is settled: the feed reopens a cue the same
+        // text repeats within its merge gap, so the record is final only
+        // that long after a cue's end (a cue dropped by a backward seek
+        // stays in the file; a write run does not seek)
+        size_t cc_written = 0;
+        const auto writeSettledCaptions = [&](bool all) {
+            if (!vfw) return;
+            cc_written = std::min(cc_written, cc_feed.file_entries.size());
+            while (cc_written < cc_feed.file_entries.size()) {
+                const auto &e = cc_feed.file_entries[cc_written];
+                if (!all && e.end_seconds + LiveSubtitleFeed::c_merge_gap_seconds > state.stream_seconds)
+                    break;
+                vfw->addClosedCaption(e.start_seconds, e.end_seconds, state.stream_seconds, e.lines);
+                cc_written++;
+            }
+        };
+#endif
 
 #ifdef HAVE_OCR
         // The OCR worker is owned here, directly by the render thread; band
@@ -854,6 +873,9 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                                   (*subtitle_tracks)[cc_track_index], *subtitle_font);
                     subtitle_font->refreshAtlasIfDirty(command_pool);
                 }
+#ifdef HAVE_LIBAV
+                writeSettledCaptions(false);
+#endif
             }
 
 #ifdef HAVE_OCR
@@ -1113,9 +1135,14 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             return entries;
         };
 
+        if (cc_track_index >= 0 && subtitle_tracks) {
+            cc_feed.finish(state.stream_seconds, (*subtitle_tracks)[cc_track_index]);
+#ifdef HAVE_LIBAV
+            writeSettledCaptions(true);
+#endif
+        }
         if (cc_track_index >= 0 && !subtitle_setup.cc_write_stem.empty() && subtitle_tracks) {
             try {
-                cc_feed.finish(state.stream_seconds, (*subtitle_tracks)[cc_track_index]);
                 const std::string cc_path = subtitle_setup.cc_write_stem + ".CC.srt";
                 writeSrt(cc_path, absoluteEntries(cc_feed.file_entries));
                 log.info(eApplication, std::format("Wrote {} CC cues to {}",
@@ -1473,6 +1500,7 @@ struct VideoFileOutput {
     int width = 0, height = 0, fps_num = 0, fps_den = 0;
     VideoColorStandard color_standard{};
     bool ac3_passthrough = false;
+    bool closed_captions = false;
 
     void close() {
 #ifdef HAVE_LIBAV
@@ -1595,18 +1623,24 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         // bitstream (all 5.1 channels, no transcode) instead of PCM
         const bool ac3_passthrough = !std::is_same<InputBlock, MuseInputBlock>::value
                 && audio_track == AudioTrack::eAc3 && decode_audio;
+        // An NTSC disc's closed captions go into a subtitle stream (empty on
+        // a disc without them: the stream must exist before the header)
+        const bool closed_captions = subtitle_setup.ntsc_cc;
         if (vfw) {
             // The file is open from the input before: this one must decode to
             // the same picture and the same kind of audio stream to go on in it
             if (initial_w != video_out.width || initial_h != video_out.height
                     || fps_num != video_out.fps_num || fps_den != video_out.fps_den
-                    || color_standard != video_out.color_standard || ac3_passthrough != video_out.ac3_passthrough)
+                    || color_standard != video_out.color_standard || ac3_passthrough != video_out.ac3_passthrough
+                    || closed_captions != video_out.closed_captions)
                 throw runtime_error(std::format(
-                        "--write {}: this input decodes to {}x{} at {}/{} frames/s{}, but the file holds {}x{} at {}/{}{} "
+                        "--write {}: this input decodes to {}x{} at {}/{} frames/s{}{}, but the file holds {}x{} at {}/{}{}{} "
                         "from the input before it; give it a --write file of its own",
                         *output_filename, initial_w, initial_h, fps_num, fps_den, ac3_passthrough ? " with the AC3 bitstream" : "",
+                        closed_captions ? " with closed captions" : "",
                         video_out.width, video_out.height, video_out.fps_num, video_out.fps_den,
-                        video_out.ac3_passthrough ? " with the AC3 bitstream" : ""));
+                        video_out.ac3_passthrough ? " with the AC3 bitstream" : "",
+                        video_out.closed_captions ? " with closed captions" : ""));
             log.info(eApplication, std::format("--write: {} continues in {}", title, *output_filename));
             vfw->newInput();
         } else {
@@ -1615,7 +1649,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
             vfw = make_unique<VideoFileWriter>(output_filename.value(), *video_out.log,
                                                initial_w, initial_h, fps_num, fps_den,
                                                write_preset, color_standard, dar_num, dar_den,
-                                               ac3_passthrough);
+                                               ac3_passthrough, closed_captions);
             if (!vfw->init())
                 throw runtime_error("Cannot initialize output encoder");
             video_out.filename = *output_filename;
@@ -1623,6 +1657,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
             video_out.fps_num = fps_num; video_out.fps_den = fps_den;
             video_out.color_standard = color_standard;
             video_out.ac3_passthrough = ac3_passthrough;
+            video_out.closed_captions = closed_captions;
         }
     }
 #endif

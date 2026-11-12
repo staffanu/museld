@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <algorithm>
 #include <climits>
+#include <cmath>
+#include <cstring>
 #include "VideoFileWriter.h"
 #include "musevk/VulkanBuffer.h"
 
@@ -70,6 +72,9 @@ bool VideoFileWriter::init() {
         initAudio(spec);
     m_have_audio = true;
     m_encode_audio = true;
+
+    if (m_closed_captions)
+        initClosedCaptions(spec);
 
     av_dump_format(m_format_context, 0, m_filename.c_str(), 1);
 
@@ -570,6 +575,71 @@ void VideoFileWriter::initAudio(const PresetSpec &spec) {
 
     // The resampler is created lazily (initResampler) once the first audio
     // arrives, since the input sample rate depends on the audio mode
+}
+
+// The closed caption stream: text cues, muxed as the container's own text
+// subtitle format (SubRip blocks in Matroska, 3GPP timed text in MP4) with
+// no encoder in between.  The cues reach the muxer late, each when the next
+// replaces it on screen, and the muxer's interleaver would otherwise hold
+// the video and audio for its default ten seconds waiting for this stream:
+// one second keeps the memory it takes bounded, and a cue later than that
+// is written where it arrives, a block with an earlier time than the ones
+// around it, which both containers allow.
+void VideoFileWriter::initClosedCaptions(const PresetSpec &spec) {
+    const bool matroska = std::string(spec.format_name) == "matroska";
+    const AVCodecID codec_id = matroska ? AV_CODEC_ID_SUBRIP : AV_CODEC_ID_MOV_TEXT;
+    if (avformat_query_codec(m_format_context->oformat, codec_id, FF_COMPLIANCE_NORMAL) != 1)
+        throw std::runtime_error(std::format("Text subtitles cannot be stored in format {}", m_format_context->oformat->name));
+    m_caption_stream = avformat_new_stream(m_format_context, nullptr);
+    if (!m_caption_stream)
+        throw std::runtime_error("Could not allocate stream");
+    m_caption_stream->id = (int)m_format_context->nb_streams - 1;
+    AVCodecParameters *par = m_caption_stream->codecpar;
+    par->codec_type = AVMEDIA_TYPE_SUBTITLE;
+    par->codec_id = codec_id;
+    m_caption_stream->time_base = (AVRational){1, 1000};
+    av_dict_set(&m_caption_stream->metadata, "title", "Closed captions", 0);
+    m_format_context->max_interleave_delta = AV_TIME_BASE;
+}
+
+void VideoFileWriter::addClosedCaption(double start_seconds, double end_seconds, double now_seconds,
+                                       const std::vector<std::string> &lines) {
+    if (!m_caption_stream || lines.empty() || end_seconds <= start_seconds)
+        return;
+    const double fps = (double)m_video_fps_num / m_video_fps_den;
+    const double file_now = (double)m_video_stream.next_pts / fps;
+    const int64_t pts = std::llround((file_now - (now_seconds - start_seconds)) * 1000);
+    const int64_t duration = std::llround((end_seconds - start_seconds) * 1000);
+    if (pts < 0 || pts < m_caption_last_pts) {
+        m_log.debug(eOutput, std::format("Closed caption at {} ms dropped: before the stream's last cue at {} ms",
+                                         pts, m_caption_last_pts));
+        return;
+    }
+    std::string text;
+    for (const auto &line : lines) {
+        if (!text.empty()) text += '\n';
+        text += line;
+    }
+    const bool mov_text = m_caption_stream->codecpar->codec_id == AV_CODEC_ID_MOV_TEXT;
+    if (mov_text && text.size() > 0xffff)
+        text.resize(0xffff);
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt || av_new_packet(pkt, (int)text.size() + (mov_text ? 2 : 0)) < 0)
+        throw std::runtime_error("Could not allocate subtitle packet");
+    uint8_t *q = pkt->data;
+    if (mov_text) { // 3GPP timed text: a 16-bit big-endian length before the UTF-8 text
+        *q++ = (uint8_t)(text.size() >> 8);
+        *q++ = (uint8_t)(text.size() & 0xff);
+    }
+    memcpy(q, text.data(), text.size());
+    pkt->pts = pkt->dts = pts;
+    pkt->duration = duration;
+    pkt->flags |= AV_PKT_FLAG_KEY;
+    m_caption_last_pts = pts;
+    int ret = mux(pkt, (AVRational){1, 1000}, m_caption_stream);
+    av_packet_free(&pkt);
+    if (ret < 0)
+        m_log.error(eOutput, std::format("Error while writing subtitle packet: {}", av_err2string(ret)));
 }
 
 // A stream-copy audio track for the AC3-RF bitstream: no encoder, the sync

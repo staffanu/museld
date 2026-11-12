@@ -3,7 +3,7 @@
 Work worth doing, in rough order of value, with the reasoning behind each item so it can be
 picked up cold.  This is a working list for development, not the list of known limitations in
 `museld.md`: nothing here is promised, and items leave when done or when they stop making sense.
-Last revised 2026-11-11.
+Last revised 2026-11-12.
 
 ## Housekeeping
 
@@ -76,8 +76,14 @@ Last revised 2026-11-11.
 - **Player-like navigation:** frame search by CAV frame number and time search by CLV time code
   with numeric entry (the chapter probe infrastructure does the hard part), step backwards,
   slow motion, fast scan with picture.
-- **Richer `--write`:** all audio tracks as separate streams, disc chapters as chapter markers,
-  closed captions as a subtitle stream.
+- **Richer `--write`:** all audio tracks as separate streams (the chapter marks and the closed
+  caption stream are done).  The demodulator can run the analog, EFM and AC3 sources at once per
+  block, but the decoder turns one track into PCM and the writer has one audio stream with one
+  sync schedule: the decoder's audio block becomes a loop over the disc's tracks, each with its
+  own CX expander, EFM processor and DTS check, the decoded field carries one buffer per track,
+  and the writer's audio members become a vector of streams against the shared video clock, the
+  AC3 track a stream copy; a disc with AC3 on one side only would need refusing or a silent
+  stream for the one-file-across-sides rule.
 - **AC3 bitstream passthrough** to the audio device for an AV receiver, instead of decoding to
   5.1 PCM.  Natural for the decoder-box setup.
 - **Direct USB capture input** (Domesday Duplicator, Picoscope) without an external program.
@@ -100,3 +106,5 @@ Last revised 2026-11-11.
 - 2026-11-11: the black level and CX modes remembered per disc with the other disc settings.
 - 2026-11-11: edge-directed interpolation of the moving parts on SD (`--no-edge-directed` for the
   vertical average).
+- 2026-11-12: `--write` files carry the disc's start timecode and chapter marks, and an NTSC
+  input's closed captions as a subtitle stream.

@@ -30,13 +30,16 @@ class VideoFileWriter {
 public:
     // With ac3_passthrough the audio stream is the original AC3 bitstream
     // (stream copy of the sync frames passed to addVideoFrameWithAudio)
-    // instead of PCM encoded to the preset's audio codec.
+    // instead of PCM encoded to the preset's audio codec.  With
+    // closed_captions the file has a text subtitle stream for the cues
+    // passed to addClosedCaption (an NTSC disc's line-21 captions).
     VideoFileWriter(std::string filename, Logger &log, int video_width, int video_height,
                     int video_fps_num, int video_fps_den,
                     VideoWriterPreset preset, VideoColorStandard color_standard,
                     int display_aspect_num, int display_aspect_den,
-                    bool ac3_passthrough) :
+                    bool ac3_passthrough, bool closed_captions) :
             m_ac3_passthrough(ac3_passthrough),
+            m_closed_captions(closed_captions),
             m_filename(std::move(filename)),
             m_log(log),
             m_video_width(video_width),
@@ -72,6 +75,13 @@ public:
                                 AudioMode audio_mode, int number_of_samples, AudioFrame *audio_samples,
                                 const std::vector<std::array<uint8_t, 1536>> &ac3_frames,
                                 std::optional<double> disc_seconds, std::optional<int> chapter);
+    // A closed caption cue for the subtitle stream.  start and end are the
+    // cue's on-screen span in the input's playback time, now that time at
+    // the frame last added: the cue is placed relative to that frame, so the
+    // input's own clock need not match the file's (a cue is known complete
+    // only once the next one replaces it, so they arrive after their frames)
+    void addClosedCaption(double start_seconds, double end_seconds, double now_seconds,
+                          const std::vector<std::string> &lines);
     // The frames that follow come from another input (the disc's next side)
     void newInput() { m_timeline.newInput(); }
     void cleanup();
@@ -102,6 +112,7 @@ private:
     void initVideo(const PresetSpec &spec);
     void initAudio(const PresetSpec &spec);
     void initAudioPassthrough();
+    void initClosedCaptions(const PresetSpec &spec);
     void writeAc3Frames(const std::vector<std::array<uint8_t, 1536>> &ac3_frames);
     void initResampler(AudioMode mode);
     void convertAndWriteAudio(const uint8_t **in, int in_samples);
@@ -131,6 +142,7 @@ private:
     }
 
     const bool m_ac3_passthrough;
+    const bool m_closed_captions;
     int64_t m_ac3_next_pts = 0;        // in samples at 48 kHz
     bool m_ac3_pause_logged = false;   // the selected track left AC3 mid-write
     std::string m_filename;
@@ -144,6 +156,8 @@ private:
     AVRational m_display_aspect;
     OutputStream m_video_stream;
     OutputStream m_audio_stream;
+    AVStream *m_caption_stream = nullptr; // the closed caption text stream, muxed without an encoder
+    int64_t m_caption_last_pts = -1;      // ms; a cue is not written before the one preceding it
     AVFormatContext *m_format_context;
     bool m_have_video; // if the output supports video
     bool m_have_audio; // if the output supports audio
