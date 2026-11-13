@@ -1675,11 +1675,11 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         // played.  The AC3 track's stream is the original AC3 bitstream
         // (all 5.1 channels, no transcode) instead of PCM
         constexpr bool is_muse = std::is_same<InputBlock, MuseInputBlock>::value;
-        if (is_muse && !write_audio.empty())
-            throw InputError("--write-audio applies to NTSC and PAL inputs, which have several audio tracks");
+        if (is_muse && std::find(write_audio.begin(), write_audio.end(), AudioTrack::eAc3) != write_audio.end())
+            throw InputError("--write-audio: a MUSE disc has no AC3 track (its tracks are muse and efm)");
         std::vector<WriterAudioStream> audio_streams;
         for (const AudioTrack track : write_audio.empty() ? std::vector<AudioTrack>{audio_track} : write_audio) {
-            const char *title = is_muse ? "MUSE" : track == AudioTrack::eAc3 ? "AC3" : track == AudioTrack::eEfm ? "EFM" : "Analog";
+            const char *title = track == AudioTrack::eAc3 ? "AC3" : track == AudioTrack::eEfm ? "EFM" : is_muse ? "MUSE" : "Analog";
             audio_streams.push_back({track, !is_muse && track == AudioTrack::eAc3 && decode_audio, title});
         }
         const auto same_streams = [](const std::vector<WriterAudioStream> &a, const std::vector<WriterAudioStream> &b) {
@@ -2363,21 +2363,21 @@ int main(int argc, char *argv[]) {
 #endif
     });
     options.option("--write-audio", "TRACKS",
-                   "NTSC/PAL: the audio streams of the --write file, a comma-separated list of "
-                   "analog, efm and ac3 in the order the streams are to have (default: the track "
-                   "played, as one stream).  Every listed track is demodulated and decoded besides "
-                   "the one played, the AC3 track as its original bitstream; a listed track the "
-                   "disc does not have gives a silent stream", [&] () -> void {
+                   "The audio streams of the --write file, a comma-separated list of analog, efm "
+                   "and ac3 (NTSC/PAL) or of muse and efm (MUSE) in the order the streams are to "
+                   "have (default: the track played, as one stream).  Every listed track is "
+                   "demodulated and decoded besides the one played, the AC3 track as its original "
+                   "bitstream; a listed track the disc does not have gives a silent stream", [&] () -> void {
         const std::string list = *(it++);
         write_audio.clear();
         for (size_t at = 0; at <= list.size();) {
             const size_t comma = std::min(list.find(',', at), list.size());
             const std::string name = list.substr(at, comma - at);
             AudioTrack track;
-            if (name == "analog") track = AudioTrack::eDefault;
+            if (name == "analog" || name == "muse") track = AudioTrack::eDefault;
             else if (name == "efm") track = AudioTrack::eEfm;
             else if (name == "ac3") track = AudioTrack::eAc3;
-            else throw std::runtime_error(std::format("--write-audio: unknown track '{}' (expected analog, efm or ac3)", name));
+            else throw std::runtime_error(std::format("--write-audio: unknown track '{}' (expected analog, efm or ac3; muse or efm on MUSE)", name));
             if (std::find(write_audio.begin(), write_audio.end(), track) != write_audio.end())
                 throw std::runtime_error(std::format("--write-audio: {} listed twice", name));
             write_audio.push_back(track);

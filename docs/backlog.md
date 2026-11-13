@@ -3,7 +3,7 @@
 Work worth doing, in rough order of value, with the reasoning behind each item so it can be
 picked up cold.  This is a working list for development, not the list of known limitations in
 `museld.md`: nothing here is promised, and items leave when done or when they stop making sense.
-Last revised 2026-11-12.
+Last revised 2026-11-13.
 
 ## Housekeeping
 
@@ -110,4 +110,5 @@ Last revised 2026-11-12.
   vertical average).
 - 2026-11-12: `--write` files carry the disc's start timecode and chapter marks, and an NTSC
   input's closed captions as a subtitle stream.
-- 2026-11-12: `--write-audio analog,efm,ac3` writes the listed tracks as separate audio streams.
+- 2026-11-12: `--write-audio analog,efm,ac3` writes the listed tracks as separate audio streams
+  (2026-11-13: `muse,efm` on MUSE).

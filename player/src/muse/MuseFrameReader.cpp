@@ -54,6 +54,8 @@ MuseFrameReader::MuseFrameReader(
           m_sample_rate(demodulate ? sample_rate / MuseDemodulatedBlock::c_video_decimation_rate : sample_rate),
           m_input_samples_decimation_rate(demodulate ? MuseDemodulatedBlock::c_video_decimation_rate : 1),
           m_demodulator(nullptr),
+          m_efm_played(efm_enabled),
+          m_efm_extra(false),
           m_input_scale(1.f),
           m_input_offset(0.f),
           m_file_reset_request(false),
@@ -204,8 +206,15 @@ int64_t MuseFrameReader::inputSampleCount() const {
 }
 
 void MuseFrameReader::setEfmEnabled(bool enabled) {
+    m_efm_played = enabled;
     if (m_demodulator != nullptr)
-        m_demodulator->setEfmEnabled(enabled);
+        m_demodulator->setEfmEnabled(m_efm_played || m_efm_extra);
+}
+
+void MuseFrameReader::setExtraAudioTracks(const std::vector<AudioTrack> &tracks) {
+    m_efm_extra = std::find(tracks.begin(), tracks.end(), AudioTrack::eEfm) != tracks.end();
+    if (m_demodulator != nullptr)
+        m_demodulator->setEfmEnabled(m_efm_played || m_efm_extra);
 }
 
 void MuseFrameReader::setEfmAdaptiveFilterSize(int size) {

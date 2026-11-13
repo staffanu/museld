@@ -1,6 +1,8 @@
 // Copyright 2023-2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <algorithm>
+#include <optional>
 #include <string>
 #include <map>
 #include <chrono>
@@ -86,6 +88,12 @@ bool MuseDecoder::initialize() {
 
 bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
     const bool efm_audio = controls.audio_track == AudioTrack::eEfm;
+    // --write-audio muse,efm: both tracks decoded, each delivered as its own
+    // track output besides the played one's
+    const auto listed = [&](AudioTrack track) {
+        return std::find(controls.extra_tracks.begin(), controls.extra_tracks.end(), track) != controls.extra_tracks.end();
+    };
+    const bool both_tracks = (efm_audio && listed(AudioTrack::eDefault)) || (!efm_audio && listed(AudioTrack::eEfm));
     const FieldInterpolationMode field_interpolation_mode = controls.field_interpolation_mode;
     const bool redo_last_field = controls.redo_last_field;
     const bool enable_non_linear = controls.enable_non_linear;
@@ -318,16 +326,35 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
     }
 
     if (decode_audio && m_field_index == 0) {
-        if (efm_audio && input_block != nullptr) {
+        // Each wanted track decodes into a TrackAudio; the played one's is
+        // then the field's audio, and both go to track_audio when both are wanted
+        std::optional<TrackAudio> efm, muse;
+        if ((efm_audio || both_tracks) && input_block != nullptr) {
+            efm.emplace(TrackAudio{AudioTrack::eEfm, MODE_EFM, {}, {}});
             auto raw = m_efm_decoder.decode(input_block->efm_data, m_frame_no % 30 == 0);
             for (const auto &s : m_efm_pcm_processor.processSamples(raw, m_efm_decoder.preEmphasis())) {
-                if (out.audio_sample_count >= MAX_AUDIO_OUTPUT_SAMPLES) break;
-                out.audio_samples[out.audio_sample_count] = AudioFrame{{s.samples[0], s.samples[1]}};
-                out.audio_sample_count++;
+                if (efm->samples.size() >= MAX_AUDIO_OUTPUT_SAMPLES) break;
+                efm->samples.push_back(AudioFrame{{s.samples[0], s.samples[1]}});
             }
-            out.audio_mode = MODE_EFM;
-        } else // MUSE audio
-            m_audio_decoder.decodeFrame(m_frame_no, m_shaders.getAudioData(), &out.audio_mode, &out.audio_sample_count, out.audio_samples);
+        }
+        if (!efm_audio || both_tracks) {
+            muse.emplace(TrackAudio{AudioTrack::eDefault, MODE_UNKNOWN, {}, {}});
+            static_assert(MAX_AUDIO_OUTPUT_SAMPLES <= 2048);
+            AudioFrame samples[MAX_AUDIO_OUTPUT_SAMPLES];
+            int count = 0;
+            m_audio_decoder.decodeFrame(m_frame_no, m_shaders.getAudioData(), &muse->mode, &count, samples);
+            muse->samples.assign(samples, samples + count);
+        }
+        const auto &played = efm_audio ? efm : muse;
+        if (played) {
+            out.audio_mode = played->mode;
+            out.audio_sample_count = (int)played->samples.size();
+            std::copy(played->samples.begin(), played->samples.end(), out.audio_samples);
+        }
+        if (both_tracks) {
+            if (muse) out.track_audio.push_back(std::move(*muse));
+            if (efm) out.track_audio.push_back(std::move(*efm));
+        }
     }
 
     if (input_block != nullptr)

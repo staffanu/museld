@@ -73,6 +73,9 @@ public:
     void holdAtInputEnd(bool hold) override { if (m_demodulator != nullptr) m_demodulator->holdAtEnd(hold); }
     [[nodiscard]] bool atInputEnd() const override { return m_demodulator != nullptr && m_demodulator->atEnd(); }
     void setEfmEnabled(bool enabled) override;
+    // The tracks --write-audio lists besides the one played: the EFM
+    // demodulator runs when either wants it
+    void setExtraAudioTracks(const std::vector<AudioTrack> &tracks) override;
     void setEfmAdaptiveFilterSize(int size) override;
     [[nodiscard]] int efmAdaptiveFilterSize() const override;
 
@@ -129,6 +132,8 @@ private:
     double m_sample_rate;               // of the stream the sync pass sees (demodulated, video-decimated)
     int m_input_samples_decimation_rate;
     MuseRfDemodulator *m_demodulator;
+    bool m_efm_played;                  // the played track is EFM
+    bool m_efm_extra;                   // --write-audio lists EFM besides the played track
     // File mode: the reader hands out the file's own sample codes, mapped to
     // the ~0..255 MUSE range the sync levels are defined on
     float m_input_scale;

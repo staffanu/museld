@@ -19,6 +19,7 @@ no-film-mode = ["--no-film-mode"]
 no-dropout = ["--no-dropout"]
 eq-off = ["--eq", "off"]
 all-audio = ["--write-audio", "analog,efm,ac3"]
+all-audio-muse = ["--write-audio", "muse,efm"]
 
 [standard_stages]
 ntsc = ["default", "intra-field", "no-3d-comb", "no-film-mode", "no-dropout"]
@@ -163,3 +164,4 @@ sha256 = "ea14f2a2c4309f5d4da9509e7ffeded55addf2e7ff36d647c566d3ed308fcbe5"
 standard = "muse"
 source = "Ursa Minor Blue (MUSE), fx3usbadc at 62.5 MHz, from 120 s"
 why = "MUSE film: motion detection and the still/moving reconstruction, the feed-forward timebase on a spinning-up player's successor frames."
+stages = ["default", "intra-field", "eq-off", "all-audio-muse"]
