@@ -173,11 +173,17 @@ void AudioDecoder::decodeFrame(int frame_no,
             }
             auto ix = search(m_queue.cbegin(), m_queue.cend(), c_sync_pattern.cbegin(), c_sync_pattern.cend());
             if (ix != m_queue.cend()) {
+                // Align the queue to the pattern and leave it there: the locked
+                // path below consumes it with the frame, on this pass if the
+                // whole frame is in, else on the next.  Consuming it here left
+                // the control word at the head when the frame was not in yet,
+                // which the next pass took for a missed sync, decoding two
+                // frames 16 bits out of place before searching again
                 m_consecutive_failed_syncs = 0;
-                m_queue.erase(m_queue.cbegin(), ix + 16);
-            } else {
-                m_queue.erase(m_queue.cbegin(), m_queue.cbegin() + 1350 - 16);
+                m_queue.erase(m_queue.cbegin(), ix);
+                continue;
             }
+            m_queue.erase(m_queue.cbegin(), m_queue.cbegin() + 1350 - 16);
         } else {
             if (!equal(m_queue.cbegin(), m_queue.cbegin() + 16, c_sync_pattern.cbegin())) {
                 m_consecutive_failed_syncs++;
