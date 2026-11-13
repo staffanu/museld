@@ -1,8 +1,8 @@
-# museld — Real-time MUSE Laserdisc Player
+# museld — Real-time MUSE, NTSC and PAL Laserdisc Player
 
 [![CI](https://github.com/staffanu/museld/actions/workflows/ci.yml/badge.svg)](https://github.com/staffanu/museld/actions/workflows/ci.yml)
 
-This repository contains a real-time decoder for Hi-Vision MUSE and NTSC
+This repository contains a real-time decoder for Hi-Vision MUSE, NTSC and PAL
 laserdiscs, along with a reusable library and CLI for decoding AC3-RF surround audio and EFM CD
 audio from laserdisc RF captures.
 
@@ -47,8 +47,8 @@ builds them, and how to make a release.
 
 ### museld
 
-A real-time [MUSE](https://en.wikipedia.org/wiki/Multiple_sub-Nyquist_sampling_encoding)
-and NTSC laserdisc decoder. Video filtering runs on the GPU via Vulkan
+A real-time [MUSE](https://en.wikipedia.org/wiki/Multiple_sub-Nyquist_sampling_encoding),
+NTSC and PAL laserdisc decoder. Video filtering runs on the GPU via Vulkan
 and GLSL compute shaders. Audio is output via the bundled [miniaudio](https://miniaud.io/) library.
 NTSC playback can take its audio from the analog FM, EFM (CD), or AC3-RF surround track;
 AC3 — and the DTS bitstream that DTS discs carry on the EFM track, detected automatically —
