@@ -567,8 +567,15 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
 - The Siri Remote as a gamepad (needs the original remote), and Menu/back quitting the
   app: fine for development, but a tvOS app is not supposed to exit itself; a
   settings screen that stays in the app replaces this later.
-- A `--seek` and `--pause` from the Xcode scheme work; a settings screen, an app icon
-  and a top-shelf image are for later.
+- A `--seek` and `--pause` from the Xcode scheme work; a settings screen is for later.
+- The app icon and the top-shelf image (2026-11-12): a laserdisc and the name, drawn by
+  `player/tvos/make-icons.py` (numpy + PIL, the bundled Noto Sans) into
+  `player/tvos/Assets.xcassets`, which is checked in -- the build does not run the
+  script.  The icon is tvOS's stack of three layers (background, disc, wordmark) that
+  move against each other under the focus; `--preview <png>` renders the flattened icon
+  and the top shelf to look at.  CMake adds the catalog to the bundle and names it with
+  `ASSETCATALOG_COMPILER_APPICON_NAME`; Xcode's actool writes `Assets.car` and the
+  `CFBundleIcons`/`TVTopShelfImage` keys into the Info.plist.
 
 ### 2. Measure the rest
 

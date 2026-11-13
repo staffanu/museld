@@ -510,6 +510,9 @@ if(BUILD_MUSE)
             XCODE_ATTRIBUTE_CODE_SIGN_STYLE Automatic
             XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${MUSELD_DEVELOPMENT_TEAM}"
             "XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED[sdk=appletvsimulator*]" NO
+            # The icon and the top-shelf image (tvos/Assets.xcassets, drawn by
+            # tvos/make-icons.py)
+            XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "App Icon & Top Shelf Image"
             XCODE_GENERATE_SCHEME TRUE
             XCODE_SCHEME_ARGUMENTS "${MUSELD_TVOS_LAUNCH_ARGUMENTS}"
         )
@@ -517,7 +520,10 @@ if(BUILD_MUSE)
         # The shaders and the font ride in the bundle.  A tvOS bundle is flat:
         # "Resources" is the bundle root, next to the executable, so the
         # lookup relative to the executable's directory is the desktop's.
-        target_sources(museld PRIVATE ${SPIRV_BINARY_FILES} ${MUSELD_FONT_DST})
+        target_sources(museld PRIVATE ${SPIRV_BINARY_FILES} ${MUSELD_FONT_DST}
+            "${CMAKE_SOURCE_DIR}/tvos/Assets.xcassets")
+        set_source_files_properties("${CMAKE_SOURCE_DIR}/tvos/Assets.xcassets" PROPERTIES
+            MACOSX_PACKAGE_LOCATION Resources)
         set_source_files_properties(${SPIRV_BINARY_FILES} PROPERTIES
             GENERATED TRUE MACOSX_PACKAGE_LOCATION Resources/shaders)
         set_source_files_properties(${MUSELD_FONT_DST} PROPERTIES
