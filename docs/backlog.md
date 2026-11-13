@@ -16,11 +16,6 @@ Last revised 2026-11-13.
   and 62.5 MHz (NTSC/PAL/MUSE in either direction, 1-3 s per switch); the decoder box is not.
   Judge the "NO SIGNAL" pacing on a real disc change, and whether three agreeing chunks is the
   right count.
-- **Check `--write-audio muse,efm` on a MUSE disc with an EFM track.**  None of the captures at
-  hand has one (2026-11-13), so the EFM stream of a two-track MUSE file was verified to be in
-  place and silent, not for content.  Staffan has several such discs: capture one, then render
-  4 s with `--write-audio muse,efm` and with `--efm` alone and compare the EFM streams (they
-  must be bit-identical), and listen to both tracks.
 - **muse-16 (16.2 MHz baseband) input type** is legacy: keep it working for existing u16 files,
   no new formats or level work, remove when nothing needs it.
 - **Settings changed with keys do not carry to the next input** on a multi-file command line
@@ -106,7 +101,8 @@ Last revised 2026-11-13.
 - 2026-11-12: `--write` files carry the disc's start timecode and chapter marks, and an NTSC
   input's closed captions as a subtitle stream.
 - 2026-11-12: `--write-audio analog,efm,ac3` writes the listed tracks as separate audio streams
-  (2026-11-13: `muse,efm` on MUSE).
+  (2026-11-13: `muse,efm` on MUSE, checked on a MUSE capture with an EFM track: the EFM stream
+  of the two-track file is bit-identical to the `--efm` render).
 - 2026-11-13: the MUSE audio sync search leaves the pattern for the frame decode instead of
   consuming it, so a sync found at the tail of a pass no longer costs two misdecoded frames and
   three warnings on the next.
