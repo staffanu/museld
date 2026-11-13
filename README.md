@@ -6,12 +6,17 @@ This repository contains a real-time decoder for Hi-Vision MUSE, NTSC and PAL
 laserdiscs, along with a reusable library and CLI for decoding AC3-RF surround audio and EFM CD
 audio from laserdisc RF captures.
 
-If you want to decode laserdiscs in general,
-the [ld-decode project](https://github.com/happycube/ld-decode)
-is probably a better place to start, but it doesn't decode MUSE, or
-currently, AC3-RF.  For bad captures or damaged discs this EFM decoder
-might have better results, but since it's not integrated in the ld-decode
-toolchain, try that first.
+museld is a player: it decodes a capture while it plays, to a window and the audio device,
+and can also render it to a video file. The
+[ld-decode project](https://github.com/happycube/ld-decode) is the place for archival work,
+where a capture is decoded offline into a time-base-corrected file that its tools then
+analyse and filter. The two overlap on NTSC and PAL decoding but differ in what they are
+for, and ld-decode has no MUSE decoder.
+
+`ac3rf-efm-decode` decodes the AC3-RF surround track and the EFM (CD) track of a capture on
+their own, without the player. It is not integrated with the ld-decode toolchain, but it
+reads the same captures, so it is worth trying on an AC3 disc, or on a damaged disc whose
+EFM track decodes badly elsewhere.
 
 ## Download
 
