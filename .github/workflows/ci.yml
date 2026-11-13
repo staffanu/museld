@@ -8,7 +8,10 @@ on:
 jobs:
   linux:
     name: Linux (museld + ac3rf-efm-decode + tests)
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest became 26.04 on 2026-11-13 and the LunarG apt
+    # repository has no list for it yet (the Vulkan SDK step fails); move on
+    # when https://packages.lunarg.com/vulkan/lunarg-vulkan-resolute.list exists
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
