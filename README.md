@@ -31,9 +31,9 @@ universal, running natively on both Apple Silicon and Intel, and need macOS 15 o
 | `museld-windows-x86_64-full.zip`<br>`museld-macos-universal-full.zip` | The same, plus FFmpeg so that `--write` works and ONNX Runtime so that `--ocr` works. Several times the size. |
 
 museld needs a GPU with Vulkan support and current graphics drivers; on macOS it reaches
-the GPU through the bundled MoltenVK. The Windows build has been tested against real
-captures; the macOS build of museld is still **experimental** and has had little testing on
-real machines. `ac3rf-efm-decode` is in better shape.
+the GPU through the bundled MoltenVK. Both builds are tested against real captures, the
+macOS one on Apple Silicon, where museld is developed; the Intel half of the universal
+build is built and run by CI but has had less use on real machines.
 
 Neither download is signed with a paid certificate, so both systems object the first time.
 On macOS, clear the quarantine tag once with `xattr -cr <folder>`, or download with `curl`
