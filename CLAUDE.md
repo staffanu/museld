@@ -307,7 +307,14 @@ bright one) and 480 far below it (about level-50 on positive-sync lines, level-8
 It is not the chain's step response -- a luma step inside the picture shows the emphasis
 pre-shoot (dip, bump, bigger bump before a fall; bump, dip, deep dip before a rise) that the
 de-emphasis undoes, and the line-end pair fits neither polarity -- so it belongs to the
-recorded signal at the luma/sync junction, origin unknown (encoder filtering or the disc chain).
+recorded signal at the luma/sync junction.  It is inside the MUSE band (an 8.1 or 7 MHz low-pass
+on the dumped 31.25 MHz baseband before the cubic resampling leaves it, so it is not aliasing of
+the resampler, nor the equaliser, which comes after the dump), and the de-emphasis FIR reading
+the real samples past 480 instead of its 128 pad does not remove it either.  A player's own
+baseband output (the 16.2 MHz u16 capture of A River Runs Through It, analysed line-locked as
+tools/muse-ctlscan.py does) shows only a residue: 479 at the picture level and 480 about 12
+below it on negative-sync lines, nothing on positive ones -- so a real decoder's chain tames
+what ours shows in full, by what mechanism is not known.
 Nominally luma by the book, unusable as picture in practice: `copy_y_for_interpolation.comp`
 holds sample 478 across them (a cosmetic choice, two samples wide), the horizontal upsampler
 repeats the end sample instead of padding with 128 (`edge_repeat`; the audio rows keep the pad),
