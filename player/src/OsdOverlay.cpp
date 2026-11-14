@@ -55,7 +55,7 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         text_renderer.drawText(images.out_image, tl_x(90), tl_y(50), "NO SIGNAL", comp_scale(osd_base), command_buffer);
     }
 
-    if (state.enable_cursor) {
+    if (state.enable_cursor && !state.position_search) {
         // Draw the pointer coordinates in the top left corner (both in single field and
         // interpolated coordinates). If paused and showing only a single field, also show
         // the input stream offset for the start of the frame and for pixels under the
@@ -105,7 +105,10 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
             state.redo_last_field = true;
     }
 
-    if (state.show_disc_code) {
+    // Not while a position search runs: the picture on screen is not
+    // re-decoded under its probes, so anything drawn then stays, and the disc
+    // code of each probe would be drawn over the last one's
+    if (state.show_disc_code && !state.position_search) {
         auto disc_info_strings = state.last_decoded.disc_info
                 ? state.last_decoded.disc_info->asStrings()
                 : std::vector<std::string>{"No disc info"};
