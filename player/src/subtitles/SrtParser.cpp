@@ -196,7 +196,7 @@ void writeSrt(const std::filesystem::path &file, const std::vector<SubtitleEntry
     for (const auto &entry : entries) {
         auto timestamp = [](double seconds) {
             const long ms = std::lround(std::max(0.0, seconds) * 1000);
-            char buf[16];
+            char buf[32];  // hours are unbounded: 13 digits at most for a long, 24 bytes in all
             snprintf(buf, sizeof(buf), "%02ld:%02ld:%02ld,%03ld",
                      ms / 3600000, ms / 60000 % 60, ms / 1000 % 60, ms % 1000);
             return std::string(buf);
