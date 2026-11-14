@@ -3,7 +3,7 @@
 Work worth doing, in rough order of value, with the reasoning behind each item so it can be
 picked up cold.  This is a working list for development, not the list of known limitations in
 `museld.md`: nothing here is promised, and items leave when done or when they stop making sense.
-Last revised 2026-11-13.
+Last revised 2026-11-14.
 
 ## Housekeeping
 
@@ -73,9 +73,9 @@ Last revised 2026-11-13.
   read on open, for what the state file remembers (aspect, overscan, audio track, subtitle
   tracks, black level, CX) plus tint, which first needs to become a live setting (it is set at
   the decoder's construction, from `--tint` only).
-- **Player-like navigation:** frame search by CAV frame number and time search by CLV time code
-  with numeric entry (the chapter probe infrastructure does the hard part), step backwards,
-  slow motion, fast scan with picture.
+- **Player-like transport:** step backwards, slow motion, fast scan with picture.  These need
+  frames decoded out of order or at another rate, unlike the searches (done 2026-11-14), which
+  only seek.
 - **AC3 bitstream passthrough** to the audio device for an AV receiver, instead of decoding to
   5.1 PCM.  Natural for the decoder-box setup.
 - **Direct USB capture input** (Domesday Duplicator, Picoscope) without an external program.
@@ -106,3 +106,6 @@ Last revised 2026-11-13.
 - 2026-11-13: the MUSE audio sync search leaves the pattern for the frame decode instead of
   consuming it, so a sync found at the tail of a pass no longer costs two misdecoded frames and
   three warnings on the next.
+- 2026-11-14: going to a chapter, a CLV time or a CAV frame by number: select on the menu's
+  Time/Frame and Chapter lines, which show the position (a digit cursor driven by the remote's five keys, or typed), the G key, `--time`
+  and `--frame`, on the chapter search generalised to a position search.

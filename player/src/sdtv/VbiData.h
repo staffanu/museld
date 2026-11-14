@@ -4,6 +4,7 @@
 #ifndef MUSECPP_VBIDATA_H
 #define MUSECPP_VBIDATA_H
 
+#include <cmath>
 #include <optional>
 #include <vector>
 #include <string>
@@ -21,7 +22,13 @@ public:
 
     std::vector<std::string> asStrings() const override;
     std::optional<double> playbackTimeSeconds() const override;
+    std::optional<double> discTimeSeconds() const override;
+    double discTimeResolutionSeconds() const override {
+        return m_is_clv && !m_clv_picture_number.has_value() ? 1.0 : 1.0 / std::round(m_frames_per_second);
+    }
     std::optional<int> chapter() const override { return m_chapter; }
+    std::optional<int> frameNumber() const override { return m_is_clv ? std::nullopt : m_cav_picture_number; }
+    std::optional<bool> isClv() const override { return m_is_clv; }
     [[nodiscard]] bool cavPictureInherited() const { return m_cav_picture_inherited; }
     bool isLeadIn() const override { return m_is_lead_in; }
     bool isLeadOut() const override { return m_is_lead_out; }

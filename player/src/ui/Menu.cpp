@@ -42,7 +42,10 @@ void Menu::popPage() {
     m_revision++;
 }
 
-void Menu::startTextEntry(std::unique_ptr<TextEntry> entry) {
+void Menu::startEntry(std::unique_ptr<Entry> entry) {
+    m_entry_opened_menu = !m_open;
+    if (!m_open)
+        open();
     m_entry = std::move(entry);
     m_end_entry = false;
     m_revision++;
@@ -62,28 +65,30 @@ void Menu::backspace() {
     }
 }
 
-// The entry's callbacks may end the entry (endTextEntry) or close the menu, and
+// The entry's callbacks may end the entry (endEntry) or close the menu, and
 // the std::function running is the entry's own: it is destroyed here, once
 // the call has returned, never inside it
-void Menu::dispatchToEntry(const std::function<void(TextEntry &)> &call) {
+void Menu::dispatchToEntry(const std::function<void(Entry &)> &call) {
     m_in_entry_call = true;
     call(*m_entry);
     m_in_entry_call = false;
     if (m_end_entry) {
         m_entry.reset();
         m_end_entry = false;
+        if (m_entry_opened_menu && m_open)
+            close();
     }
     m_revision++;
 }
 
 void Menu::acceptEntry() {
     if (m_entry)
-        dispatchToEntry([](TextEntry &entry) { entry.accept(); });
+        dispatchToEntry([](Entry &entry) { entry.accept(); });
 }
 
 void Menu::cancelEntry() {
     if (m_entry)
-        dispatchToEntry([](TextEntry &entry) { entry.cancel(); });
+        dispatchToEntry([](Entry &entry) { entry.cancel(); });
 }
 
 void Menu::open() {
@@ -99,6 +104,7 @@ void Menu::open() {
 void Menu::close() {
     m_open = false;
     m_stack.clear();
+    m_entry_opened_menu = false;
     if (m_in_entry_call)
         m_end_entry = true; // the entry's callback called us: dispatchToEntry ends it
     else
@@ -119,9 +125,9 @@ bool Menu::handleKey(MenuKey key) {
     if (!m_open || page == nullptr)
         return false;
     if (m_entry) {
-        static const TextEntry::Key keys[] = {TextEntry::Key::eUp, TextEntry::Key::eDown, TextEntry::Key::eLeft,
-                                             TextEntry::Key::eRight, TextEntry::Key::eSelect, TextEntry::Key::eBack};
-        dispatchToEntry([key](TextEntry &entry) { entry.handleKey(keys[(int)key]); });
+        static const Entry::Key keys[] = {Entry::Key::eUp, Entry::Key::eDown, Entry::Key::eLeft,
+                                         Entry::Key::eRight, Entry::Key::eSelect, Entry::Key::eBack};
+        dispatchToEntry([key](Entry &entry) { entry.handleKey(keys[(int)key]); });
         return true;
     }
     const auto items = enabledItems(*page);

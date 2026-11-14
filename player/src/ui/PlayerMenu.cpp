@@ -1,10 +1,12 @@
 // Copyright 2026 Staffan Ulfberg
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
+#include <cmath>
 #include <format>
 #include "PlayerMenu.h"
 #include "PlayerActions.h"
 #include "PlayerState.h"
+#include "PositionEntry.h"
 
 namespace {
 
@@ -32,7 +34,58 @@ MenuItem action(std::string label, std::string hint, std::function<void()> activ
 
 std::string onOff(bool on) { return on ? "ON" : "OFF"; }
 
+// Whether the disc playing is CAV (frame numbers) rather than CLV (a time
+// code); CLV until the code has said
+bool discIsCav(const PlayerState &s) {
+    const auto &info = s.last_decoded.disc_info;
+    return info && info->isClv().has_value() && !*info->isClv();
+}
+
+void startGoToEntry(Menu &menu, PlayerState &s, ReaderControls &r, Logger &log, PositionSearch::Target::Kind kind) {
+    using Kind = PositionSearch::Target::Kind;
+    const auto &info = s.last_decoded.disc_info;
+    double initial = 0;
+    std::string title;
+    PositionEntry::Format format = PositionEntry::Format::eNumber;
+    int digits = 2;
+    switch (kind) {
+        case Kind::eChapter:
+            title = "GO TO CHAPTER";
+            if (info && info->chapter()) initial = *info->chapter();
+            digits = initial >= 100 ? 3 : 2;
+            break;
+        case Kind::eTime:
+            title = "GO TO TIME";
+            format = PositionEntry::Format::eTime;
+            if (info && info->discTimeSeconds()) initial = std::floor(*info->discTimeSeconds());
+            break;
+        case Kind::eFrame:
+            title = "GO TO FRAME";
+            if (info && info->frameNumber()) initial = *info->frameNumber();
+            digits = initial >= 100000 ? 6 : 5; // a side holds 54 000 frames (NTSC), MUSE counts to 131 071
+            break;
+        default:
+            return;
+    }
+    menu.startEntry(std::make_unique<PositionEntry>(
+            title, format, digits, initial,
+            [&menu, &s, &r, &log, kind](double value) {
+                menu.close(); // the search shows on the picture
+                startPositionSearch(s, r, log, PositionSearch::Target{kind, value});
+            },
+            [&menu] { menu.endEntry(); }));
+}
+
 } // namespace
+
+void openGoToChapterEntry(Menu &menu, PlayerState &state, ReaderControls &reader, Logger &log) {
+    startGoToEntry(menu, state, reader, log, PositionSearch::Target::Kind::eChapter);
+}
+
+void openGoToEntry(Menu &menu, PlayerState &state, ReaderControls &reader, Logger &log) {
+    startGoToEntry(menu, state, reader, log, discIsCav(state) ? PositionSearch::Target::Kind::eFrame
+                                                              : PositionSearch::Target::Kind::eTime);
+}
 
 MenuPage *buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b, MenuPage *open_page) {
     PlayerState &s = b.state;
@@ -139,10 +192,33 @@ MenuPage *buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b, MenuPage *ope
     playback->items.push_back(setting("Playing", "SPACE", [&s] { return s.paused ? "PAUSED" : "PLAYING"; },
                                       [&s](int) { togglePause(s); }));
     playback->items.push_back(action("Step one field", "N", [&s] { stepOneField(s); }));
-    playback->items.push_back(action("Back 10 seconds", "LEFT", [&s, &r] { seekOrPan(s, r, -10); }));
-    playback->items.push_back(action("Forward 10 seconds", "RIGHT", [&s, &r] { seekOrPan(s, r, 10); }));
-    playback->items.push_back(action("Previous chapter", "DOWN", [&s, &r, &log] { chapterOrPan(s, r, log, false); }));
-    playback->items.push_back(action("Next chapter", "UP", [&s, &r, &log] { chapterOrPan(s, r, log, true); }));
+    // The position, as a player's display shows it: the time (CLV) or frame
+    // (CAV) and the chapter, each a line whose value is where playback is,
+    // Left and Right the seek and chapter skips the keys do, and select the
+    // number entry
+    MenuItem position = setting("Time", "LEFT RIGHT", [&s] {
+                                    const auto &info = s.last_decoded.disc_info;
+                                    if (discIsCav(s))
+                                        return info && info->frameNumber() ? std::format("{}", *info->frameNumber()) : std::string();
+                                    return info && info->discTimeSeconds()
+                                           ? PositionSearch::describe(PositionSearch::Target::Kind::eTime, std::floor(*info->discTimeSeconds()))
+                                           : std::string();
+                                },
+                                [&s, &r](int d) { seekOrPan(s, r, 10 * d); });
+    position.activate = [&menu, &s, &r, &log] { openGoToEntry(menu, s, r, log); };
+    playback->items.push_back(std::move(position));
+    MenuItem frame_label = playback->items.back(); // the same line named Frame on a CAV disc
+    playback->items.back().enabled = [&s] { return !discIsCav(s); };
+    frame_label.label = "Frame";
+    frame_label.enabled = [&s] { return discIsCav(s); };
+    playback->items.push_back(std::move(frame_label));
+    MenuItem chapter = setting("Chapter", "DOWN UP", [&s] {
+                                   const auto &info = s.last_decoded.disc_info;
+                                   return info && info->chapter() ? std::format("{}", *info->chapter()) : std::string();
+                               },
+                               [&s, &r, &log](int d) { chapterOrPan(s, r, log, d > 0); });
+    chapter.activate = [&menu, &s, &r, &log] { openGoToChapterEntry(menu, s, r, log); };
+    playback->items.push_back(std::move(chapter));
     playback->items.push_back(setting("Picture stops", "P", [&s] { return onOff(s.honor_picture_stops); },
                                       [&s](int) { togglePictureStops(s); }));
 

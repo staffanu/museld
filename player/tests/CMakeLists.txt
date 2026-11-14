@@ -15,7 +15,7 @@ add_executable(museld-tests
     SrtParserTest.cpp
     SubtitleDiscoveryTest.cpp
     DisplayGeometryTest.cpp
-    ChapterSearchTest.cpp
+    PositionSearchTest.cpp
     VideoFileTimelineTest.cpp
     LdfInputReaderTest.cpp
     HttpByteSourceTest.cpp
@@ -24,9 +24,10 @@ add_executable(museld-tests
     BrowserPartsTest.cpp
     ../src/ui/Menu.cpp
     ../src/ui/TextEntry.cpp
+    ../src/ui/PositionEntry.cpp
     ../src/ui/DirectoryListing.cpp
     ../src/ui/SavedState.cpp
-    ../src/ChapterSearch.cpp
+    ../src/PositionSearch.cpp
     ../src/VideoFileTimeline.cpp
     ../src/subtitles/Eia608Decoder.cpp
     ../src/bch/BchDecoder.cpp

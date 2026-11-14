@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include "TextEntry.h"
+#include "Entry.h"
 
 // The on-screen menu: pages of items driven by six keys -- up, down, left,
 // right, select, back -- so that it works the same from a keyboard, a game
@@ -65,13 +65,15 @@ public:
     void pushPage(MenuPage *page);
     void popPage();
 
-    // A text entry (the browser's address field) takes the keys over while it
-    // lasts; its callbacks end it through endTextEntry, which takes effect once
-    // the key that caused it has been handled.  type() and backspace() are for
-    // a real keyboard's characters.
-    void startTextEntry(std::unique_ptr<TextEntry> entry);
-    void endTextEntry() { m_end_entry = true; }
-    TextEntry *textEntry() const { return m_entry.get(); }
+    // An entry (the browser's address field, the player's go-to) takes the
+    // keys over while it lasts; its callbacks end it through endEntry, which
+    // takes effect once the key that caused it has been handled.  An entry
+    // started while the menu is closed opens it for the entry alone: the
+    // menu closes again when the entry ends (a key's go-to, over the
+    // picture).  type() and backspace() are for a real keyboard's characters.
+    void startEntry(std::unique_ptr<Entry> entry);
+    void endEntry() { m_end_entry = true; }
+    Entry *entry() const { return m_entry.get(); }
     void type(const std::string &utf8);
     void backspace();
     void acceptEntry();
@@ -106,10 +108,11 @@ private:
     std::vector<std::unique_ptr<MenuPage>> m_pages;
     MenuPage *m_root = nullptr;      // the page open() shows; the first page when unset
     std::vector<MenuPage *> m_stack; // the open page last
-    void dispatchToEntry(const std::function<void(TextEntry &)> &call);
+    void dispatchToEntry(const std::function<void(Entry &)> &call);
 
-    std::unique_ptr<TextEntry> m_entry;
+    std::unique_ptr<Entry> m_entry;
     bool m_end_entry = false;
+    bool m_entry_opened_menu = false; // close the menu when the entry ends
     bool m_in_entry_call = false;
     bool m_open = false;
     unsigned m_revision = 0;

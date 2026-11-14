@@ -29,19 +29,21 @@ void MenuOverlay::render(musevk::CommandBuffer &command_buffer, ResultImages &im
     const int line_h = glyph_h + glyph_h / 3;
     const int pad = glyph_w;
 
-    if (const TextEntry *entry = menu.textEntry()) {
-        // The address field: the title, the text with a cursor, the keyboard
-        // rows with the selected key marked
+    if (const Entry *entry = menu.entry()) {
+        // An entry: the title, the text with a cursor (on one of its digits, or
+        // at its end), the keyboard rows with the selected key marked if it
+        // has a keyboard, else its hint line
         const auto rows = entry->rows();
+        const std::string hint = entry->hint();
         size_t row_chars = 0;
         for (const auto &row : rows) {
             size_t n = 0;
             for (const auto &key : row) n += key.size() + 1;
             row_chars = std::max(row_chars, n);
         }
-        const size_t text_chars = std::max<size_t>(entry->text().size() + 1, 24);
+        const size_t text_chars = std::max<size_t>(entry->text().size() + 1, std::max<size_t>(hint.size(), 24));
         const int panel_w = std::min(width - 2 * pad, pad * 2 + glyph_w * (int)std::max(row_chars, text_chars));
-        const int panel_h = pad * 3 + line_h * (int)(rows.size() + 2) + glyph_h / 2;
+        const int panel_h = pad * 3 + line_h * (int)(rows.size() + 2 + (hint.empty() ? 0 : 1)) + glyph_h / 2;
         const int x0 = pad * 2;
         const int y0 = std::max(pad, (height - panel_h) / 2);
         text_renderer.fillRect(images.out_image, x0, y0, panel_w, panel_h, 0.0f, 0.0f, 0.0f, 0.7f, command_buffer);
@@ -55,8 +57,19 @@ void MenuOverlay::render(musevk::CommandBuffer &command_buffer, ResultImages &im
         if ((int)text.size() > avail)
             text = text.substr(text.size() - (size_t)avail);
         text_renderer.fillRect(images.out_image, x0 + pad / 2, y - (line_h - glyph_h) / 2, panel_w - pad, line_h, 0.9f, 0.9f, 0.9f, 0.15f, command_buffer);
-        text_renderer.drawText(images.out_image, x0 + pad, y, text + "_", scale, command_buffer);
+        if (entry->cursor() >= 0) {
+            // The digit under the cursor is marked like a keyboard key
+            text_renderer.fillRect(images.out_image, x0 + pad + glyph_w * entry->cursor() - glyph_w / 4, y - (line_h - glyph_h) / 2,
+                                   glyph_w + glyph_w / 2, line_h, 0.9f, 0.9f, 0.9f, 0.3f, command_buffer);
+            text_renderer.drawText(images.out_image, x0 + pad, y, text, scale, command_buffer);
+        } else {
+            text_renderer.drawText(images.out_image, x0 + pad, y, text + "_", scale, command_buffer);
+        }
         y += line_h + glyph_h / 2;
+        if (!hint.empty()) {
+            text_renderer.drawText(images.out_image, x0 + pad, y, hint, scale, command_buffer);
+            y += line_h;
+        }
         for (size_t r = 0; r < rows.size(); r++) {
             int x = x0 + pad;
             for (size_t c = 0; c < rows[r].size(); c++) {

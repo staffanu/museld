@@ -542,6 +542,10 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   Escape for back, nothing else (logged at M4 on 2026-11-11), so the player is driven with
   those: Back opens the menu over the picture and, from its root, closes it again rather
   than leaving; the menu's Stop item returns to the browser, whose Back leaves the app.
+  Going to a chapter, time or frame by number (2026-11-14) is select on the Playback page's
+  Time (Frame on CAV) and Chapter lines, which show the position and step it with left and
+  right; the entry is driven with the same keys: up and down set the digit under the cursor, left
+  and right move it, OK goes, Back cancels.  Not yet tried on the box.
   The aspect mode set for a disc was gone when it was opened again: the state file now
   keeps, per address, the aspect, overscan, audio track and subtitle choice (the disc's
   own properties; not full screen, which is a testing convenience on a PC, nor the decode

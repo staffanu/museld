@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include "ui/Menu.h"
+#include "ui/PositionEntry.h"
+#include "ui/TextEntry.h"
 
 namespace {
 
@@ -116,16 +118,16 @@ TEST_CASE("A text entry whose callback closes the menu is destroyed after the ca
     Fixture f;
     f.menu.open();
     std::string done_with;
-    f.menu.startTextEntry(std::make_unique<TextEntry>(
+    f.menu.startEntry(std::make_unique<TextEntry>(
             "ADDRESS", "x",
             [&](const std::string &text) {
-                f.menu.endTextEntry();
+                f.menu.endEntry();
                 done_with = text;
                 f.menu.close();
                 done_with += "/closed"; // still inside the callback: its captures must be alive
             },
-            [&] { f.menu.endTextEntry(); }));
-    REQUIRE(f.menu.textEntry() != nullptr);
+            [&] { f.menu.endEntry(); }));
+    REQUIRE(f.menu.entry() != nullptr);
     SECTION("from a keyboard's Return") {
         f.menu.acceptEntry();
     }
@@ -137,5 +139,86 @@ TEST_CASE("A text entry whose callback closes the menu is destroyed after the ca
     }
     REQUIRE(done_with == "x/closed");
     REQUIRE(!f.menu.isOpen());
-    REQUIRE(f.menu.textEntry() == nullptr);
+    REQUIRE(f.menu.entry() == nullptr);
+}
+
+TEST_CASE("A position entry is set like a clock and typed like a VCR", "[Menu]") {
+    double done = -1;
+    int cancelled = 0;
+    PositionEntry time("GO TO TIME", PositionEntry::Format::eTime, 0, 3091, [&](double v) { done = v; }, [&] { cancelled++; });
+    CHECK(time.text() == "0:51:31");
+    CHECK(time.cursor() == 6); // the units of the seconds, past both colons
+    time.handleKey(Entry::Key::eUp);
+    CHECK(time.text() == "0:51:32");
+    time.handleKey(Entry::Key::eLeft);
+    CHECK(time.cursor() == 5);
+    for (int i = 0; i < 3; i++) time.handleKey(Entry::Key::eUp); // 3 -> 4 -> 5 -> 0: the tens of seconds stop at 5
+    CHECK(time.text() == "0:51:02");
+    time.handleKey(Entry::Key::eDown);
+    CHECK(time.text() == "0:51:52");
+    time.handleKey(Entry::Key::eLeft); // the units of the minutes
+    time.handleKey(Entry::Key::eLeft); // the tens
+    time.handleKey(Entry::Key::eLeft); // the hours
+    CHECK(time.cursor() == 0);
+    time.handleKey(Entry::Key::eLeft); // wraps to the seconds
+    CHECK(time.cursor() == 6);
+    time.handleKey(Entry::Key::eRight);
+    CHECK(time.cursor() == 0);
+    // A keyboard types the digits in order, overwriting from the cursor
+    for (const char *d : {"1", "0", "2", "3", "4"}) time.type(d);
+    CHECK(time.text() == "1:02:34");
+    CHECK(time.cursor() == 6); // stays on the last digit
+    time.type("9");
+    CHECK(time.text() == "1:02:39");
+    time.type("x"); // not a digit
+    CHECK(time.text() == "1:02:39");
+    time.backspace();
+    CHECK(time.text() == "1:02:30");
+    CHECK(time.cursor() == 5);
+    time.handleKey(Entry::Key::eSelect);
+    CHECK(done == 3600 + 2 * 60 + 30);
+    time.handleKey(Entry::Key::eBack);
+    CHECK(cancelled == 1);
+
+    PositionEntry frame("GO TO FRAME", PositionEntry::Format::eNumber, 5, 23456, [&](double v) { done = v; }, {});
+    CHECK(frame.text() == "23456");
+    CHECK(frame.cursor() == 4);
+    frame.handleKey(Entry::Key::eUp);
+    CHECK(frame.text() == "23457");
+    for (int i = 0; i < 4; i++) frame.handleKey(Entry::Key::eUp); // 7, 8, 9, 0, 1: no carry
+    CHECK(frame.text() == "23451");
+    frame.accept();
+    CHECK(done == 23451);
+    PositionEntry chapter("GO TO CHAPTER", PositionEntry::Format::eNumber, 2, 7, {}, {});
+    CHECK(chapter.text() == "07");
+    PositionEntry clamped("X", PositionEntry::Format::eNumber, 2, 123, {}, {});
+    CHECK(clamped.text() == "99");
+    CHECK(clamped.hint().find("SELECT") != std::string::npos);
+    CHECK(clamped.rows().empty());
+}
+
+TEST_CASE("An entry started on a closed menu opens it for its own duration", "[Menu]") {
+    Fixture f;
+    REQUIRE(!f.menu.isOpen());
+    f.menu.startEntry(std::make_unique<PositionEntry>("GO TO", PositionEntry::Format::eNumber, 2, 3,
+                                                      [&](double) { f.menu.close(); }, [&] { f.menu.endEntry(); }));
+    CHECK(f.menu.isOpen());
+    REQUIRE(f.menu.entry() != nullptr);
+    f.menu.handleKey(MenuKey::eBack); // cancels: the entry ends, and the menu it opened closes
+    CHECK(f.menu.entry() == nullptr);
+    CHECK(!f.menu.isOpen());
+
+    f.menu.startEntry(std::make_unique<PositionEntry>("GO TO", PositionEntry::Format::eNumber, 2, 3,
+                                                      [&](double) { f.menu.close(); }, [&] { f.menu.endEntry(); }));
+    f.menu.handleKey(MenuKey::eSelect); // accepts: the callback closes the menu itself
+    CHECK(f.menu.entry() == nullptr);
+    CHECK(!f.menu.isOpen());
+
+    // From an open menu the entry's end returns to the page it was started from
+    f.menu.open();
+    f.menu.startEntry(std::make_unique<PositionEntry>("GO TO", PositionEntry::Format::eNumber, 2, 3,
+                                                      [&](double) {}, [&] { f.menu.endEntry(); }));
+    f.menu.handleKey(MenuKey::eBack);
+    CHECK(f.menu.entry() == nullptr);
+    CHECK(f.menu.isOpen());
 }

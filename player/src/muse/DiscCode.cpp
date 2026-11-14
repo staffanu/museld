@@ -20,6 +20,12 @@ std::vector<std::string> DiscCode::asStrings() const {
     return {disc_code_string1, disc_code_string2};
 }
 
+std::optional<int> DiscCode::frameNumber() const {
+    if (pf() || df() || !playbackTimeSeconds())
+        return std::nullopt;
+    return frame();
+}
+
 std::optional<double> DiscCode::playbackTimeSeconds() const {
     // MUSE is 60 fields/30 progressive frames per second. The disc-code frame
     // counter starts at 1.

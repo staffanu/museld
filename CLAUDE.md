@@ -376,9 +376,21 @@ The `src/` directory is the include root for both binaries. The `ac3rf` CMake ta
 
 **Pluggable erasure concealment**: Abstract `ErasureConcealer` interface with four implementations (`RepeatingSample`, `LinearInterpolation`, `Ar`, `SlowAr`), selected via CLI.
 
-**Chapter search and picture stops**: the Up/Down keys and `--chapter` find a chapter start by
-probing the input (`ChapterSearch`, pure decision logic with a Catch2 test, driven by the
-player loop in `museld.cpp`). Probes use `DecodeControls::metadata_only` (first decoder stage
+**Position search and picture stops**: the Up/Down keys and `--chapter` find a chapter start,
+and `--time H:MM:SS`, `--frame N` and select on the menu's Time/Frame and Chapter lines (the Playback
+page shows the position; Left/Right there seek and skip chapters) a time of the CLV time code or a
+CAV frame number, by probing the input (`PositionSearch`, pure decision logic with a Catch2
+test, driven by the player loop in `museld.cpp`; a chapter is bracketed and bisected, a time or
+frame is interpolated from the current position, since the capture runs at the disc's rate, and
+lands in two or three probes, on the frame itself when the code numbers the frames, within
+0.15 s on a CLV code of whole seconds -- `DiscInfo::discTimeSeconds()` is the code's own
+count, 30 frames per second on NTSC, not playback time, with `discTimeResolutionSeconds()`
+saying which, and `frameNumber()`/`isClv()` the rest).  The entries are `ui/PositionEntry`
+(a digit cursor set like a clock from the remote's five keys, typed into like a VCR from a
+keyboard; `ui/Entry` is what it and the address field's `TextEntry` share, and
+`Menu::startEntry` on a closed menu opens it for the entry alone, as the G key does over the
+picture); `MUSELD_MENU_OPEN="Playback/Time"` opens one for a scripted screenshot.
+Probes use `DecodeControls::metadata_only` (first decoder stage
 only, no picture or audio), absolute seeks (`FrameReader::seekToInputSample`, returning a seek
 generation that every frame carries in `DecodedField::seek_generation`, so frames from before
 the seek are told apart) and the input length (`InputReader::sampleCount()`, taken from the
@@ -395,7 +407,7 @@ the seeking thread, and the NTSC reader drops the partial frame after a reset. A
 about 50 ms. End of file finishes the demodulator and reader threads for good, and a probe near the end
 of a capture may find no signal left there and run into it: while a search is on, the demodulator
 waits at the end for a seek instead (`RfDemodulator::holdAtEnd`), the player loop tells the search
-(`ChapterSearch::probeReachedEnd`), and the search looks further back for the last frames there are. `DiscInfo` exposes chapter, lead-in/out and the CAV picture stop (which pauses
+(`PositionSearch::probeReachedEnd`), and the search looks further back for the last frames there are. `DiscInfo` exposes chapter, lead-in/out and the CAV picture stop (which pauses
 playback unless turned off with P).
 
 **Input format abstraction**: `InputReader` specializations (raw widths, lds, FLAC; a seekable

@@ -9,7 +9,7 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "ChapterSearch.h"
+#include "PositionSearch.h"
 #include "Decoder.h"
 #include "DisplayGeometry.h"
 
@@ -78,12 +78,13 @@ struct PlayerState {
     bool honor_picture_stops = true;
     std::optional<int64_t> last_picture_stop_offset;
 
-    // A chapter search in progress (Up/Down keys): the loop performs its
-    // seeks, feeds it the frames decoded after each one and shows nothing
-    // new until it ends.  search_generation is the reader's seek generation
-    // of the pending probe, which the fed frames must match;
-    // search_action_pending asks the loop to carry out search->action().
-    std::unique_ptr<ChapterSearch> chapter_search;
+    // A position search in progress (the Up/Down keys, the menu's go-to):
+    // the loop performs its seeks, feeds it the frames decoded after each
+    // one and shows nothing new until it ends.  search_generation is the
+    // reader's seek generation of the pending probe, which the fed frames
+    // must match; search_action_pending asks the loop to carry out
+    // search->action().
+    std::unique_ptr<PositionSearch> position_search;
     uint32_t search_generation = 0;
     bool search_action_pending = false;
     bool search_resume_paused = false; // playback was paused when the search began

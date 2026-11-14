@@ -37,7 +37,7 @@
 #include "FrameReader.h"
 #include "TextRenderer.h"
 #include "Decoder.h"
-#include "ChapterSearch.h"
+#include "PositionSearch.h"
 #include "PlayerState.h"
 #include "PlayerActions.h"
 #include "OsdOverlay.h"
@@ -361,7 +361,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                       double seconds_per_iteration,
                       int pace_slack_fields,
                       double initial_seek_seconds,
-                      std::optional<int> start_chapter, bool returns_to_browser) {
+                      std::optional<PositionSearch::Target> start_position, bool returns_to_browser) {
     vk::Device &device = manager.getDevice();
     std::optional<InputProbeResult::Type> switched;
 
@@ -459,14 +459,21 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         input.setMenu(&menu);
         if (const char *open_page = getenv("MUSELD_MENU_OPEN"); open_page != nullptr) {
             // A screenshot or a test run: start with the menu up, on the root or on
-            // the page named (MUSELD_MENU_OPEN=Picture)
+            // the page named (MUSELD_MENU_OPEN=Picture), or with an item of a page
+            // selected (MUSELD_MENU_OPEN="Playback/Go to time...")
             menu.open();
-            for (const auto &line : menu.lines()) {
-                if (line.label == open_page) {
-                    menu.handleKey(MenuKey::eSelect);
-                    break;
+            std::string path = open_page;
+            while (!path.empty()) {
+                const size_t slash = path.find('/');
+                const std::string label = path.substr(0, slash);
+                path = slash == std::string::npos ? std::string() : path.substr(slash + 1);
+                for (const auto &line : menu.lines()) {
+                    if (line.label == label) {
+                        menu.handleKey(MenuKey::eSelect);
+                        break;
+                    }
+                    menu.handleKey(MenuKey::eDown);
                 }
-                menu.handleKey(MenuKey::eDown);
             }
         }
         FrameExporter frame_exporter(log, manager, command_pool);
@@ -654,7 +661,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                     state.black_level_mode,
                     // metadata_only: a probe; a redo during the search is the
                     // one clean decode of the displayed field it starts with
-                    state.chapter_search != nullptr && !redo,
+                    state.position_search != nullptr && !redo,
                     state.temporal_nr,
                     state.edge_directed,
                     extra_tracks,
@@ -678,11 +685,11 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             return true;
         };
 
-        // Carries out the chapter search's pending action.  The search ends
-        // where the chapter was found, or back where it started on failure.
-        auto runChapterSearchAction = [&]() {
-            using Kind = ChapterSearch::Action::Kind;
-            const auto &action = state.chapter_search->action();
+        // Carries out the position search's pending action.  The search ends
+        // where the position was found, or back where it started on failure.
+        auto runPositionSearchAction = [&]() {
+            using Kind = PositionSearch::Action::Kind;
+            const auto &action = state.position_search->action();
             switch (action.kind) {
                 case Kind::eWait:
                     break;
@@ -692,7 +699,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                         // (the input's end, a container limit) stays put
                         state.osd_text = reader_controls.seekToInputSample && reader_controls.samples_per_second > 0
                                          ? "SEEK FAILED" : "SEARCH NOT AVAIL";
-                        state.chapter_search.reset();
+                        state.position_search.reset();
                         break;
                     }
                     state.osd_text = "SEARCH";
@@ -700,19 +707,20 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 case Kind::eDone:
                 case Kind::eFailed: {
                     const bool found = action.kind == Kind::eDone;
-                    const int64_t destination = found ? action.offset : state.chapter_search->originOffset();
+                    const int64_t destination = found ? action.offset : state.position_search->originOffset();
+                    const std::string name = PositionSearch::describe(state.position_search->target().kind, action.value);
                     log.info(eApplication, found
-                             ? std::format("Chapter search: chapter {} found at input sample {} after {} probes",
-                                           action.chapter, action.offset, state.chapter_search->probes())
-                             : std::format("Chapter search: {} after {} probes, returning to input sample {}",
-                                           action.reason, state.chapter_search->probes(), destination));
+                             ? std::format("Position search: {} found at input sample {} after {} probes",
+                                           name, action.offset, state.position_search->probes())
+                             : std::format("Position search: {} after {} probes, returning to input sample {}",
+                                           action.reason, state.position_search->probes(), destination));
                     seekToInputSample(destination);
                     // Shown with the first frame from there, not on the probe image
-                    state.osd_text_pending = found ? std::format("CHAPTER {}", action.chapter) : action.reason;
+                    state.osd_text_pending = found ? name : action.reason;
                     state.osd_text_pending_generation = state.search_generation;
                     if (state.search_resume_paused)
                         state.paused_countdown = 5;
-                    state.chapter_search.reset();
+                    state.position_search.reset();
                     break;
                 }
             }
@@ -727,10 +735,10 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         while ((state.paused && !state.redo_last_field)
                || decoder.next(make_controls(state.redo_last_field), state.last_decoded)) {
 
-            // A chapter search owns the decoder while it runs: its probe
+            // A position search owns the decoder while it runs: its probe
             // frames are not played (no clock, picture, audio, captions or
             // file output), only read for their disc code
-            const bool searching = state.chapter_search != nullptr;
+            const bool searching = state.position_search != nullptr;
             // A probe near the end of a capture may find no signal there and
             // run into the end of the input, which would finish the reader:
             // it waits there instead while a search is on
@@ -758,14 +766,15 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                                    + state.stream_seek_offset_seconds;
             state.redo_last_field = false;
 
-            // --chapter: once the disc code is readable, go there.  Before
-            // the first chapter code every frame is a candidate, and a disc
-            // without chapter codes just plays from the start.
-            if (start_chapter && !searching && state.last_decoded.decoded && state.last_decoded.disc_info
-                && state.last_decoded.disc_info->chapter()) {
-                if (!startChapterSearch(state, reader_controls, log, ChapterSearch::Direction::eNext, start_chapter))
-                    log.warn(eApplication, std::format("--chapter {}: {}", *start_chapter, state.osd_text));
-                start_chapter.reset();
+            // --chapter, --time, --frame: once the disc code carries the
+            // coordinate asked for, go there.  Before that every frame is a
+            // candidate, and a disc without the code just plays from the start.
+            if (start_position && !searching && state.last_decoded.decoded && state.last_decoded.disc_info
+                && PositionSearch::coordinate(positionReading(state), start_position->kind)) {
+                if (!startPositionSearch(state, reader_controls, log, *start_position))
+                    log.warn(eApplication, std::format("{}: {}", PositionSearch::describe(start_position->kind, start_position->value),
+                                                       state.osd_text));
+                start_position.reset();
             }
 
             if (!searching && !state.osd_text_pending.empty() && state.last_decoded.decoded
@@ -779,13 +788,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 // pipeline) say nothing about where it landed
                 if (!state.search_action_pending && state.last_decoded.decoded
                     && state.last_decoded.seek_generation == state.search_generation) {
-                    ChapterSearch::Reading reading{state.last_decoded.disc_info_input_offset};
-                    if (const auto &info = state.last_decoded.disc_info) {
-                        reading.chapter = info->chapter();
-                        reading.lead_in = info->isLeadIn();
-                        reading.lead_out = info->isLeadOut();
-                    }
-                    if (state.chapter_search->feed(reading).kind != ChapterSearch::Action::Kind::eWait)
+                    if (state.position_search->feed(positionReading(state)).kind != PositionSearch::Action::Kind::eWait)
                         state.search_action_pending = true;
                     search_idle_at_end = 0;
                 } else if (!state.search_action_pending && !state.last_decoded.decoded
@@ -794,8 +797,8 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                     // read on the way has had three timeouts to come out as
                     // a frame: there is none
                     if (++search_idle_at_end >= 3) {
-                        log.info(eApplication, "Chapter search: no frame between the probe and the end of the input");
-                        if (state.chapter_search->probeReachedEnd().kind != ChapterSearch::Action::Kind::eWait)
+                        log.info(eApplication, "Position search: no frame between the probe and the end of the input");
+                        if (state.position_search->probeReachedEnd().kind != PositionSearch::Action::Kind::eWait)
                             state.search_action_pending = true;
                         search_idle_at_end = 0;
                     }
@@ -803,7 +806,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 if (state.search_action_pending) {
                     state.search_action_pending = false;
                     search_idle_at_end = 0;
-                    runChapterSearchAction();
+                    runPositionSearchAction();
                 }
             } else if (state.honor_picture_stops && !vfw && !export_frame_filename && !no_keys && !state.paused
                        && state.last_decoded.decoded && state.last_decoded.disc_info
@@ -1597,7 +1600,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   double export_frame_after_seconds,
                   double write_duration_seconds,
                   double initial_seek_seconds,
-                  std::optional<int> start_chapter, bool returns_to_browser) {
+                  std::optional<PositionSearch::Target> start_position, bool returns_to_browser) {
     // The decoded image size (also the size of a written video file), where
     // the picture sits in it and the shape of its pixels, and a window of the
     // picture's shape that downscales it in neither direction
@@ -1761,6 +1764,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                 !is_muse && video_standard->ntsc_chroma, // has_ac3_audio: AC3-RF exists on NTSC discs only
                 reader.inputIsLive(),
         };
+        reader_controls.frames_per_second = is_muse ? 30.0 : video_standard->framesPerSecond();
         if (!reader.inputIsLive()) {
             reader_controls.holdAtInputEnd = [&reader](bool hold) { reader.holdAtInputEnd(hold); };
             reader_controls.atInputEnd = [&reader]() { return reader.atInputEnd(); };
@@ -1839,7 +1843,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   vfw, audio_playback.get(), executable_dir,
                   subtitle_setup,
                   export_frame_filename, export_frame_after_seconds, write_duration_seconds, seconds_per_iteration,
-                  pace_slack_fields, initial_seek_seconds, start_chapter, returns_to_browser);
+                  pace_slack_fields, initial_seek_seconds, start_position, returns_to_browser);
     }
 
     // The writer stays open for the next input (the caller closes it)
@@ -1966,7 +1970,7 @@ int main(int argc, char *argv[]) {
     std::optional<InputFormat> input_format_option = std::nullopt;
     std::optional<double> sample_frequency_option;      // unset means measure it from the file
     double initial_seek_seconds = 0;
-    std::optional<int> start_chapter; // --chapter: search for it once the disc code reads
+    std::optional<PositionSearch::Target> start_position; // --chapter/--time/--frame: searched for once the disc code reads
     bool start_paused = false;
     auto field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
     bool use_3d_comb = true;
@@ -2063,8 +2067,23 @@ int main(int argc, char *argv[]) {
     });
     options.option("--chapter", "N", "Start playing at chapter N, found by searching the capture for its "
                    "chapter codes (after --seek, if given; the Up and Down keys do the same for the next and "
-                   "previous chapter)", [&] () -> void {
-        start_chapter = stoi(*(it++));
+                   "previous chapter, and the menu's Go to chapter item takes a number)", [&] () -> void {
+        start_position = PositionSearch::Target::chapter(stoi(*(it++)));
+    });
+    options.option("--time", "H:MM:SS", "Start playing at this time of the disc's time code (CLV discs), found "
+                   "like --chapter; the menu's Go to time item (key G) does the same", [&] () -> void {
+        const std::string text = *(it++);
+        int h = 0, m = 0, sec = 0;
+        if (sscanf(text.c_str(), "%d:%d:%d", &h, &m, &sec) == 3)
+            start_position = PositionSearch::Target::time(h * 3600 + m * 60 + sec);
+        else if (sscanf(text.c_str(), "%d:%d", &m, &sec) == 2)
+            start_position = PositionSearch::Target::time(m * 60 + sec);
+        else
+            throw runtime_error("--time takes H:MM:SS or MM:SS, not " + text);
+    });
+    options.option("--frame", "N", "Start playing at frame N of a CAV disc, found like --chapter; the menu's "
+                   "Go to frame item (key G) does the same", [&] () -> void {
+        start_position = PositionSearch::Target::frame(stoi(*(it++)));
     });
     options.option("--seek", "SECONDS", "Seek to this position before playing", [&] () -> void {
         initial_seek_seconds = stod(*(it++));
@@ -2692,7 +2711,7 @@ int main(int argc, char *argv[]) {
                                                  benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, write_audio, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                 initial_seek_seconds, start_chapter, is_tvos || browse);
+                                 initial_seek_seconds, start_position, is_tvos || browse);
                     break;
                 }
                 case eMuse16MHz: {
@@ -2705,7 +2724,7 @@ int main(int argc, char *argv[]) {
                                  audio_track, audio_fallback, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, write_audio, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                 initial_seek_seconds, start_chapter, is_tvos || browse);
+                                 initial_seek_seconds, start_position, is_tvos || browse);
                     break;
                 }
                 case eMuseOversampled:
@@ -2721,7 +2740,7 @@ int main(int argc, char *argv[]) {
                                  audio_track, audio_fallback, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, write_audio, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                 initial_seek_seconds, start_chapter, is_tvos || browse);
+                                 initial_seek_seconds, start_position, is_tvos || browse);
                     break;
                 }
                 default:
@@ -2741,7 +2760,7 @@ int main(int argc, char *argv[]) {
                 file_input_type = *outcome.switch_to;
                 input = PreparedInput(name, std::move(outcome.input), *resolved_format);
                 initial_seek_seconds = 0;
-                start_chapter = std::nullopt;
+                start_position = std::nullopt;
             }
             } while (outcome.switch_to);
             return outcome.open_next;

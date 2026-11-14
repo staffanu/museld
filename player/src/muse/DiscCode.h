@@ -14,7 +14,13 @@ public:
 
     std::vector<std::string> asStrings() const override;
     std::optional<double> playbackTimeSeconds() const override;
+    // MUSE runs at exactly 30 frames/s, so the code's time is the playback time
+    std::optional<double> discTimeSeconds() const override { return playbackTimeSeconds(); }
+    double discTimeResolutionSeconds() const override { return 1.0 / 30; }
     std::optional<int> chapter() const override { return pf() ? std::nullopt : std::make_optional(chapterNumber()); }
+    // The frame address is on CLV discs too, but a player searches those by time
+    std::optional<int> frameNumber() const override;
+    std::optional<bool> isClv() const override { return df(); }
     bool isLeadIn() const override { return pf(); }
     // The MUSE disc code has a picture stop bit (ST in FADR2, EP 0 532 277),
     // but its bit position is only given in the patent's drawing; until a

@@ -35,4 +35,12 @@ struct PlayerMenuBindings {
 // open_page: the browser's page, linked before Quit; null for none
 MenuPage *buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b, MenuPage *open_page = nullptr);
 
+// The go-to entries (the Playback page's items, the G key): a chapter
+// number, or the position in the disc's own coordinate -- a time on a CLV
+// disc, a frame number on a CAV disc -- prefilled with where playback is.
+// Accepting starts a position search and closes the menu; the entry opened
+// over the picture closes it again when cancelled too.
+void openGoToChapterEntry(Menu &menu, PlayerState &state, ReaderControls &reader, Logger &log);
+void openGoToEntry(Menu &menu, PlayerState &state, ReaderControls &reader, Logger &log);
+
 #endif //MUSELD_PLAYERMENU_H

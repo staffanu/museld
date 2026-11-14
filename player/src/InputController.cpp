@@ -7,6 +7,7 @@
 #include "InputController.h"
 #include "PlayerActions.h"
 #include "ui/Menu.h"
+#include "ui/PlayerMenu.h"
 
 #include <algorithm>
 #include <cstring>
@@ -17,26 +18,43 @@
 #include "PlayerState.h"
 #include "logging/Logger.h"
 
-bool startChapterSearch(PlayerState &state, const ReaderControls &reader, Logger &log,
-                        ChapterSearch::Direction direction, std::optional<int> target_chapter) {
-    if (state.chapter_search)
-        return false; // one at a time
-    const auto &info = state.last_decoded.disc_info;
-    if (!info || !info->chapter()) {
-        state.osd_text = "NO CHAPTER CODE";
-        return false;
+PositionSearch::Reading positionReading(const PlayerState &state) {
+    PositionSearch::Reading reading{state.last_decoded.disc_info_input_offset};
+    if (const auto &info = state.last_decoded.disc_info) {
+        reading.chapter = info->chapter();
+        reading.time = info->discTimeSeconds();
+        reading.time_resolution = info->discTimeResolutionSeconds();
+        reading.frame = info->frameNumber();
+        reading.lead_in = info->isLeadIn();
+        reading.lead_out = info->isLeadOut();
     }
+    return reading;
+}
+
+bool startPositionSearch(PlayerState &state, const ReaderControls &reader, Logger &log,
+                         const PositionSearch::Target &target) {
+    if (state.position_search)
+        return false; // one at a time
     if (!reader.seekToInputSample || reader.samples_per_second <= 0) {
         state.osd_text = "SEARCH NOT AVAIL";
         return false;
     }
-    const ChapterSearch::Reading here{state.last_decoded.disc_info_input_offset, info->chapter(),
-                                      info->isLeadIn(), info->isLeadOut()};
-    const ChapterSearch::Params params{reader.samples_per_second,
-                                       reader.input_sample_count ? reader.input_sample_count() : -1};
-    state.chapter_search = target_chapter
-            ? std::make_unique<ChapterSearch>(params, here, *target_chapter)
-            : std::make_unique<ChapterSearch>(params, here, direction);
+    const PositionSearch::Reading here = positionReading(state);
+    PositionSearch::Params params{reader.samples_per_second,
+                                  reader.input_sample_count ? reader.input_sample_count() : -1};
+    if (reader.frames_per_second > 0)
+        params.frames_per_second = reader.frames_per_second;
+    auto search = std::make_unique<PositionSearch>(params, here, target);
+    if (search->action().kind == PositionSearch::Action::Kind::eFailed) {
+        // No code to start from (or no input length): said at once, nothing moves
+        state.osd_text = search->action().reason;
+        return false;
+    }
+    if (search->action().kind == PositionSearch::Action::Kind::eDone) {
+        state.osd_text = PositionSearch::describe(target.kind, search->action().value); // already there
+        return true;
+    }
+    state.position_search = std::move(search);
     state.search_action_pending = true;
     // The search needs the decoder running; back to the pause when done.
     // The OSD text is drawn into the displayed image, which the search
@@ -46,10 +64,13 @@ bool startChapterSearch(PlayerState &state, const ReaderControls &reader, Logger
     state.paused = false;
     state.redo_last_field = true;
     state.paused_countdown = 0;
-    log.info(eApplication, std::format("Chapter search: {} from chapter {} at input sample {}",
-                                       target_chapter ? std::format("chapter {}", *target_chapter)
-                                       : direction == ChapterSearch::Direction::eNext ? "next" : "previous",
-                                       *info->chapter(), here.offset));
+    using Kind = PositionSearch::Target::Kind;
+    log.info(eApplication, std::format("Position search: {} from {} at input sample {}",
+                                       target.kind == Kind::eNextChapter ? "next chapter"
+                                       : target.kind == Kind::ePreviousChapter ? "previous chapter"
+                                       : PositionSearch::describe(target.kind, target.value),
+                                       PositionSearch::describe(target.kind, *PositionSearch::coordinate(here, target.kind)),
+                                       here.offset));
     return true;
 }
 
@@ -122,7 +143,7 @@ bool InputController::poll(SDL_Window *window,
                                    || event.key.scancode == SDL_SCANCODE_LEFT || event.key.scancode == SDL_SCANCODE_RIGHT;
                 const bool menu_open = m_menu != nullptr && m_menu->isOpen();
                 const bool erasing = event.key.scancode == SDL_SCANCODE_BACKSPACE && menu_open
-                                     && m_menu->textEntry() != nullptr;
+                                     && m_menu->entry() != nullptr;
                 if (!event.key.repeat || (arrow && menu_open) || erasing) {
                     m_pressed.insert(event.key.scancode);
                     if (!event.key.repeat)
@@ -135,7 +156,7 @@ bool InputController::poll(SDL_Window *window,
                 // Not a space: the space bar picks the key under the cursor on the
                 // on-screen keyboard (below, as a gamepad's select does), and the
                 // keyboard's SPACE key there types one
-                if (m_menu != nullptr && m_menu->isOpen() && m_menu->textEntry() != nullptr
+                if (m_menu != nullptr && m_menu->isOpen() && m_menu->entry() != nullptr
                     && strcmp(event.text.text, " ") != 0)
                     m_menu->type(event.text.text);
                 break;
@@ -195,7 +216,7 @@ bool InputController::poll(SDL_Window *window,
 #endif
     // The window takes text input while the menu's address field is up, so a
     // keyboard types into it (and its letters are not hotkeys meanwhile)
-    const bool entry_up = m_menu != nullptr && m_menu->isOpen() && m_menu->textEntry() != nullptr;
+    const bool entry_up = m_menu != nullptr && m_menu->isOpen() && m_menu->entry() != nullptr;
     // Not on tvOS: SDL's text input there is the system's full-screen keyboard
     // dialog, which would come up over the menu's own keyboard (the one the
     // remote drives, with the address prefilled)
@@ -269,8 +290,8 @@ bool InputController::poll(SDL_Window *window,
     if (checkKey(SDL_SCANCODE_N))
         PlayerActions::stepOneField(state);
     // Left/Right seek, Up/Down find the next/previous chapter (see
-    // ChapterSearch; the loop in runPlayer drives it); all four pan instead
-    // while zoomed
+    // PositionSearch; the loop in runPlayer drives it); all four pan instead
+    // while zoomed.  G asks for a time or frame to go to.
     if (checkKey(SDL_SCANCODE_LEFT))
         PlayerActions::seekOrPan(state, reader, -10);
     if (checkKey(SDL_SCANCODE_RIGHT))
@@ -279,6 +300,8 @@ bool InputController::poll(SDL_Window *window,
         PlayerActions::chapterOrPan(state, reader, m_log, true);
     if (checkKey(SDL_SCANCODE_DOWN))
         PlayerActions::chapterOrPan(state, reader, m_log, false);
+    if (checkKey(SDL_SCANCODE_G) && m_menu != nullptr)
+        openGoToEntry(*m_menu, state, reader, m_log);
     if (checkKey(SDL_SCANCODE_P))
         PlayerActions::togglePictureStops(state);
     if (checkKey(SDL_SCANCODE_1))

@@ -183,6 +183,8 @@ a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at 
 | `--overscan <percent>` | How much of the edges to hide, as a TV does — same as the O key. `0` (default) shows the standard picture: for NTSC the part of the decoded image that is exactly 4:3, which leaves out the blanking margins at the sides (black on most discs). A percentage hides that much more in each dimension, half on either side (`5` shows the central 95 %). `full` shows the whole decoded image, margins included |
 | `--seek <seconds>` | Seek to position before starting playback |
 | `--chapter <n>` | Start playing at chapter `n`, found by searching the capture for its chapter codes (see below); after `--seek`, if given |
+| `--time <h:mm:ss>` | Start playing at this time of the disc's time code (CLV discs; `mm:ss` also accepted), found like a chapter |
+| `--frame <n>` | Start playing at frame `n` of a CAV disc, found like a chapter |
 | `--pause` | Start paused |
 | `--export-frame <file>` | Save one decoded frame as PNG to `<file>` and quit. Combine with `--export-frame-at` to give the decoder (sync lock, adaptive equaliser, motion detection) a warm-up run from the `--seek` position. |
 | `--export-frame-at <seconds>` | Stream position of the frame saved by `--export-frame` (absolute, same units as `--seek` — not a delay after it). Default: the first decoded frame. |
@@ -357,13 +359,25 @@ with N to watch its 3, 2, 3, 2 rhythm), `hold` marks the fields that re-show the
 frame, and `adapt` a locked frame whose missing repeat made it fall back to the motion-adaptive
 path.
 
-**Chapters**: laserdisc frames carry their chapter number (the VBI codes for NTSC/PAL, the
-line 564 disc code for MUSE) on discs that have chapters.  A chapter index exists only on some
-discs, in the lead-in, which captures usually leave out, and `museld` doesn't read it.  The Up
-and Down keys, and `--chapter`, therefore search iteratively for the chapter boundary: this
-typically takes less than a second.  Down goes to the start of the current chapter, or, within
-the first seconds of it, to the chapter before.  The search needs the input's length, and works
-on files and http input, not on live streams or the 16.2 MHz baseband reader.
+**Chapters, times and frames**: laserdisc frames carry their chapter number (the VBI codes
+for NTSC/PAL, the line 564 disc code for MUSE) on discs that have chapters, and their position
+as the disc counts it: a time code on CLV discs, a frame number on CAV discs.  A chapter index
+exists only on some discs, in the lead-in, which captures usually leave out, and `museld`
+doesn't read it.  The Up and Down keys, and `--chapter`, therefore search iteratively for the
+chapter boundary: this typically takes less than a second.  Down goes to the start of the
+current chapter, or, within the first seconds of it, to the chapter before.  Going to a time
+or a frame by number, as a player's remote does, is the G key, or the menu's Playback page,
+whose Time (Frame on a CAV disc) and Chapter lines show where playback is, step it with Left
+and Right as the keys do (10 seconds, a chapter) and open a number entry on select; `--time`
+and `--frame` do the same from the command line.  The number is set like a clock, the cursor on one digit, Up and Down
+changing it, Left and Right moving between the digits, select going there and back
+cancelling, starting from where playback is, so a jump nearby changes a digit or two; a
+keyboard types the digits straight in, Return goes, Escape cancels.  The search takes two or
+three probes and lands on the frame asked for (within a fraction of a second on a CLV disc
+whose time code has no picture numbers), paused if playback was paused, as a player's frame
+search does.  A position past the end of the capture says NOT ON THIS CAPTURE, one before its
+start lands at the start.  The searches need the input's length, and work on files and http
+input, not on live streams or the 16.2 MHz baseband reader.
 
 **Stop code**: The picture stop code of NTSC
 CAV discs (`82CFFF`, IEC 60857 10.1.4) pauses playback on the frame it marks, once per stop;
@@ -430,6 +444,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | N | Step one field forward (while paused) |
 | Left / Right | Seek ±10 seconds |
 | Up / Down | Next / previous chapter (see Chapters above) |
+| G | Go to a time (CLV) or frame (CAV): a number entry over the picture (see Chapters above) |
 | P | Toggle honouring the picture stop codes (on by default for files, off for live input) |
 | 1 | Normal field interpolation (motion detection) |
 | 2 | Force intra-field interpolation (treat everything as motion) |
@@ -466,7 +481,8 @@ does quitting with Escape.  Settings that mean nothing for the disc being played
 Apple TV the remote's back button (the Siri Remote's Menu button; a TV remote
 over HDMI-CEC sends the arrows, OK and back, nothing else) opens it over the
 picture, and from its root page closes it again; select pauses, left and right
-seek, up and down find chapters.  Playback ends through the menu's Stop item,
+seek, up and down find chapters, and select on the Playback page's Time, Frame and
+Chapter lines takes a number from the remote's arrows.  Playback ends through the menu's Stop item,
 which returns to the file browser, and back from the browser's page leaves the
 app, which starts there.  A PC started with `--browse` works the same way: the
 menu's last item is Stop and returns to the browser; started with a file on the

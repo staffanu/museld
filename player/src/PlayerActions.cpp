@@ -69,7 +69,7 @@ void chapterOrPan(PlayerState &state, ReaderControls &reader, Logger &log, bool 
                                               0.5 / state.zoom_factor, 1.0 - 0.5 / state.zoom_factor);
         return;
     }
-    startChapterSearch(state, reader, log, next ? ChapterSearch::Direction::eNext : ChapterSearch::Direction::ePrevious);
+    startPositionSearch(state, reader, log, next ? PositionSearch::Target::nextChapter() : PositionSearch::Target::previousChapter());
 }
 
 void togglePictureStops(PlayerState &state) {

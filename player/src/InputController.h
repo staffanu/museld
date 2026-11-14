@@ -11,7 +11,7 @@
 #include <string>
 
 #include "AudioDefs.h"
-#include "ChapterSearch.h"
+#include "PositionSearch.h"
 #include "DropoutMode.h"
 #include "InputProbe.h"
 
@@ -65,13 +65,18 @@ struct ReaderControls {
     // Seconds the analog track has had no carrier (RF input with an analog
     // track only): the automatic fallback to the EFM track reads it
     std::function<double()> analogSilentSeconds;
+    // The disc's frame rate, what its frame numbers count (the position search)
+    double frames_per_second = 0;
 };
 
-// Begins a chapter search from the displayed frame: the next or previous
-// chapter, or a given one.  Sets the OSD text and returns false when no
-// search can start here (no chapter code, an input that cannot seek).
-bool startChapterSearch(PlayerState &state, const ReaderControls &reader, Logger &log,
-                        ChapterSearch::Direction direction, std::optional<int> target_chapter = std::nullopt);
+// Begins a position search from the displayed frame: the next or previous
+// chapter, a given chapter, a time or a frame.  Sets the OSD text and
+// returns false when no search can start here (the frame has no such code,
+// an input that cannot seek).
+bool startPositionSearch(PlayerState &state, const ReaderControls &reader, Logger &log,
+                         const PositionSearch::Target &target);
+// What the displayed frame's disc code says, as the search reads it
+PositionSearch::Reading positionReading(const PlayerState &state);
 
 class InputController {
 public:

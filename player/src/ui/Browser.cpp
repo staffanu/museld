@@ -6,6 +6,7 @@
 #include <format>
 #include <thread>
 #include "Browser.h"
+#include "TextEntry.h"
 #include "SavedState.h"
 #include "input/InputReaderFactory.h"
 
@@ -101,16 +102,16 @@ void Browser::enterAddress() {
     // else the most recent address, else the scheme
     const std::string initial = !m_last_typed.empty() ? m_last_typed
                               : m_state.recent().empty() ? std::string("http://") : m_state.recent().front();
-    m_menu.startTextEntry(std::make_unique<TextEntry>(
+    m_menu.startEntry(std::make_unique<TextEntry>(
             "ADDRESS", initial,
             [this](const std::string &text) {
-                m_menu.endTextEntry();
+                m_menu.endEntry();
                 m_last_typed = text;
                 const std::string location = normalizeAddress(text);
                 if (!location.empty())
                     go(location);
             },
-            [this] { m_menu.endTextEntry(); }));
+            [this] { m_menu.endEntry(); }));
 }
 
 // Plays a file or stream, lists a directory.  The argument is usually the

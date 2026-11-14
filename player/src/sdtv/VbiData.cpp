@@ -78,6 +78,20 @@ std::vector<std::string> VbiData::asStrings() const {
   return {string1, string2};
 }
 
+std::optional<double> VbiData::discTimeSeconds() const {
+  const double frames_per_code_second = std::round(m_frames_per_second);
+  if (m_is_clv) {
+    if (!m_clv_time_seconds.has_value()) return std::nullopt;
+    double seconds = m_clv_time_seconds.value();
+    if (m_clv_picture_number.has_value())
+      seconds += (m_clv_picture_number.value() - 1) / frames_per_code_second;
+    return seconds;
+  }
+  if (m_cav_picture_number.has_value())
+    return (m_cav_picture_number.value() - 1) / frames_per_code_second;
+  return std::nullopt;
+}
+
 std::optional<double> VbiData::playbackTimeSeconds() const {
   if (m_is_clv) {
     if (!m_clv_time_seconds.has_value()) return std::nullopt;

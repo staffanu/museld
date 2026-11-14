@@ -321,7 +321,8 @@ if(BUILD_MUSE)
         ui/Menu.cpp ui/Menu.h
         ui/PlayerMenu.cpp ui/PlayerMenu.h
         ui/MenuOverlay.cpp ui/MenuOverlay.h
-        ui/TextEntry.cpp ui/TextEntry.h
+        ui/Entry.h ui/TextEntry.cpp ui/TextEntry.h
+        ui/PositionEntry.cpp ui/PositionEntry.h
         ui/DirectoryListing.cpp ui/DirectoryListing.h
         ui/SavedState.cpp ui/SavedStatePath.cpp ui/SavedState.h
         ui/Browser.cpp ui/Browser.h
@@ -334,7 +335,7 @@ if(BUILD_MUSE)
         DisplayGeometry.cpp DisplayGeometry.h
         FrameExporter.cpp FrameExporter.h
         InputController.cpp InputController.h
-        ChapterSearch.cpp ChapterSearch.h
+        PositionSearch.cpp PositionSearch.h
 
         bch/BchDecoder.cpp bch/BchDecoder.h
         util/PercentileFilter.cpp util/PercentileFilter.h
