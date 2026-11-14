@@ -295,6 +295,16 @@ independent — expect ±40 ns and ~1 ns line-to-line jitter; `pal-pilot-check.p
 refines PAL line starts with the pilot, and `<prefix>.pilot.f64` holds the corrected curve --
 run the tool on it as a prefix to see the residual, 0.4 ns).
 
+**MUSE line edges** (measured 2026-11-14 on the blue1 capture with the dumps below, averaging
+the baseband at the reader's pixel positions over 4000 picture lines): the chroma ends at pixel
+105 and the luma starts at 107 where the shaders take them (`MUSE_C_OFFSET`, `col + 106`), so the
+grid is not shifted; but the last two luma samples, 479 and 480, carry the channel's transition
+into the next line's sync on every line whatever the picture (a +30 spike, then a -80 dip),
+so `copy_y_for_interpolation.comp` holds sample 478 across them, the horizontal upsampler
+repeats the end sample instead of padding with 128 (`edge_repeat`; the audio rows keep the pad),
+and the field chroma interpolation clamps its right and bottom neighbours inside the buffer.
+Before that the right edge showed a bright and a dark column, alternating with the line.
+
 **MUSE timebase**: the two dumps exist for MUSE too: `MUSELD_DUMP_DEMOD` writes
 the demodulated 31.25 MHz baseband (MUSE levels, plateaus of the HD sync at about 57 and 178;
 with `MUSELD_DUMP_DEMOD_AFTER_SEEK=1` it starts at the first block after the seek and writes the

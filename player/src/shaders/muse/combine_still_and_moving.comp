@@ -149,12 +149,17 @@ float16_t resample_field_r(uint row, uint col) {
     int top_left_y = 1 - field_parity;
     int top_left_x = 3 * field_parity;
 
-    int tl_r = clamp((int(row) - top_left_y) / 4, 0, 32000); // row / col in the field color buffer
+    int tl_r = clamp((int(row) - top_left_y) / 4, 0, MUSE_BUF_HEIGHT / 2 - 1); // row / col in the field color buffer
     int tl_c = clamp((int(col) + 1 - top_left_x) / 6, 0, MUSE_Y_BUF_WIDTH / 2 - 1); // the color sampling is offset one pixel
+    // The last column and row of the buffer have no neighbour to the right or
+    // below: the interpolation then holds them (an index past the row's end
+    // read the next row's first sample, a dark fringe on the right edge)
+    int tr_c = min(tl_c + 1, MUSE_Y_BUF_WIDTH / 2 - 1);
+    int bl_r = min(tl_r + 1, MUSE_BUF_HEIGHT / 2 - 1);
     float16_t tl = field_r[tl_r][tl_c];
-    float16_t tr = field_r[tl_r][tl_c + 1];
-    float16_t bl = field_r[tl_r + 1][tl_c];
-    float16_t br = field_r[tl_r + 1][tl_c + 1];
+    float16_t tr = field_r[tl_r][tr_c];
+    float16_t bl = field_r[bl_r][tl_c];
+    float16_t br = field_r[bl_r][tr_c];
 
     float16_t y_part = clamp(float16_t((int(row) - top_left_y) - 4 * tl_r) / 4.hf, 0.hf, 1.hf);
     float16_t x_part = clamp(float16_t((int(col) - top_left_x) - 6 * tl_c) / 6.hf, 0.hf, 1.hf);
@@ -170,12 +175,17 @@ float16_t resample_field_b(uint row, uint col) {
     int top_left_y = 1 - field_parity;
     int top_left_x = 3 * field_parity;
 
-    int tl_r = clamp((int(row) - top_left_y) / 4, 0, 32000); // row / col in the field color buffer
+    int tl_r = clamp((int(row) - top_left_y) / 4, 0, MUSE_BUF_HEIGHT / 2 - 1); // row / col in the field color buffer
     int tl_c = clamp((int(col) + 1 - top_left_x) / 6, 0, MUSE_Y_BUF_WIDTH / 2 - 1); // the color sampling is offset one pixel
+    // The last column and row of the buffer have no neighbour to the right or
+    // below: the interpolation then holds them (an index past the row's end
+    // read the next row's first sample, a dark fringe on the right edge)
+    int tr_c = min(tl_c + 1, MUSE_Y_BUF_WIDTH / 2 - 1);
+    int bl_r = min(tl_r + 1, MUSE_BUF_HEIGHT / 2 - 1);
     float16_t tl = field_b[tl_r][tl_c];
-    float16_t tr = field_b[tl_r][tl_c + 1];
-    float16_t bl = field_b[tl_r + 1][tl_c];
-    float16_t br = field_b[tl_r + 1][tl_c + 1];
+    float16_t tr = field_b[tl_r][tr_c];
+    float16_t bl = field_b[bl_r][tl_c];
+    float16_t br = field_b[bl_r][tr_c];
 
     float16_t y_part = clamp(float16_t((int(row) - top_left_y) - 4 * tl_r) / 4.hf, 0.hf, 1.hf);
     float16_t x_part = clamp(float16_t((int(col) - top_left_x) - 6 * tl_c) / 6.hf, 0.hf, 1.hf);
