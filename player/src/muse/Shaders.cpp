@@ -138,7 +138,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             VulkanUtil::loadSpirv(executable_dir, "filter_diamond.comp"), Size(0), 4));
     m_convert_sample_rate_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "convert_sample_rate",
-            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 12,
+            {eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 13,
              VulkanUtil::loadSpirv(executable_dir, "convert_horiz_sample_rate.comp"),
             Size(0), 5));
     m_decode_c_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
@@ -239,7 +239,7 @@ void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
             m_convert_sample_rate_algo,
             vector{m_filter_2_to_3_buffer->size().x_size, 3u, 2u, 0u, 0u,
                    m_interpolated32_buffer->size().y_size, m_interpolated32_buffer->size().x_size,
-                   0u, 1u, 0u, 1u, 0u}, 0);
+                   0u, 1u, 0u, 1u, 0u, 1u}, 0);
 
     m_decode_c_single_field_algo->updateBufferDescriptorsInSet(0, {field.m_data, m_field_r_buffer, m_field_b_buffer});
     sq.enqueueComputeShader(m_decode_c_single_field_algo, vector{frame_phase_c, field_parity}, 0);
@@ -393,7 +393,7 @@ void Shaders::makeFieldFromConsecutiveFrames(CommandBuffer &sq,
     sq.enqueueComputeShader(
             m_convert_sample_rate_algo,
             vector{filter_4_to_3->size().x_size, 3u, 4u, 0u, 0u, m_interpolated32_buffer->size().y_size,
-                        m_interpolated32_buffer->size().x_size, (1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases}, convert_sample_rate_descriptor_set_index);
+                        m_interpolated32_buffer->size().x_size, (1 - fields_parity), 2u, fields_phases, 2u, 2 * fields_phases, 1u}, convert_sample_rate_descriptor_set_index);
 }
 
 ResultImages Shaders::getResultImages() {
@@ -408,7 +408,7 @@ void Shaders::convertAudioSampleRate(musevk::CommandBuffer &sq, shared_ptr<Vulka
                 m_convert_sample_rate_algo,
                 vector{m_filter_4_to_3_buffer->size().x_size, 3u, 4u,
                        2u + 562u * i, 2u, 44u, (uint32_t)MUSE_TOTAL_WIDTH,
-                       44u * i, 1u, 0u, 1u, 0u},
+                       44u * i, 1u, 0u, 1u, 0u, 0u},
                 3 + i);
     }
     m_audio_data->synchronizeForHostRead(sq);

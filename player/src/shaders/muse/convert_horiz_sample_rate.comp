@@ -18,6 +18,11 @@ layout(push_constant) uniform PushConstants {
     uint dest_start_col;
     uint dest_col_step_size;
     uint phase;
+    // Beyond the ends of a source row: 0 pads with mid-level (128, the bit
+    // stream of the audio rows), 1 repeats the end sample (the picture: a
+    // pad of 128 against a dark edge lit the last column mid-grey, with the
+    // filter's ringing a few columns in)
+    uint edge_repeat;
 };
 
 layout(set = 0, binding = 0) buffer readonly filter_buffer {
@@ -68,7 +73,13 @@ void main() {
     int hiFreqIx = int(dest_col_filter_out * downsample_factor + phase);
     float16_t s = 0.hf;
     for (int l = (hiFreqIx - N + UPSAMPLE - 1) / UPSAMPLE; l <= (hiFreqIx + N) / UPSAMPLE; l++) {
-        float16_t v = l >= 0 && l < source_width ? source[(source_row + source_y_offset) * source_width + source_x_offset + l] : 128.hf;
+        float16_t v;
+        if (l >= 0 && l < source_width)
+            v = source[(source_row + source_y_offset) * source_width + source_x_offset + l];
+        else if (edge_repeat != 0)
+            v = source[(source_row + source_y_offset) * source_width + source_x_offset + clamp(l, 0, int(source_width) - 1)];
+        else
+            v = 128.hf;
         s += v * shared_filter[UPSAMPLE * l - hiFreqIx + N];
     }
 
