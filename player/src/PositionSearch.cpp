@@ -64,7 +64,7 @@ const char *PositionSearch::noCodeReason() const {
 }
 
 const char *PositionSearch::notOnCaptureReason() const {
-    return m_target.isChapter() ? "NO MORE CHAPTERS" : "NOT ON THIS CAPTURE";
+    return m_target.isChapter() ? "NO MORE CHAPTERS" : "NOT FOUND";
 }
 
 void PositionSearch::noteResolution(const Reading &reading) {

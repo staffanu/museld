@@ -375,7 +375,7 @@ cancelling, starting from where playback is, so a jump nearby changes a digit or
 keyboard types the digits straight in, Return goes, Escape cancels.  The search takes two or
 three probes and lands on the frame asked for (within a fraction of a second on a CLV disc
 whose time code has no picture numbers), paused if playback was paused, as a player's frame
-search does.  A position past the end of the capture says NOT ON THIS CAPTURE, one before its
+search does.  A position past the end of the capture says NOT FOUND, one before its
 start lands at the start.  The searches need the input's length, and work on files and http
 input, not on live streams or the 16.2 MHz baseband reader.
 

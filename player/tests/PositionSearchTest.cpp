@@ -310,7 +310,7 @@ TEST_CASE("a frame past the end of the capture fails", "[positionsearch]") {
     PositionSearch search(params(disc), disc.readingAt(origin, 1), PositionSearch::Target::frame(50000));
     auto out = run(disc, search);
     REQUIRE(out.action.kind == PositionSearch::Action::Kind::eFailed);
-    CHECK(out.action.reason == "NOT ON THIS CAPTURE");
+    CHECK(out.action.reason == "NOT FOUND");
 }
 
 TEST_CASE("a time before the capture began lands at its start", "[positionsearch]") {
