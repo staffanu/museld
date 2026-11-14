@@ -32,18 +32,17 @@ void MenuOverlay::render(musevk::CommandBuffer &command_buffer, ResultImages &im
     if (const Entry *entry = menu.entry()) {
         // An entry: the title, the text with a cursor (on one of its digits, or
         // at its end), the keyboard rows with the selected key marked if it
-        // has a keyboard, else its hint line
+        // has a keyboard
         const auto rows = entry->rows();
-        const std::string hint = entry->hint();
         size_t row_chars = 0;
         for (const auto &row : rows) {
             size_t n = 0;
             for (const auto &key : row) n += key.size() + 1;
             row_chars = std::max(row_chars, n);
         }
-        const size_t text_chars = std::max<size_t>(entry->text().size() + 1, std::max<size_t>(hint.size(), 24));
+        const size_t text_chars = std::max<size_t>(entry->text().size() + 1, 24);
         const int panel_w = std::min(width - 2 * pad, pad * 2 + glyph_w * (int)std::max(row_chars, text_chars));
-        const int panel_h = pad * 3 + line_h * (int)(rows.size() + 2 + (hint.empty() ? 0 : 1)) + glyph_h / 2;
+        const int panel_h = pad * 3 + line_h * (int)(rows.size() + 2) + glyph_h / 2;
         const int x0 = pad * 2;
         const int y0 = std::max(pad, (height - panel_h) / 2);
         text_renderer.fillRect(images.out_image, x0, y0, panel_w, panel_h, 0.0f, 0.0f, 0.0f, 0.7f, command_buffer);
@@ -66,10 +65,6 @@ void MenuOverlay::render(musevk::CommandBuffer &command_buffer, ResultImages &im
             text_renderer.drawText(images.out_image, x0 + pad, y, text + "_", scale, command_buffer);
         }
         y += line_h + glyph_h / 2;
-        if (!hint.empty()) {
-            text_renderer.drawText(images.out_image, x0 + pad, y, hint, scale, command_buffer);
-            y += line_h;
-        }
         for (size_t r = 0; r < rows.size(); r++) {
             int x = x0 + pad;
             for (size_t c = 0; c < rows[r].size(); c++) {

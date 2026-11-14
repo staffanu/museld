@@ -66,10 +66,6 @@ int PositionEntry::cursor() const {
     return m_place;
 }
 
-std::string PositionEntry::hint() const {
-    return "UP/DOWN CHANGE  LEFT/RIGHT MOVE  SELECT GO";
-}
-
 void PositionEntry::handleKey(Key key) {
     const int n = (int)m_digits.size();
     int &digit = m_digits[(size_t)m_place];

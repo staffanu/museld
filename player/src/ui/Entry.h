@@ -13,7 +13,7 @@
 // (PositionEntry, the player's go-to).  A real keyboard types into either
 // through type() and backspace(), and its Return and Escape are accept()
 // and cancel().  Nothing here draws: the overlay shows the title and the
-// text, the keyboard rows if there are any, and the hint.
+// text, and the keyboard rows if there are any.
 class Entry {
 public:
     enum class Key { eUp, eDown, eLeft, eRight, eSelect, eBack };
@@ -36,8 +36,6 @@ public:
     [[nodiscard]] virtual std::vector<std::vector<std::string>> rows() const { return {}; }
     [[nodiscard]] virtual int row() const { return 0; }
     [[nodiscard]] virtual int column() const { return 0; }
-    // A line under the text saying what the keys do; empty for none
-    [[nodiscard]] virtual std::string hint() const { return {}; }
 };
 
 #endif //MUSELD_ENTRY_H

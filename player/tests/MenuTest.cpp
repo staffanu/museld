@@ -193,7 +193,6 @@ TEST_CASE("A position entry is set like a clock and typed like a VCR", "[Menu]")
     CHECK(chapter.text() == "07");
     PositionEntry clamped("X", PositionEntry::Format::eNumber, 2, 123, {}, {});
     CHECK(clamped.text() == "99");
-    CHECK(clamped.hint().find("SELECT") != std::string::npos);
     CHECK(clamped.rows().empty());
 }
 

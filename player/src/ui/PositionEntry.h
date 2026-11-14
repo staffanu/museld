@@ -35,7 +35,6 @@ public:
     [[nodiscard]] const std::string &title() const override { return m_title; }
     [[nodiscard]] const std::string &text() const override { return m_text; }
     [[nodiscard]] int cursor() const override;
-    [[nodiscard]] std::string hint() const override;
 
     [[nodiscard]] double value() const;
     [[nodiscard]] Format format() const { return m_format; }
