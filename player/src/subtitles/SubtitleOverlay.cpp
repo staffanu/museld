@@ -221,4 +221,11 @@ void SubtitleOverlay::render(musevk::CommandBuffer &command_buffer,
 
     std::vector<PushBlock> push{pc};
     command_buffer.enqueueComputeShader(m_shader, push);
+
+    // The plates are blended over the picture, so a second pass over the same
+    // decoded image would darken them again: while paused (and after an input
+    // timeout, which presents the previous image once more) the field is
+    // re-decoded for the next pass, as the OSD and the menu ask for theirs
+    if (state.paused || !state.last_decoded.decoded)
+        state.redo_last_field = true;
 }
