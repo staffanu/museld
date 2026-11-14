@@ -117,6 +117,10 @@ struct SubtitleSetup {
     // Start with the CC track in the primary slot (--cc): the captions show
     // from the start without the [ key, which a TV remote does not have
     bool cc_show = false;
+    // Non-empty: record the picture signature of the frames played into this
+    // file (--signature-write), which a later play of the disc is recognized
+    // by to pick its subtitles
+    std::string signature_write_path;
 };
 
 // Applies live text updates (from the OCR worker or the closed caption
@@ -647,6 +651,20 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             for (const auto &stream : vfw->audioStreams())
                 extra_tracks.push_back(stream.track);
 #endif
+        // --signature-write: the signature of every frame read goes to the
+        // file as it is played
+        std::unique_ptr<disc_signature::Writer> signature_writer;
+        if (!subtitle_setup.signature_write_path.empty()) {
+            const double fps = reader_controls.frames_per_second;
+            const auto header = is_muse ? disc_signature::Header::forStandard(disc_signature::Standard::eMuse, 30, 1)
+                    : fps < 27 ? disc_signature::Header::forStandard(disc_signature::Standard::ePal, 25, 1)
+                    : disc_signature::Header::forStandard(disc_signature::Standard::eNtsc, 30000, 1001);
+            try {
+                signature_writer = std::make_unique<disc_signature::Writer>(subtitle_setup.signature_write_path, header);
+            } catch (const std::exception &x) {
+                throw std::runtime_error(std::format("--signature-write: {}", x.what()));
+            }
+        }
         auto make_controls = [&](bool redo) {
             return Decoder::DecodeControls{
                     audio_track,
@@ -665,6 +683,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                     state.temporal_nr,
                     state.edge_directed,
                     extra_tracks,
+                    signature_writer != nullptr,
             };
         };
 
@@ -767,6 +786,13 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 }
             if (reader_controls.signalPresent)
                 state.no_signal = !reader_controls.signalPresent();
+
+            // Taken out of the field once written: a pass that does not
+            // decode (paused) sees the same field again
+            if (signature_writer && state.last_decoded.signature) {
+                signature_writer->append(*state.last_decoded.signature);
+                state.last_decoded.signature.reset();
+            }
 
             // Only fields that were actually decoded: next() also returns true
             // when the input timed out, and counting those would make
@@ -1210,6 +1236,14 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
 #ifdef HAVE_LIBAV
             writeSettledCaptions(true);
 #endif
+        }
+        if (signature_writer) {
+            if (signature_writer->good())
+                log.info(eApplication, std::format("Wrote the signature of {} frames to {}",
+                                                   signature_writer->frameCount(), subtitle_setup.signature_write_path));
+            else
+                log.error(eApplication, std::format("Writing the signature to {} failed after {} frames",
+                                                    subtitle_setup.signature_write_path, signature_writer->frameCount()));
         }
         if (cc_track_index >= 0 && !subtitle_setup.cc_write_stem.empty() && subtitle_tracks) {
             try {
@@ -2027,6 +2061,7 @@ int main(int argc, char *argv[]) {
     bool ocr_write = false;
     bool cc_write = false;
     bool cc_show = false;
+    std::string signature_write_path;
 
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
@@ -2345,6 +2380,11 @@ int main(int argc, char *argv[]) {
                                "--subtitles finds them on the next playback", [&] () -> void {
         cc_write = true;
     });
+    options.option("--signature-write", "FILE", "Record the picture signature of the disc as it plays "
+                                                "(block means of every frame with its disc code) "
+                                                "into FILE, for recognizing the disc on a later play", [&] () -> void {
+        signature_write_path = *(it++);
+    });
     options.flag("--cc", "Show the line-21 closed captions of an NTSC disc from the start "
                          "(the CC track is otherwise selected with the [ key)", [&] () -> void {
         cc_show = true;
@@ -2653,6 +2693,7 @@ int main(int argc, char *argv[]) {
                         (input_path.parent_path() / input_path.stem()).string();
             }
             subtitle_setup.cc_show = cc_show;
+            subtitle_setup.signature_write_path = signature_write_path;
             if ((cc_write || cc_show) && file_input_type != eNtscRf)
                 cerr << std::format("Warning: {} does nothing here: closed captions exist only on NTSC discs",
                                     cc_write ? "--cc-write" : "--cc") << endl;

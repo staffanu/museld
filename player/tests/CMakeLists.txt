@@ -17,6 +17,7 @@ add_executable(museld-tests
     DisplayGeometryTest.cpp
     PositionSearchTest.cpp
     VideoFileTimelineTest.cpp
+    DiscSignatureTest.cpp
     LdfInputReaderTest.cpp
     HttpByteSourceTest.cpp
     ParallelOggFlacReaderTest.cpp
@@ -29,6 +30,7 @@ add_executable(museld-tests
     ../src/ui/SavedState.cpp
     ../src/PositionSearch.cpp
     ../src/VideoFileTimeline.cpp
+    ../src/signature/DiscSignature.cpp
     ../src/subtitles/Eia608Decoder.cpp
     ../src/bch/BchDecoder.cpp
     ../src/InputProbe.cpp

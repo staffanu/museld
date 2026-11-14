@@ -103,6 +103,7 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
     out.audio_sample_count = 0;
     out.ac3_frames.clear();
     out.track_audio.clear();
+    out.signature.reset();
     out.decoded = false;
 
     if (redo_last_field) // undo the field advance from the previous call
@@ -336,6 +337,17 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     if (input_block != nullptr) {
         m_frame_buffers[0]->processDiscCode();
+        if (controls.record_signature && !controls.metadata_only) {
+            // The luminance samples of the two fields (lines 47-562 and
+            // 609-1124, samples 107-480) of the frame buffer the disc code is
+            // read from: rescaled to digital levels, de-emphasized, and with
+            // the transmission gamma undone when that stage is on
+            const disc_signature::FieldGeometry geometry{
+                    MUSE_TOTAL_WIDTH, {46, 608}, MUSE_BUF_HEIGHT, 106, MUSE_Y_BUF_WIDTH};
+            disc_signature::Frame &signature = out.signature.emplace();
+            disc_signature::computeBlocks(m_frame_buffers[0]->data()->data<uint16_t>(), geometry, signature.blocks);
+            signature.setDiscInfo(m_frame_buffers[0]->getDiscCode().get(), 30, 1);
+        }
     }
 
     if (decode_audio && m_field_index == 0) {

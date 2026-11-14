@@ -14,6 +14,7 @@
 #include "DropoutMode.h"
 #include "DiscInfo.h"
 #include "ResultImages.h"
+#include "signature/DiscSignature.h"
 
 class Decoder {
 public:
@@ -84,6 +85,9 @@ public:
         // with a stream per track (DecodedField::track_audio); the reader
         // must demodulate them too (FrameReader::setExtraAudioTracks)
         std::vector<AudioTrack> extra_tracks;
+        // The picture signature of every frame read is wanted
+        // (DecodedField::signature, for --signature-write)
+        bool record_signature = false;
     };
 
     // One audio track's output of a field, for the file writer
@@ -141,6 +145,11 @@ public:
         // where the EFM track was decoded (SDTV): the automatic fallback from
         // a silent analog track checks that the EFM track exists at all
         std::optional<bool> efm_locked;
+        // The picture signature of the frame just read, with that frame's own
+        // disc code (which is not always the frame disc_info describes); set
+        // once per frame read while DecodeControls::record_signature is on,
+        // not on a metadata probe
+        std::optional<disc_signature::Frame> signature;
     };
 
     Decoder(const Decoder&) = delete;

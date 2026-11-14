@@ -234,6 +234,19 @@ are supported; the channel-2 services and field 2 (CC3/CC4, XDS) are not.
 
 A `--write` file carries the captions as a subtitle stream as well, timed against the file.
 
+### Disc signature
+
+`--signature-write FILE` records the picture signature of a disc while it plays, from a
+capture or a live input: for every frame read, the mean level of the frame buffer over a 16 by
+12 grid of blocks per field (the inner part of the picture, taken before the colour decoding,
+so the decode settings do not change it), with the frame's disc code. Two plays of one disc
+give the same numbers at the same disc frame, which is meant for recognizing a disc as it
+plays, to pick its subtitles; so far only the recording exists. The file is 776 bytes per
+frame (about 80 MB for an hour of NTSC); its layout is described in
+`player/src/signature/DiscSignature.h`. `tools/disc-signature-compare.py A B` pairs the
+frames of two recordings by disc frame and reports how well windows of them agree, against
+windows taken from different places.
+
 ### Live subtitle OCR and translation (experimental)
 
 Discs with burned-in subtitles can be read and translated during playback. This

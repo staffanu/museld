@@ -336,6 +336,7 @@ if(BUILD_MUSE)
         FrameExporter.cpp FrameExporter.h
         InputController.cpp InputController.h
         PositionSearch.cpp PositionSearch.h
+        signature/DiscSignature.cpp signature/DiscSignature.h
 
         bch/BchDecoder.cpp bch/BchDecoder.h
         util/PercentileFilter.cpp util/PercentileFilter.h

@@ -191,6 +191,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
     out.decoded = false;
     out.efm_locked.reset();
     out.cc_bytes.reset();
+    out.signature.reset();
 
     if (redo_last_field) // undo the field advance from the previous call
         m_field_index = (m_field_index + 1) % 2;
@@ -699,6 +700,17 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
                 m_log.debug(eDecoder, std::format("VBI frame {}: picture number carried over from the previous frame", m_frame_no));
             m_prev_vbi = vbi;
             m_prev_vbi_seek_generation = input_block->seek_generation;
+        }
+        if (controls.record_signature && !controls.metadata_only) {
+            // From the frame buffer the VBI slicer reads (de-emphasized,
+            // blanking 0, white 1), before any of the colour decoding
+            const disc_signature::FieldGeometry geometry{
+                    m_standard.samples_per_line,
+                    {m_standard.field_start_y - 1, m_standard.field_start_y - 1 + m_standard.field2_offset},
+                    m_standard.field_lines, m_standard.field_start_x, m_standard.y_buf_width};
+            disc_signature::Frame &signature = out.signature.emplace();
+            disc_signature::computeBlocks(m_frames[0]->data()->data<uint16_t>(), geometry, signature.blocks);
+            signature.setDiscInfo(m_frames[0]->getVbiData().get(), m_standard.fps_num, m_standard.fps_den);
         }
         // A new frame was read, so this pair has not been delivered before.
         // It leads the displayed frame (m_frames[1]) by one frame time, which

@@ -76,6 +76,11 @@ player/            — Main C++ project (museld player + ac3rf-efm-decode librar
                      --ocr-translate <url> adds "OCR-EN", --ocr-write saves both as .srt
                      with original imprint timing.  subocr-test is the regression harness
                      against the tools/subocr Python reference
+    signature/     — DiscSignature: block means of every frame read (16x12 per field, from the
+                     frame buffer before colour decoding) with its disc code, for recognizing a
+                     disc as it plays; so far the recorder only (--signature-write FILE, both
+                     decoders fill DecodedField::signature), tools/disc-signature-compare.py
+                     scores two recordings against each other
     util/          — PercentileFilter, LinearRegression, ConstExprHelpers, FmtAddons
     shaders/       — GLSL compute shaders (compiled to SPIR-V at build time)
     museld.cpp
