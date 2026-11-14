@@ -144,7 +144,9 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
         m_frame_buffers.pop_back();
         m_frame_buffers.push_front(frame_buffer);
         frame_buffer->set_frame_no(++m_frame_no, input_block->input_offset, input_block->input_samples_per_muse_sample);
-        m_frame_seek_generation = input_block->seek_generation;
+        std::rotate(m_frame_seek_generation.rbegin(), m_frame_seek_generation.rbegin() + 1,
+                    m_frame_seek_generation.rend());
+        m_frame_seek_generation[0] = input_block->seek_generation;
         shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
 
         // Decode the control signal on the *raw* frame so the equaliser can pick the
@@ -304,7 +306,18 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
                 m_frame_buffers[2 - decoded_field_index]->get_field(1 - decoded_field_index),
                 m_frame_buffers[2]->get_field(decoded_field_index)};
 
-        if (m_shaders.decodeInterFrameAndDetectMotion(*m_second_stage_command_buffer, fields, true)) {
+        // The previous frames are this one's temporal neighbours only when
+        // the same seek read them: after a seek (and a position search's
+        // probes, which read frames from all over the disc into the ring)
+        // the first frames are decoded within
+        // themselves.  (A slot not yet read at the start of a run is left as
+        // it always was.)
+        auto other_seek = [this](int slot) {
+            return m_frame_seek_generation[slot] != c_no_frame_yet
+                   && m_frame_seek_generation[slot] != m_frame_seek_generation[0];
+        };
+        const bool neighbours_match = !other_seek(1) && !other_seek(2);
+        if (neighbours_match && m_shaders.decodeInterFrameAndDetectMotion(*m_second_stage_command_buffer, fields, true)) {
             m_log.debug(eVideo, std::format("Field {} inter-frame interpolation success", decoded_field_index));
             m_shaders.combineStillAndMovingParts(*m_second_stage_command_buffer,
                                                  field_interpolation_mode == FieldInterpolationMode::eForceIntraField,
@@ -381,7 +394,7 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
 
     out.disc_info = m_frame_buffers[0]->getDiscCode();
     out.disc_info_input_offset = m_frame_buffers[0]->getInputOffset();
-    out.seek_generation = m_frame_seek_generation;
+    out.seek_generation = m_frame_seek_generation[0];
 
     return true;
 }

@@ -94,6 +94,7 @@ private:
     // The seek generation of each frame in m_frames (same order), so the
     // disc info handed out can say which seek it belongs to
     std::vector<uint32_t> m_frame_seek_generation; // one per frame in m_frames
+    static constexpr uint32_t c_no_frame_yet = UINT32_MAX; // a slot nothing has been read into
     double m_prev_burst_phase;        // last frame's burst phase, NAN before the first
     double m_burst_coherence_avg;     // EWMA of the frame-to-frame burst phase error, -1 until seeded
     std::array<double, 256> m_noise_psd; // cumulative blank-VBI-line power spectrum

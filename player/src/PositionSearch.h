@@ -95,6 +95,11 @@ public:
         };
         Kind kind;
         int64_t offset = 0;
+        // eDone: where to seek to so that the frame at `offset` is the first
+        // one read -- the probe that read it was aimed here; a seek to the
+        // frame's own offset reads the frame after it, since the readers hand
+        // out the first whole frame past a seek
+        int64_t seek_offset = 0;
         double value = 0;
         std::string reason;
     };
@@ -133,6 +138,7 @@ public:
 private:
     struct Bound {
         int64_t offset;
+        int64_t requested = 0;          // the probe's position that read it
         // The coordinate read there; unset for lead-in/lead-out and the
         // input ends, where only the side of the target is known
         std::optional<double> value;

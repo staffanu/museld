@@ -100,7 +100,7 @@ bool SdtvDecoder::initialize() {
     // so the first reads decode blank frames instead of special cases
     for (int i = 0; i < 3 * m_temporal_distance + 1; i++)
         m_frames.push_back(new SdtvFrame(m_log, -i, m_manager, m_standard));
-    m_frame_seek_generation.assign(m_frames.size(), 0);
+    m_frame_seek_generation.assign(m_frames.size(), c_no_frame_yet);
 
     m_frame_no = 0;
     m_field_index = 0;
@@ -179,8 +179,8 @@ bool SdtvDecoder::detectDtsBitstream(const std::vector<TwoChannelSampleWithErasu
 // For NTSC, enable_non_linear is not implemented
 bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
     const AudioTrack audio_track = controls.audio_track;
-    const bool use_3d_comb = controls.use_3d_comb;
-    const FieldInterpolationMode field_interpolation_mode = controls.field_interpolation_mode;
+    bool use_3d_comb = controls.use_3d_comb;
+    FieldInterpolationMode field_interpolation_mode = controls.field_interpolation_mode;
     const bool redo_last_field = controls.redo_last_field;
     const DropoutMode dropout_mode = controls.dropout_mode;
     const bool output_yuv = controls.output_yuv;
@@ -501,6 +501,22 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         int decoded_field_index = m_decode_all_fields ? m_field_index : 1;
 
         const int d = m_temporal_distance;
+        // The frames on either side of the displayed one are its temporal
+        // neighbours only when the same seek read them: after a seek (and
+        // after a position search's probes, which read frames from all over
+        // the disc into the ring) the first frames are decoded within
+        // themselves, no 3D comb, no inter-frame weave.  (A slot not yet
+        // read at the start of a run is left as it always was.)
+        auto other_seek = [this, d](int slot) {
+            return m_frame_seek_generation[slot] != c_no_frame_yet
+                   && m_frame_seek_generation[slot] != m_frame_seek_generation[d];
+        };
+        if (m_frame_seek_generation[d] != c_no_frame_yet && (other_seek(0) || other_seek(2 * d))) {
+            use_3d_comb = false;
+            field_interpolation_mode = FieldInterpolationMode::eForceIntraField;
+            m_log.debug(eVideo, std::format("frame {} decoded within itself: its neighbours are from another seek (generations {} {} {})",
+                                            m_frame_no - d, m_frame_seek_generation[0], m_frame_seek_generation[d], m_frame_seek_generation[2 * d]));
+        }
         out.last_frame_buffer_input_offset = m_frames[d]->getInputOffset();
         out.input_samples_per_muse_sample = m_frames[d]->getInputSamplesPerSdtvSample();
         out.field_parity = decoded_field_index;

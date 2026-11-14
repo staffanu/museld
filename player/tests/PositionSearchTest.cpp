@@ -289,6 +289,11 @@ TEST_CASE("a frame search lands on the frame", "[positionsearch]") {
         REQUIRE(there.frame.has_value());
         CHECK(*there.frame == target);
         CHECK(out.probes <= 5);
+        // The player seeks to seek_offset and is handed the first whole frame
+        // past it, which must be that frame
+        const int64_t frame = (int64_t)(c_fs / c_fps);
+        const int64_t landed = ((out.action.seek_offset + (int64_t)(0.03 * c_fs)) / frame + 1) * frame;
+        CHECK(landed == out.action.offset);
     }
 }
 

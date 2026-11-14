@@ -707,14 +707,15 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 case Kind::eDone:
                 case Kind::eFailed: {
                     const bool found = action.kind == Kind::eDone;
-                    const int64_t destination = found ? action.offset : state.position_search->originOffset();
+                    const int64_t destination = found ? action.seek_offset : state.position_search->originOffset();
                     const std::string name = PositionSearch::describe(state.position_search->target().kind, action.value);
                     log.info(eApplication, found
                              ? std::format("Position search: {} found at input sample {} after {} probes",
                                            name, action.offset, state.position_search->probes())
                              : std::format("Position search: {} after {} probes, returning to input sample {}",
                                            action.reason, state.position_search->probes(), destination));
-                    seekToInputSample(destination);
+                    if (seekToInputSample(destination))
+                        state.search_landing_generation = state.search_generation;
                     // Shown with the first frame from there, not on the probe image
                     state.osd_text_pending = found ? name : action.reason;
                     state.osd_text_pending_generation = state.search_generation;
@@ -739,6 +740,16 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             // frames are not played (no clock, picture, audio, captions or
             // file output), only read for their disc code
             const bool searching = state.position_search != nullptr;
+            if (state.search_landing_generation && state.last_decoded.decoded
+                && state.last_decoded.seek_generation == *state.search_landing_generation) {
+                state.search_landing_generation.reset();
+                log.debug(eApplication, std::format("Position search: landed, the frame at input sample {} is shown",
+                                                    state.last_decoded.disc_info_input_offset));
+            }
+            // The picture, sound and everything that follows them are held
+            // back while a search runs and until its landing frame is the
+            // one displayed (a function: --chapter starts a search below)
+            auto hidden = [&state] { return state.position_search != nullptr || state.search_landing_generation.has_value(); };
             // A probe near the end of a capture may find no signal there and
             // run into the end of the input, which would finish the reader:
             // it waits there instead while a search is on
@@ -760,7 +771,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             // Only fields that were actually decoded: next() also returns true
             // when the input timed out, and counting those would make
             // --export-frame-at fire early and the frame rate below flattering.
-            if (!state.paused && state.last_decoded.decoded && !searching)
+            if (!state.paused && state.last_decoded.decoded && !hidden())
                 state.field_count++;
             state.stream_seconds = state.field_count * seconds_per_iteration
                                    + state.stream_seek_offset_seconds;
@@ -855,7 +866,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
 
             // Scripted export: decode until the requested stream position is reached
             bool scripted_export = false;
-            if (export_frame_filename && !searching &&
+            if (export_frame_filename && !hidden() &&
                 state.field_count * seconds_per_iteration >= export_frame_after_seconds) {
                 state.export_frame = true;
                 scripted_export = true;
@@ -868,7 +879,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             // OSD or the menu, which a screenshot would otherwise be needed for)
             static const bool export_with_overlays = getenv("MUSELD_EXPORT_OVERLAYS") != nullptr;
             bool export_after_present = false;
-            if (state.export_frame && !searching) {
+            if (state.export_frame && !hidden()) {
                 state.export_frame = false;
                 if (export_with_overlays) {
                     export_after_present = true;
@@ -882,7 +893,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 }
             }
 
-            if (cc_track_index >= 0 && state.last_decoded.cc_bytes && subtitle_tracks && !searching) {
+            if (cc_track_index >= 0 && state.last_decoded.cc_bytes && subtitle_tracks && !hidden()) {
                 // After a seek the caption memories describe the abandoned
                 // stream position; a forward jump also loses the pop-on load
                 // in progress, so start over in both directions
@@ -916,7 +927,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
 
 #ifdef HAVE_OCR
             if (ocr_worker) {
-                if (!state.paused && state.last_decoded.decoded && !searching
+                if (!state.paused && state.last_decoded.decoded && !hidden()
                     && ++ocr_sample_countdown >= ocr_sample_every) {
                     ocr_sample_countdown = 0;
                     int band_width, band_height;
@@ -982,7 +993,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             // Only a decoded field goes into the file: next() also returns on an
             // input timeout with nothing decoded, and the images then hold whatever
             // was there before (zeros, before the first field)
-            if (vfw && !searching && state.last_decoded.decoded) {
+            if (vfw && !hidden() && state.last_decoded.decoded) {
                 // The frame's disc time and chapter, for the file's start
                 // timecode and chapter marks
                 std::optional<double> disc_seconds;
@@ -1022,7 +1033,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
 #endif
 
             if (audio_playback && state.last_decoded.audio_sample_count != 0
-                && state.last_decoded.audio_mode != MODE_UNKNOWN && !state.paused && !searching) {
+                && state.last_decoded.audio_mode != MODE_UNKNOWN && !state.paused && !hidden()) {
                 // Channel selection for the listener (bilingual discs, or the
                 // left-only analog audio on AC3 discs).  Mutating the decoded
                 // samples is safe here: the file writer above has already
@@ -1046,6 +1057,9 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 // tvOS: GPU work in the background gets the app killed.  Idle
                 // until the events bring it back (decoding is paused as well).
                 SDL_Delay(50);
+            } else if (state.search_landing_generation) {
+                // The frame decoded is not yet the one the search landed on:
+                // the window keeps showing the picture the search left
             } else {
                 auto swap_chain_image = manager.acquireNextImage(image_available_semaphore);
                 // (after the acquire: it may have recreated the swap chain at a new size)

@@ -407,7 +407,14 @@ the seeking thread, and the NTSC reader drops the partial frame after a reset. A
 about 50 ms. End of file finishes the demodulator and reader threads for good, and a probe near the end
 of a capture may find no signal left there and run into it: while a search is on, the demodulator
 waits at the end for a seek instead (`RfDemodulator::holdAtEnd`), the player loop tells the search
-(`PositionSearch::probeReachedEnd`), and the search looks further back for the last frames there are. `DiscInfo` exposes chapter, lead-in/out and the CAV picture stop (which pauses
+(`PositionSearch::probeReachedEnd`), and the search looks further back for the last frames there are.
+A search ends with a seek to the probe position that read the frame found (`Action::seek_offset`:
+a seek to the frame's own offset reads the frame after it), and the player presents nothing until
+the displayed frame is of that seek's generation (`PlayerState::search_landing_generation`; the SDTV
+decoder shows a frame behind the read, so the first frame after the landing is the last probe's).
+Both decoders decode a frame within itself (no 3D comb, no inter-frame weave or interpolation) when
+its temporal neighbours in the frame ring came from another seek, which the probes' frames did; a
+slot not yet read at the start of a run (`c_no_frame_yet`) is left as it always was. `DiscInfo` exposes chapter, lead-in/out and the CAV picture stop (which pauses
 playback unless turned off with P).
 
 **Input format abstraction**: `InputReader` specializations (raw widths, lds, FLAC; a seekable

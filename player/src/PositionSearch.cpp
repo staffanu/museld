@@ -116,41 +116,41 @@ PositionSearch::PositionSearch(const Params &params, const Reading &current, con
           m_action{Action::Kind::eFailed} {
     const auto here = coordinate(current, target.kind);
     if (!here) {
-        m_action = {Action::Kind::eFailed, 0, 0, noCodeReason()};
+        m_action = {Action::Kind::eFailed, 0, 0, 0, noCodeReason()};
         return;
     }
     noteResolution(current);
     if (params.input_sample_count < 0 && m_forward) {
         // Probing past the end of the input finishes the decoding threads
         // for good, so forward probes need to know where the end is
-        m_action = {Action::Kind::eFailed, 0, 0, "INPUT LENGTH UNKNOWN"};
+        m_action = {Action::Kind::eFailed, 0, 0, 0, "INPUT LENGTH UNKNOWN"};
         return;
     }
     switch (target.kind) {
         case Kind::eNextChapter:
             m_target.value = *here + 1;
-            m_lo = Bound{current.offset, here};
+            m_lo = Bound{current.offset, current.offset, here};
             break;
         case Kind::ePreviousChapter:
             // The start of the current chapter first; finish() moves on to
             // the one before when that turns out to be right behind us
             m_target.value = *here;
-            m_hi = Bound{current.offset, here};
+            m_hi = Bound{current.offset, current.offset, here};
             break;
         case Kind::eChapter:
         case Kind::eTime:
         case Kind::eFrame:
             if (target.kind == Kind::eFrame && *here == target.value) {
                 // Already on it
-                m_action = {Action::Kind::eDone, current.offset, target.value};
+                m_action = {Action::Kind::eDone, current.offset, current.offset, target.value};
                 return;
             }
             // Inside the target chapter, or at or past the time or frame:
             // look for its start behind us
             if (*here >= target.value)
-                m_hi = Bound{current.offset, here};
+                m_hi = Bound{current.offset, current.offset, here};
             else
-                m_lo = Bound{current.offset, here};
+                m_lo = Bound{current.offset, current.offset, here};
             break;
     }
     decide();
@@ -181,14 +181,14 @@ void PositionSearch::finish() {
         // past the previous chapter's end.
         m_chained = true;
         m_target.value--;
-        m_hi = Bound{start, m_target.value + 1};
+        m_hi = Bound{start, m_hi->requested, m_target.value + 1};
         m_lo.reset();
         m_step = seconds(m_params.initial_step_seconds);
         decide();
         return;
     }
     const double value = m_target.isChapter() ? m_hi->value.value_or(m_target.value) : m_target.value;
-    m_action = {Action::Kind::eDone, start, value};
+    m_action = {Action::Kind::eDone, start, m_hi->requested, value};
 }
 
 void PositionSearch::decide() {
@@ -266,7 +266,7 @@ void PositionSearch::decide() {
     // Backward: gallop from the upper bound towards the start
     if (m_hi->offset == 0) {
         // The position was before the capture began
-        m_action = {Action::Kind::eDone, 0, m_target.isChapter() ? m_hi->value.value_or(m_target.value) : m_target.value};
+        m_action = {Action::Kind::eDone, 0, 0, m_target.isChapter() ? m_hi->value.value_or(m_target.value) : m_target.value};
         return;
     }
     int64_t from = m_hi->offset;
@@ -304,7 +304,7 @@ const PositionSearch::Action &PositionSearch::feed(const Reading &reading) {
         // Nothing to read here: a stretch without codes, or a disc without
         // them at all.  Nudge the probe forward a little, a few times.
         if (++m_retries_without_code > 3) {
-            m_action = {Action::Kind::eFailed, 0, 0, noCodeReason()};
+            m_action = {Action::Kind::eFailed, 0, 0, 0, noCodeReason()};
             return m_action;
         }
         probe(m_requested + seconds(1.0));
@@ -313,7 +313,7 @@ const PositionSearch::Action &PositionSearch::feed(const Reading &reading) {
 
     // Which side of the target is this frame on?
     const bool below = reading.lead_in || (value && *value < m_target.value && !reading.lead_out);
-    const Bound bound{reading.offset, reading.lead_in || reading.lead_out ? std::nullopt : value};
+    const Bound bound{reading.offset, m_requested, reading.lead_in || reading.lead_out ? std::nullopt : value};
     const auto lo_before = m_lo ? m_lo->offset : -1;
     const auto hi_before = m_hi ? m_hi->offset : -1;
     if (below) {
@@ -321,14 +321,14 @@ const PositionSearch::Action &PositionSearch::feed(const Reading &reading) {
             // Landed past the upper bound and still below the target: the
             // disc's codes contradict themselves here (a dropout misread,
             // or chapters out of order); accept the upper bound
-            m_action = {Action::Kind::eDone, m_hi->offset,
+            m_action = {Action::Kind::eDone, m_hi->offset, m_hi->requested,
                         m_target.isChapter() ? m_hi->value.value_or(m_target.value) : m_target.value};
             return m_action;
         }
         const bool at_input_end = m_params.input_sample_count >= 0
                 && m_requested >= clampToInput(m_params.input_sample_count);
         if ((at_input_end || m_past_end) && m_forward && !m_hi) {
-            m_action = {Action::Kind::eFailed, 0, 0, notOnCaptureReason()};
+            m_action = {Action::Kind::eFailed, 0, 0, 0, notOnCaptureReason()};
             return m_action;
         }
         if (!m_lo || reading.offset > m_lo->offset)
@@ -337,14 +337,14 @@ const PositionSearch::Action &PositionSearch::feed(const Reading &reading) {
         if (reading.lead_out && m_forward && !m_hi) {
             // Beyond the programme: the position does not exist.  (A
             // lead-out read during a backward search just bounds it.)
-            m_action = {Action::Kind::eFailed, 0, 0, notOnCaptureReason()};
+            m_action = {Action::Kind::eFailed, 0, 0, 0, notOnCaptureReason()};
             return m_action;
         }
         if (!m_hi || reading.offset < m_hi->offset)
             m_hi = bound;
         if (m_requested == 0 && !m_lo) {
             // The very start of the capture is already at or past the target
-            m_action = {Action::Kind::eDone, 0,
+            m_action = {Action::Kind::eDone, 0, 0,
                         m_target.isChapter() ? m_hi->value.value_or(m_target.value) : m_target.value};
             return m_action;
         }
@@ -379,7 +379,7 @@ const PositionSearch::Action &PositionSearch::probeReachedEnd() {
     if (m_hi || !m_lo) {
         // Only a forward gallop probes towards the end; anything else that
         // gets there has lost its way
-        m_action = {Action::Kind::eFailed, 0, 0, "SEARCH FAILED"};
+        m_action = {Action::Kind::eFailed, 0, 0, 0, "SEARCH FAILED"};
         return m_action;
     }
     // The last frames of the capture are somewhere before this probe.  One
@@ -389,7 +389,7 @@ const PositionSearch::Action &PositionSearch::probeReachedEnd() {
     const int64_t next = m_requested - m_back_step;
     m_back_step *= 2;
     if (next <= m_lo->offset) {
-        m_action = {Action::Kind::eFailed, 0, 0, notOnCaptureReason()};
+        m_action = {Action::Kind::eFailed, 0, 0, 0, notOnCaptureReason()};
         return m_action;
     }
     probe(next);

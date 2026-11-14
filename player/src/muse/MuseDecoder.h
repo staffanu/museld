@@ -4,6 +4,7 @@
 #ifndef MUSECPP_MUSEDECODER_H
 #define MUSECPP_MUSEDECODER_H
 
+#include <array>
 #include <deque>
 #include "musevk/TimestampStatistics.h"
 #include "efm/EfmDecoder.h"
@@ -67,7 +68,8 @@ private:
     musevk::VulkanManager &m_manager;
     Shaders m_shaders;
     const bool m_decode_video;
-    uint32_t m_frame_seek_generation = 0; // of the frame in m_frame_buffers[0]
+    static constexpr uint32_t c_no_frame_yet = UINT32_MAX; // a slot nothing has been read into
+    std::array<uint32_t, 3> m_frame_seek_generation{c_no_frame_yet, c_no_frame_yet, c_no_frame_yet}; // of the frames in m_frame_buffers, by slot
     const bool m_decode_all_fields;
     const bool m_decode_audio;
     musevk::TimestampQueryPool *m_timestamp_query_pool; // if set we use it

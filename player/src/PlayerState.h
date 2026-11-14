@@ -88,6 +88,11 @@ struct PlayerState {
     uint32_t search_generation = 0;
     bool search_action_pending = false;
     bool search_resume_paused = false; // playback was paused when the search began
+    // After a search: the seek generation of where it landed.  Until the
+    // displayed frame is of it (the NTSC decoder shows a frame behind the
+    // read, so the first one after the landing is the last probe's) nothing
+    // is presented or heard.
+    std::optional<uint32_t> search_landing_generation;
     // OSD text to show once a frame of the given seek generation is on
     // screen (the search's result, which must not be drawn over the probe
     // image still showing)
