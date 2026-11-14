@@ -775,6 +775,8 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 state.field_count++;
             state.stream_seconds = state.field_count * seconds_per_iteration
                                    + state.stream_seek_offset_seconds;
+            // The while condition skipped the decoder on a paused pass without a redo
+            state.picture_fresh = !(state.paused && !state.redo_last_field) && state.last_decoded.decoded;
             state.redo_last_field = false;
 
             // --chapter, --time, --frame: once the disc code carries the

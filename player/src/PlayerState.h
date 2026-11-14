@@ -27,6 +27,11 @@ struct PlayerState {
     bool paused_before_background = false;
     Decoder::FieldInterpolationMode field_interpolation_mode = Decoder::FieldInterpolationMode::eNormal;
     bool redo_last_field = false;
+    // The displayed image was decoded (or re-decoded) on this pass of the
+    // loop; false on a pass that presents the previous image again (paused
+    // without a redo, an input timeout).  Overlays that blend rather than
+    // overwrite draw only on a fresh image.
+    bool picture_fresh = false;
     bool export_frame = false;
     bool enable_non_linear = true;
     bool use_3d_comb = true; // NTSC: temporal Y/C separation on still parts
