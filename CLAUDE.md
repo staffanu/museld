@@ -320,10 +320,12 @@ baseband output (the 16.2 MHz u16 capture of A River Runs Through It, analysed l
 tools/muse-ctlscan.py does) shows only a residue: 479 at the picture level and 480 about 12
 below it on negative-sync lines, nothing on positive ones -- so a real decoder's chain tames
 what ours shows in full, by what mechanism is not known.
-Nominally luma by the book, unusable as picture in practice: `copy_y_for_interpolation.comp`
-holds sample 478 across them (a cosmetic choice, two samples wide), the horizontal upsampler
-repeats the end sample instead of padding with 128 (`edge_repeat`; the audio rows keep the pad),
-and the field chroma interpolation clamps its right and bottom neighbours inside the buffer.
+Nominally luma by the book: the frame is decoded whole, and `PictureFormat::muse` leaves two
+samples at each end of the line (six columns) outside the standard picture, as the NTSC format
+leaves out its blanking margins (the O key's full image shows them; a hold of the last samples
+was tried first and showed as streaks).  The horizontal upsampler repeats the end sample
+instead of padding with 128 (`edge_repeat`; the audio rows keep the pad), and the field chroma
+interpolation clamps its right and bottom neighbours inside the buffer.
 Before that the right edge showed a bright and a dark column, alternating with the line.
 
 **MUSE timebase**: the two dumps exist for MUSE too: `MUSELD_DUMP_DEMOD` writes

@@ -180,7 +180,7 @@ a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at 
 | `--all-fields` | Update display at 60 Hz (default) |
 | `--full-screen` | Start full screen (at the monitor's current mode; the picture is scaled to it) |
 | `--aspect <mode>` | How the picture is fitted to the window — same as the F key. `normal` (default) keeps its shape, 16:9 for MUSE and 4:3 for NTSC, with black bars where the window is wider or taller; `zoom` fills the window and crops what overflows, which shows a letterboxed film full width on a wide screen; `squeeze` is for anamorphic NTSC discs, whose 4:3 frame holds a 16:9 picture squeezed horizontally; `stretch` fills the window ignoring the shape |
-| `--overscan <percent>` | How much of the edges to hide, as a TV does — same as the O key. `0` (default) shows the standard picture: for NTSC the part of the decoded image that is exactly 4:3, which leaves out the blanking margins at the sides (black on most discs). A percentage hides that much more in each dimension, half on either side (`5` shows the central 95 %). `full` shows the whole decoded image, margins included |
+| `--overscan <percent>` | How much of the edges to hide, as a TV does — same as the O key. `0` (default) shows the standard picture: for NTSC the part of the decoded image that is exactly 4:3, which leaves out the blanking margins at the sides (black on most discs); for MUSE all but two samples at each end of the line, where the discs carry the transients of their mastering chain next to the sync and the guard sample (a bright or dark column, varying from disc to disc, that a real decoder shows too). A percentage hides that much more in each dimension, half on either side (`5` shows the central 95 %). `full` shows the whole decoded image, margins included |
 | `--seek <seconds>` | Seek to position before starting playback |
 | `--chapter <n>` | Start playing at chapter `n`, found by searching the capture for its chapter codes (see below); after `--seek`, if given |
 | `--time <h:mm:ss>` | Start playing at this time of the disc's time code (CLV discs; `mm:ss` also accepted), found like a chapter |
@@ -474,7 +474,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | J | NTSC: cycle the black level: auto → NTSC-M (7.5 IRE) → NTSC-J (0 IRE), see `--black-level` |
 | C | Show cursor coordinates and input-file offsets (see below) |
 | L | Toggle non-linear de-emphasis processing |
-| O | Cycle the overscan: 0 % → 2.5 % → 5 % → full image (NTSC only) (see `--overscan`) |
+| O | Cycle the overscan: 0 % → 2.5 % → 5 % → full image (see `--overscan`) |
 | Z | Cycle the magnifier: 1× → 2× → 4× (arrow keys pan when zoomed) |
 | S | Export the displayed frame to a timestamped PNG in the current directory (without OSD text and subtitles) |
 | [ | Cycle the primary subtitle track (bottom of the frame) through the available tracks and off |
