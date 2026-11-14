@@ -4,7 +4,9 @@
 #ifndef MUSECPP_OSDOVERLAY_H
 #define MUSECPP_OSDOVERLAY_H
 
+#include <optional>
 #include <string>
+#include <vector>
 
 struct SDL_Window;
 class TextRenderer;
@@ -22,6 +24,10 @@ public:
                        const Decoder &decoder,
                        SDL_Window *window,
                        TextRenderer &text_renderer);
+
+private:
+    // The disc code lines shown while a position search runs (see render)
+    std::optional<std::vector<std::string>> m_held_disc_code;
 };
 
 #endif //MUSECPP_OSDOVERLAY_H

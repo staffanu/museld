@@ -105,10 +105,7 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
             state.redo_last_field = true;
     }
 
-    // Not while a position search runs: the picture on screen is not
-    // re-decoded under its probes, so anything drawn then stays, and the disc
-    // code of each probe would be drawn over the last one's
-    if (state.show_disc_code && !state.position_search) {
+    if (state.show_disc_code) {
         auto disc_info_strings = state.last_decoded.disc_info
                 ? state.last_decoded.disc_info->asStrings()
                 : std::vector<std::string>{"No disc info"};
@@ -132,6 +129,18 @@ std::string OsdOverlay::render(musevk::CommandBuffer &command_buffer,
         }
         if (!state.last_decoded.level_status.empty())
             disc_info_strings.push_back(state.last_decoded.level_status);
+        // While a position search runs the picture on screen is not re-decoded
+        // under its probes, so anything drawn then stays: the code of the frame
+        // the search left is held and drawn in its place every pass (the same
+        // text in the same place), not each probe's over the last one's.  The
+        // first pass of a search still shows that frame, re-decoded clean.
+        if (state.position_search) {
+            if (!m_held_disc_code)
+                m_held_disc_code = disc_info_strings;
+            disc_info_strings = *m_held_disc_code;
+        } else {
+            m_held_disc_code.reset();
+        }
         const int disc_scale = comp_scale(osd_base / 2);
         const int glyph_h = 24;
         const int bottom_margin = std::max(0, src.height - 955 - glyph_h * 2) / zoom;
