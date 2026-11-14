@@ -45,15 +45,16 @@ PictureFormat PictureFormat::pal(int width, int height, int first_column) {
 }
 
 PictureFormat PictureFormat::muse(int width, int height) {
-    // The standard picture leaves out two luma samples (six columns of the
-    // 3x upsampled frame) at each end of the line: after the guard sample
-    // and before the sync the discs carry the mastering chain's transients
-    // there (a dip at the start, a spike and a dip before the sync, deeper
-    // on negative-sync lines, their size differing from disc to disc), which
-    // a real decoder shows too, rounded off by its output filtering; two
-    // samples is what shows on the discs measured.  The frame is decoded
-    // and written whole; the O key's full image shows it.
-    const double margin = 2.0 * width / 374;
+    // The standard picture leaves out four columns at each end of the line
+    // (the frame is the 374 luma samples upsampled 3x): after the guard
+    // sample and before the sync the discs carry the mastering chain's
+    // transients there (a dip at the start, a spike and a dip before the
+    // sync, deeper on negative-sync lines, their size differing from disc to
+    // disc), which a real decoder shows too, rounded off by its output
+    // filtering.  Four columns is the most that shows on the discs measured
+    // (Ursa Minor Blue's right edge, 1to11's left).  The frame is decoded and
+    // written whole; the O key's full image shows it.
+    const double margin = 4.0 * width / (3 * 374);
     return {width, height, (16.0 / 9.0) / ((double)width / height), margin, width - margin, false};
 }
 
