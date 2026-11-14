@@ -33,7 +33,9 @@ public:
     // original AC3 bitstream (stream copy of the sync frames passed in).
     // With closed_captions the file has a text subtitle stream for the cues
     // passed to addClosedCaption (an NTSC disc's line-21 captions).
-    VideoFileWriter(std::string filename, Logger &log, int video_width, int video_height,
+    // video_width/height: the size written; crop_x/crop_y: where that window
+    // sits in the decoded planes handed to addVideoFrameWithAudio (even)
+    VideoFileWriter(std::string filename, Logger &log, int video_width, int video_height, int crop_x, int crop_y,
                     int video_fps_num, int video_fps_den,
                     VideoWriterPreset preset, VideoColorStandard color_standard,
                     int display_aspect_num, int display_aspect_den,
@@ -43,6 +45,8 @@ public:
             m_log(log),
             m_video_width(video_width),
             m_video_height(video_height),
+            m_crop_x(crop_x),
+            m_crop_y(crop_y),
             m_video_fps_num(video_fps_num),
             m_video_fps_den(video_fps_den),
             m_preset(preset),
@@ -173,6 +177,7 @@ private:
     Logger &m_log;
     int m_video_width;
     int m_video_height;
+    int m_crop_x, m_crop_y;
     int m_video_fps_num; // frames per second as a rational, e.g. 60000/1001
     int m_video_fps_den;
     VideoWriterPreset m_preset;

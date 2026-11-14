@@ -192,6 +192,7 @@ a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at 
 | `--write-muse16 <file>` | Re-encode input to the 16.2 MHz format (see below) |
 | `--write <file>` | Write decoded video and audio to a media file (requires FFmpeg ≥ 7.1). The file stays open from one input to the next as long as the name stays the same, so the sides of a disc given as consecutive inputs come out as one continuous file; an input that decodes to another picture size, frame rate or audio stream kind than the file was opened with is refused, and a new `--write` name ends the file and starts another. The file also says where on the disc it is: its start timecode is the disc's time at the first frame (non-drop, counted in the file's frame rate; a file that begins before the programme, as a capture of a side from its start does, has a start before zero, written wrapped below 24 hours, `23:59:58:26` for 1.13 s before zero, so the timecode passes `00:00:00:00` where the disc's time does), and the disc's chapters are chapter marks, the stretch before the first one a chapter named Start. `ffprobe -show_entries stream_tags=timecode:format_tags=timecode -show_chapters` prints both. An NTSC input's closed captions (see below) go into a text subtitle stream (SubRip in Matroska, 3GPP timed text in MP4), present but empty on a disc without captions. The timecode is taken from the first half second of frames whose disc code runs steadily, so a player's jump back during spin-up does not set it; a disc without a time code, or one that gives none in the first minute (the first few seconds for the lossless preset), leaves the file without a timecode |
 | `--write-audio <tracks>` | The audio streams of the `--write` file, a comma-separated list of `analog`, `efm` and `ac3` on NTSC/PAL, or of `muse` and `efm` on MUSE, in the order the streams are to have, each titled by its track. Every listed track is demodulated and decoded besides the one played, the AC3 track as its original bitstream and the others as PCM, each kept in sync with the video clock on its own; a listed track the disc does not have gives a silent stream, and the sound of a track is written as the disc carries it (the analog track of an AC3 disc is its left channel with a silent right). Without the option the file has one stream, the track played. The extra decoding slows a batch render: the AC3 clip of the regression set renders three tracks about 17 % slower than one |
+| `--write-overscan <percent>` | Crop the `--write` file as `--overscan` crops the display: `0` writes the standard picture (for NTSC and PAL the 4:3 picture without the blanking margins, 748 columns of the 764; for MUSE the line without the four columns at each end), a percentage that much less in each dimension, `full` (default) the whole decoded image. For a file to watch in a player that cannot hide the edges itself. The crop is on even pixel edges, the display aspect in the metadata follows it, and the frame count, timecode and chapters are unchanged |
 | `--write-preset <preset>` | Media file preset: `standard` (H.264 + AAC in MP4, default) or `archival` (lossless FFV1 16-bit + PCM in Matroska). Container and codecs come from the preset, not the filename extension. |
 | `--write-duration <seconds>` | Stop an input after writing this much of its video (default: run to the end of the input); the file is finalized when the last input ends |
 | `--log <spec>` | Log level per category, e.g. `A3V4` (Audio=Info, Video=Debug). Categories: M P A V D I O; levels 0–4 = Off Error Warn Info Debug |
@@ -474,7 +475,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | J | NTSC: cycle the black level: auto → NTSC-M (7.5 IRE) → NTSC-J (0 IRE), see `--black-level` |
 | C | Show cursor coordinates and input-file offsets (see below) |
 | L | Toggle non-linear de-emphasis processing |
-| O | Cycle the overscan: 0 % → 2.5 % → 5 % → full image (see `--overscan`) |
+| O | Cycle the overscan: 0 % (EDGES HIDDEN on MUSE) → 2.5 % → 5 % → full image (see `--overscan`) |
 | Z | Cycle the magnifier: 1× → 2× → 4× (arrow keys pan when zoomed) |
 | S | Export the displayed frame to a timestamped PNG in the current directory (without OSD text and subtitles) |
 | [ | Cycle the primary subtitle track (bottom of the frame) through the available tracks and off |
@@ -578,7 +579,8 @@ select the fitting: `zoom` is for letterboxed films on a wide screen, `squeeze` 
 ("squeeze") NTSC discs, and `stretch` disables the fitting altogether. The OSD text and subtitles
 stay inside the part of the picture on screen, so zooming does not cut them off. `--write` files
 and exported frames are unaffected by all of this: they carry the whole decoded image at its
-native size, with its true shape in the metadata (6:7 pixels, 191:140, for NTSC).
+native size, with its true shape in the metadata (6:7 pixels, 191:140, for NTSC), unless
+`--write-overscan` asks for the file to be cropped as the display is.
 
 ### Remote control
 

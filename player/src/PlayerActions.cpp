@@ -396,8 +396,13 @@ std::string subtitleSlotName(const PlayerState &state, int slot) {
 }
 
 std::string overscanName(const PlayerState &state) {
-    return state.full_image ? "OVERSCAN OFF: FULL IMAGE"
-                            : std::format("OVERSCAN {:g}%", state.overscan * 100);
+    return "OVERSCAN " + overscanValueName(state);
+}
+
+std::string overscanValueName(const PlayerState &state) {
+    return state.full_image ? "OFF: FULL IMAGE"
+         : state.overscan < 0.001 ? state.picture_format.standard_name
+         : std::format("{:g}%", state.overscan * 100);
 }
 
 } // namespace PlayerActions

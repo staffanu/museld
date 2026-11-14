@@ -115,7 +115,7 @@ MenuPage *buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b, MenuPage *ope
     // Picture
     picture->items.push_back(setting("Aspect", "F", [&s] { return std::string(aspectModeName(s.aspect_mode)); },
                                      [&s](int d) { cycleAspect(s, d); }));
-    picture->items.push_back(setting("Overscan", "O", [&s] { return s.full_image ? std::string("OFF: FULL IMAGE") : std::format("{:g}%", s.overscan * 100); },
+    picture->items.push_back(setting("Overscan", "O", [&s] { return overscanValueName(s); },
                                      [&s](int d) { cycleOverscan(s, d); }));
     picture->items.push_back(setting("Zoom", "Z", [&s] { return std::format("{}x", s.zoom_factor); },
                                      [&s](int d) { cycleZoom(s, d); }));

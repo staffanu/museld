@@ -1605,6 +1605,10 @@ struct VideoFileOutput {
     VideoColorStandard color_standard{};
     std::vector<WriterAudioStream> audio_streams;
     bool closed_captions = false;
+    // --write-overscan: the part of the decoded image written, as --overscan
+    // selects it for the display; the whole image by default
+    bool crop_full_image = true;
+    double crop_overscan = 0.0;
 
     void close() {
 #ifdef HAVE_LIBAV
@@ -1707,22 +1711,28 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         VideoColorStandard color_standard;
         int dar_num, dar_den; // display aspect ratio
         int fps_num, fps_den;
+        // The part of the decoded image written: the whole of it, blanking
+        // margins included, unless --write-overscan crops it as the display
+        // does.  The file's display aspect is that part's size times the pixel
+        // shape: for NTSC's 764x480 image of 6/7 pixels that is 191:140, a
+        // little wider than the 4:3 of the picture inside it; for MUSE's
+        // 1122x1032 image 16:9
+        const PictureCrop crop = pictureCrop(picture_format, video_out.crop_full_image, video_out.crop_overscan);
+        int par_num, par_den; // the pixel shape, width over height
         if constexpr (std::is_same<InputBlock, MuseInputBlock>::value) {
             color_standard = VideoColorStandard::eBt709;
-            dar_num = 16; dar_den = 9;
+            par_num = 16 * initial_h; par_den = 9 * initial_w;
             fps_num = decode_all_fields ? 60 : 30; fps_den = 1;
         } else {
-            // The file holds the whole decoded image, blanking margins
-            // included, so its display aspect is the image size times the
-            // pixel shape: for NTSC's 764x480 image of 6/7 pixels that is
-            // 191:140, a little wider than the 4:3 of the picture inside it
             color_standard = video_standard->ntsc_chroma ? VideoColorStandard::eSmpte170m
                                                          : VideoColorStandard::eBt470bg;
-            const int par_num = video_standard->ntsc_chroma ? 6 : 944;
-            const int par_den = video_standard->ntsc_chroma ? 7 : 1135;
-            const int g = std::gcd(initial_w * par_num, initial_h * par_den);
-            dar_num = initial_w * par_num / g; dar_den = initial_h * par_den / g;
+            par_num = video_standard->ntsc_chroma ? 6 : 944;
+            par_den = video_standard->ntsc_chroma ? 7 : 1135;
             fps_num = video_standard->fps_num * (decode_all_fields ? 2 : 1); fps_den = video_standard->fps_den;
+        }
+        {
+            const int64_t g = std::gcd((int64_t)crop.width() * par_num, (int64_t)crop.height() * par_den);
+            dar_num = (int)((int64_t)crop.width() * par_num / g); dar_den = (int)((int64_t)crop.height() * par_den / g);
         }
         // The file's audio streams: the --write-audio list, or the track
         // played.  The AC3 track's stream is the original AC3 bitstream
@@ -1753,14 +1763,14 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         if (vfw) {
             // The file is open from the input before: this one must decode to
             // the same picture and the same audio streams to go on in it
-            if (initial_w != video_out.width || initial_h != video_out.height
+            if (crop.width() != video_out.width || crop.height() != video_out.height
                     || fps_num != video_out.fps_num || fps_den != video_out.fps_den
                     || color_standard != video_out.color_standard || !same_streams(audio_streams, video_out.audio_streams)
                     || closed_captions != video_out.closed_captions)
                 throw runtime_error(std::format(
                         "--write {}: this input decodes to {}x{} at {}/{} frames/s{}{}, but the file holds {}x{} at {}/{}{}{} "
                         "from the input before it; give it a --write file of its own",
-                        *output_filename, initial_w, initial_h, fps_num, fps_den, describe_streams(audio_streams),
+                        *output_filename, crop.width(), crop.height(), fps_num, fps_den, describe_streams(audio_streams),
                         closed_captions ? " with closed captions" : "",
                         video_out.width, video_out.height, video_out.fps_num, video_out.fps_den,
                         describe_streams(video_out.audio_streams),
@@ -1770,14 +1780,19 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         } else {
             if (!video_out.log)
                 throw std::logic_error("the --write logger must be made before process_file()");
+            if (!video_out.crop_full_image)
+                log.info(eApplication, std::format("--write: the file holds columns {}..{} and rows {}..{} of the {}x{} decoded image ({})",
+                                                   crop.x0, crop.x1, crop.y0, crop.y1, initial_w, initial_h,
+                                                   video_out.crop_overscan < 0.001 ? std::string(picture_format.standard_name)
+                                                                                   : std::format("overscan {:g}%", video_out.crop_overscan * 100)));
             vfw = make_unique<VideoFileWriter>(output_filename.value(), *video_out.log,
-                                               initial_w, initial_h, fps_num, fps_den,
+                                               crop.width(), crop.height(), crop.x0, crop.y0, fps_num, fps_den,
                                                write_preset, color_standard, dar_num, dar_den,
                                                audio_streams, closed_captions);
             if (!vfw->init())
                 throw runtime_error("Cannot initialize output encoder");
             video_out.filename = *output_filename;
-            video_out.width = initial_w; video_out.height = initial_h;
+            video_out.width = crop.width(); video_out.height = crop.height();
             video_out.fps_num = fps_num; video_out.fps_den = fps_den;
             video_out.color_standard = color_standard;
             video_out.audio_streams = audio_streams;
@@ -2066,6 +2081,10 @@ int main(int argc, char *argv[]) {
     const vector<string> args(argv + 1, argv + argc);
     auto it = args.cbegin();
 
+    // The --write file, kept open across the inputs that name it; declared
+    // before the options, which set its crop, and outside the try so an error on a later input still finalizes what the
+    // earlier ones wrote
+    VideoFileOutput video_out;
     CliOptions options;
 
     auto usage = [&options] (ostream &out, int status) -> void {
@@ -2248,8 +2267,9 @@ int main(int argc, char *argv[]) {
         else throw std::runtime_error(std::format("Unknown --eq mode {} (expected off|on|frozen)", name));
     });
     options.option("--overscan", "PERCENT", "How much of the edges to hide, as a TV does (also cycled with the O key): "
-                                            "0 shows the standard picture (default; for NTSC the 4:3 part of the decoded "
-                                            "image, without the blanking margins at the sides), a percentage hides that "
+                                            "0 shows the standard picture (default; for NTSC and PAL the 4:3 part of the decoded "
+                                            "image, without the blanking margins at the sides; for MUSE the line without "
+                                            "the few columns at its ends), a percentage hides that "
                                             "much more in each dimension, and full shows the whole decoded image",
                    [&] () -> void {
         const string value = *(it++);
@@ -2459,6 +2479,22 @@ int main(int argc, char *argv[]) {
             at = comma + 1;
         }
     });
+    options.option("--write-overscan", "PERCENT", "Crop the --write file as --overscan crops the display: 0 writes the "
+                   "standard picture (for NTSC and PAL the 4:3 picture without the blanking margins, for MUSE the line "
+                   "without the few columns at its ends), a percentage that much less in each dimension, and full "
+                   "(default) the whole decoded image", [&] () -> void {
+        const string value = *(it++);
+        if (value == "full") {
+            video_out.crop_full_image = true;
+        } else {
+            video_out.crop_overscan = stod(value) / 100.0;
+            if (video_out.crop_overscan < 0.0 || video_out.crop_overscan > 0.25) {
+                cerr << "--write-overscan must be full or a percentage from 0 to 25" << endl;
+                exit(1);
+            }
+            video_out.crop_full_image = false;
+        }
+    });
     options.option("--write-preset", "PRESET",
                    "Media file preset: standard (H.264 + AAC in MP4, default) or archival "
                    "(lossless FFV1 16-bit + PCM in Matroska)", [&] () -> void {
@@ -2521,10 +2557,6 @@ int main(int argc, char *argv[]) {
         usage(cout, EXIT_SUCCESS);
     });
 
-    // The --write file, kept open across the inputs that name it; declared
-    // outside the try so an error on a later input still finalizes what the
-    // earlier ones wrote
-    VideoFileOutput video_out;
     try {
         bool input_file_given = false;
         // Options apply to the input files that follow them, so any left over when

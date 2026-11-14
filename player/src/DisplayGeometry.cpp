@@ -28,7 +28,7 @@ PictureFormat PictureFormat::ntsc(int width, int height, int first_column) {
     // Sample s of the line is the pixel whose edges are s and s + 1
     const double center = center_us * samples_per_us - first_column + 0.5;
     const double picture_width = height * (4.0 / 3.0) / pixel_aspect;
-    return {width, height, pixel_aspect, center - picture_width / 2, center + picture_width / 2, true};
+    return {width, height, pixel_aspect, center - picture_width / 2, center + picture_width / 2, true, "0%"};
 }
 
 PictureFormat PictureFormat::pal(int width, int height, int first_column) {
@@ -41,7 +41,7 @@ PictureFormat PictureFormat::pal(int width, int height, int first_column) {
     const double center_us = (12.0 - 1.5) + 52.0 / 2;
     const double center = center_us * samples_per_us - first_column + 0.5;
     const double picture_width = height * (4.0 / 3.0) / pixel_aspect;
-    return {width, height, pixel_aspect, center - picture_width / 2, center + picture_width / 2, true};
+    return {width, height, pixel_aspect, center - picture_width / 2, center + picture_width / 2, true, "0%"};
 }
 
 PictureFormat PictureFormat::muse(int width, int height) {
@@ -55,7 +55,7 @@ PictureFormat PictureFormat::muse(int width, int height) {
     // (Ursa Minor Blue's right edge, 1to11's left).  The frame is decoded and
     // written whole; the O key's full image shows it.
     const double margin = 4.0 * width / (3 * 374);
-    return {width, height, (16.0 / 9.0) / ((double)width / height), margin, width - margin, false};
+    return {width, height, (16.0 / 9.0) / ((double)width / height), margin, width - margin, false, "EDGES HIDDEN"};
 }
 
 namespace {
@@ -73,6 +73,14 @@ namespace {
         const double hh = f.height / 2.0 * (1 - overscan);
         return {cx - hw, cy - hh, cx + hw, cy + hh};
     }
+}
+
+PictureCrop pictureCrop(const PictureFormat &format, bool full_image, double overscan) {
+    const Rect r = baseRect(format, full_image, overscan);
+    // Outwards to even pixel edges, within the image
+    auto even_down = [](double v) { return std::max(0, (int)std::floor(v) & ~1); };
+    auto even_up = [](double v, int limit) { return std::min(limit, ((int)std::ceil(v) + 1) & ~1); };
+    return {even_down(r.x0), even_down(r.y0), even_up(r.x1, format.width), even_up(r.y1, format.height)};
 }
 
 void defaultWindowSize(const PictureFormat &format, bool full_image, int &width, int &height) {

@@ -16,6 +16,10 @@ struct PictureFormat {
     double pixel_aspect;            // width over height of one of its pixels on a square-pixel display
     double picture_x0, picture_x1;  // the columns [x0, x1) of the standard picture, in pixel-edge coordinates
     bool can_squeeze;               // a 4:3 frame, which may hold an anamorphic 16:9 picture
+    // What the overscan control calls the standard picture: "0%" where the
+    // standard defines it (the 4:3 picture of NTSC and PAL), "EDGES HIDDEN"
+    // where it is a margin found on the discs (MUSE)
+    const char *standard_name;
 
     // first_column: the 4 fsc sample after the sync edge that column 0 holds
     static PictureFormat ntsc(int width, int height, int first_column);
@@ -54,6 +58,18 @@ struct DisplayGeometry {
 };
 
 DisplayGeometry computeDisplayGeometry(const DisplayGeometryInput &in);
+
+// The part of the decoded image a written file keeps (--write-overscan):
+// the standard picture with the overscan applied, as the display shows it,
+// on whole pixels with even edges so the 4:2:0 chroma planes crop with it;
+// the whole image when full_image
+struct PictureCrop {
+    int x0, y0, x1, y1;
+    [[nodiscard]] int width() const { return x1 - x0; }
+    [[nodiscard]] int height() const { return y1 - y0; }
+};
+PictureCrop pictureCrop(const PictureFormat &format, bool full_image, double overscan);
+
 
 // A window of the picture's shape that shows it without downscaling in
 // either direction

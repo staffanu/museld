@@ -795,28 +795,33 @@ AVFrame *VideoFileWriter::makeVideoFrame(OutputStream *ost, std::shared_ptr<muse
     assert(image_V->size() == sizeU);
     assert(sizeY.x_size == sizeU.x_size * 2);
     assert(sizeY.y_size == sizeU.y_size * 2);
+    // The window written, within the decoded planes (the whole of them unless
+    // --write-overscan crops); the chroma planes at half the offsets and size
+    assert(m_crop_x % 2 == 0 && m_crop_y % 2 == 0 && m_video_width % 2 == 0 && m_video_height % 2 == 0);
+    assert(m_crop_x + m_video_width <= (int)sizeY.x_size && m_crop_y + m_video_height <= (int)sizeY.y_size);
+    const uint32_t w = m_video_width, h = m_video_height, wc = w / 2, hc = h / 2;
+    const uint16_t *srcY = image_Y->data<uint16_t>() + m_crop_y * sizeY.x_size + m_crop_x;
+    const uint16_t *srcU = image_U->data<uint16_t>() + (m_crop_y / 2) * sizeU.x_size + m_crop_x / 2;
+    const uint16_t *srcV = image_V->data<uint16_t>() + (m_crop_y / 2) * sizeU.x_size + m_crop_x / 2;
 
     // Plane order: data[0] = Y, data[1] = Cb (out_U carries B-Y), data[2] = Cr (out_V carries R-Y)
     if (ost->codec_context->pix_fmt == AV_PIX_FMT_YUV420P16LE) {
-        for (uint32_t y = 0; y < sizeY.y_size; y++)
-            memcpy(ost->frame->data[0] + y * ost->frame->linesize[0],
-                   image_Y->data<uint16_t>() + y * sizeY.x_size, sizeY.x_size * sizeof(uint16_t));
+        for (uint32_t y = 0; y < h; y++)
+            memcpy(ost->frame->data[0] + y * ost->frame->linesize[0], srcY + y * sizeY.x_size, w * sizeof(uint16_t));
 
-        for (uint32_t y = 0; y < sizeU.y_size; y++) {
-            memcpy(ost->frame->data[1] + y * ost->frame->linesize[1],
-                   image_U->data<uint16_t>() + y * sizeU.x_size, sizeU.x_size * sizeof(uint16_t));
-            memcpy(ost->frame->data[2] + y * ost->frame->linesize[2],
-                   image_V->data<uint16_t>() + y * sizeU.x_size, sizeU.x_size * sizeof(uint16_t));
+        for (uint32_t y = 0; y < hc; y++) {
+            memcpy(ost->frame->data[1] + y * ost->frame->linesize[1], srcU + y * sizeU.x_size, wc * sizeof(uint16_t));
+            memcpy(ost->frame->data[2] + y * ost->frame->linesize[2], srcV + y * sizeU.x_size, wc * sizeof(uint16_t));
         }
     } else {
-        for (uint32_t y = 0; y < sizeY.y_size; y++)
-            for (uint32_t x = 0; x < sizeY.x_size; x++)
-                ost->frame->data[0][y * ost->frame->linesize[0] + x] = image_Y->data<uint16_t>()[y * sizeY.x_size + x] >> 8;
+        for (uint32_t y = 0; y < h; y++)
+            for (uint32_t x = 0; x < w; x++)
+                ost->frame->data[0][y * ost->frame->linesize[0] + x] = srcY[y * sizeY.x_size + x] >> 8;
 
-        for (uint32_t y = 0; y < sizeU.y_size; y++)
-            for (uint32_t x = 0; x < sizeU.x_size; x++) {
-                ost->frame->data[1][y * ost->frame->linesize[1] + x] = image_U->data<uint16_t>()[y * sizeU.x_size + x] >> 8;
-                ost->frame->data[2][y * ost->frame->linesize[2] + x] = image_V->data<uint16_t>()[y * sizeU.x_size + x] >> 8;
+        for (uint32_t y = 0; y < hc; y++)
+            for (uint32_t x = 0; x < wc; x++) {
+                ost->frame->data[1][y * ost->frame->linesize[1] + x] = srcU[y * sizeU.x_size + x] >> 8;
+                ost->frame->data[2][y * ost->frame->linesize[2] + x] = srcV[y * sizeU.x_size + x] >> 8;
             }
     }
 

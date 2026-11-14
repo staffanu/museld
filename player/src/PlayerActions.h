@@ -64,6 +64,7 @@ namespace PlayerActions {
     std::string efmFilterName(const ReaderControls &reader);
     std::string subtitleSlotName(const PlayerState &state, int slot);
     std::string overscanName(const PlayerState &state);
+    std::string overscanValueName(const PlayerState &state); // the menu's value column
 }
 
 #endif //MUSELD_PLAYERACTIONS_H

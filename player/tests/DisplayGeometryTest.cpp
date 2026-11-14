@@ -122,31 +122,77 @@ TEST_CASE("Default windows show the picture edge to edge without downscaling", "
     CHECK(w == 764);
     CHECK(h == 560);
     defaultWindowSize(c_muse, false, w, h);
-    CHECK(w == 1835);
+    CHECK(w == 1822); // the 1114 columns of the standard picture at their 16:9-of-1122 pixel shape
     CHECK(h == 1032);
+    defaultWindowSize(c_muse, true, w, h);
+    CHECK(w == 1835);
 }
 
-TEST_CASE("MUSE on a 16:9 screen fills it; squeeze is a no-op, and the full image is the picture", "[display]") {
+TEST_CASE("MUSE: the standard picture leaves four columns at each end, the full image shows them; squeeze is a no-op", "[display]") {
+    CHECK(std::string(c_muse.standard_name) == "EDGES HIDDEN");
+    CHECK(std::string(c_ntsc.standard_name) == "0%");
     for (auto mode : {AspectMode::eNormal, AspectMode::eZoom, AspectMode::eSqueeze}) {
         for (bool full : {false, true}) {
             DisplayGeometryInput in = muse(mode, 1920, 1080);
             in.full_image = full;
             const auto g = computeDisplayGeometry(in);
-            CHECK_THAT(g.src_x0, WithinAbs(0.0, 1e-9));
-            CHECK_THAT(g.src_x1, WithinAbs(1122.0, 1e-9));
-            CHECK_THAT(g.src_y0, WithinAbs(0.0, 1e-9));
-            CHECK_THAT(g.src_y1, WithinAbs(1032.0, 1e-9));
-            expectWholeDest(g, 1920, 1080);
+            CHECK_THAT(g.src_x0, WithinAbs(full ? 0.0 : 4.0, 1e-9));
+            CHECK_THAT(g.src_x1, WithinAbs(full ? 1122.0 : 1118.0, 1e-9));
+            if (full || mode != AspectMode::eZoom) {
+                CHECK_THAT(g.src_y0, WithinAbs(0.0, 1e-9));
+                CHECK_THAT(g.src_y1, WithinAbs(1032.0, 1e-9));
+            } else {
+                // Zoom fills the width of the 16:9 screen, cropping the few rows that the
+                // narrower standard picture overflows by
+                CHECK(g.src_y0 > 0);
+                CHECK(g.src_y0 < 5);
+            }
+            if (full) {
+                expectWholeDest(g, 1920, 1080);
+            } else if (mode == AspectMode::eNormal) {
+                // Not stretched: the 1114 columns keep their pixel shape, a hair narrower than 16:9
+                CHECK(g.dst_y0 == 0);
+                CHECK(g.dst_y1 == 1080);
+                CHECK(g.dst_x1 - g.dst_x0 < 1920);
+                CHECK(g.dst_x1 - g.dst_x0 > 1900);
+            }
         }
     }
+}
+
+TEST_CASE("The written crop is the standard picture on even pixel edges, or the whole image", "[display]") {
+    const PictureCrop ntsc = pictureCrop(c_ntsc, false, 0.0);
+    // The 4:3 picture is ~747 columns centred in 764, widened outwards to even edges
+    CHECK(ntsc.x0 % 2 == 0);
+    CHECK(ntsc.x1 % 2 == 0);
+    CHECK(ntsc.x0 <= c_ntsc.picture_x0);
+    CHECK(ntsc.x0 > c_ntsc.picture_x0 - 2);
+    CHECK(ntsc.x1 >= c_ntsc.picture_x1);
+    CHECK(ntsc.x1 < c_ntsc.picture_x1 + 2);
+    CHECK(ntsc.y0 == 0);
+    CHECK(ntsc.y1 == 480);
+    CHECK(ntsc.width() == 750);
+    const PictureCrop muse = pictureCrop(c_muse, false, 0.0);
+    CHECK(muse.x0 == 4);
+    CHECK(muse.x1 == 1118);
+    CHECK(muse.height() == 1032);
+    const PictureCrop whole = pictureCrop(c_ntsc, true, 0.05);
+    CHECK((whole.x0 == 0 && whole.y0 == 0 && whole.x1 == 764 && whole.y1 == 480));
+    const PictureCrop five = pictureCrop(c_ntsc, false, 0.05);
+    // 5 % hides 2.5 % per side of the 747x480 picture: ~18.7 columns and 12 rows
+    CHECK(five.x0 == ntsc.x0 + 20);
+    CHECK(five.x1 == ntsc.x1 - 20);
+    CHECK(five.y0 == 12);
+    CHECK(five.y1 == 468);
+    CHECK(five.width() % 2 == 0);
 }
 
 TEST_CASE("MUSE on a 4:3 screen: normal letterboxes, zoom crops the sides", "[display]") {
     const auto n = computeDisplayGeometry(muse(AspectMode::eNormal, 1600, 1200));
     CHECK(n.dst_x0 == 0);
     CHECK(n.dst_x1 == 1600);
-    CHECK(n.dst_y0 == 150);
-    CHECK(n.dst_y1 == 1050);
+    CHECK(n.dst_y0 == 147); // the standard picture is a hair narrower than 16:9: a little more letterbox
+    CHECK(n.dst_y1 == 1053);
     const auto z = computeDisplayGeometry(muse(AspectMode::eZoom, 1600, 1200));
     expectWholeDest(z, 1600, 1200);
     CHECK(z.src_y0 == 0);
