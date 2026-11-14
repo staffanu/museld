@@ -295,12 +295,21 @@ independent — expect ±40 ns and ~1 ns line-to-line jitter; `pal-pilot-check.p
 refines PAL line starts with the pilot, and `<prefix>.pilot.f64` holds the corrected curve --
 run the tool on it as a prefix to see the residual, 0.4 ns).
 
-**MUSE line edges** (measured 2026-11-14 on the blue1 capture with the dumps below, averaging
-the baseband at the reader's pixel positions over 4000 picture lines): the chroma ends at pixel
-105 and the luma starts at 107 where the shaders take them (`MUSE_C_OFFSET`, `col + 106`), so the
-grid is not shifted; but the last two luma samples, 479 and 480, carry the channel's transition
-into the next line's sync on every line whatever the picture (a +30 spike, then a -80 dip),
-so `copy_y_for_interpolation.comp` holds sample 478 across them, the horizontal upsampler
+**MUSE line edges** (2026-11-14): the NHK book's figure 4.13 (~/work/MuseBook, the TCI
+waveform with MUSE sample numbers) lays the line out as HD sync 1-11, chroma 12-105, a guard
+sample 106, luma 107-480, which is where the shaders take them (`MUSE_C_OFFSET`, `col + 106`);
+averaging the demodulated baseband at the reader's pixel positions over ~4000 picture lines
+(the dumps below and a script like tools/muse-sync-delta.py) confirms the 105/107 boundary on
+every capture, so the grid is not shifted.  But on all six captures (blue1, Sony test disc, jp,
+1to11, Hills; fx3, Picoscope and unfiltered chains) the last two luma samples carry the same
+transient whatever the picture: 479 above the picture level (+5 on a dark picture, +33 on a
+bright one) and 480 far below it (about level-50 on positive-sync lines, level-85 on negative).
+It is not the chain's step response -- a luma step inside the picture shows the emphasis
+pre-shoot (dip, bump, bigger bump before a fall; bump, dip, deep dip before a rise) that the
+de-emphasis undoes, and the line-end pair fits neither polarity -- so it belongs to the
+recorded signal at the luma/sync junction, origin unknown (encoder filtering or the disc chain).
+Nominally luma by the book, unusable as picture in practice: `copy_y_for_interpolation.comp`
+holds sample 478 across them (a cosmetic choice, two samples wide), the horizontal upsampler
 repeats the end sample instead of padding with 128 (`edge_repeat`; the audio rows keep the pad),
 and the field chroma interpolation clamps its right and bottom neighbours inside the buffer.
 Before that the right edge showed a bright and a dark column, alternating with the line.
