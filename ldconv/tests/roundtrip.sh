@@ -67,6 +67,29 @@ run "$WORK/a.s16" "$WORK/h.rf"
 run "$WORK/h.rf"  "$WORK/h.s16"
 check "s16 -> f32 -> s16" "$WORK/a.s16" "$WORK/h.s16"
 
+# --- the 36-bit STREAMINFO sample count --------------------------------------
+# libFLAC's Ogg encoder writes a count of 2^36 or more wrapped to the field (its
+# plain FLAC encoder writes "unknown"); ldconv clears it to unknown after the
+# encode and reads the length from the last Ogg page instead.  The limit is
+# lowered for the test, which cannot encode 2^36 samples.
+LDCONV_STREAMINFO_TOTAL_LIMIT=1000 run "$WORK/src.lds" "$WORK/long.ldf"
+field=$(od -An -tx1 -j58 -N5 "$WORK/long.ldf" | tr -d ' ')
+if [ "$field" = "f000000000" ]; then
+    echo "ok    ldf sample count beyond the field cleared to unknown"
+else
+    echo "FAIL  ldf sample count beyond the field ($field)"
+    failures=$((failures + 1))
+fi
+run "$WORK/long.ldf" "$WORK/long.lds"
+check "ldf with an unknown count -> lds" "$WORK/src.lds" "$WORK/long.lds"
+samples=$("$LDCONV" --info "$WORK/long.ldf" | sed -n 's/^ *Samples: \([0-9]*\).*/\1/p')
+if [ "$samples" = "1677720" ]; then
+    echo "ok    ldf length from the last page's granule position"
+else
+    echo "FAIL  ldf length from the last page ($samples)"
+    failures=$((failures + 1))
+fi
+
 # --- --bits, the one lossy option -------------------------------------------
 # A .lds sample scaled to 16 bits already has six zero bits under it, so asking
 # for ten changes nothing at all, and neither does asking for more than there is.

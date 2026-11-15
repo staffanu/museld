@@ -35,6 +35,12 @@ extension alone cannot tell you — and from the extension otherwise.
 `--input-format`/`--output-format` override both, and are required for the `-`
 that means standard input or output.
 
+FLAC's header holds the sample count in 36 bits, which a disc side at 62.5 MHz exceeds.
+libFLAC's Ogg encoder writes such a count wrapped to the field (decoders trusting it then
+refuse every seek past the wrapped value), so ldconv clears it to "unknown" after the
+encode and, reading, takes the length of an `ldf` without a count from the last Ogg
+page's granule position, which `--info` reports.
+
 ## Sample values
 
 The formats do not all carry the same number of bits, so values are rescaled to line

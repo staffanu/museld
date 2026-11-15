@@ -2,6 +2,7 @@
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <format>
 #include <stdexcept>
@@ -139,10 +140,61 @@ private:
     std::vector<int32_t> m_carry; // samples of an incomplete trailing group
 };
 
+// The Ogg page checksum: CRC-32 with the 0x04C11DB7 polynomial, no reflection,
+// zero initial value, over the page with its CRC field zeroed
+uint32_t oggCrc(const unsigned char *p, size_t n) {
+    uint32_t crc = 0;
+    for (size_t i = 0; i < n; i++) {
+        crc ^= (uint32_t)p[i] << 24;
+        for (int b = 0; b < 8; b++)
+            crc = crc & 0x80000000u ? (crc << 1) ^ 0x04C11DB7u : crc << 1;
+    }
+    return crc;
+}
+
+// STREAMINFO holds the sample count in 36 bits.  libFLAC's plain FLAC encoder writes
+// 0 ("unknown") for a count that does not fit, but its Ogg encoder (1.5.0) writes the
+// count masked to the field, and decoders trusting the wrapped value refuse every
+// seek past it.  So an Ogg file written with that many samples gets the field
+// cleared here, in the first page, whose checksum is rewritten.  The length is in
+// the last page's granule position anyway (see FlacSource).
+constexpr uint64_t k_streaminfo_total_limit = 1ULL << 36;
+
+uint64_t streamInfoTotalLimit() {
+    // For the tests, which cannot encode 2^36 samples
+    if (const char *env = getenv("LDCONV_STREAMINFO_TOTAL_LIMIT"); env != nullptr && *env != '\0')
+        return strtoull(env, nullptr, 10);
+    return k_streaminfo_total_limit;
+}
+
+void clearOggStreamInfoTotal(const std::string &path) {
+    constexpr size_t k_page = 27 + 1 + 9 + 4 + 4 + 34; // header, one lacing byte, the FLAC-in-Ogg packet
+    constexpr size_t k_total = 28 + 17 + 13;          // the field: low nibble of this byte and the next four
+    FILE *file = fopen(path.c_str(), "r+b");
+    if (file == nullptr)
+        throw std::runtime_error(std::format("Cannot reopen {} to clear its sample count: {}", path, strerror(errno)));
+    unsigned char page[k_page];
+    const bool ok = readFull(file, page, k_page) == k_page && memcmp(page, "OggS", 4) == 0 && page[26] == 1
+        && page[27] == 51 && page[28] == 0x7F && memcmp(page + 29, "FLAC", 4) == 0 && memcmp(page + 37, "fLaC", 4) == 0;
+    if (ok) {
+        page[k_total] &= 0xF0;
+        memset(page + k_total + 1, 0, 4);
+        memset(page + 22, 0, 4);
+        const uint32_t crc = oggCrc(page, k_page);
+        for (int k = 0; k < 4; k++)
+            page[22 + k] = (unsigned char)(crc >> (8 * k));
+        if (seekFile(file, 0, SEEK_SET) == 0)
+            writeFull(file, page, k_page);
+    }
+    fclose(file);
+    if (!ok)
+        throw std::runtime_error(std::format("{} does not start with the FLAC-in-Ogg page expected", path));
+}
+
 class FlacSink : public SampleSink, private FLAC::Encoder::File {
 public:
     FlacSink(Format format, FILE *file, std::string name, const SinkOptions &options)
-        : SampleSink(format), m_name(std::move(name)) {
+        : SampleSink(format), m_name(std::move(name)), m_ogg(format == Format::OggFlac), m_to_file(!isStdStream(file)) {
         set_channels(1);
         set_bits_per_sample(16);
         set_sample_rate(options.flac_rate);
@@ -207,6 +259,7 @@ public:
                     FLAC__StreamEncoderStateString[get_state()]));
             done += n;
         }
+        m_samples_written += count;
     }
 
     void close() override {
@@ -216,14 +269,20 @@ public:
         if (!FLAC::Encoder::File::finish())
             throw std::runtime_error(std::format("Error finishing {}: {}", m_name,
                 FLAC__StreamEncoderStateString[get_state()]));
+        // finish() wrote the count into STREAMINFO; see clearOggStreamInfoTotal
+        if (m_ogg && m_to_file && m_samples_written >= streamInfoTotalLimit())
+            clearOggStreamInfoTotal(m_name);
     }
 
     unsigned threads() const { return m_threads; }
 
 private:
     std::string m_name;
+    bool m_ogg;
+    bool m_to_file; // a path that can be reopened, not the standard output
     bool m_initialized = false;
     unsigned m_threads = 1;
+    uint64_t m_samples_written = 0;
 };
 
 } // namespace

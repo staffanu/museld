@@ -189,6 +189,37 @@ private:
     size_t m_carry_pos = 0;
 };
 
+// The sample count of a FLAC-in-Ogg file whose STREAMINFO does not say (an encode
+// through a pipe, as ld-compress makes them, or more samples than the field's 36
+// bits hold): each Ogg page carries the number of samples encoded up to its end as
+// its granule position, so the last page of the file gives the length.  Reads the
+// file's tail and puts the position back.  0 when there is no such page.
+uint64_t lastOggGranule(FILE *file, int64_t size) {
+    const int64_t original = tellFile(file);
+    if (original < 0 || size <= 0)
+        return 0;
+    constexpr int64_t k_tail = 256 * 1024; // pages are 64 KiB at most
+    const int64_t start = std::max<int64_t>(0, size - k_tail);
+    std::vector<unsigned char> buf((size_t)(size - start));
+    uint64_t result = 0;
+    if (seekFile(file, start, SEEK_SET) == 0) {
+        const size_t got = readFull(file, buf.data(), buf.size());
+        for (size_t i = got >= 27 ? got - 27 : 0; i-- > 0;) {
+            if (memcmp(buf.data() + i, "OggS", 4) != 0 || buf[i + 4] != 0)
+                continue;
+            uint64_t granule = 0;
+            for (int b = 7; b >= 0; b--)
+                granule = (granule << 8) | buf[i + 6 + b];
+            if (granule != ~0ULL && granule != 0) { // -1 marks a page that ends no packet
+                result = granule;
+                break;
+            }
+        }
+    }
+    seekFile(file, original, SEEK_SET);
+    return result;
+}
+
 class FlacSource : public SampleSource, private FLAC::Decoder::File {
 public:
     FlacSource(Format format, FILE *file, std::string name)
@@ -214,6 +245,8 @@ public:
         if (m_channels != 1)
             throw std::runtime_error(std::format(
                 "{} has {} channels; RF captures are mono", m_name, m_channels));
+        if (m_total == 0 && format == Format::OggFlac && m_seekable)
+            m_total = lastOggGranule(file, m_size);
     }
 
     ~FlacSource() override {
