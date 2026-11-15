@@ -51,6 +51,11 @@ private:
     void patchStreamInfoTotal();
     int64_t sampleCountFromOggGranule();
     int64_t sampleCountFromLastFrame();
+    // The last frame of a plain FLAC file, from the headers in its tail: where its header is,
+    // the samples it holds, and whether the file holds all of it (its CRC-16 is at the end)
+    struct LastFrame { int64_t header_offset, start_sample, end_sample; bool complete; };
+    std::optional<LastFrame> scanLastFrame(int fixed_blocksize);
+    int64_t sourcePosition(); // the stream offset of the next byte libFLAC's read_callback gets
 
     FLAC__StreamDecoderReadStatus read_callback(FLAC__byte buffer[], size_t *bytes) override;
     FLAC__StreamDecoderWriteStatus write_callback(const ::FLAC__Frame *frame, const FLAC__int32 *const buffer[]) override;
@@ -79,6 +84,10 @@ private:
     int m_streaminfo_blocksize = 0;    // STREAMINFO maximum block size: the fixed block size
     InputFormat m_container = eFlac;   // as detected
     std::optional<int64_t> m_sample_count_estimate; // sampleCount()'s answer, computed once
+    // Where the stream ends for libFLAC when the file's last frame is cut short (the encoder
+    // was still writing, or was killed): the byte offset of that frame's header, so libFLAC
+    // never reads the partial frame.  -1 for the whole source.  See patchStreamInfoTotal.
+    int64_t m_stream_end = -1;
     std::string m_failure; // empty until a callback fails; see recordError
 };
 

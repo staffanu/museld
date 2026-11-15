@@ -109,11 +109,24 @@ namespace {
         return crc;
     }
 
+    // The CRC-16 that ends every FLAC frame: polynomial 0x8005, zero initial value, over the
+    // frame from its sync code to the byte before the CRC
+    uint16_t flacCrc16(const uint8_t *p, size_t n) {
+        uint16_t crc = 0;
+        for (size_t i = 0; i < n; i++) {
+            crc ^= (uint16_t)(p[i] << 8);
+            for (int b = 0; b < 8; b++)
+                crc = crc & 0x8000 ? (uint16_t)((crc << 1) ^ 0x8005) : (uint16_t)(crc << 1);
+        }
+        return crc;
+    }
+
     // Decodes a FLAC frame header at p and returns the stream position just
-    // after the frame, or -1 when there is no valid header here.  The frame
+    // after the frame, or -1 when there is no valid header here (and the
+    // frame's first sample in *start_out, when asked for).  The frame
     // number (fixed block size streams) or sample number (variable) is
     // UTF-8 coded; the header ends with a CRC-8 that validates the match.
-    int64_t frameEndFromHeader(const uint8_t *p, size_t n, int fixed_blocksize) {
+    int64_t frameEndFromHeader(const uint8_t *p, size_t n, int fixed_blocksize, int64_t *start_out = nullptr) {
         if (n < 6 || p[0] != 0xFF || (p[1] & 0xFE) != 0xF8)
             return -1;
         const bool variable = p[1] & 1;
@@ -148,6 +161,8 @@ namespace {
         if (!variable && fixed_blocksize > 0 && blocksize > fixed_blocksize)
             return -1; // only the last frame may differ, and only by being shorter
         const int64_t start = variable ? (int64_t)number : (int64_t)number * fixed_blocksize;
+        if (start_out)
+            *start_out = start;
         return start + blocksize;
     }
 }
@@ -160,6 +175,22 @@ namespace {
 // seeks by the stream length instead, which works anywhere; the count is
 // not needed from here, sampleCount() takes it from the file's tail.  So
 // the field is zeroed in the bytes handed to libFLAC, before it parses them.
+//
+// A plain FLAC stream is the other way round: libFLAC seeks it by bisection
+// between the count and the stream length, and without a count it starts
+// from the stream's end, where its first probe must decode the last frame.
+// That probe is placed a guessed frame length before the end, and when it
+// lands inside the last frame (or the file ends inside a frame: flac still
+// writing, or killed) no frame decodes there, and libFLAC either gives up
+// or, told by eof_callback that it reached the end, walks the file from
+// its lower bound one frame at a time (seconds on a 200 MB file).  So a
+// plain FLAC stream without a usable count gets the exact count from the
+// last frame header in its tail, written into the field for libFLAC (when
+// it fits the 36 bits) -- its probes then interpolate towards the target
+// and a target past the end is refused at once -- and a file holding only
+// part of its last frame has the stream ended for libFLAC at that frame's
+// header (m_stream_end: length_callback, read_callback, eof_callback), so
+// neither the seeks nor the playback reaching it see the partial frame.
 void LdfInputReader::patchStreamInfoTotal() {
     constexpr size_t c_plain_head = 4 + 4 + 34;           // fLaC, block header, STREAMINFO
     constexpr size_t c_ogg_head = 27 + 1 + 9 + 4 + 4 + 34; // page header, lacing, FLAC-in-Ogg packet
@@ -181,33 +212,58 @@ void LdfInputReader::patchStreamInfoTotal() {
     uint64_t total = (uint64_t)(streaminfo[c_total_offset] & 0x0F) << 32;
     for (int k = 1; k <= 4; k++)
         total = total | (uint64_t)streaminfo[c_total_offset + k] << (8 * (4 - k));
-    if (total == 0)
-        return;
+    const auto write_total = [&](uint64_t value) {
+        streaminfo[c_total_offset] = (uint8_t)((streaminfo[c_total_offset] & 0xF0) | ((value >> 32) & 0x0F));
+        for (int k = 1; k <= 4; k++)
+            streaminfo[c_total_offset + k] = (uint8_t)(value >> (8 * (4 - k)));
+    };
     if (m_container == eFlac) {
-        // A plain FLAC stream without a seek table is seeked by libFLAC
-        // from the sample count (it bisects between the count and the
-        // file length), and with the count hidden every seek fails: so
-        // the count is left alone when it can be right, and hidden only
-        // when the file holds more bytes than that many samples could
-        // compress to.  FLAC does not expand RF (0.3-0.6 of the raw size
-        // on the captures here), so a ratio above 1.1 means a wrapped count.
+        const int fixed_blocksize = streaminfo[2] << 8 | streaminfo[3]; // the maximum block size
         const int bits_per_sample = (((streaminfo[12] & 0x01) << 4) | (streaminfo[13] >> 4)) + 1;
         const int64_t size = m_source->size();
-        if (size > 0 && (double)size * 8.0 <= 1.1 * (double)total * (double)bits_per_sample) {
+        // The count is kept when it can be right: the file holds no more bytes than
+        // that many samples could compress to.  FLAC does not expand RF (0.3-0.6 of
+        // the raw size on the captures here), so a ratio above 1.1 means a wrapped count.
+        if (total != 0 && size > 0 && (double)size * 8.0 <= 1.1 * (double)total * (double)bits_per_sample) {
             if (m_log)
                 m_log->debug(eInput, std::format("FLAC STREAMINFO sample count {} kept: plausible for {} bytes at {} bits",
                                                  total, size, bits_per_sample));
             return;
         }
+        const auto last = scanLastFrame(fixed_blocksize);
+        if (last) {
+            const int64_t count = last->complete ? last->end_sample : last->start_sample;
+            m_sample_count_estimate = count;
+            if (!last->complete) {
+                m_stream_end = last->header_offset;
+                if (m_log)
+                    m_log->info(eInput, std::format("The file holds only part of its last FLAC frame (samples {} to {}; the "
+                                                    "encoder was still writing, or was stopped), so the stream ends before it, "
+                                                    "at byte {}", last->start_sample, last->end_sample, last->header_offset));
+            }
+            if (count < (int64_t)1 << 36) {
+                write_total((uint64_t)count);
+                if (m_log)
+                    m_log->debug(eInput, std::format("FLAC STREAMINFO sample count {} written from the file's last frame "
+                                                     "header for libFLAC to seek by (the field held {})", count, total));
+                return;
+            }
+        }
+        if (total == 0)
+            return;
+        write_total(0);
+        if (m_log)
+            m_log->debug(eInput, std::format("FLAC STREAMINFO sample count {} hidden from libFLAC so seeks are not "
+                                             "limited by it (the field holds 36 bits)", total));
+        return;
     }
-    streaminfo[c_total_offset] &= 0xF0;
-    memset(streaminfo + c_total_offset + 1, 0, 4);
-    if (m_container == eFlacOgg) {
-        memset(m_pushback + 22, 0, 4);
-        const uint32_t crc = oggCrc(m_pushback, c_ogg_head);
-        for (int k = 0; k < 4; k++)
-            m_pushback[22 + k] = (uint8_t)(crc >> (8 * k));
-    }
+    if (total == 0)
+        return;
+    write_total(0);
+    memset(m_pushback + 22, 0, 4);
+    const uint32_t crc = oggCrc(m_pushback, c_ogg_head);
+    for (int k = 0; k < 4; k++)
+        m_pushback[22 + k] = (uint8_t)(crc >> (8 * k));
     if (m_log)
         m_log->debug(eInput, std::format("FLAC STREAMINFO sample count {} hidden from libFLAC so seeks are not "
                                          "limited by it (the field holds 36 bits)", total));
@@ -236,21 +292,30 @@ int64_t LdfInputReader::sampleCount() {
 }
 
 // Plain FLAC without a usable STREAMINFO count (see patchStreamInfoTotal):
-// the last frame header in the file says where its frame ends.
+// the last frame header in the file says where its frame ends -- or, when
+// the file holds only part of that frame, where it begins, since the stream
+// is ended there for libFLAC.
 int64_t LdfInputReader::sampleCountFromLastFrame() {
-    if (isLive())
+    const auto last = scanLastFrame(m_streaminfo_blocksize);
+    if (!last)
         return -1;
+    return last->complete ? last->end_sample : last->start_sample;
+}
+
+std::optional<LdfInputReader::LastFrame> LdfInputReader::scanLastFrame(int fixed_blocksize) {
+    if (isLive())
+        return std::nullopt;
     std::scoped_lock<std::mutex> lock(m_source_mutex);
     const int64_t size = m_source->size();
     if (size <= 0)
-        return -1;
+        return std::nullopt;
     const int64_t original = m_source->seek(0, SEEK_CUR);
     if (original < 0)
-        return -1;
+        return std::nullopt;
     constexpr int64_t tail = 256 * 1024; // several frames of RF at any compression
     const int64_t start = std::max<int64_t>(0, size - tail);
     std::vector<uint8_t> buf((size_t)(size - start));
-    int64_t result = -1;
+    std::optional<LastFrame> result;
     if (m_source->seek(start, SEEK_SET) == start) {
         size_t got = 0;
         while (got < buf.size()) {
@@ -262,15 +327,29 @@ int64_t LdfInputReader::sampleCountFromLastFrame() {
         // data imitating a header) would have to pass the CRC and land after
         // the real last frame, so the frame end is also required to stay
         // ahead of the previous valid one by less than one tail's worth.
-        int64_t last = -1;
+        int64_t last = -1, last_start = -1;
+        size_t last_at = 0;
         for (size_t i = 0; i + 16 <= got; i++) {
-            const int64_t end = frameEndFromHeader(buf.data() + i, got - i, m_streaminfo_blocksize);
+            int64_t frame_start = 0;
+            const int64_t end = frameEndFromHeader(buf.data() + i, got - i, fixed_blocksize, &frame_start);
             if (end < 0)
                 continue;
-            if (last < 0 || (end > last && end - last <= tail * 8))
+            if (last < 0 || (end > last && end - last <= tail * 8)) {
                 last = end;
+                last_start = frame_start;
+                last_at = i;
+            }
         }
-        result = last;
+        if (last >= 0) {
+            // The frame is whole when the file ends with its CRC-16.  An encoder that was
+            // still writing, or was stopped, leaves part of a frame instead.
+            const bool whole_file_read = got == buf.size();
+            const size_t frame_bytes = got - last_at;
+            const bool complete = whole_file_read && frame_bytes > 2
+                && flacCrc16(buf.data() + last_at, frame_bytes - 2)
+                    == (uint16_t)(buf[got - 2] << 8 | buf[got - 1]);
+            result = LastFrame{start + (int64_t)last_at, last_start, last, complete};
+        }
     }
     m_source->seek(original, SEEK_SET);
     return result;
@@ -330,6 +409,11 @@ bool LdfInputReader::seek(int64_t no_samples) {
     throwIfFailed();
     // Clamp at the start of the stream (see InputReaderImpl::seek)
     no_samples = std::max(no_samples, -(int64_t)m_sample_position);
+    // Where libFLAC reads next (the byte after the last frame it decoded), to put it back
+    // there by offset if it refuses the seek: a second bisection would fail where the first
+    // one did.  Not known for Ogg, where libFLAC reads through its own page layer.
+    FLAC__uint64 decode_position = 0;
+    const bool have_position = m_container == eFlac && get_decode_position(&decode_position);
     bool ok = seek_absolute(m_sample_position + no_samples);
     throwIfFailed();
     if (ok) {
@@ -342,7 +426,9 @@ bool LdfInputReader::seek(int64_t no_samples) {
     if (m_log)
         m_log->warn(eInput, std::format("libFLAC cannot seek to sample {}; staying at {}",
                                         m_sample_position + no_samples, m_sample_position));
-    flush();
+    flush(); // the decoder looks for a frame sync where the source is positioned next
+    if (have_position && seek_callback(decode_position) == FLAC__STREAM_DECODER_SEEK_STATUS_OK)
+        return false; // the samples not yet taken from the last decoded frame are still in m_decoded_samples
     ok = seek_absolute(m_sample_position);
     throwIfFailed();
     if (!ok)
@@ -383,10 +469,21 @@ FLAC__StreamDecoderReadStatus LdfInputReader::read_callback(FLAC__byte buffer[],
         *bytes = n;
         return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
     }
+    size_t wanted = *bytes;
+    if (m_stream_end >= 0) {
+        // The stream ends before the file does (see patchStreamInfoTotal)
+        const int64_t position = m_source->seek(0, SEEK_CUR);
+        if (position >= 0)
+            wanted = (size_t)std::clamp<int64_t>(m_stream_end - position, 0, (int64_t)wanted);
+        if (wanted == 0) {
+            *bytes = 0;
+            return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
+        }
+    }
     // libFLAC has no "try again later": a live source that has nothing yet is
     // waited for here, as the raw readers do in readFully.
     ssize_t r;
-    while ((r = m_source->read(buffer, *bytes)) == -1 && errno == EAGAIN)
+    while ((r = m_source->read(buffer, wanted)) == -1 && errno == EAGAIN)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     if (r == -1) {
         recordError(std::format("Error reading input: {}", strerror(errno)));
@@ -438,25 +535,35 @@ void LdfInputReader::error_callback(::FLAC__StreamDecoderErrorStatus status) {
     recordError(std::format("libFLAC++ error_callback: {}", FLAC__StreamDecoderErrorStatusString[status]));
 }
 
-FLAC__StreamDecoderTellStatus LdfInputReader::tell_callback(FLAC__uint64 *absolute_byte_offset) {
+int64_t LdfInputReader::sourcePosition() {
     const int64_t position = m_source->seek(0, SEEK_CUR);
+    if (position == -1)
+        return -1;
+    return position - (int64_t)(m_pushback_size - m_pushback_read);
+}
+
+FLAC__StreamDecoderTellStatus LdfInputReader::tell_callback(FLAC__uint64 *absolute_byte_offset) {
+    const int64_t position = sourcePosition();
     if (position == -1) {
         if (errno == ESPIPE)
             return FLAC__STREAM_DECODER_TELL_STATUS_UNSUPPORTED;
         return FLAC__STREAM_DECODER_TELL_STATUS_ERROR;
     }
-    *absolute_byte_offset = (FLAC__uint64)position - (m_pushback_size - m_pushback_read);
+    *absolute_byte_offset = (FLAC__uint64)position;
     return FLAC__STREAM_DECODER_TELL_STATUS_OK;
 }
 
 FLAC__StreamDecoderSeekStatus LdfInputReader::seek_callback(FLAC__uint64 absolute_byte_offset) {
-    int64_t r = m_source->seek((int64_t)absolute_byte_offset, SEEK_SET);
+    // The stream head is served from m_pushback, whose STREAMINFO may be patched
+    // (patchStreamInfoTotal), so a seek into it reads from there, not the source
+    const int64_t source_offset = std::max<int64_t>((int64_t)absolute_byte_offset, (int64_t)m_pushback_size);
+    int64_t r = m_source->seek(source_offset, SEEK_SET);
     if (r == -1) {
         if (errno == ESPIPE)
             return FLAC__STREAM_DECODER_SEEK_STATUS_UNSUPPORTED;
         return FLAC__STREAM_DECODER_SEEK_STATUS_ERROR;
     }
-    m_pushback_read = m_pushback_size; // the source is positioned explicitly from here on
+    m_pushback_read = (size_t)std::min<int64_t>((int64_t)absolute_byte_offset, (int64_t)m_pushback_size);
     return FLAC__STREAM_DECODER_SEEK_STATUS_OK;
 }
 
@@ -464,10 +571,16 @@ FLAC__StreamDecoderLengthStatus LdfInputReader::length_callback(FLAC__uint64 *st
     const int64_t size = m_source->size();
     if (size < 0)
         return FLAC__STREAM_DECODER_LENGTH_STATUS_UNSUPPORTED;
-    *stream_length = (FLAC__uint64)size;
+    *stream_length = (FLAC__uint64)(m_stream_end >= 0 ? std::min(m_stream_end, size) : size);
     return FLAC__STREAM_DECODER_LENGTH_STATUS_OK;
 }
 
+// Only where the stream is ended short of the file (patchStreamInfoTotal) is the end known
+// here; otherwise libFLAC learns of it from a read that returns nothing, as before, which is
+// also all a live source can tell.
 bool LdfInputReader::eof_callback() {
-    return false; // TODO actually check!
+    if (m_stream_end < 0)
+        return false;
+    const int64_t position = sourcePosition();
+    return position >= 0 && position >= m_stream_end;
 }

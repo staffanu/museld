@@ -152,3 +152,48 @@ TEST_CASE("FLAC sample count and seeking", "[ldf]") {
         expectBlockAt(*reader, 11 * c_block);
     }
 }
+
+// A plain FLAC file that ends inside its last frame, with the count at zero: flac
+// still writing to it, or killed.  libFLAC's seeks on a stream of unknown length
+// start from its end and die on the partial frame -- including the seek that
+// puts the decoder back after a refused one, which ended museld -- and playback
+// reaching the frame reports a decoding error.  The reader ends the stream for
+// libFLAC at that frame's header and gives it the exact count instead.
+TEST_CASE("plain FLAC cut inside its last frame", "[ldf]") {
+    const int64_t n = 50 * c_block + 1234;
+    const auto path = encode(n, false);
+    Cleanup cleanup{path};
+    setStreamInfoTotal(path, false, 0);
+    auto bytes = readAll(path);
+    bytes.resize(bytes.size() - 100); // inside the last frame (1234 samples of noise, 2 KB and more)
+    writeAll(path, bytes);
+    const int64_t whole = 50 * c_block; // the samples before the cut frame
+
+    SECTION("the count is the start of the cut frame, and seeks land") {
+        auto reader = open(path, false);
+        CHECK(reader->sampleCount() == whole);
+        REQUIRE(reader->seek(whole - 3 * c_block));
+        expectBlockAt(*reader, whole - 3 * c_block);
+        REQUIRE(reader->seek(-(whole - 3 * c_block) + 7 * c_block - c_block)); // back to block 7
+        expectBlockAt(*reader, 7 * c_block);
+    }
+
+    SECTION("a refused seek leaves the reader where it was") {
+        auto reader = open(path, false);
+        REQUIRE(reader->seek(10 * c_block));
+        expectBlockAt(*reader, 10 * c_block);
+        CHECK_FALSE(reader->seek(n + 100 * c_block)); // past the end
+        expectBlockAt(*reader, 11 * c_block);
+        CHECK_FALSE(reader->seek(whole + 500)); // into the cut frame
+        expectBlockAt(*reader, 12 * c_block);
+    }
+
+    SECTION("reading to the end stops before the cut frame, without an error") {
+        auto reader = open(path, false);
+        REQUIRE(reader->seek(whole - 2 * c_block));
+        expectBlockAt(*reader, whole - 2 * c_block);
+        expectBlockAt(*reader, whole - c_block);
+        std::vector<float> f(c_block);
+        CHECK(reader->readFloats(f.data()) == 0);
+    }
+}

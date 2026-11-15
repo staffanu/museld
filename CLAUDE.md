@@ -432,8 +432,17 @@ plain stream). STREAMINFO's sample count is only 36 bits (28 min at 40 MHz), so 
 have it at zero or wrapped, and libFLAC refuses seeks beyond a wrapped value: `LdfInputReader`
 zeroes the field in the bytes it hands libFLAC (re-checksumming the Ogg page), which makes it
 seek by stream length instead. A plain FLAC stream (no Ogg, no seek table) is the opposite case:
-libFLAC seeks it from the count and fails every seek without one, so there the count is kept
-when it is plausible for the file size and hidden only when wrapped (the Technidisc capture). A seek the input refuses returns false up the chain
+libFLAC bisects it between the count and the stream length, and without a count it starts from
+the end, where its first probe must decode the last frame: a file that ends inside a frame
+(flac still writing, or killed -- what `usbstream | flac` leaves until it finishes) made every
+seek fail there, the one restoring the position after a refused seek included, which ended
+museld, and libFLAC walked the file a frame at a time when the probe merely landed inside the
+last whole frame. So the count is kept when it is plausible for the file size, and otherwise
+(zero, or wrapped as on the Technidisc capture) the reader scans the file's tail for the last
+frame header, writes the exact count into the field for libFLAC when it fits the 36 bits, and
+ends the stream for libFLAC at the header of a cut frame (its CRC-16 is not at the end of the
+file) so neither seeks nor playback see the partial frame; a refused seek puts the decoder back
+by byte offset (`get_decode_position`), not by a second bisection. A seek the input refuses returns false up the chain
 (`InputReader::seek`, `RfDemodulator::seekLocked`, `FrameReader::seek`) and nothing moves. Readers
 reset their timebase/PLL on the reader thread when a block's generation changes, never from
 the seeking thread, and the NTSC reader drops the partial frame after a reset. A probe costs
