@@ -197,3 +197,54 @@ TEST_CASE("plain FLAC cut inside its last frame", "[ldf]") {
         CHECK(reader->readFloats(f.data()) == 0);
     }
 }
+
+// A plain FLAC file with more samples than STREAMINFO's 36-bit count can hold (a disc side
+// at 62.5 MHz; the limit is lowered to zero here) cannot be given its count, so libFLAC would
+// bisect from the end and fail whenever its first probe lands inside the last frame.  The
+// reader finds the target by its own search instead.
+TEST_CASE("plain FLAC seeks by the reader's own search when the count does not fit", "[ldf]") {
+    struct Limit {
+        Limit() { LdfInputReader::setStreamInfoCountLimitForTest(0); }
+        ~Limit() { LdfInputReader::setStreamInfoCountLimitForTest((uint64_t)1 << 36); }
+    } limit;
+    const int64_t n = 400 * c_block + 1234;
+    const auto path = encode(n, false);
+    Cleanup cleanup{path};
+    setStreamInfoTotal(path, false, 0);
+
+    SECTION("targets everywhere, including inside a frame and in the short last frame") {
+        auto reader = open(path, false);
+        CHECK(reader->sampleCount() == n);
+        const int64_t targets[] = {n - 3 * c_block, 7 * c_block, 10 * c_block + 1000, 399 * c_block + 500,
+                                   n - c_block, 0, 1, 250 * c_block - 1};
+        int64_t position = 0;
+        for (const int64_t target : targets) {
+            REQUIRE(reader->seek(target - position));
+            expectBlockAt(*reader, target);
+            position = target + c_block;
+        }
+    }
+
+    SECTION("a refused seek leaves the reader where it was, samples of the current frame included") {
+        auto reader = open(path, false);
+        REQUIRE(reader->seek(10 * c_block + 100));
+        expectBlockAt(*reader, 10 * c_block + 100);
+        CHECK_FALSE(reader->seek(n + 100 * c_block)); // past the end: refused by the count
+        expectBlockAt(*reader, 11 * c_block + 100);
+    }
+
+    SECTION("a file cut inside its last frame") {
+        auto bytes = readAll(path);
+        bytes.resize(bytes.size() - 100);
+        writeAll(path, bytes);
+        auto reader = open(path, false);
+        const int64_t whole = 400 * c_block;
+        CHECK(reader->sampleCount() == whole);
+        REQUIRE(reader->seek(whole - 2 * c_block));
+        expectBlockAt(*reader, whole - 2 * c_block);
+        CHECK_FALSE(reader->seek(c_block + 500)); // into the cut frame
+        expectBlockAt(*reader, whole - c_block);
+        std::vector<float> f(c_block);
+        CHECK(reader->readFloats(f.data()) == 0);
+    }
+}

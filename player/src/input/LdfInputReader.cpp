@@ -15,6 +15,8 @@
 #include "LdfInputReader.h"
 #include "logging/Logger.h"
 
+uint64_t LdfInputReader::s_streaminfo_count_limit = (uint64_t)1 << 36;
+
 LdfInputReader::LdfInputReader(std::unique_ptr<ByteSource> source, uint32_t block_size, InputFormat format,
                                Logger *log)
   : InputReader(std::move(source), block_size),
@@ -241,13 +243,17 @@ void LdfInputReader::patchStreamInfoTotal() {
                                                     "encoder was still writing, or was stopped), so the stream ends before it, "
                                                     "at byte {}", last->start_sample, last->end_sample, last->header_offset));
             }
-            if (count < (int64_t)1 << 36) {
+            if ((uint64_t)count < s_streaminfo_count_limit) {
                 write_total((uint64_t)count);
                 if (m_log)
                     m_log->debug(eInput, std::format("FLAC STREAMINFO sample count {} written from the file's last frame "
                                                      "header for libFLAC to seek by (the field held {})", count, total));
                 return;
             }
+            if (m_log)
+                m_log->debug(eInput, std::format("FLAC sample count {} from the file's last frame header does not fit "
+                                                 "STREAMINFO's 36 bits: the reader seeks by its own search (the field held {})",
+                                                 count, total));
         }
         if (total == 0)
             return;
@@ -281,6 +287,10 @@ void LdfInputReader::initialize() {
     FLAC__StreamDecoderState s;
     while (s = get_state(), s != FLAC__STREAM_DECODER_READ_FRAME && s != FLAC__STREAM_DECODER_SEARCH_FOR_FRAME_SYNC && s != FLAC__STREAM_DECODER_END_OF_STREAM)
         processSingleChecked();
+    // Where the frames start: nothing of them is consumed yet (seekBySearch's lower bound)
+    FLAC__uint64 first_frame = 0;
+    if (m_container == eFlac && get_decode_position(&first_frame))
+        m_first_frame_offset = (int64_t)first_frame;
 }
 
 int64_t LdfInputReader::sampleCount() {
@@ -409,30 +419,135 @@ bool LdfInputReader::seek(int64_t no_samples) {
     throwIfFailed();
     // Clamp at the start of the stream (see InputReaderImpl::seek)
     no_samples = std::max(no_samples, -(int64_t)m_sample_position);
+    const int64_t target = (int64_t)m_sample_position + no_samples;
+    // A plain FLAC stream libFLAC has no count for (see patchStreamInfoTotal) is
+    // seeked by the reader's own search, with the count it read from the tail
+    const bool own_search = m_container == eFlac && m_total_samples == 0 && m_first_frame_offset >= 0
+        && m_sample_count_estimate && *m_sample_count_estimate > 0;
+    if (own_search && target >= *m_sample_count_estimate) {
+        if (m_log)
+            m_log->warn(eInput, std::format("Cannot seek to sample {}: the file holds {}; staying at {}",
+                                            target, *m_sample_count_estimate, m_sample_position));
+        return false; // nothing moved
+    }
     // Where libFLAC reads next (the byte after the last frame it decoded), to put it back
-    // there by offset if it refuses the seek: a second bisection would fail where the first
-    // one did.  Not known for Ogg, where libFLAC reads through its own page layer.
+    // there by offset if the seek fails: a second bisection would fail where the first one
+    // did.  Not known for Ogg, where libFLAC reads through its own page layer.  The samples
+    // not yet taken from the last decoded frame are kept too: the search decodes over them.
     FLAC__uint64 decode_position = 0;
     const bool have_position = m_container == eFlac && get_decode_position(&decode_position);
-    bool ok = seek_absolute(m_sample_position + no_samples);
+    const std::vector<uint16_t> kept_samples(m_decoded_samples, m_decoded_samples + m_flac_used_size);
+    const uint32_t kept_read_count = m_flac_block_read_count;
+    bool ok;
+    if (own_search) {
+        m_probing = true;
+        ok = seekBySearch(target, *m_sample_count_estimate);
+        m_probing = false;
+    } else {
+        ok = seek_absolute((FLAC__uint64)target);
+    }
     throwIfFailed();
     if (ok) {
-        m_sample_position += no_samples;
+        m_sample_position = (uint64_t)target;
         return true;
     }
-    // libFLAC refused the position (past the end, or beyond a STREAMINFO
-    // count it trusts).  It is left in its seek-error state, so put it back
-    // where it was and let the caller carry on from there.
+    // libFLAC refused the position (past the end, or beyond a STREAMINFO count it trusts),
+    // or the search found no frame holding it.  The decoder is left where the attempt ended,
+    // so put it back where it was and let the caller carry on from there.
     if (m_log)
-        m_log->warn(eInput, std::format("libFLAC cannot seek to sample {}; staying at {}",
-                                        m_sample_position + no_samples, m_sample_position));
+        m_log->warn(eInput, std::format("{} cannot seek to sample {}; staying at {}",
+                                        own_search ? "The frame search" : "libFLAC", target, m_sample_position));
     flush(); // the decoder looks for a frame sync where the source is positioned next
-    if (have_position && seek_callback(decode_position) == FLAC__STREAM_DECODER_SEEK_STATUS_OK)
-        return false; // the samples not yet taken from the last decoded frame are still in m_decoded_samples
+    if (have_position && seek_callback(decode_position) == FLAC__STREAM_DECODER_SEEK_STATUS_OK) {
+        if (own_search) {
+            memcpy(m_decoded_samples, kept_samples.data(), kept_samples.size() * sizeof(uint16_t));
+            m_flac_used_size = (uint32_t)kept_samples.size();
+            m_flac_block_read_count = kept_read_count;
+        }
+        return false;
+    }
     ok = seek_absolute(m_sample_position);
     throwIfFailed();
     if (!ok)
         throw std::runtime_error("libflac: seek_absolute failed, and the previous position cannot be restored");
+    return false;
+}
+
+// Positions libFLAC at `offset` and decodes the first frame after it, which write_callback
+// records in m_last_frame_sample.  False when nothing decodes there: the stream's data ends
+// before the offset, or a read failed (recorded for the caller to raise).
+bool LdfInputReader::decodeFrameAt(int64_t offset) {
+    if (seek_callback((FLAC__uint64)offset) != FLAC__STREAM_DECODER_SEEK_STATUS_OK || !flush())
+        return false;
+    m_last_frame_sample = -1;
+    // A false frame sync in the compressed data costs a step that decodes nothing (the
+    // error is reported to error_callback, which ignores it while probing) and libFLAC
+    // resumes its search after it
+    for (int step = 0; step < 8 && m_last_frame_sample < 0; step++) {
+        if (!process_single() || !m_failure.empty() || get_state() == FLAC__STREAM_DECODER_END_OF_STREAM)
+            return false;
+    }
+    return m_last_frame_sample >= 0;
+}
+
+// libFLAC seeks a plain FLAC stream of unknown length by bisection from its end, where its
+// first probe must decode the last frame -- which fails whenever the probe, placed a guessed
+// frame length before the end, lands inside that frame.  A stream of more than 2^36 samples
+// (a disc side at 62.5 MHz) cannot be given its count, so its target is found here instead:
+// an interpolation search between the first frame and the stream's end (byte and sample
+// known at both, the end's from the tail scan), each probe decoding the frame after its
+// offset, narrowed to a stretch of a few frames that is then decoded forward to the frame
+// holding the target.  That frame is left in m_decoded_samples with the read position at the
+// target, as libFLAC's own seek leaves it.  The caller checked the target against the count.
+bool LdfInputReader::seekBySearch(int64_t target, int64_t count) {
+    const int64_t end = m_stream_end >= 0 ? m_stream_end : m_source->size();
+    if (end <= m_first_frame_offset || target < 0)
+        return false;
+    int64_t lo_bytes = m_first_frame_offset, lo_sample = 0, hi_bytes = end, hi_sample = count;
+    constexpr int64_t c_forward_bytes = 64 * 1024; // decoded frame by frame from here: tens of frames
+    for (int probe = 0; probe < 40 && hi_bytes - lo_bytes > c_forward_bytes; probe++) {
+        // Aim by the sample density between the bounds; the bounds move onto the probe's own
+        // offset, so every probe narrows the stretch
+        const double fraction = hi_sample > lo_sample ? (double)(target - lo_sample) / (double)(hi_sample - lo_sample) : 0.5;
+        const int64_t pos = std::clamp(lo_bytes + (int64_t)(fraction * (double)(hi_bytes - lo_bytes)),
+                                       lo_bytes + 1, hi_bytes - 1);
+        if (!decodeFrameAt(pos)) {
+            if (!m_failure.empty())
+                return false;
+            hi_bytes = pos; // no frame begins after pos: the data ends before it
+            continue;
+        }
+        const int64_t frame_sample = m_last_frame_sample;
+        if (frame_sample <= target && target < frame_sample + m_last_frame_blocksize) {
+            m_flac_block_read_count = (uint32_t)(target - frame_sample);
+            return true;
+        }
+        // The first frame after pos starts at frame_sample, so the frame holding the target
+        // starts before pos when it is earlier, after pos when it is later
+        if (frame_sample > target) {
+            hi_bytes = pos;
+            hi_sample = frame_sample;
+        } else {
+            lo_bytes = pos;
+            lo_sample = frame_sample;
+        }
+    }
+    // Forward from the lower bound to the frame holding the target
+    if (!decodeFrameAt(lo_bytes))
+        return false;
+    for (int frames = 0; frames < 4096; frames++) {
+        if (m_last_frame_sample <= target && target < m_last_frame_sample + m_last_frame_blocksize) {
+            m_flac_block_read_count = (uint32_t)(target - m_last_frame_sample);
+            return true;
+        }
+        if (m_last_frame_sample > target)
+            return false; // the target lies in no frame: a hole in the stream
+        m_last_frame_sample = -1;
+        if (!process_single() || !m_failure.empty() || get_state() == FLAC__STREAM_DECODER_END_OF_STREAM)
+            return false;
+        if (m_last_frame_sample < 0)
+            frames--; // a step that decoded nothing (a bad frame skipped)
+    }
     return false;
 }
 
@@ -511,6 +626,11 @@ FLAC__StreamDecoderWriteStatus LdfInputReader::write_callback(const FLAC__Frame 
         m_decoded_samples[i] = buffer[0][i];
     m_flac_used_size = frame->header.blocksize;
     m_flac_block_read_count = 0;
+    // libFLAC turns a frame number into the sample number when it knows the block size
+    m_last_frame_sample = frame->header.number_type == FLAC__FRAME_NUMBER_TYPE_FRAME_NUMBER
+        ? (int64_t)frame->header.number.frame_number * frame->header.blocksize
+        : (int64_t)frame->header.number.sample_number;
+    m_last_frame_blocksize = (int)frame->header.blocksize;
 
     return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
 }
@@ -532,6 +652,8 @@ void LdfInputReader::metadata_callback(const ::FLAC__StreamMetadata *metadata) {
 }
 
 void LdfInputReader::error_callback(::FLAC__StreamDecoderErrorStatus status) {
+    if (m_probing)
+        return; // a probe landing in the middle of a frame finds false syncs; libFLAC moves on
     recordError(std::format("libFLAC++ error_callback: {}", FLAC__StreamDecoderErrorStatusString[status]));
 }
 

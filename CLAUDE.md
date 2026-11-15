@@ -441,8 +441,18 @@ last whole frame. So the count is kept when it is plausible for the file size, a
 (zero, or wrapped as on the Technidisc capture) the reader scans the file's tail for the last
 frame header, writes the exact count into the field for libFLAC when it fits the 36 bits, and
 ends the stream for libFLAC at the header of a cut frame (its CRC-16 is not at the end of the
-file) so neither seeks nor playback see the partial frame; a refused seek puts the decoder back
-by byte offset (`get_decode_position`), not by a second bisection. A seek the input refuses returns false up the chain
+file) so neither seeks nor playback see the partial frame. A count that does not fit (a disc
+side at 62.5 MHz: the river captures, 159 and 173 G samples) cannot be given to libFLAC, whose
+end probe then gambles on the last frame being shorter than its guess (about 40% of captures
+lose), so there the reader seeks by its own search (`seekBySearch`: interpolation between the
+first frame and the stream's end, each probe decoding the frame after its offset with
+`decodeFrameAt`, the last 64 KiB decoded forward to the frame holding the target, left in the
+sample buffer with the read position at the target as libFLAC's seek leaves it; a target at or
+past the count is refused without touching libFLAC; 4 to 16 probes of a chapter or time search
+each took about 50 ms on the 200 GB files). A refused seek puts the decoder back by byte offset
+(`get_decode_position`) with the kept samples of the current frame, not by a second bisection.
+`LdfInputReader::setStreamInfoCountLimitForTest(0)` makes every plain file take the search
+path, which is how the test covers it. A seek the input refuses returns false up the chain
 (`InputReader::seek`, `RfDemodulator::seekLocked`, `FrameReader::seek`) and nothing moves. Readers
 reset their timebase/PLL on the reader thread when a block's generation changes, never from
 the seeking thread, and the NTSC reader drops the partial frame after a reset. A probe costs

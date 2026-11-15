@@ -36,6 +36,10 @@ public:
     // From STREAMINFO; -1 when the encoder left it at zero (a streamed encode)
     int64_t sampleCount() override;
 
+    // Test hook: the largest sample count written into STREAMINFO for libFLAC (the field's
+    // 2^36 by default; 0 makes every plain FLAC file seek by the reader's own search)
+    static void setStreamInfoCountLimitForTest(uint64_t limit) { s_streaminfo_count_limit = limit; }
+
 private:
     // libFLAC invokes the callbacks below from its own C frames, which must not be unwound
     // through: an exception thrown there would skip libFLAC's bookkeeping and leave the
@@ -55,6 +59,8 @@ private:
     // the samples it holds, and whether the file holds all of it (its CRC-16 is at the end)
     struct LastFrame { int64_t header_offset, start_sample, end_sample; bool complete; };
     std::optional<LastFrame> scanLastFrame(int fixed_blocksize);
+    bool seekBySearch(int64_t target, int64_t count);
+    bool decodeFrameAt(int64_t offset);
     int64_t sourcePosition(); // the stream offset of the next byte libFLAC's read_callback gets
 
     FLAC__StreamDecoderReadStatus read_callback(FLAC__byte buffer[], size_t *bytes) override;
@@ -88,6 +94,11 @@ private:
     // was still writing, or was killed): the byte offset of that frame's header, so libFLAC
     // never reads the partial frame.  -1 for the whole source.  See patchStreamInfoTotal.
     int64_t m_stream_end = -1;
+    int64_t m_first_frame_offset = -1;  // plain FLAC: the byte after the metadata, from libFLAC
+    int64_t m_last_frame_sample = -1;   // the first sample of the frame write_callback last got
+    int m_last_frame_blocksize = 0;
+    bool m_probing = false;             // seekBySearch decoding frames to find its way: errors are expected
+    static uint64_t s_streaminfo_count_limit;
     std::string m_failure; // empty until a callback fails; see recordError
 };
 
