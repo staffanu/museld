@@ -111,7 +111,8 @@ private:
     void syncPass();
     void acquire(int64_t stream_end);
     void track(int64_t stream_end);
-    bool scoreCandidate(int64_t i, Candidate *c) const;
+    bool acceptPulse(const Candidate &c, int64_t k, bool trace);
+    bool scoreCandidate(int64_t i, Candidate *c, bool strict) const;
     bool refineCrossing(Candidate *c) const;
     void evaluateAnchors();
     // Resample finalized lines into the frame; returns true when a frame completed
@@ -180,6 +181,10 @@ private:
     bool m_tracking;
     bool m_last_positive;               // polarity of the last accepted pulse
     int m_misses;                       // lines since it without a usable edge
+    // A pulse found after misses, or off its prediction, waits for the next
+    // line to confirm it before it becomes the chain's reference (track())
+    bool m_have_pending;
+    Candidate m_pending;
     std::deque<std::pair<int64_t, bool>> m_polarities; // (lattice line, positive) of accepted pulses
 
     // --- vertical anchor: MUSE line numbers on the lattice ---

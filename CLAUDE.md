@@ -362,6 +362,32 @@ edge alternate polarity line to line exactly like the sync, so an acquisition ch
 by the frame pulses of lines 1-2 before it becomes the lattice (the Sony test disc's bars locked
 the chain otherwise). A player spinning up (the first two seconds of the blue capture) hunts
 +-2% around nominal speed.
+The tracking (`MuseFrameReader::track`) holds a pulse found after misses, or more than two
+pixels off its prediction, as pending until the next line confirms it with a pulse of the other
+polarity one period on, and the candidate test has a loose form, used only within two pixels of
+where the chain predicts the sync, that asks the full sync level of the plateau before the
+crossing alone (2026-11-16, a Top Gun capture from an HLD-X9 whose line timing wobbles +-6 us
+at 39 Hz, the velocity +-1500 ppm): the audio lines 3-46 and 564-608 carry the sync followed at
+once by the ternary audio data, which rings into the sync's high plateau so that a few of them in
+a row fail the flatness test, and a step of the data a few samples off was then accepted in the
+widened window; the chain's reference is the last accepted pulse, so every later line was
+searched in the wrong place and steps of the data or picture edges hundreds of samples away
+were accepted as the window grew, until a re-anchor or a timebase reset.  Besides that, in
+stretches of some ten milliseconds in step with the wobble, the level after the sync's crossing
+settles at 100-135 instead of 57/178 while the plateau before it and the step keep their
+height, and in shorter ones the sync is gone from the predicted place altogether, with picture
+content there -- both in the RF itself (an independent demodulation of the capture shows the
+same lines the same way), which looks like the pickup drifting towards the adjacent track.
+The loose form keeps the chain through the first kind; the second is coasted (a chain period
+following the wobble at 5% per line instead of 2% halved the coasted lines there, but changed
+which measurements the smoother accepts on the clean captures, 65-71 dB over every frame of
+two clips and two disc codes, and was not kept).  Over the 50 s of that clip the lines without
+a sync pulse went from 11410 to 1427, eight frames with hundreds of unsupported lines to one
+(a stretch with no sync of the track at the predicted place), two re-anchors and a reset to
+none; on a 3.5 s stretch
+the grid's error against the sync edges went from 6.3 to 3.9 ns rms (p99 13 to 10 ns), with
+every line found.  Picture steps from a dark plateau pass the loose form far too often for it
+to be used in searching (tried: three times the untracked lines).
 
 **Sample rates**: anything in the sync pass and timebase that is a count of (decimated)
 samples must be derived from a time, never a constant: a 30 MHz Domesday Duplicator capture

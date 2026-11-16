@@ -76,6 +76,8 @@ MuseFrameReader::MuseFrameReader(
           m_tracking(false),
           m_last_positive(false),
           m_misses(0),
+          m_have_pending(false),
+          m_pending{},
           m_anchored(false),
           m_seek_generation(0),
           m_frame_partial(true),
@@ -230,6 +232,7 @@ void MuseFrameReader::resetTimebase(const char *why) {
     m_timebase.reset();
     m_tracking = false;
     m_misses = 0;
+    m_have_pending = false;
     m_chains.clear();
     m_polarities.clear();
     m_anchored = false;
@@ -438,7 +441,7 @@ void MuseFrameReader::syncPass() {
 
 // Is there an HD sync edge with its pixel 1 at stream position i?  Requires
 // i - 2 >= m_psum_base and i + m_span < m_stream_pos.
-bool MuseFrameReader::scoreCandidate(int64_t i, Candidate *c) const {
+bool MuseFrameReader::scoreCandidate(int64_t i, Candidate *c, bool strict) const {
     auto mean = [this](int64_t a, int64_t b) {
         return (float)((m_psum[b - m_psum_base] - m_psum[a - m_psum_base]) / (double)(b - a));
     };
@@ -446,17 +449,28 @@ bool MuseFrameReader::scoreCandidate(int64_t i, Candidate *c) const {
     const float b = mean(i + m_off_b0, i + m_off_b1);
     const float d = b - a;
     const float ad = abs(d);
-    if (ad < c_amp_min * m_amp_ref || ad > c_amp_max * m_amp_ref)
+    if (ad < (strict ? c_amp_min : 0.35f) * m_amp_ref || ad > c_amp_max * m_amp_ref)
         return false;
     const float lo = min(a, b), hi = max(a, b);
-    if (lo < c_level_lo_min || lo > c_level_lo_max || hi < c_level_hi_min || hi > c_level_hi_max)
+    if (lo < c_level_lo_min || hi > c_level_hi_max)
+        return false;
+    // Both plateaus at their sync levels -- or, where the chain already
+    // predicts the sync (strict false), only the one before the crossing:
+    // on the Top Gun capture from an HLD-X9 the step at the crossing keeps
+    // its height but the level after it settles at 100-135 in stretches of
+    // some ten milliseconds, in step with the player's 39 Hz wobble, in the
+    // RF itself (an independent demodulation of the capture shows the same
+    // lines the same way), and whole frames went untracked for it.  Picture
+    // steps from a dark plateau pass the loose form too often for it to be
+    // used in searching (tried: three times the untracked lines)
+    if (strict ? (lo > c_level_lo_max || hi < c_level_hi_min) : (d > 0 ? a > c_level_lo_max : a < c_level_hi_min))
         return false;
     const float m = sample(i + m_off_mid);
     if ((m - a) * d <= 0 || (b - m) * d <= 0)
         return false; // the middle sample is not between the plateaus
     if (abs(sample(i + m_off_f1) - sample(i + m_off_f3)) > c_flatness * ad
-        || abs(sample(i + m_off_f8) - sample(i + m_off_f10)) > c_flatness * ad)
-        return false; // a plateau is not flat: a ramp or picture detail
+        || (strict && abs(sample(i + m_off_f8) - sample(i + m_off_f10)) > c_flatness * ad))
+        return false; // a plateau is not flat: a ramp or picture detail (the collapsed plateau is not)
     c->i = i;
     c->a = a;
     c->b = b;
@@ -505,7 +519,7 @@ void MuseFrameReader::acquire(int64_t stream_end) {
         bool in_run = false;
         for (int64_t i = w0; i < w1; i++) {
             Candidate c;
-            const bool ok = scoreCandidate(i, &c);
+            const bool ok = scoreCandidate(i, &c, true);
             if (ok && in_run && c.positive == best.positive) {
                 if (abs(c.b - c.a) > best_ad) {
                     best = c;
@@ -675,6 +689,7 @@ bool MuseFrameReader::lockOnChain(const Chain &c, size_t line1_ix, double diff) 
     m_amp_ref = amp / (float)c.amps.size();
     m_last_positive = c.pols.back();
     m_misses = 0;
+    m_have_pending = false;
     m_tracking = true;
     m_line1_k = line1_k;
     m_anchored = true;
@@ -698,32 +713,60 @@ bool MuseFrameReader::lockOnChain(const Chain &c, size_t line1_ix, double diff) 
 // window that widens with the gap since the last edge, with the polarity the
 // alternation says -- the other polarity is accepted when it is all there is
 // (the lines 2-3 break, or a line after a missed one).
+//
+// A pulse found right where the chain predicts it is the sync.  One found
+// after misses, or more than two pixels off, is held as pending until the
+// next line confirms it: a pulse of the other polarity one period on, within
+// four pixels.  The chain's reference is the last accepted pulse, so a false
+// one moves every later prediction by its error, and the window widens too
+// slowly to find the sync again for a hundred lines or more.  Measured on a
+// Top Gun capture from an HLD-X9 whose line timing wobbles +-6 us at 39 Hz:
+// the audio lines 3-46 and 564-608 carry the sync followed at once by the
+// ternary audio data, which rings into the sync's high plateau so that a
+// few of them in a row fail the flatness test, and the first step of the
+// data a few samples off was then accepted in the widened window, after
+// which the true syncs sat outside every window and steps of the data or
+// picture edges hundreds of samples away were accepted as the window grew,
+// until a re-anchor or a timebase reset (1.3 frames lost at each of several
+// audio blocks).  A step of the audio data or a picture edge is not followed
+// one line later by one of the other polarity at the sync's place, so the
+// confirmation refuses it and the chain keeps coasting from the true
+// reference, with the window widening, until two consecutive syncs are found.
 void MuseFrameReader::track(int64_t stream_end) {
     for (;;) {
         const int64_t k0 = m_timebase.lastPulseLine();
-        const int64_t k = k0 + 1 + m_misses;
-        // Predicted from the last edge by the chain's period: good to a
-        // sample for the next line and to a few over a gap of tens of lines.
-        // (The smoother's look-ahead head, extrapolated up to 64 lines, is
-        // good to a few pixels only, which is enough to detect a slipped
-        // line but not to place a +-4 pixel window: used for the window it
-        // missed 15% of the lines on a clean capture.)
-        const double gap = (double)(k - k0) * m_timebase.period();
-        const double pred = m_timebase.lastPulseTime() + gap;
-        const double w = min(4 * m_pix + 0.0005 * gap, 0.4 * m_p_nominal);
+        const int64_t k = k0 + 1 + m_misses + (m_have_pending ? 1 : 0);
+        double pred, w;
+        bool expect_positive;
+        if (m_have_pending) {
+            // the line after the pending pulse: one period on, in a tight window
+            pred = m_pending.t + m_timebase.period();
+            w = 4 * m_pix;
+            expect_positive = !m_pending.positive;
+        } else {
+            // Predicted from the last edge by the chain's period: good to a
+            // sample for the next line and to a few over a gap of tens of lines.
+            // (The smoother's look-ahead head, extrapolated up to 64 lines, is
+            // good to a few pixels only, which is enough to detect a slipped
+            // line but not to place a +-4 pixel window: used for the window it
+            // missed 15% of the lines on a clean capture.)
+            const double gap = (double)(k - k0) * m_timebase.period();
+            pred = m_timebase.lastPulseTime() + gap;
+            w = min(4 * m_pix + 0.0005 * gap, 0.4 * m_p_nominal);
+            expect_positive = m_last_positive != (((k - k0) & 1) != 0);
+        }
         // pred is the crossing (pixel 6); the candidates are pixel 1 positions
         const double pred_pixel1 = pred - m_off_mid;
         const int64_t lo = max<int64_t>((int64_t)floor(pred_pixel1 - w), m_psum_base + 2);
         const int64_t hi = (int64_t)ceil(pred_pixel1 + w);
         if (hi + m_span + 2 >= stream_end)
             return; // the line's samples have not all arrived
-        const bool expect_positive = m_last_positive != (((k - k0) & 1) != 0);
         Candidate alt{}, same{};
         bool have_alt = false, have_same = false;
         double dist_alt = 1e30, dist_same = 1e30;
         for (int64_t i = lo; i <= hi; i++) {
             Candidate c;
-            if (!scoreCandidate(i, &c))
+            if (!scoreCandidate(i, &c, true))
                 continue;
             const double dist = abs((double)i - pred_pixel1);
             if (c.positive == expect_positive) {
@@ -732,21 +775,36 @@ void MuseFrameReader::track(int64_t stream_end) {
                 dist_same = dist; same = c; have_same = true;
             }
         }
-        Candidate *chosen = have_alt ? &alt : have_same ? &same : nullptr;
+        // Nothing of the full shape: the collapsed shape, of the expected
+        // polarity, within two pixels of where the chain predicts the sync
+        if (!have_alt && !have_same) {
+            const int64_t lo2 = max<int64_t>((int64_t)floor(pred_pixel1 - 2 * m_pix), m_psum_base + 2);
+            const int64_t hi2 = (int64_t)ceil(pred_pixel1 + 2 * m_pix);
+            for (int64_t i = lo2; i <= hi2; i++) {
+                Candidate c;
+                if (!scoreCandidate(i, &c, false) || c.positive != expect_positive)
+                    continue;
+                const double dist = abs((double)i - pred_pixel1);
+                if (dist < dist_alt) { dist_alt = dist; alt = c; have_alt = true; }
+            }
+        }
+        // A pending pulse is confirmed by the alternating polarity only
+        Candidate *chosen = have_alt ? &alt : (have_same && !m_have_pending) ? &same : nullptr;
         static const bool trace = getenv("MUSELD_TRACE_SYNC") != nullptr;
         const bool refined = chosen != nullptr && refineCrossing(chosen);
         if (refined) {
-            const int64_t kk = m_timebase.addPulse(chosen->t);
-            if (trace && kk < 0)
-                m_log.debug(eInput, std::format("track: line {} pred {:.1f} candidate at {:.1f} dropped by addPulse (last {} at {:.1f}, p {:.2f})",
-                                                k, pred, chosen->t, k0, m_timebase.lastPulseTime(), m_timebase.period()));
-            if (kk >= 0) {
-                m_polarities.emplace_back(kk, chosen->positive);
-                if (m_polarities.size() > 4096)
-                    m_polarities.pop_front();
-                m_last_positive = chosen->positive;
+            if (!m_have_pending && (m_misses > 0 || abs(chosen->t - pred) > 2 * m_pix)) {
+                m_pending = *chosen;
+                m_have_pending = true;
+                continue; // the next line decides
+            }
+            bool accepted = true;
+            if (m_have_pending) {
+                accepted = acceptPulse(m_pending, k - 1, trace);
+                m_have_pending = false;
+            }
+            if (accepted && acceptPulse(*chosen, k, trace)) {
                 m_misses = 0;
-                m_amp_ref += 0.01f * (abs(chosen->b - chosen->a) - m_amp_ref);
                 continue;
             }
         }
@@ -754,11 +812,12 @@ void MuseFrameReader::track(int64_t stream_end) {
             int n_pass = 0;
             for (int64_t i = lo; i <= hi; i++) {
                 Candidate c;
-                n_pass += scoreCandidate(i, &c);
+                n_pass += scoreCandidate(i, &c, true);
             }
-            m_log.debug(eInput, std::format("track: line {} missed: pred {:.1f} window [{}, {}] passing {} alt {} same {} refine_ok {}; "
+            m_log.debug(eInput, std::format("track: line {} missed{}: pred {:.1f} window [{}, {}] passing {} alt {} same {} refine_ok {}; "
                                             "samples at pred-2..+20: {}",
-                                            k, pred, lo, hi, n_pass, have_alt, have_same,
+                                            k, m_have_pending ? std::format(" (pending pulse at {:.1f} dropped)", m_pending.t) : "",
+                                            pred, lo, hi, n_pass, have_alt, have_same,
                                             refined, [&] {
                                                 std::string v;
                                                 for (int64_t i = (int64_t)pred - 2; i < (int64_t)pred + 20; i++)
@@ -766,8 +825,37 @@ void MuseFrameReader::track(int64_t stream_end) {
                                                 return v;
                                             }()));
         }
+        if (m_have_pending) {
+            // unconfirmed: the pending line was a miss, and this line is
+            // looked at again from the chain's own prediction
+            m_have_pending = false;
+            m_misses++;
+            continue;
+        }
         m_misses++;
     }
+}
+
+// A refined candidate goes into the lattice as line k's pulse; false when
+// the lattice dropped it (a duplicate line)
+bool MuseFrameReader::acceptPulse(const Candidate &c, int64_t k, bool trace) {
+    const int64_t kk = m_timebase.addPulse(c.t);
+    if (kk < 0) {
+        if (trace)
+            m_log.debug(eInput, std::format("track: line {} candidate at {:.1f} dropped by addPulse (last {} at {:.1f}, p {:.2f})",
+                                            k, c.t, m_timebase.lastPulseLine(), m_timebase.lastPulseTime(), m_timebase.period()));
+        return false;
+    }
+    m_polarities.emplace_back(kk, c.positive);
+    if (m_polarities.size() > 4096)
+        m_polarities.pop_front();
+    m_last_positive = c.positive;
+    // The amplitude reference follows the capture's level scale, from the
+    // full-height syncs only: the collapsed ones above would pull it down to
+    // where the full ones exceed its upper bound
+    if (abs(c.b - c.a) >= 0.75f * m_amp_ref)
+        m_amp_ref += 0.01f * (abs(c.b - c.a) - m_amp_ref);
+    return true;
 }
 
 // The vertical anchor: two consecutive negative syncs are lines 2 and 3.
