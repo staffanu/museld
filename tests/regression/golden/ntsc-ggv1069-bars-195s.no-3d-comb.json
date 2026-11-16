@@ -4,14 +4,14 @@
  "museld_args": [
   "--no-3d-comb"
  ],
- "recorded": "2026-11-11",
+ "recorded": "2026-11-16",
  "golden_file": "ntsc-ggv1069-bars-195s.no-3d-comb.cfd9e873e7ac.mkv",
  "probe": "ldf NTSC RF at 40e6 Hz",
  "video": {
   "width": 764,
   "height": 480,
   "pix_fmt": "yuv420p16le",
-  "fps": 59.94005994005994,
+  "fps": 59.94006309148265,
   "frames": 238,
   "sha256": "cfd9e873e7ac37573d9237dd2284e6d981145f2f259f1675e377f26738d03233",
   "frame_sha": [

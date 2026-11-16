@@ -2,14 +2,14 @@
  "clip": "ntsc-ggv1069-bars-195s",
  "stage": "default",
  "museld_args": [],
- "recorded": "2026-11-11",
+ "recorded": "2026-11-16",
  "golden_file": "ntsc-ggv1069-bars-195s.default.194ffedc0fb9.mkv",
  "probe": "ldf NTSC RF at 40e6 Hz",
  "video": {
   "width": 764,
   "height": 480,
   "pix_fmt": "yuv420p16le",
-  "fps": 59.94005994005994,
+  "fps": 59.94006309148265,
   "frames": 238,
   "sha256": "194ffedc0fb9a155b62c4b3ed77925eecd85bd494c4ae2a6c031dc6402bfeeee",
   "frame_sha": [

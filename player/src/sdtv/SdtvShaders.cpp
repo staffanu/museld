@@ -81,7 +81,7 @@ SdtvShaders::SdtvShaders(Logger &log, const std::string &executable_dir, musevk:
           spirv("extend_dropouts"), Size(standard.samples_per_line, standard.total_lines)));
   m_conceal_composite_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
           "sdtv_conceal_composite",
-          {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 1,
+          {eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 1,
           spirv("conceal_composite"), Size(standard.samples_per_line, standard.total_lines)));
   // one-dimensional over the flattened frame: the causal filter runs on in
   // scan order across row ends
@@ -152,8 +152,7 @@ void SdtvShaders::copyToFrame(musevk::CommandBuffer &sq, std::shared_ptr<musevk:
   std::shared_ptr<musevk::VulkanBuffer> const &dropout_plane, std::shared_ptr<musevk::VulkanBuffer> const &buffer,
   DropoutMode dropout_mode, float level_scale) {
   // m_row_blanking was uploaded by extendDropouts for this frame
-  m_conceal_composite_algo->updateBufferDescriptorsInSet(0, {video_input, dropout_plane, m_concealed_composite,
-      m_movement_buffers[m_current_movement_buffer_index], m_future_movement_buffer, m_row_blanking});
+  m_conceal_composite_algo->updateBufferDescriptorsInSet(0, {video_input, dropout_plane, m_concealed_composite, m_row_blanking});
   sq.enqueueComputeShader<uint32_t>(m_conceal_composite_algo,
       { dropout_mode == DropoutMode::eNormal ? 0u : dropout_mode == DropoutMode::eDisabled ? 1u : 2u });
   m_deemphasis_algo->updateBufferDescriptorsInSet(0, {m_concealed_composite, buffer, m_row_blanking});

@@ -5,8 +5,8 @@
   "--no-dropout",
   "--efm"
  ],
- "recorded": "2026-11-11",
- "golden_file": "pal-empire-d515-0s.no-dropout.a1bbd136fa00.mkv",
+ "recorded": "2026-11-16",
+ "golden_file": "pal-empire-d515-0s.no-dropout.a92a44b9a847.mkv",
  "probe": "ldf PAL RF at 40e6 Hz",
  "video": {
   "width": 944,
@@ -14,7 +14,7 @@
   "pix_fmt": "yuv420p16le",
   "fps": 50.0,
   "frames": 196,
-  "sha256": "a1bbd136fa00efb0da300fdb5e59468900236537fa02ca5e03b0e8a2e483ca17",
+  "sha256": "a92a44b9a8476ca151bca4820d7d6d7123d894f25e5273d1813f4ea679c93bf5",
   "frame_sha": [
    "34882d48a5763b61",
    "67a247d4e0aa33e6",
@@ -75,8 +75,8 @@
    "ef6a95b70d01d228",
    "6bead172f028eb57",
    "6bead172f028eb57",
-   "e32d8fa3c5ff4485",
-   "e32d8fa3c5ff4485",
+   "ca6a311a6a3d6172",
+   "ca6a311a6a3d6172",
    "8b0a1a7b1593cd15",
    "8b0a1a7b1593cd15",
    "180b6bb4f7124116",

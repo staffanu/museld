@@ -5,7 +5,7 @@
   "--eq",
   "off"
  ],
- "recorded": "2026-11-14",
+ "recorded": "2026-11-16",
  "golden_file": "muse-ursa-minor-blue-120s.eq-off.2cc9ee7aabf2.mkv",
  "probe": "ldf MUSE RF at 62.5e6 Hz",
  "video": {

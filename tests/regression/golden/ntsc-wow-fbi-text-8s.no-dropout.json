@@ -5,14 +5,14 @@
   "--no-dropout",
   "--efm"
  ],
- "recorded": "2026-11-11",
+ "recorded": "2026-11-16",
  "golden_file": "ntsc-wow-fbi-text-8s.no-dropout.6e68819f21c6.mkv",
  "probe": "ldf NTSC RF at 40e6 Hz",
  "video": {
   "width": 764,
   "height": 480,
   "pix_fmt": "yuv420p16le",
-  "fps": 60.0,
+  "fps": 59.94006309148265,
   "frames": 236,
   "sha256": "6e68819f21c62dadcc0343df46c4f577eb3027d1406c52e29761912a4d6f7579",
   "frame_sha": [

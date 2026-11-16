@@ -5,7 +5,7 @@
   "--no-dropout",
   "--efm"
  ],
- "recorded": "2026-11-11",
+ "recorded": "2026-11-16",
  "golden_file": "pal-pioneer94-wander-4s.no-dropout.fb69eced17a8.mkv",
  "probe": "ldf PAL RF at 40e6 Hz",
  "video": {

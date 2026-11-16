@@ -80,6 +80,24 @@ bool video_spike(uint row, int col) {
     return false;
 }
 
+// A hole in the demodulated signal starts a flag on its own: two or more of
+// the five samples around this one at the de-emphasis clamp itself (-0.5 or
+// 1.5; saturated dark colour reaches -0.33).  The RF detector's envelope box
+// flags a hole a few samples late, and the four-sample pad before a flag
+// did not always reach back to where the signal first fell to the clamp,
+// which left the darkest first samples of a scratch unconcealed; some
+// holes it missed altogether (the ABBA disc).  Not on the last two lines
+// of a field, where the PAL test disc's bars carry a blacker-than-black
+// marker at the clamp, which is content.
+bool video_hole(uint row, int col) {
+    int pinned = 0;
+    for (int dc = -2; dc <= 2; dc++) {
+        float v = float(deemphasized[row][uint(clamp(col + dc, 0, SDTV_TOTAL_WIDTH - 1))]);
+        pinned += (v <= -0.495 || v >= 1.495) ? 1 : 0;
+    }
+    return pinned >= 2;
+}
+
 uint word(uint row, int w) {
     return (w < 0 || w >= SDTV_DROPOUT_BIT_WORDS) ? 0u : dropout_bits[row][w];
 }
@@ -121,8 +139,13 @@ void main() {
     // donor lines carrying a core detection -- refusing the soft skirts too
     // was observed to push donors out of reach and leave dropouts uncorrected.
 
-    // core: fixed pad around a detection
+    // core: fixed pad around a detection, or a hole in the video itself
     bool core = window(words, base_word, col - 4, 9) != 0u;
+    if (!core && col >= SDTV_FIELD_START_X && col < SDTV_FIELD_START_X + SDTV_Y_BUF_WIDTH) {
+        const int field_row = int(row) - SDTV_FIELD_START_Y - (row >= SDTV_FIELD2_OFFSET ? SDTV_FIELD2_OFFSET : 0);
+        if (field_row >= 0 && field_row < SDTV_FIELD_HEIGHT - 2)
+            core = video_hole(row, col);
+    }
 
     // bridge: flags on both sides within a short gap
     bool soft = false;

@@ -2,7 +2,7 @@
  "clip": "muse-ursa-minor-blue-120s",
  "stage": "default",
  "museld_args": [],
- "recorded": "2026-11-14",
+ "recorded": "2026-11-16",
  "golden_file": "muse-ursa-minor-blue-120s.default.fb6f5c85513f.mkv",
  "probe": "ldf MUSE RF at 62.5e6 Hz",
  "video": {

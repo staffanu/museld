@@ -4,16 +4,16 @@
  "museld_args": [
   "--no-dropout"
  ],
- "recorded": "2026-11-11",
- "golden_file": "ntsc-alien2-0s.no-dropout.70b929082e6d.mkv",
+ "recorded": "2026-11-16",
+ "golden_file": "ntsc-alien2-0s.no-dropout.b8c67e237d51.mkv",
  "probe": "ldf NTSC RF at 40e6 Hz",
  "video": {
   "width": 764,
   "height": 480,
   "pix_fmt": "yuv420p16le",
-  "fps": 59.94005994005994,
+  "fps": 59.94006309148265,
   "frames": 238,
-  "sha256": "70b929082e6df386cc5c8029bf51181089da12d062df36be201f509234e276da",
+  "sha256": "b8c67e237d513c2d5d5962043b1f045458c22e89dd28debb17b59b58169e5eff",
   "frame_sha": [
    "96934824620bc33c",
    "96934824620bc33c",
@@ -185,7 +185,7 @@
    "1d51e2e69c5b99ca",
    "c09c8809a1d122e1",
    "da8328b930df4f5b",
-   "7d500118846d8e15",
+   "9e9492c4c1a0266d",
    "320da9eaee78f4ba",
    "8457eb9c7668899c",
    "855fb7d57e3eed40",

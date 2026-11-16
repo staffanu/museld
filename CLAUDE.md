@@ -281,7 +281,17 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   whether the de-emphasised video is pinned outside the signal range there (the frame dump's
   `<path>` file, not `.raw`: pre-emphasis overshoots on every sharp edge): on The Big Day that
   separated real dropouts from bright detail where the envelope ratio and the slew count could not,
-  and `sdtv_extend_dropouts.comp` now keeps a flag only on that evidence.
+  and `sdtv_extend_dropouts.comp` now keeps a flag only on that evidence.  Since every flag is so
+  corroborated, the composite concealment (`sdtv_conceal_composite.comp`) no longer gates a flag on
+  temporal motion: a scratch cutting the same lines in every frame is pinned to the same clamp
+  frame after frame, shows no motion, and stayed unconcealed with its purple de-emphasis tail (the
+  ABBA disc, 2026-11-16).  Two more holes closed then: a run of samples at the clamp starts a core
+  flag by itself (`video_hole`; the envelope detector flags a hole a few samples late and the pad
+  did not always reach its first, darkest samples, and some holes it missed altogether -- not on a
+  field's last two lines, where the GGV1011 bars carry a blacker-than-black marker at the clamp),
+  and the decode's temporal donor refuses a pixel
+  next to a hole in its own frame (`hole_nearby_prev/next`), which was that hole's dark but legal
+  tail.  Judged by the raw-minus-concealed streak measure of that session, not by eye.
 - `MUSELD_DUMP_VBI_FAIL=<path>` — each VBI code line that failed to slice, as 910
   floats (the 4 fsc frame-buffer row).
 - `MUSELD_DUMP_FRAME=<path>` — one whole frame buffer (the de-emphasized, rescaled

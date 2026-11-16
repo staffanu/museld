@@ -2,7 +2,7 @@
  "clip": "muse-sony-test-disc-120s",
  "stage": "default",
  "museld_args": [],
- "recorded": "2026-11-14",
+ "recorded": "2026-11-16",
  "golden_file": "muse-sony-test-disc-120s.default.d897928021b8.mkv",
  "probe": "ldf MUSE RF at 62.5e6 Hz",
  "video": {

@@ -4,16 +4,16 @@
  "museld_args": [
   "--no-dropout"
  ],
- "recorded": "2026-11-11",
- "golden_file": "ntsc-rfref-40mhz-40s.no-dropout.dcdb86052137.mkv",
+ "recorded": "2026-11-16",
+ "golden_file": "ntsc-rfref-40mhz-40s.no-dropout.38a7f1999e27.mkv",
  "probe": "ldf NTSC RF at 40e6 Hz",
  "video": {
   "width": 764,
   "height": 480,
   "pix_fmt": "yuv420p16le",
-  "fps": 59.94005994005994,
+  "fps": 59.94006309148265,
   "frames": 238,
-  "sha256": "dcdb86052137b0f4223e7e4ccb4114be2c147d43bb4c73cc7a7a7a9dd8612058",
+  "sha256": "38a7f1999e27de43029f6ef4654445b992bf7855668823075aeca431f9a45e13",
   "frame_sha": [
    "96934824620bc33c",
    "96934824620bc33c",
@@ -32,7 +32,7 @@
    "0192ebf46ac6bc6e",
    "15e118e735025e70",
    "a4bfdc0eca1a56a1",
-   "31380b9a5a0f466f",
+   "1343fef35f5b3181",
    "3a868be1dbe83f28",
    "9ba9d827261e9831",
    "077554a998634049",
@@ -258,7 +258,7 @@
  "audio": {
   "codec": "pcm_s16le",
   "bytes": 698080,
-  "sha256": "27a836fbf2ba104c4f9f7ae9dfe82ba4a35c1bff9dce985cc33f6b10e2408c11",
+  "sha256": "d419c9d0685d248b12a6e02b5d1a7470128acc96780a396e23a318b6958cd376",
   "judged_sha256": "a998a0d602682bafd73bb6af2e1d1885b006e622b2cced7ae9495136d4c2dcf3"
  },
  "codes": [

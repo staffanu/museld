@@ -5,7 +5,7 @@
   "--field-interpolation",
   "intra-field"
  ],
- "recorded": "2026-11-14",
+ "recorded": "2026-11-16",
  "golden_file": "muse-sony-test-disc-120s.intra-field.0bdb3ec25b0e.mkv",
  "probe": "ldf MUSE RF at 62.5e6 Hz",
  "video": {

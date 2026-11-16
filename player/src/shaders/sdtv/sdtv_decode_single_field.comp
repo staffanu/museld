@@ -190,10 +190,34 @@ void surround_motion(uint frame_line, uint field_first, uint field_last, uint ma
     }
 }
 
+// hole_nearby for the neighbouring frames: a donor pixel next to a hole in
+// its own frame is that hole's de-emphasis tail, dark yet legal (a scratch
+// that cuts the same lines in every frame offers such donors on both sides)
+bool hole_nearby_prev(uint frame_line, uint frame_col) {
+    int pinned = 0;
+    for (int dx = 4; dx <= 14; dx += 2) {
+        float16_t l = prev_frame[frame_line][uint(max(int(frame_col) - dx, 0))];
+        float16_t r = prev_frame[frame_line][uint(min(int(frame_col) + dx, SDTV_TOTAL_WIDTH - 1))];
+        pinned += (l < -0.45hf || l > 1.45hf) ? 1 : 0;
+        pinned += (r < -0.45hf || r > 1.45hf) ? 1 : 0;
+    }
+    return pinned >= 2;
+}
+bool hole_nearby_next(uint frame_line, uint frame_col) {
+    int pinned = 0;
+    for (int dx = 4; dx <= 14; dx += 2) {
+        float16_t l = next_frame[frame_line][uint(max(int(frame_col) - dx, 0))];
+        float16_t r = next_frame[frame_line][uint(min(int(frame_col) + dx, SDTV_TOTAL_WIDTH - 1))];
+        pinned += (l < -0.45hf || l > 1.45hf) ? 1 : 0;
+        pinned += (r < -0.45hf || r > 1.45hf) ? 1 : 0;
+    }
+    return pinned >= 2;
+}
+
 // The temporal donor for a defective pixel: the same pixel of the stiller
 // neighbour frame, if that side's surroundings are still enough, and the
-// donor is neither flagged nor pinned there.  -1: previous, +1: next,
-// 0: none -- the repair is then spatial.
+// donor is neither flagged nor pinned there, nor in the tail of a hole
+// there.  -1: previous, +1: next, 0: none -- the repair is then spatial.
 int pick_donor(uint frame_line, uint frame_col, float16_t sp, float16_t sf) {
     for (int attempt = 0; attempt < 2; attempt++) {
         bool try_prev = (sp <= sf) == (attempt == 0);
@@ -203,6 +227,8 @@ int pick_donor(uint frame_line, uint frame_col, float16_t sp, float16_t sf) {
             continue;
         float16_t v = try_prev ? prev_frame[frame_line][frame_col] : next_frame[frame_line][frame_col];
         if (v < -0.45hf || v > 1.45hf)
+            continue;
+        if (try_prev ? hole_nearby_prev(frame_line, frame_col) : hole_nearby_next(frame_line, frame_col))
             continue;
         return try_prev ? -1 : 1;
     }

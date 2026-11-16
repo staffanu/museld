@@ -296,11 +296,12 @@ untouched; `--highlight-dropout` paints them red (dropout in the luminance area)
 A flag from the RF detector is kept only where the demodulated video shows the damage, a sample
 within ten columns pinned outside the signal range after de-emphasis: on a noisy PAL disc the
 envelope dips and slews on bright detail over a weak carrier just as on real dropouts, and three
-flags in five were on clean picture before this check. On NTSC and PAL a defect is a pixel the RF detector flagged, or one whose level is illegal (far
+flags in five were on clean picture before this check; a run of samples at the clamp starts a
+flag by itself, since the detector's flag comes a few samples after the hole it marks. On NTSC and PAL a defect is a pixel the RF detector flagged, or one whose level is illegal (far
 below blanking or above peak white, which a demodulator produces where the carrier faltered too
 briefly for the detector), including the tails such a hole leaves. The repair is temporal where
-the surroundings are still -- the same pixel of the stiller neighbour frame, decoded in place --
-and spatial otherwise: the average of the neighbouring lines for a flagged pixel, the nearest
+the surroundings are still -- the same pixel of the stiller neighbour frame, decoded in place,
+unless that frame has a hole of its own nearby, whose tail it would copy -- and spatial otherwise: the average of the neighbouring lines for a flagged pixel, the nearest
 healthy line for an illegal level. Whether the surroundings are still is read from the motion
 masks on the nearest clean lines above and below, never at the pixel itself, which the defect
 makes look like motion whatever the scene does. An illegal level that does not differ from the

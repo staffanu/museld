@@ -6,16 +6,16 @@
   "intra-field",
   "--efm"
  ],
- "recorded": "2026-11-11",
- "golden_file": "ntsc-rfref-30mhz-40s.intra-field.deae341c7a3b.mkv",
+ "recorded": "2026-11-16",
+ "golden_file": "ntsc-rfref-30mhz-40s.intra-field.643eb5adf977.mkv",
  "probe": "ldf NTSC RF at 29.98e6 Hz",
  "video": {
   "width": 764,
   "height": 480,
   "pix_fmt": "yuv420p16le",
-  "fps": 59.94005994005994,
+  "fps": 59.94006309148265,
   "frames": 236,
-  "sha256": "deae341c7a3b8072f499b3c8161267adf060300e9e659927a1bc2d94331135fb",
+  "sha256": "643eb5adf977092e046646769c5160cbd744ea448833683707064b11590f5b47",
   "frame_sha": [
    "96934824620bc33c",
    "96934824620bc33c",
@@ -251,8 +251,8 @@
    "3515f00991cda0d7",
    "e3a699989d2dff13",
    "87ad33e76eea059a",
-   "405c1c7aa28984ab",
-   "7b9ab3c28a43d100"
+   "1697ee3247aaf44f",
+   "13f6d096d4cf309d"
   ]
  },
  "audio": {

@@ -31,43 +31,23 @@ layout(set = 0, binding = 2) buffer writeonly concealed_out_buffer {
     float concealed_out[][SDTV_TOTAL_WIDTH];
 };
 
-// Motion masks of the previous frame (this frame's are not computed yet);
-// their future side covers the differences against this frame, which is
-// exactly the evidence needed: a real dropout's garbage never matches the
-// neighbouring frames, so it always registers as motion there, while a
-// false detection on static content (subtitle strokes) shows none -- and
-// concealing those from the surrounding lines damages the picture more
-// than the marginal defect it was flagged for.
-layout(set = 0, binding = 3) buffer readonly past_motion_buffer {
-    float16_t past_motion[][SDTV_Y_BUF_WIDTH];
-};
-
-layout(set = 0, binding = 4) buffer readonly future_motion_buffer {
-    float16_t future_motion[][SDTV_Y_BUF_WIDTH];
-};
-
 // The blanking level of each row in reader voltage units, measured on its
 // back porch (SdtvFrame::RowBlankingLevels)
-layout(set = 0, binding = 5) buffer readonly row_blanking_buffer {
+layout(set = 0, binding = 3) buffer readonly row_blanking_buffer {
     float row_blanking[];
 };
 
-float motion_at(int r, int c) {
-    int field = r >= SDTV_FIELD2_OFFSET ? 1 : 0;
-    int fr = r - SDTV_FIELD_START_Y - SDTV_FIELD2_OFFSET * field;
-    if (fr < 0 || fr >= SDTV_FIELD_HEIGHT)
-        return 1.0; // outside the picture rows: keep the old behavior
-    int orow = fr * 2 + field;
-    int oc = clamp(c - SDTV_FIELD_START_X, 0, SDTV_Y_BUF_WIDTH - 1);
-    return max(float(past_motion[orow][oc]), float(future_motion[orow][oc]));
-}
-
+// Every flag in the plane is corroborated by the demodulated video pinned
+// outside the signal's range nearby (sdtv_extend_dropouts.comp), which no
+// picture content does, so a flag is a dropout.  A temporal gate used to sit
+// here too (a flag without motion against the neighbouring frames was taken
+// for static content, the false flags on subtitle strokes the corroboration
+// now removes), and it left a scratch that cuts the same lines in every
+// frame unconcealed: its hole is pinned to the same clamp frame after frame,
+// so it shows no motion at all (the ABBA disc, where the dark dashes and
+// their purple de-emphasis tails stayed in the picture).
 bool is_dropout(int r, int c) {
-    int cc = clamp(c, 0, SDTV_TOTAL_WIDTH - 1);
-    // A flag without temporal deviation is content, not a dropout.  The gate
-    // sits low: shallow real dropouts deviate modestly, while static content
-    // (subtitle text) measures essentially zero.
-    return dropout_data[r][cc] != 0 && motion_at(r, cc) > 0.1;
+    return dropout_data[r][clamp(c, 0, SDTV_TOTAL_WIDTH - 1)] != 0;
 }
 
 // Donor lines are only refused for core detections (1), not for the

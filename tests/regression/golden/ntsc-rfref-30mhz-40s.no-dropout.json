@@ -5,14 +5,14 @@
   "--no-dropout",
   "--efm"
  ],
- "recorded": "2026-11-11",
+ "recorded": "2026-11-16",
  "golden_file": "ntsc-rfref-30mhz-40s.no-dropout.12f186dbdaf4.mkv",
  "probe": "ldf NTSC RF at 29.98e6 Hz",
  "video": {
   "width": 764,
   "height": 480,
   "pix_fmt": "yuv420p16le",
-  "fps": 59.94005994005994,
+  "fps": 59.94006309148265,
   "frames": 236,
   "sha256": "12f186dbdaf4c66e238448133b848e43d3fb850823eb1218954b3b057b09220b",
   "frame_sha": [
