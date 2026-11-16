@@ -740,7 +740,7 @@ void MuseFrameReader::track(int64_t stream_end) {
         bool expect_positive;
         if (m_have_pending) {
             // the line after the pending pulse: one period on, in a tight window
-            pred = m_pending.t + m_timebase.period();
+            pred = m_pending.t + m_timebase.predictionPeriod();
             w = 4 * m_pix;
             expect_positive = !m_pending.positive;
         } else {
@@ -750,7 +750,7 @@ void MuseFrameReader::track(int64_t stream_end) {
             // good to a few pixels only, which is enough to detect a slipped
             // line but not to place a +-4 pixel window: used for the window it
             // missed 15% of the lines on a clean capture.)
-            const double gap = (double)(k - k0) * m_timebase.period();
+            const double gap = (double)(k - k0) * m_timebase.predictionPeriod();
             pred = m_timebase.lastPulseTime() + gap;
             w = min(4 * m_pix + 0.0005 * gap, 0.4 * m_p_nominal);
             expect_positive = m_last_positive != (((k - k0) & 1) != 0);

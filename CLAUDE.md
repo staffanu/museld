@@ -378,13 +378,23 @@ settles at 100-135 instead of 57/178 while the plateau before it and the step ke
 height, and in shorter ones the sync is gone from the predicted place altogether, with picture
 content there -- both in the RF itself (an independent demodulation of the capture shows the
 same lines the same way), which looks like the pickup drifting towards the adjacent track.
-The loose form keeps the chain through the first kind; the second is coasted (a chain period
-following the wobble at 5% per line instead of 2% halved the coasted lines there, but changed
-which measurements the smoother accepts on the clean captures, 65-71 dB over every frame of
-two clips and two disc codes, and was not kept).  Over the 50 s of that clip the lines without
-a sync pulse went from 11410 to 1427, eight frames with hundreds of unsupported lines to one
-(a stretch with no sync of the track at the predicted place), two re-anchors and a reset to
-none; on a 3.5 s stretch
+The loose form keeps the chain through the first kind; the second is coasted, with the window
+placed by a period that follows the clean intervals at 10% per line
+(`LineTimebase::predictionPeriod`; the chain's own period, 2% per line and the one the lattice
+and the smoother use, lagged the wobble's velocity by nearly a sample per line, and a coast of
+fifty lines after an audio block ran away from a window widening at 0.44 samples per line --
+adapting the chain's period itself faster changed which measurements the smoother accepts on
+the clean captures, so the lattice keeps the slow one and only the prediction uses the fast
+one).  The measurement still depends a little on the prediction: the candidate test passes on
+a run of neighbouring positions, the one nearest the prediction is taken, and its plateau means
+set the level the crossing is refined at, so a change of the prediction's period moved every
+frame of the Sony test disc and Ursa Minor Blue by a fraction of a sample (64-71 dB; the two
+disc codes reported differing are the same numbers read two samples earlier), and their
+goldens were re-recorded; taking the position with the largest step instead, to make the
+measurement the signal's alone, tracked worse (four times the untracked lines, a re-anchor)
+and was not kept.  Over the 50 s of that clip the
+lines without a sync pulse went from 11410 to 783, eight frames with hundreds of unsupported
+lines to none, two re-anchors and a reset to none; on a 3.5 s stretch
 the grid's error against the sync edges went from 6.3 to 3.9 ns rms (p99 13 to 10 ns), with
 every line found.  Picture steps from a dark plateau pass the loose form far too often for it
 to be used in searching (tried: three times the untracked lines).

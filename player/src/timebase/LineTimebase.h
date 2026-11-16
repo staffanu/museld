@@ -60,6 +60,12 @@ public:
     [[nodiscard]] double lastPulseTime() const { return m_lat_t; }
     [[nodiscard]] int64_t lastPulseLine() const { return m_last_meas_k; }
     [[nodiscard]] double period() const { return m_p_run; } // the chain's local line period
+    // The same, adapted five times faster, for predicting where a line's
+    // sync will be across a gap: on a player whose line timing wobbles
+    // (an HLD-X9 at +-1500 ppm, 39 Hz) the chain's period lags the velocity
+    // by a sample per line and a coast of fifty lines ran away from its
+    // window.  Only a prediction: the lattice and the filter keep the slow one
+    [[nodiscard]] double predictionPeriod() const { return m_p_fast; }
     // Seed the period from a measurement the chain cannot make quickly (the
     // MUSE acquisition chain's, good to 0.05% over its 32 lines): the chain
     // adapts at 2% per line and the filter learns it slower still, and a
@@ -104,6 +110,7 @@ private:
     bool m_lattice_valid;
     double m_lat_t;                     // last accepted pulse
     double m_p_run;                     // slowly adapted local period
+    double m_p_fast;                    // the faster one, for predictions only
     int64_t m_last_meas_k;              // its line
     // Integer-line slip correction against the curve: a shift confirmed by
     // this many consecutive pulses re-labels the chain

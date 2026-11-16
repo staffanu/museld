@@ -44,6 +44,7 @@ LineTimebase::LineTimebase(Logger &log, const char *owner, double sample_rate, d
           m_lattice_valid(false),
           m_lat_t(0),
           m_p_run(p_nominal),
+          m_p_fast(p_nominal),
           m_last_meas_k(0),
           m_slip_shift(0),
           m_slip_first_k(0),
@@ -103,6 +104,7 @@ int64_t LineTimebase::addPulse(double t) {
         m_lattice_valid = true;
         m_lat_t = t;
         m_p_run = m_p_nominal;
+        m_p_fast = m_p_nominal;
         m_meas.emplace_back(0, t);
         m_last_meas_k = 0;
         return -1;
@@ -150,8 +152,10 @@ int64_t LineTimebase::addPulse(double t) {
     m_lat_t = t; // last accepted pulse: chain reference and no-sync watchdog
     m_meas.emplace_back(k, t);
     m_last_meas_k = k;
-    if (dk == 1 && err < 0.1)
+    if (dk == 1 && err < 0.1) {
         m_p_run += 0.02 * (dt - m_p_run); // the local period, from clean consecutive intervals only
+        m_p_fast += 0.1 * (dt - m_p_fast);
+    }
     // Measurement noise from the data: the second difference of three
     // consecutive-line pulse times has variance 6R plus a negligible wow
     // term.  Mean absolute value, clipped for robustness against junk.
@@ -177,6 +181,7 @@ int64_t LineTimebase::addPulse(double t) {
 
 void LineTimebase::setPeriod(double p) {
     m_p_run = p;
+    m_p_fast = p;
     if (m_kal_valid)
         m_kal.p = p;
 }
