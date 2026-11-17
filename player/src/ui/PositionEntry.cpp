@@ -14,8 +14,8 @@ PositionEntry::PositionEntry(std::string title, Format format, int digits, doubl
       m_on_done(std::move(on_done)),
       m_on_cancel(std::move(on_cancel)) {
     setValue(initial);
-    // The cursor starts on the last digit: the units, the ones most often changed
-    m_place = (int)m_digits.size() - 1;
+    // The cursor starts on the first digit, where a number typed in full
+    // begins; the units are one press of Left away, since the cursor wraps
 }
 
 int PositionEntry::placeLimit(int place) const {

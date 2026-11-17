@@ -390,7 +390,9 @@ and Right as the keys do (10 seconds, a chapter) and open a number entry on sele
 and `--frame` do the same from the command line.  The number is set like a clock, the cursor on one digit, Up and Down
 changing it, Left and Right moving between the digits, select going there and back
 cancelling, starting from where playback is, so a jump nearby changes a digit or two; a
-keyboard types the digits straight in, Return goes, Escape cancels.  The search takes two or
+keyboard types the digits straight in, Return goes, Escape cancels.  The cursor starts on the
+first digit, so a number is typed in full with its leading zeros (frame 1501 as 01501); Left
+from there wraps to the last digit.  The search takes two or
 three probes and lands on the frame asked for (within a fraction of a second on a CLV disc
 whose time code has no picture numbers), paused if playback was paused, as a player's frame
 search does.  A position past the end of the capture says NOT FOUND, one before its

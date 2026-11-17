@@ -13,7 +13,8 @@
 // digit, up and down change it (wrapping within what the place allows, the
 // tens of seconds stop at 5), left and right move between the digits,
 // select accepts and back cancels.  It starts from where playback is, so a
-// jump nearby changes a digit or two.  A keyboard's digits overwrite the
+// jump nearby changes a digit or two, with the cursor on the first digit,
+// where a number typed in full begins.  A keyboard's digits overwrite the
 // digit under the cursor and move on, as a VCR's do; its Backspace moves
 // back.  The number is a count (a chapter or frame number, a fixed number
 // of digits) or a time, H:MM:SS.

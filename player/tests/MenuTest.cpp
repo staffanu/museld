@@ -147,7 +147,9 @@ TEST_CASE("A position entry is set like a clock and typed like a VCR", "[Menu]")
     int cancelled = 0;
     PositionEntry time("GO TO TIME", PositionEntry::Format::eTime, 0, 3091, [&](double v) { done = v; }, [&] { cancelled++; });
     CHECK(time.text() == "0:51:31");
-    CHECK(time.cursor() == 6); // the units of the seconds, past both colons
+    CHECK(time.cursor() == 0); // the first digit, where a number typed in full begins
+    time.handleKey(Entry::Key::eLeft); // wraps to the units of the seconds, past both colons
+    CHECK(time.cursor() == 6);
     time.handleKey(Entry::Key::eUp);
     CHECK(time.text() == "0:51:32");
     time.handleKey(Entry::Key::eLeft);
@@ -160,9 +162,9 @@ TEST_CASE("A position entry is set like a clock and typed like a VCR", "[Menu]")
     time.handleKey(Entry::Key::eLeft); // the tens
     time.handleKey(Entry::Key::eLeft); // the hours
     CHECK(time.cursor() == 0);
-    time.handleKey(Entry::Key::eLeft); // wraps to the seconds
+    time.handleKey(Entry::Key::eLeft);
     CHECK(time.cursor() == 6);
-    time.handleKey(Entry::Key::eRight);
+    time.handleKey(Entry::Key::eRight); // and wraps back
     CHECK(time.cursor() == 0);
     // A keyboard types the digits in order, overwriting from the cursor
     for (const char *d : {"1", "0", "2", "3", "4"}) time.type(d);
@@ -181,6 +183,14 @@ TEST_CASE("A position entry is set like a clock and typed like a VCR", "[Menu]")
     CHECK(cancelled == 1);
 
     PositionEntry frame("GO TO FRAME", PositionEntry::Format::eNumber, 5, 23456, [&](double v) { done = v; }, {});
+    CHECK(frame.text() == "23456");
+    CHECK(frame.cursor() == 0);
+    for (const char *d : {"0", "1", "5", "0", "1"}) frame.type(d); // typed in full from where the entry opens
+    CHECK(frame.text() == "01501");
+    frame.type("6"); // the cursor stayed on the units
+    CHECK(frame.text() == "01506");
+    frame.handleKey(Entry::Key::eRight);
+    for (const char *d : {"2", "3", "4", "5", "6"}) frame.type(d);
     CHECK(frame.text() == "23456");
     CHECK(frame.cursor() == 4);
     frame.handleKey(Entry::Key::eUp);
