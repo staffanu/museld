@@ -55,28 +55,31 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                   0.029017564543303277, 0.028343512638849419, 0.011535573644165619
           })),
   m_filter_4_to_3_video_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
-          Size(37),
+          Size(31),
           {
-                  // The 4:3 conversion of the inter-frame luma (makeFieldFromConsecutiveFrames), the
-                  // decoder's single most expensive pass on the Apple TV's A10X: two fields of
-                  // 1122 x 516 outputs per field, and its cost is the taps.  Until 2024-08 this and
-                  // the audio shared one 31-tap rectangular design (cutoff 0.125, transition 0.03);
-                  // the audio then got the 65-tap Kaiser below, and the video came along for
-                  // the ride (5.2 ms per field, the whole real-time deficit on the A10X).  This
-                  // is a weighted least-squares design to the same specification as the audio
-                  // one: pass band to 0.125 of the (3x) rate, stop band from 0.167 (weight 30),
-                  // 37 taps: ripple +0.2/-1.4 dB, 34 dB and more down from 0.167, 44 from 0.18.
-                  // Design: tools/muse-4to3-filter.py.
-                  0.002646730012522024, 0.006480643437177124, 0.008385594904737104, 0.005037497789252051,
-                  -0.003735010657332328, -0.013043359998247005, -0.015090914316393264, -0.005064227084600736,
-                  0.013218859264166239, 0.027143087873341052, 0.022775679525513556, -0.003720233228949926,
-                  -0.038852520933186099, -0.055699952817362432, -0.028941657193870683, 0.047390572246389269,
-                  0.151392167554216611, 0.241288687581996120, 0.276776712081262144, 0.241288687581996092,
-                  0.151392167554216556, 0.047390572246389290, -0.028941657193870617, -0.055699952817362432,
-                  -0.038852520933185981, -0.003720233228949479, 0.022775679525513418, 0.027143087873341104,
-                  0.013218859264165871, -0.005064227084600748, -0.015090914316393214, -0.013043359998246969,
-                  -0.003735010657332298, 0.005037497789252110, 0.008385594904737352, 0.006480643437177167,
-                  0.002646730012521992
+                  // The still path's conversion of the inter-frame luma from 32.4 to 24.3 MHz
+                  // (makeFieldFromConsecutiveFrames) is the MUSE standard's "12 MHz filter
+                  // including the sample-rate conversion": the NHK book's Table 4.1, the assumed
+                  // decoder filter the encoder's own 12 MHz filter is matched to, 31 taps on the
+                  // 97.2 MHz unit clock this shader runs at (3x the input), symmetric about the
+                  // centre, normalised here to unity (the book's taps sum to 3.03).  It is not
+                  // flat: +1.6 dB at 6 MHz, +3.2 dB at 8, +3 at 10, -1.2 at 12.15, -33 at 16.2,
+                  // and the response rises again above 16 MHz, which the book accepts since the
+                  // encoder removed what was there.  Until 2026-11-17 this was a flat 37-tap
+                  // weighted-least-squares design (pass band to 0.125 of the rate, stop band
+                  // from 0.167), steeper than the standard's and without its peaking, so the
+                  // cascade with the encoder was a little soft above 6 MHz.  The ringing seen
+                  // two to three pixels before a sharp edge is not this filter's: it is in the
+                  // signal once the standard de-emphasis is applied (the encoder's emphasis is
+                  // an approximate inverse of it), and stayed the same with either filter.
+                  0.000713329, -0.001319991, -0.004909967, -0.004023307,
+                  0.014723235, 0.042666382, 0.048396344, 0.007259952,
+                  -0.058899607, -0.084219439, -0.068762875, -0.031666456,
+                  0.030419797, 0.146005693, 0.288294745, 0.350644329,
+                  0.288294745, 0.146005693, 0.030419797, -0.031666456,
+                  -0.068762875, -0.084219439, -0.058899607, 0.007259952,
+                  0.048396344, 0.042666382, 0.014723235, -0.004023307,
+                  -0.004909967, -0.001319991, 0.000713329
           })),
   m_filter_4_to_3_buffer(VulkanUtil::createDeviceBufferFloatsAsHalfFloats(m_vulkan_manager, command_pool,
           Size(65),

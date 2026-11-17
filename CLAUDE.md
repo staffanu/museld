@@ -348,8 +348,15 @@ path's bilinear fetch counted its weights from one column off its index and is c
 the same column now).  The B-Y upsampler of the still path switched
 on the unshifted column where R-Y switched on the shifted one, which put B-Y a pixel and a
 half right of R-Y with a bump in every blue edge.  Still visible after that: a 4% ringing
-of the luma 2-3 pixels before a sharp edge, from the resampling filters (not in the recorded
-samples), and the chroma's own two-to-three pixel transition.
+of the luma 2-3 pixels before a sharp edge, and the chroma's own two-to-three pixel transition.
+The ringing is in the signal, not the filters: it is there once the standard de-emphasis is
+applied to the raw samples, and unchanged by the still path's 4:3 luma filter, which since
+2026-11-17 is the standard's own (`m_filter_4_to_3_video_buffer`, the NHK book's Table 4.1,
+the "12 MHz filter including the 32.4 to 24.3 MHz conversion" on the 97.2 MHz clock of
+`convert_horiz_sample_rate.comp`, 31 taps normalised to unity; it peaks +3 dB at 6-10 MHz as
+the encoder's matched filter expects, where the 37-tap least-squares design before it was flat
+and steeper).  The book standardises only that filter: the intra path's 2:3 filter, the audio's
+65-tap 4:3 and the field interpolations are the decoder's own choice.
 
 **MUSE timebase**: the two dumps exist for MUSE too: `MUSELD_DUMP_DEMOD` writes
 the demodulated 31.25 MHz baseband (MUSE levels, plateaus of the HD sync at about 57 and 178;
