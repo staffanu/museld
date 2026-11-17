@@ -86,8 +86,18 @@ float16_t display_linear(float16_t p) {
 
 // Unfortunately having two versions of the color interpolation functions is necessary since we cannot pass the buffer itself
 // to the function -- tried that and it seems that it is copied despite being read-only!
+// The chroma of the still path sits on the luma grid (decode_c), chroma sample
+// k of the compressed slot at 4k + o for the sub-sampling phase o.  That grid
+// is two thirds of a luma pixel (two columns here) to the right of the
+// picture: measured on the Sony test disc's white/blue checker and on its
+// colour bars, in the written file's own U/V planes, the chroma edge lay 0.65
+// luma pixels after the luma edge with the grids aligned, and lies within a
+// tenth of it with this shift, in both fields and in both paths (2026-11-17;
+// a whole pixel put it a quarter to a half pixel early).  The further +1
+// centres the 1:3 filter on its sample.
+const int c_chroma_shift = 2 + 1;
 float16_t resample_inter_frame_r(uint row, uint col) {
-    int c = int(col) + 1; // the color sampling is shifted one high frequency pixel
+    int c = int(col) + c_chroma_shift;
     int c_div_3 = min(c / 3, MUSE_Y_BUF_WIDTH - 1);
     float16_t s = 0.hf;
     switch (c % 3) {
@@ -109,10 +119,10 @@ float16_t resample_inter_frame_r(uint row, uint col) {
 }
 
 float16_t resample_inter_frame_b(uint row, uint col) {
-    int c = int(col) + 1; // the color sampling is shifted one high frequency pixel
+    int c = int(col) + c_chroma_shift;
     int c_div_3 = min(c / 3, MUSE_Y_BUF_WIDTH - 1);
     float16_t s = 0.hf;
-    switch (col % 3) {
+    switch (c % 3) {
         case 0:
         s = (c_div_3 > 0 ? inter_frame_b[row][c_div_3 - 1] : 128.hf) * fc0;
         s += inter_frame_b[row][c_div_3] * fc1; // filter_coeffs[3];
@@ -150,7 +160,12 @@ float16_t resample_field_r(uint row, uint col) {
     int top_left_x = 3 * field_parity;
 
     int tl_r = clamp((int(row) - top_left_y) / 4, 0, MUSE_BUF_HEIGHT / 2 - 1); // row / col in the field color buffer
-    int tl_c = clamp((int(col) + 1 - top_left_x) / 6, 0, MUSE_Y_BUF_WIDTH / 2 - 1); // the color sampling is offset one pixel
+    // The same shift as the still path's; sample i of the field buffer (luma
+    // pixel 2i, plus one for the second field) is then centred on column
+    // 6i - 2, where the still path puts it, with the interpolation weights
+    // counted from there (they were counted from one column off the index)
+    const int cc = int(col) + c_chroma_shift - 1 - top_left_x;
+    int tl_c = clamp(cc / 6, 0, MUSE_Y_BUF_WIDTH / 2 - 1);
     // The last column and row of the buffer have no neighbour to the right or
     // below: the interpolation then holds them (an index past the row's end
     // read the next row's first sample, a dark fringe on the right edge)
@@ -162,7 +177,7 @@ float16_t resample_field_r(uint row, uint col) {
     float16_t br = field_r[bl_r][tr_c];
 
     float16_t y_part = clamp(float16_t((int(row) - top_left_y) - 4 * tl_r) / 4.hf, 0.hf, 1.hf);
-    float16_t x_part = clamp(float16_t((int(col) - top_left_x) - 6 * tl_c) / 6.hf, 0.hf, 1.hf);
+    float16_t x_part = clamp(float16_t(cc - 6 * tl_c) / 6.hf, 0.hf, 1.hf);
 
     return tl * (1.hf - y_part) * (1.hf - x_part)
         + tr * (1.hf - y_part) * x_part
@@ -176,7 +191,12 @@ float16_t resample_field_b(uint row, uint col) {
     int top_left_x = 3 * field_parity;
 
     int tl_r = clamp((int(row) - top_left_y) / 4, 0, MUSE_BUF_HEIGHT / 2 - 1); // row / col in the field color buffer
-    int tl_c = clamp((int(col) + 1 - top_left_x) / 6, 0, MUSE_Y_BUF_WIDTH / 2 - 1); // the color sampling is offset one pixel
+    // The same shift as the still path's; sample i of the field buffer (luma
+    // pixel 2i, plus one for the second field) is then centred on column
+    // 6i - 2, where the still path puts it, with the interpolation weights
+    // counted from there (they were counted from one column off the index)
+    const int cc = int(col) + c_chroma_shift - 1 - top_left_x;
+    int tl_c = clamp(cc / 6, 0, MUSE_Y_BUF_WIDTH / 2 - 1);
     // The last column and row of the buffer have no neighbour to the right or
     // below: the interpolation then holds them (an index past the row's end
     // read the next row's first sample, a dark fringe on the right edge)
@@ -188,7 +208,7 @@ float16_t resample_field_b(uint row, uint col) {
     float16_t br = field_b[bl_r][tr_c];
 
     float16_t y_part = clamp(float16_t((int(row) - top_left_y) - 4 * tl_r) / 4.hf, 0.hf, 1.hf);
-    float16_t x_part = clamp(float16_t((int(col) - top_left_x) - 6 * tl_c) / 6.hf, 0.hf, 1.hf);
+    float16_t x_part = clamp(float16_t(cc - 6 * tl_c) / 6.hf, 0.hf, 1.hf);
 
     return tl * (1.hf - y_part) * (1.hf - x_part)
         + tr * (1.hf - y_part) * x_part

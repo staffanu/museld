@@ -337,6 +337,19 @@ was tried first and showed as streaks).  The horizontal upsampler repeats the en
 instead of padding with 128 (`edge_repeat`; the audio rows keep the pad), and the field chroma
 interpolation clamps its right and bottom neighbours inside the buffer.
 Before that the right edge showed a bright and a dark column, alternating with the line.
+The chroma sits two thirds of a luma pixel to the right of where the grid `4k + o`
+(compressed chroma sample k, sub-sampling phase o) puts it, so the combine shader's
+upsamplers shift it two output columns left (`c_chroma_shift`; 2026-11-17, measured on the
+Sony test disc's white/blue checker and its colour bars in the written file's own U/V
+planes, not in a PNG export, whose RGB hides the chroma behind the gamma: the chroma edge
+lay 0.65 luma pixels after the luma edge, and lies within a tenth of it with the shift, in
+both fields and both paths; a whole pixel put it a quarter to a half early.  The intra
+path's bilinear fetch counted its weights from one column off its index and is centred on
+the same column now).  The B-Y upsampler of the still path switched
+on the unshifted column where R-Y switched on the shifted one, which put B-Y a pixel and a
+half right of R-Y with a bump in every blue edge.  Still visible after that: a 4% ringing
+of the luma 2-3 pixels before a sharp edge, from the resampling filters (not in the recorded
+samples), and the chroma's own two-to-three pixel transition.
 
 **MUSE timebase**: the two dumps exist for MUSE too: `MUSELD_DUMP_DEMOD` writes
 the demodulated 31.25 MHz baseband (MUSE levels, plateaus of the HD sync at about 57 and 178;
