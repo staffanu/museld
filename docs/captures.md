@@ -14,9 +14,28 @@ are whatever `captures-sync.sh` last pulled into `~/data/LD-Captures/clips`.
 
 ## Layout on the NAS
 
-- `<Disc>/` -- one directory per disc, the full captures as captured, one file per side
+- `NTSC/`, `PAL/`, `MUSE/` -- whole sides only, one directory per disc, one file per side
   (`<disc>-side<n>.<player>.<standard>-rf.<rate>.ldf`, or the capture tool's own name
   where it was received that way); `CATALOGUE.md` at the top of the share says for each
+  which player and ADC, and what the capture is good for.  A disc captured on several
+  players or at several rates has a subdirectory per capture.  A player's decoded MUSE
+  baseband is a side too (`...muse-baseband.16.2MHz.ldf`, beside the RF of the same disc).
+- `excerpts/<standard>/<Disc>/` -- the partial captures, seconds to a couple of minutes,
+  kept apart so the whole sides can be browsed on their own.  They are a holding area:
+  once the stretches a capture was kept for are in `clips/` or the regression suite, it
+  can go.
+- `clips/` -- the curated collection: short cuts of the stretches worked on and returned
+  to, `.ldf` of a few seconds to a minute, each described in `clips/MANIFEST.toml` (source
+  capture, position, length, format, what it shows).  This is the set every machine mirrors.
+- `public/museld-testdata/` -- the regression suite's clips and goldens, served on the web;
+  the suite fetches from there, so they stay where they are.  The manifest lists them as
+  pointers, not copies.
+- `derived/` -- not captures, but worth keeping: ld-decode's outputs of the Abyss
+  capture, the old ldaudio experiment files, a rendered demo.  What belongs to one disc
+  stays beside its capture (the CD rip that is the Jurassic Park CD capture's truth, the
+  subtitle files of the MUSE discs).
+
+`CATALOGUE.md` at the top of the share says for each
   which player and ADC, and what the capture is good for.  A disc captured on several
   players or at several rates has a subdirectory per capture (`EmpireStrikesBack/d515/`,
   `.../v4400/`).  A single-file capture gets a directory of its own too, so the rule
@@ -49,6 +68,6 @@ the manifest on the NAS, and let the sync bring it over.
 Cutting a clip (ldconv, byte-exact, with the seek and length in seconds):
 
 ```
-ldconv -s 22s -n 50s /Volumes/video/LD-Captures/MUSE/TopGun/top-gun.x9.muse-rf.60MHz.ldf \
+ldconv -s 22s -n 50s /Volumes/video/LD-Captures/MUSE/TopGun/top-gun.side1.x9.muse-rf.60MHz.ldf \
        /Volumes/video/LD-Captures/clips/muse-top-gun-x9-wobble-22s-50s.ldf
 ```
