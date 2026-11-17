@@ -77,7 +77,23 @@ AudioDecoder::AudioDecoder(Logger &log)
   aModeChannel4Decoder(4),
   bModeChannel1Decoder(1),
   bModeChannel2Decoder(2),
+  m_concealers{ErasureConcealer::create(ErasureConcealer::AutoregressiveModel, log, std::nullopt),
+               ErasureConcealer::create(ErasureConcealer::AutoregressiveModel, log, std::nullopt)},
+  m_samples_decoded(0),
+  m_samples_erased(0),
+  m_blocks_without_sync(0),
+  m_rows_uncorrectable(0),
+  m_range_words_uncorrectable(0),
   m_total_time_us(0) {
+}
+
+void AudioDecoder::reset() {
+    std::fill(std::begin(m_deinterleave_data), std::end(m_deinterleave_data), false);
+    m_deinterleave_buffer_start = 0;
+    m_deinterleave_fill_bits = 0;
+    m_q = 0;
+    m_queue.clear();
+    m_consecutive_failed_syncs = 100;
 }
 
 void AudioDecoder::decodeFrame(int frame_no,
@@ -99,9 +115,20 @@ void AudioDecoder::decodeFrame(int frame_no,
         m_range_bch_decoder.printStatistics(m_log, "Range bits BchDecoder");
         m_range_bch_decoder.resetStatistics();
     }
+    if (frame_no % 30 == 0) {
+        if (m_samples_erased > 0)
+            m_log.info(eAudio, std::format("MUSE audio: {} of {} samples concealed in the last second "
+                                           "({} blocks without sync, {} rows and {} range words uncorrectable)",
+                                           m_samples_erased, m_samples_decoded, m_blocks_without_sync,
+                                           m_rows_uncorrectable, m_range_words_uncorrectable));
+        m_samples_decoded = m_samples_erased = m_blocks_without_sync = 0;
+        m_rows_uncorrectable = m_range_words_uncorrectable = 0;
+    }
 
     *audio_mode = m_active_audio_mode;
-    int sample_count = 0;
+    // The frame's samples with their erasure flags, per channel pair, until
+    // the concealers have seen them
+    std::vector<TwoChannelSampleWithErasureFlags> pairs[2];
     int no_not_updated_symbol_locations = 0;
 
     auto *ptr = audio_converted_freq->data<uint16_t>();
@@ -193,6 +220,11 @@ void AudioDecoder::decodeFrame(int frame_no,
             }
             m_queue.erase(m_queue.cbegin(), m_queue.cbegin() + 16);
         }
+        // A block whose sync pattern is missing is still taken from the
+        // stream (the lock survives two of them), but its samples are
+        // erasures: it was decoded as if good before, and after a seek the
+        // bits are those of two places on the disc
+        const bool block_in_sync = m_consecutive_failed_syncs == 0;
         if (m_consecutive_failed_syncs <= 2 && m_queue.size() >= 1350 - 16) {
             uint32_t control_signal = 0;
             for (int i = 0; i < 22; i++) {
@@ -213,11 +245,19 @@ void AudioDecoder::decodeFrame(int frame_no,
             if (majority != m_active_control_signal) {
                 m_active_control_signal = majority;
                 m_log.info(eAudio, std::format("audio control signal now: {}", bitset<22>(m_active_control_signal).to_string()));
+                // A control word the table does not know keeps the mode in
+                // use: a bit error in the word (the vote is over sixteen of
+                // them, but a burst of errors turns it) switched the mode
+                // to unknown for a couple of blocks and dropped the frame's
+                // samples decoded so far (the Top Gun capture at 35.6 s)
                 auto mode = detectModeFromControlData(majority);
-                if (mode != m_active_audio_mode) {
+                if (mode == MODE_UNKNOWN && m_active_audio_mode != MODE_UNKNOWN)
+                    m_log.info(eAudio, "audio control signal unknown; keeping the audio mode in use");
+                else if (mode != m_active_audio_mode) {
                     m_active_audio_mode = mode;
                     *audio_mode = mode;
-                    sample_count = 0;
+                    pairs[0].clear();
+                    pairs[1].clear();
                     m_log.info(eAudio, std::format("audio mode now: {}", (int)m_active_audio_mode));
                 }
             }
@@ -229,8 +269,23 @@ void AudioDecoder::decodeFrame(int frame_no,
             m_queue.erase(m_queue.cbegin(), m_queue.cbegin() + 1350 - 16 - 22); // 16 * 82 = 1312 bits
 
             bool row_ok[16];
-            for (int i = 0; i < 16; i++)
+            for (int i = 0; i < 16; i++) {
                 row_ok[i] = m_bch_decoder.decode(deinterleave_matrix[i]);
+                if (!row_ok[i])
+                    m_rows_uncorrectable++;
+                row_ok[i] = row_ok[i] && block_in_sync;
+            }
+            if (!block_in_sync)
+                m_blocks_without_sync++;
+            // One sample of every channel of the mode, from the words at
+            // the given columns, into the pair vectors
+            auto emit = [&](auto &&sample_of) {
+                TwoChannelSampleWithErasureFlags s[2]{};
+                sample_of(s);
+                pairs[0].push_back(s[0]);
+                if (m_active_audio_mode == MODE_A)
+                    pairs[1].push_back(s[1]);
+            };
 
             if (m_active_audio_mode == MODE_A) {
                 int range1[7]; bool range1ok;
@@ -247,20 +302,17 @@ void AudioDecoder::decodeFrame(int frame_no,
                 range2ok = m_range_bch_decoder.decode(range2);
                 range3ok = m_range_bch_decoder.decode(range3);
                 range4ok = m_range_bch_decoder.decode(range4);
+                m_range_words_uncorrectable += !range1ok + !range2ok + !range3ok + !range4ok;
 
-                for (int i = 0; i < 16; i++) {
-                    output_samples[sample_count].samples[0] = aModeChannel1Decoder.decodeSample(range1, range1ok, &deinterleave_matrix[i][1], row_ok[i]);
-                    output_samples[sample_count].samples[1] = aModeChannel2Decoder.decodeSample(range2, range2ok, &deinterleave_matrix[i][17], row_ok[i]);
-                    output_samples[sample_count].samples[2] = aModeChannel3Decoder.decodeSample(range3, range3ok, &deinterleave_matrix[i][34], row_ok[i]);
-                    output_samples[sample_count].samples[3] = aModeChannel4Decoder.decodeSample(range4, range4ok, &deinterleave_matrix[i][50], row_ok[i]);
-                    sample_count++;
-                }
-                for (int i = 0; i < 16; i++) {
-                    output_samples[sample_count].samples[0] = aModeChannel1Decoder.decodeSample(range1, range1ok, &deinterleave_matrix[i][9], row_ok[i]);
-                    output_samples[sample_count].samples[1] = aModeChannel2Decoder.decodeSample(range2, range2ok, &deinterleave_matrix[i][25], row_ok[i]);
-                    output_samples[sample_count].samples[2] = aModeChannel3Decoder.decodeSample(range3, range3ok, &deinterleave_matrix[i][42], row_ok[i]);
-                    output_samples[sample_count].samples[3] = aModeChannel4Decoder.decodeSample(range4, range4ok, &deinterleave_matrix[i][58], row_ok[i]);
-                    sample_count++;
+                for (int half = 0; half < 2; half++) {
+                    const int c1 = half == 0 ? 1 : 9, c2 = half == 0 ? 17 : 25, c3 = half == 0 ? 34 : 42, c4 = half == 0 ? 50 : 58;
+                    for (int i = 0; i < 16; i++)
+                        emit([&](TwoChannelSampleWithErasureFlags s[2]) {
+                            s[0].samples[0] = aModeChannel1Decoder.decodeSample(range1, range1ok, &deinterleave_matrix[i][c1], row_ok[i], &s[0].erased[0]);
+                            s[0].samples[1] = aModeChannel2Decoder.decodeSample(range2, range2ok, &deinterleave_matrix[i][c2], row_ok[i], &s[0].erased[1]);
+                            s[1].samples[0] = aModeChannel3Decoder.decodeSample(range3, range3ok, &deinterleave_matrix[i][c3], row_ok[i], &s[1].erased[0]);
+                            s[1].samples[1] = aModeChannel4Decoder.decodeSample(range4, range4ok, &deinterleave_matrix[i][c4], row_ok[i], &s[1].erased[1]);
+                        });
                 }
             } else if (m_active_audio_mode == MODE_B) {
                 int range1[7]; bool range1ok;
@@ -271,24 +323,44 @@ void AudioDecoder::decodeFrame(int frame_no,
                 }
                 range1ok = m_range_bch_decoder.decode(range1);
                 range2ok = m_range_bch_decoder.decode(range2);
+                m_range_words_uncorrectable += !range1ok + !range2ok;
 
-                for (int i = 0; i < 16; i++) {
-                    output_samples[sample_count].samples[0] = bModeChannel1Decoder.decodeSample(range1, range1ok, &deinterleave_matrix[i][1], row_ok[i]);
-                    output_samples[sample_count].samples[1] = bModeChannel2Decoder.decodeSample(range2, range2ok, &deinterleave_matrix[i][34], row_ok[i]);
-                    sample_count++;
-                }
-                for (int i = 0; i < 16; i++) {
-                    output_samples[sample_count].samples[0] = bModeChannel1Decoder.decodeSample(range1, range1ok, &deinterleave_matrix[i][12], row_ok[i]);
-                    output_samples[sample_count].samples[1] = bModeChannel2Decoder.decodeSample(range2, range2ok, &deinterleave_matrix[i][45], row_ok[i]);
-                    sample_count++;
-                }
-                for (int i = 0; i < 16; i++) {
-                    output_samples[sample_count].samples[0] = bModeChannel1Decoder.decodeSample(range1, range1ok, &deinterleave_matrix[i][23], row_ok[i]);
-                    output_samples[sample_count].samples[1] = bModeChannel2Decoder.decodeSample(range2, range2ok, &deinterleave_matrix[i][56], row_ok[i]);
-                    sample_count++;
+                for (int third = 0; third < 3; third++) {
+                    const int c1 = 1 + 11 * third, c2 = 34 + 11 * third;
+                    for (int i = 0; i < 16; i++)
+                        emit([&](TwoChannelSampleWithErasureFlags s[2]) {
+                            s[0].samples[0] = bModeChannel1Decoder.decodeSample(range1, range1ok, &deinterleave_matrix[i][c1], row_ok[i], &s[0].erased[0]);
+                            s[0].samples[1] = bModeChannel2Decoder.decodeSample(range2, range2ok, &deinterleave_matrix[i][c2], row_ok[i], &s[0].erased[1]);
+                        });
                 }
             } else
                 m_log.warn(eAudio, "Unknown audio mode");
+        }
+    }
+    // Concealment, then the frame's output; the concealers keep the count
+    int sample_count = 0;
+    if (!pairs[0].empty()) {
+        int erased = 0;
+        for (const auto &s : pairs[0])
+            erased += s.erased[0] + s.erased[1];
+        for (const auto &s : pairs[1])
+            erased += s.erased[0] + s.erased[1];
+        if (erased > 0)
+            m_log.debug(eAudio, std::format("frame {}: {} of {} audio samples erased", frame_no, erased,
+                                            pairs[0].size() * 2 + pairs[1].size() * 2));
+        m_samples_erased += erased;
+        m_samples_decoded += (int)(pairs[0].size() * 2 + pairs[1].size() * 2);
+        const auto front = m_concealers[0]->processSamples(pairs[0]);
+        const auto rear = m_active_audio_mode == MODE_A ? m_concealers[1]->processSamples(pairs[1])
+                                                         : std::vector<TwoChannelSample>{};
+        sample_count = (int)std::min<size_t>(front.size(), MAX_AUDIO_OUTPUT_SAMPLES);
+        for (int i = 0; i < sample_count; i++) {
+            output_samples[i].samples[0] = front[i].samples[0];
+            output_samples[i].samples[1] = front[i].samples[1];
+            if (m_active_audio_mode == MODE_A && i < (int)rear.size()) {
+                output_samples[i].samples[2] = rear[i].samples[0];
+                output_samples[i].samples[3] = rear[i].samples[1];
+            }
         }
     }
     *sample_count_out = sample_count;

@@ -5,7 +5,7 @@
   "--field-interpolation",
   "intra-field"
  ],
- "recorded": "2026-11-16",
+ "recorded": "2026-11-17",
  "golden_file": "muse-sony-test-disc-120s.intra-field.812a96921530.mkv",
  "probe": "ldf MUSE RF at 62.5e6 Hz",
  "video": {
@@ -257,8 +257,8 @@
  "audio": {
   "codec": "pcm_s16le",
   "bytes": 693840,
-  "sha256": "4551a1664374b1187971797e563dd42986634e977facedc744adc5dbab599707",
-  "judged_sha256": "22d19d724b6a419ed44caa6df9f1a71e9e459b228fefbaaed35b2da4ee88b77b"
+  "sha256": "ef70eaf3f59560aae8ec057b1072248e9f5f6906f03618974d20fb6550a4f03c",
+  "judged_sha256": "6dcfe2dcc8a82220af7b6fba35cc567093e6a31e8e671b93e0f5076ebdd1f704"
  },
  "codes": [
   "2431352 MUSE 30 cm CAV; Chapter 3 Frame 3485",

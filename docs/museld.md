@@ -617,6 +617,15 @@ not) and verifying it by the frame pulses of lines 1-2 before it becomes the lat
 anchors the frame.  Vulkan command recording and SDL event handling run on the main
 thread. The GPU pipeline has two stages separated by a semaphore.
 
+The MUSE audio (the ternary data on the audio lines, deinterleaved, BCH-corrected and
+DPCM-decoded, two channels in mode B or four in mode A) is concealed like the EFM track: a
+sample whose data row or range word the BCH decoder cannot correct, or whose block arrived
+without its sync pattern, is a prediction only and is flagged as an erasure for the same
+autoregressive concealer (one per channel pair).  `--log A3` reports the samples concealed
+each second.  A seek forgets the deinterleaver, whose bits would otherwise be those of two
+places on the disc, and a control word the decoder does not recognize keeps the audio mode in
+use rather than silencing the track.
+
 ### Data flow — NTSC
 
 ```

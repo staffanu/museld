@@ -21,7 +21,9 @@ protected:
 class AModeChannelDecoder : public AudioChannelDecoder {
 public:
     explicit AModeChannelDecoder(int channel) : AudioChannelDecoder(channel) {};
-    int16_t decodeSample(int range[3], bool range_ok, int data[8], bool data_ok);
+    // The sample, and whether it is a prediction only (*erased) because the
+    // range word or the row's data word could not be corrected
+    int16_t decodeSample(const int range[3], bool range_ok, const int data[8], bool data_ok, bool *erased);
 
 private:
     static const int c_max_value;
@@ -33,7 +35,7 @@ class BModeChannelDecoder : public AudioChannelDecoder {
 public:
     explicit BModeChannelDecoder(int channel) : AudioChannelDecoder(channel) {};
 
-    int16_t decodeSample(int range[3], bool range_ok, int data[11], bool data_ok);
+    int16_t decodeSample(const int range[3], bool range_ok, const int data[11], bool data_ok, bool *erased);
 
 private:
     static const int c_max_value;

@@ -5,7 +5,7 @@
   "--eq",
   "off"
  ],
- "recorded": "2026-11-16",
+ "recorded": "2026-11-17",
  "golden_file": "muse-ursa-minor-blue-120s.eq-off.6ea2ae56f87d.mkv",
  "probe": "ldf MUSE RF at 62.5e6 Hz",
  "video": {
@@ -259,8 +259,8 @@
  "audio": {
   "codec": "pcm_s16le",
   "bytes": 699720,
-  "sha256": "ef344453b74b0c364cd04232a94aee9ba15795672e03782c83f9e43ed0a247ff",
-  "judged_sha256": "c969a43d57040513b5b3dc93ccb9d95e7f5abb1e90f4b688fb7073a9147fe7b2"
+  "sha256": "6881a30c99dd6e9dc1b97ada286ea11706389bcb7bbc9801573e05f2489f0a3f",
+  "judged_sha256": "707610fcb28db9a2f9846c24203b57d7ceb5c88e1461f29fc9ded74b077eab60"
  },
  "codes": [
   "659500 MUSE 30 cm CAV; Chapter 0 Frame 2223",

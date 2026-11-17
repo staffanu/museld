@@ -585,6 +585,15 @@ MUSE frame buffer → video/audio split → Vulkan GPU filters →
 HD video + miniaudio
 ```
 
+MUSE audio (`muse/AudioDecoder`): the ternary symbols of the audio lines → 25-stage
+deinterleaver → 1350-bit blocks (16-bit sync, 22-bit control word, 16 BCH-coded rows) → DPCM
+channel decoders (`AudioChannelDecoder`, a leaky integrator) → the EFM track's
+`ErasureConcealer` (AR model), one per channel pair.  A sample whose row or range word is
+uncorrectable, or whose block lacks its sync pattern, is a zero-delta prediction flagged as
+erased; `reset()` forgets the bit stream at a seek (the deinterleaver held the previous
+place's bits, a burst of noise at every search landing, 2026-11-17); an unrecognized control
+word keeps the mode in use.  `--log A3` prints the samples concealed per second.
+
 **NTSC path:**
 ```
 RF (40 MHz) → SdtvRfDemodulator → SdtvFrameReader (feed-forward timebase: sync pulse

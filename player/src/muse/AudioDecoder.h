@@ -14,6 +14,7 @@
 #include "bch/BchDecoder.h"
 #include "AudioChannelDecoder.h"
 #include "AudioDefs.h"
+#include "efm/concealment/ErasureConcealer.h"
 
 class Logger;
 
@@ -23,6 +24,12 @@ public:
     AudioDecoder(const AudioDecoder &) = delete;
     void operator=(const AudioDecoder &) = delete;
 
+
+    // Forgets the bit stream: the deinterleaver, the block queue and the
+    // sync lock.  For a seek, after which the bits in the deinterleaver
+    // belong to another place on the disc; what the decoder has learnt (the
+    // symbol positions, the mode) is kept
+    void reset();
 
     // output samples are written to the first two or all four channels depending on the detected mode
     void decodeFrame(int frame_no,
@@ -65,6 +72,16 @@ private:
     AModeChannelDecoder aModeChannel4Decoder;
     BModeChannelDecoder bModeChannel1Decoder;
     BModeChannelDecoder bModeChannel2Decoder;
+
+    // Erasure concealment of the decoded PCM, as the EFM track has: one
+    // concealer per channel pair (1-2, and 3-4 in mode A)
+    std::unique_ptr<ErasureConcealer> m_concealers[2];
+    // Since the last statistics line
+    int m_samples_decoded;
+    int m_samples_erased;
+    int m_blocks_without_sync;
+    int m_rows_uncorrectable;
+    int m_range_words_uncorrectable;
 
     long m_total_time_us;
 };

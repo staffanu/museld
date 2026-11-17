@@ -23,24 +23,29 @@ const int AModeChannelDecoder::c_max_value = 16383;
 const int AModeChannelDecoder::c_min_value = -16384;
 
 const int BModeChannelDecoder::c_max_value = 32767;
-const int BModeChannelDecoder::c_min_value = -32678;
+const int BModeChannelDecoder::c_min_value = -32768;
 
-int16_t AModeChannelDecoder::decodeSample(int range[3], bool range_ok, int data[8], bool data_ok) {
-    if (range_ok) { // otherwise just repeat the previous sample; probably not good
-        int multiplier = 128 >> binaryLittleEndianSeqToIntUnsigned(range, 3); // 1 to 128
-        int dataValue = binaryBigEndianSeqToIntSigned(data, 8);
-        m_value = m_value - m_value / 16 + dataValue * multiplier;
-    }
-    m_value = std::clamp(m_value, c_min_value, c_max_value);
-    return (short)(m_value * 2);
+// The DPCM of the NHK book: the value leaks by a sixteenth per sample and
+// the transmitted word, scaled by the block's range, is added.  When the
+// word is unusable the leak alone is applied (a zero delta, the encoder's
+// own prediction), the sample is flagged as erased for the concealer, and
+// the error it leaves in the value decays by the same leak within a few
+// dozen samples.  Before, an uncorrectable data word was added as it came
+// (the row's BCH verdict was ignored), and a bad range word froze the value.
+int16_t AModeChannelDecoder::decodeSample(const int range[3], bool range_ok, const int data[8], bool data_ok, bool *erased) {
+    const bool ok = range_ok && data_ok;
+    const int multiplier = 128 >> binaryLittleEndianSeqToIntUnsigned(range, 3); // 1 to 128
+    const int delta = ok ? binaryBigEndianSeqToIntSigned(data, 8) * multiplier : 0;
+    m_value = std::clamp(m_value - m_value / 16 + delta, c_min_value, c_max_value);
+    *erased = !ok;
+    return (int16_t)(m_value * 2);
 }
 
-int16_t BModeChannelDecoder::decodeSample(int range[3], bool range_ok, int data[11], bool data_ok) {
-    if (range_ok) { // otherwise just repeat the previous sample; probably not good
-        int multiplier = 32 >> binaryLittleEndianSeqToIntUnsigned(range, 3); // 1 to 32
-        int dataValue = binaryBigEndianSeqToIntSigned(data, 11);
-        m_value = m_value - m_value / 16 + dataValue * multiplier;
-    }
-    m_value = std::clamp(m_value, c_min_value, c_max_value);
-    return (short)m_value;
+int16_t BModeChannelDecoder::decodeSample(const int range[3], bool range_ok, const int data[11], bool data_ok, bool *erased) {
+    const bool ok = range_ok && data_ok;
+    const int multiplier = 32 >> binaryLittleEndianSeqToIntUnsigned(range, 3); // 1 to 32
+    const int delta = ok ? binaryBigEndianSeqToIntSigned(data, 11) * multiplier : 0;
+    m_value = std::clamp(m_value - m_value / 16 + delta, c_min_value, c_max_value);
+    *erased = !ok;
+    return (int16_t)m_value;
 }

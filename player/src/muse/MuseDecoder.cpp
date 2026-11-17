@@ -148,6 +148,11 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
         std::rotate(m_frame_seek_generation.rbegin(), m_frame_seek_generation.rbegin() + 1,
                     m_frame_seek_generation.rend());
         m_frame_seek_generation[0] = input_block->seek_generation;
+        // The first frame after a seek: the audio deinterleaver holds the
+        // bits of the previous place on the disc, which decoded as a burst
+        // of noise at every search landing
+        if (m_frame_seek_generation[1] != c_no_frame_yet && m_frame_seek_generation[1] != m_frame_seek_generation[0])
+            m_audio_decoder.reset();
         shared_ptr<musevk::VulkanBuffer> input_vulkan_buffer = input_block->video_data;
 
         // Decode the control signal on the *raw* frame so the equaliser can pick the
