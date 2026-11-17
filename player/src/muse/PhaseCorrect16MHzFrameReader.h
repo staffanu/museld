@@ -25,6 +25,10 @@ public:
     void cleanup() override;
 
     bool seek(double seconds) override;
+    [[nodiscard]] double inputSampleRate() const override { return 16.2e6; }
+    [[nodiscard]] int64_t inputSampleCount() const override {
+        return m_input_reader ? m_input_reader->sampleCount() : -1;
+    }
 
 protected:
     void threadFunc() override;

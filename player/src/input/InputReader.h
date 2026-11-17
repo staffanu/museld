@@ -173,8 +173,21 @@ public:
     int bitsPerSample() const override { return sizeof(T) * 8; }
     bool signedSamples() const override { return std::is_signed_v<T>; }
 
+    // Refused (nothing moves) when it would land past the end of a file of
+    // known size: lseek itself allows that, and the next read would then
+    // report the end of the stream, which finishes the decoding threads
     bool seek(int64_t no_samples) override {
-        seekBytes(no_samples * (int64_t)sizeof(*m_buffer));
+        const int64_t bytes = no_samples * (int64_t)sizeof(*m_buffer);
+        if (!isLive()) {
+            const int64_t size = m_source->size();
+            if (size >= 0) {
+                std::scoped_lock<std::mutex> lock(m_source_mutex);
+                const int64_t current = m_source->seek(0, SEEK_CUR);
+                if (current >= 0 && current + bytes > size)
+                    return false;
+            }
+        }
+        seekBytes(bytes);
         return true;
     }
 

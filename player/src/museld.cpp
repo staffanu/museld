@@ -1693,8 +1693,12 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
             else
                 input_vulkan_buffers.push_back(InputBlockFactory<InputBlock>::makeBlock(manager));
         }
-        if (!reader.initialize(input_vulkan_buffers))
-            throw runtime_error("FrameReader initialization failed");
+        try {
+            if (!reader.initialize(input_vulkan_buffers))
+                throw runtime_error("FrameReader initialization failed");
+        } catch (const InitialSeekRefused &x) {
+            throw InputError(x.what());
+        }
         if (watch_type)
             reader.watchForTypeChange(*watch_type);
     }

@@ -43,8 +43,17 @@ FrameReader<InputBlock>::~FrameReader() {
 
 template<class InputBlock>
 bool FrameReader<InputBlock>::initialize(std::vector<std::unique_ptr<InputBlock>> &buffers) {
-    if (m_initial_seek_seconds != 0)
-        seek(m_initial_seek_seconds);
+    if (m_initial_seek_seconds != 0 && !seek(m_initial_seek_seconds)) {
+        // An interactive seek past the end is ignored, but the one from the
+        // command line is a mistake worth a message, not a play from the start
+        const int64_t count = inputSampleCount();
+        const double rate = inputSampleRate();
+        if (count >= 0 && rate > 0)
+            throw InitialSeekRefused(std::format("--seek {:g} s is past the end of {}, which is {:.1f} s long",
+                                                 m_initial_seek_seconds, m_filename, (double)count / rate));
+        throw InitialSeekRefused(std::format("--seek {:g} s: {} cannot be positioned there (past its end?)",
+                                             m_initial_seek_seconds, m_filename));
+    }
 
     // We take ownership of the input blocks here -- the only reason not to create them here is that
     // we do not have access to the VulkanManager.

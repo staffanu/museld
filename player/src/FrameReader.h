@@ -7,6 +7,7 @@
 #include <thread>
 #include <condition_variable>
 #include <exception>
+#include <stdexcept>
 #include <optional>
 #include <vector>
 #include <deque>
@@ -19,6 +20,10 @@ namespace musevk {
 }
 class Logger;
 class InputReader;
+
+// Thrown by initialize() when the input refuses the initial --seek: past
+// the end of the file, or beyond what its container can seek
+struct InitialSeekRefused : std::runtime_error { using std::runtime_error::runtime_error; };
 
 enum class InputStatus {
     eNormal = 0,
