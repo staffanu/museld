@@ -15,13 +15,20 @@ DiscCode::DiscCode(int mode, int cadr, int fadr1, int fadr2) :
 std::vector<std::string> DiscCode::asStrings() const {
     std::string disc_code_string1 =
         std::format("MUSE {}{} {}", pf() ? "TOC " : "", sz() ? "20 cm" : "30 cm", df() ? "CLV" : "CAV");
-    std::string disc_code_string2 = std::format("Chapter {} Frame {}", chapterNumber(), frame());
+    // A CLV disc is navigated by time, which the code does not carry: it is
+    // shown as counted from the frame address, beside the frame
+    std::string disc_code_string2 = std::format("Chapter {} ", chapterNumber());
+    if (const auto time = playbackTimeSeconds(); time && df()) {
+        const int s = (int)*time;
+        disc_code_string2 += std::format("Time {}:{:02}:{:02} ", s / 3600, s % 3600 / 60, s % 60);
+    }
+    disc_code_string2 += std::format("Frame {}", frame());
 
     return {disc_code_string1, disc_code_string2};
 }
 
 std::optional<int> DiscCode::frameNumber() const {
-    if (pf() || df() || !playbackTimeSeconds())
+    if (pf() || !playbackTimeSeconds())
         return std::nullopt;
     return frame();
 }

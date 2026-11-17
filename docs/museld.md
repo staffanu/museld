@@ -184,7 +184,7 @@ a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at 
 | `--seek <seconds>` | Seek to position before starting playback. A position past the end of the file is an error (an interactive seek past the end is ignored instead) |
 | `--chapter <n>` | Start playing at chapter `n`, found by searching the capture for its chapter codes (see below); after `--seek`, if given |
 | `--time <h:mm:ss>` | Start playing at this time of the disc's time code (CLV discs; `mm:ss` also accepted), found like a chapter |
-| `--frame <n>` | Start playing at frame `n` of a CAV disc, found like a chapter |
+| `--frame <n>` | Start playing at frame `n` of a CAV disc, or of a MUSE CLV disc (whose disc code numbers its frames too), found like a chapter |
 | `--pause` | Start paused |
 | `--export-frame <file>` | Save one decoded frame as PNG to `<file>` and quit. Combine with `--export-frame-at` to give the decoder (sync lock, adaptive equaliser, motion detection) a warm-up run from the `--seek` position. |
 | `--export-frame-at <seconds>` | Stream position of the frame saved by `--export-frame` (absolute, same units as `--seek` — not a delay after it). Default: the first decoded frame. |
@@ -376,12 +376,15 @@ path.
 
 **Chapters, times and frames**: laserdisc frames carry their chapter number (the VBI codes
 for NTSC/PAL, the line 564 disc code for MUSE) on discs that have chapters, and their position
-as the disc counts it: a time code on CLV discs, a frame number on CAV discs.  A chapter index
+as the disc counts it: a time code on CLV discs, a frame number on CAV discs.  A MUSE disc
+numbers its frames on CLV discs too and has no time code: its time is counted from the frame
+number, 30 to the second, the disc code display (V) shows both, G asks for the time and
+`--frame` takes the number.  A chapter index
 exists only on some discs, in the lead-in, which captures usually leave out, and `museld`
 doesn't read it.  The Up and Down keys, and `--chapter`, therefore search iteratively for the
 chapter boundary: this typically takes less than a second.  Down goes to the start of the
 current chapter, or, within the first seconds of it, to the chapter before.  Going to a time
-or a frame by number, as a player's remote does, is the G key, or the menu's Playback page,
+or a frame by number, as a player's remote does, is the G key (H for a chapter), or the menu's Playback page,
 whose Time (Frame on a CAV disc) and Chapter lines show where playback is, step it with Left
 and Right as the keys do (10 seconds, a chapter) and open a number entry on select; `--time`
 and `--frame` do the same from the command line.  The number is set like a clock, the cursor on one digit, Up and Down
@@ -460,6 +463,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | Left / Right | Seek ±10 seconds |
 | Up / Down | Next / previous chapter (see Chapters above) |
 | G | Go to a time (CLV) or frame (CAV): a number entry over the picture (see Chapters above) |
+| H | Go to a chapter by its number: the same number entry (see Chapters above) |
 | P | Toggle honouring the picture stop codes (on by default for files, off for live input) |
 | 1 | Normal field interpolation (motion detection) |
 | 2 | Force intra-field interpolation (treat everything as motion) |

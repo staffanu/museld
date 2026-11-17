@@ -33,7 +33,8 @@ public:
     // within the second, a whole second where it does not
     [[nodiscard]] virtual double discTimeResolutionSeconds() const { return 1.0; }
     // The picture number of a CAV disc (counted from 1 at the programme
-    // start); unset on CLV discs and on frames without the code
+    // start), and of a MUSE CLV disc, whose code is a frame address too;
+    // unset on NTSC/PAL CLV discs and on frames without the code
     [[nodiscard]] virtual std::optional<int> frameNumber() const { return std::nullopt; }
     // Whether the disc is CLV (time code) or CAV (frame numbers): what a
     // position search can be asked for.  Unset while the code has not said.

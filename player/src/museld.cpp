@@ -2141,7 +2141,7 @@ int main(int argc, char *argv[]) {
     });
     options.option("--chapter", "N", "Start playing at chapter N, found by searching the capture for its "
                    "chapter codes (after --seek, if given; the Up and Down keys do the same for the next and "
-                   "previous chapter, and the menu's Go to chapter item takes a number)", [&] () -> void {
+                   "previous chapter, and the menu's Go to chapter item (key H) takes a number)", [&] () -> void {
         start_position = PositionSearch::Target::chapter(stoi(*(it++)));
     });
     options.option("--time", "H:MM:SS", "Start playing at this time of the disc's time code (CLV discs), found "
@@ -2155,8 +2155,8 @@ int main(int argc, char *argv[]) {
         else
             throw runtime_error("--time takes H:MM:SS or MM:SS, not " + text);
     });
-    options.option("--frame", "N", "Start playing at frame N of a CAV disc, found like --chapter; the menu's "
-                   "Go to frame item (key G) does the same", [&] () -> void {
+    options.option("--frame", "N", "Start playing at frame N of a CAV disc or a MUSE CLV disc, found like "
+                   "--chapter; the menu's Go to frame item (key G on a CAV disc) does the same", [&] () -> void {
         start_position = PositionSearch::Target::frame(stoi(*(it++)));
     });
     options.option("--seek", "SECONDS", "Seek to this position before playing", [&] () -> void {

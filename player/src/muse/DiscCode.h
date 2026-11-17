@@ -18,7 +18,8 @@ public:
     std::optional<double> discTimeSeconds() const override { return playbackTimeSeconds(); }
     double discTimeResolutionSeconds() const override { return 1.0 / 30; }
     std::optional<int> chapter() const override { return pf() ? std::nullopt : std::make_optional(chapterNumber()); }
-    // The frame address is on CLV discs too, but a player searches those by time
+    // The frame address is all a MUSE disc carries, CLV like CAV: the time of
+    // a CLV disc is counted from it, and either can be searched for
     std::optional<int> frameNumber() const override;
     std::optional<bool> isClv() const override { return df(); }
     bool isLeadIn() const override { return pf(); }

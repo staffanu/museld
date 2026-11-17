@@ -291,7 +291,7 @@ bool InputController::poll(SDL_Window *window,
         PlayerActions::stepOneField(state);
     // Left/Right seek, Up/Down find the next/previous chapter (see
     // PositionSearch; the loop in runPlayer drives it); all four pan instead
-    // while zoomed.  G asks for a time or frame to go to.
+    // while zoomed.  G asks for a time or frame to go to, H for a chapter.
     if (checkKey(SDL_SCANCODE_LEFT))
         PlayerActions::seekOrPan(state, reader, -10);
     if (checkKey(SDL_SCANCODE_RIGHT))
@@ -302,6 +302,8 @@ bool InputController::poll(SDL_Window *window,
         PlayerActions::chapterOrPan(state, reader, m_log, false);
     if (checkKey(SDL_SCANCODE_G) && m_menu != nullptr)
         openGoToEntry(*m_menu, state, reader, m_log);
+    if (checkKey(SDL_SCANCODE_H) && m_menu != nullptr)
+        openGoToChapterEntry(*m_menu, state, reader, m_log);
     if (checkKey(SDL_SCANCODE_P))
         PlayerActions::togglePictureStops(state);
     if (checkKey(SDL_SCANCODE_1))
