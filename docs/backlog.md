@@ -82,9 +82,9 @@ Last revised 2026-11-14.
 - **PAL calibration.**  Calibrated on the GGV1011 test disc and a handful of captures; the
   dropout detector's thresholds were calibrated on NTSC; Hanover bars under heavy noise are worth
   measuring with the pal-pilot tooling.
-- **MUSE open questions:** the non-linear de-emphasis on baseband input is unresolved; the
-  equaliser's reference could be verified against the Sony test disc's patterns; the LD versus BS
-  MUSE difference is unknown.
+- **MUSE open questions:** the equaliser's reference could be verified against the Sony test
+  disc's patterns; the LD versus BS MUSE difference is unknown.  (The de-emphasis on baseband
+  input was settled 2026-11-19, see below.)
 
 ## Functionality
 
@@ -103,6 +103,18 @@ Last revised 2026-11-14.
 
 ## Done since this list was started
 
+- 2026-11-19: a player's baseband output carries the MUSE signal as transmitted, both emphases
+  intact, so museld's de-emphasis stages apply to it as to RF: the HIL-C1's 16.2 MHz output and
+  the X9's RF of the same disc (A River Runs Through It, the Pioneer title card, a static
+  white-on-black frame, 16 same-phase frames averaged on each side) agree sample for sample
+  with the RF's emphasised samples (residual 4.8 codes after a gain and offset fit, below the
+  single-frame noise), not with the RF after the linear de-emphasis (10.3; the edge profiles
+  show it: both have the pre-edge dip and the overshoot of the emphasis, the de-emphasised
+  RF neither), and where the non-linear stage acts (2500 of 35000 samples, by 11 codes rms)
+  the RF before it matches better than after it (9.2 against 12.9).  The muse-16 reader's
+  level fit (the 500th sample from each end of two frames to 16 and 239) is the open part: it
+  put the same picture at 0.59 of the RF path's gain, which is where the non-linear stage's knee
+  is set in absolute codes; the reader is legacy, so noted rather than fixed.
 - 2026-11-05: picture and sound regression harness (`tests/regression/`).
 - 2026-11-06: live NTSC/PAL/MUSE type switching on a live input.
 - 2026-11-09: `--write` keeps one file across the inputs that name it (the sides of a disc).
