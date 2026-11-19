@@ -31,6 +31,25 @@ Last revised 2026-11-14.
   MUSE quality is dominated by the still/moving decision and the reconstruction filters far more
   than NTSC is.  The motion-vector investigation (2026-10) closed off the other avenue: a
   client-side recompute gives no gain.  The regression set has two MUSE clips to iterate against.
+- **MUSE impulse noise (FM clicks) concealment.**  White-on-black titles on a weak-carrier
+  capture (a Top Gun side from an HLD-X9, 2026-11-19) show black breaks across the white strokes:
+  one- or two-sample impulses of either polarity in the demodulated baseband, about 40 per frame
+  in the picture (250 ppm of the samples), the negative ones mostly on white, where the disc MTF
+  leaves the least carrier.  They are the demodulator's cycle slips, not dropouts: the carrier
+  envelope collapses for a single sample (2% of the neighbouring lines' level) and is back
+  within three, which the dropout detector's 9-sample box sees as 60-97%, and a narrower box
+  cannot be used, since the emphasised signal's own edges drive the sidebands out of the band
+  and take the single-sample envelope just as low at one position in a hundred, in every frame.
+  What separates a click is that it is not repeatable: the same-phase frames before and after
+  agree (they register to 0.04 of a sample) and the clicked one differs, and on a static stroke
+  the lines above and below agree too.  So the place is after demodulation, in the decode: a
+  sample that departs from both its same-phase temporal neighbours while they agree, or from
+  the vertical neighbours of a still stroke, replaced by them; the intra path, which is where it
+  is most visible, has only the vertical option.  The measurement recipe: `--write-muse16` of
+  the stretch, each line against the same line two frames on either side, runs of two or more
+  samples off by half the black-white span, and the shift of the line against those neighbours
+  by cross-correlation (none here).  Other discs show the same distortion; to be judged against
+  the Sony MUSE decoder's picture of them first.
 - **Noise reduction, spatial.**  The temporal NR (`--nr`, key 6, 2026-11-11) averages still parts
   only; moving parts and PAL's 2.4x noise on them would need a spatial or motion-compensated
   stage, which is a different order of work.
