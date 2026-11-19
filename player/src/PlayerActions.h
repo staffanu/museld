@@ -37,7 +37,6 @@ namespace PlayerActions {
     void cycleCx(PlayerState &state, const ReaderControls &reader, AudioTrack audio_track, int direction);
     void cycleBlackLevel(PlayerState &state, int direction);
     void cycleDropoutMode(PlayerState &state, DropoutMode &dropout_mode, int direction);
-    void toggleNonLinear(PlayerState &state);
     void toggleCursor(PlayerState &state);
     void toggleDiscCode(PlayerState &state);
     void exportFrame(PlayerState &state);

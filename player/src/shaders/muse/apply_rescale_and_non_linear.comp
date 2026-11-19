@@ -24,7 +24,6 @@
 layout(push_constant) uniform PushConstants {
     float rescale1_f;
     float rescale2_f;
-    float enable_non_linear;
 };
 
 layout(set = 0, binding = 0) buffer readonly frame_in_buffer {
@@ -85,7 +84,7 @@ void main() {
     bool is_color_area = (row >= 42 && row < 558 || row >= 604 && row < 1120) && col >= 11 && col < 105;
 
     float16_t processed;
-    if (enable_non_linear != 0 && (is_picture_area || is_color_area)) {
+    if (is_picture_area || is_color_area) {
         processed = non_linear(rescaled);
     } else {
         processed = rescaled;

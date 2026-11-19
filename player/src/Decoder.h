@@ -65,7 +65,6 @@ public:
         CxMode analog_cx;
         FieldInterpolationMode field_interpolation_mode;
         bool redo_last_field;
-        bool enable_non_linear;
         bool use_3d_comb;
         bool film_mode; // NTSC: weave by the film cadence when a 3:2 pulldown lock holds
         DropoutMode dropout_mode;

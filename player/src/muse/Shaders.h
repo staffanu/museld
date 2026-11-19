@@ -36,8 +36,7 @@ public:
                                            std::shared_ptr <musevk::VulkanBuffer> const &video_input,
                                            std::shared_ptr <musevk::VulkanBuffer> const &dropout_input,
                                            std::shared_ptr <musevk::VulkanBuffer> const &buffer,
-                                           const std::pair<float, float> &rescale,
-                                           bool enable_non_linear, DropoutMode dropout_mode);
+                                           const std::pair<float, float> &rescale, DropoutMode dropout_mode);
 
     // Adaptive equaliser FIR + float→fp16 input adapter.  Reads float video_input,
     // writes fp16 into the internal equalised buffer (accessible via

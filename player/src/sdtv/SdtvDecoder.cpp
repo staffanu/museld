@@ -176,7 +176,6 @@ bool SdtvDecoder::detectDtsBitstream(const std::vector<TwoChannelSampleWithErasu
     return is_dts;
 }
 
-// For NTSC, enable_non_linear is not implemented
 bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
     const AudioTrack audio_track = controls.audio_track;
     bool use_3d_comb = controls.use_3d_comb;

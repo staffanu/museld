@@ -328,8 +328,6 @@ bool InputController::poll(SDL_Window *window,
         PlayerActions::cycleBlackLevel(state, +1);
     if (checkKey(SDL_SCANCODE_D))
         PlayerActions::cycleDropoutMode(state, dropout_mode, +1);
-    if (checkKey(SDL_SCANCODE_L))
-        PlayerActions::toggleNonLinear(state);
     if (checkKey(SDL_SCANCODE_C))
         PlayerActions::toggleCursor(state);
     if (checkKey(SDL_SCANCODE_V))

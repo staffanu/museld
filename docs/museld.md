@@ -476,7 +476,6 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | V | Toggle disc code / chapter / frame display (while paused, the frame number is followed by the field on screen, 1 or 2), plus the NTSC film mode and black level status |
 | J | NTSC: cycle the black level: auto → NTSC-M (7.5 IRE) → NTSC-J (0 IRE), see `--black-level` |
 | C | Show cursor coordinates and input-file offsets (see below) |
-| L | Toggle non-linear de-emphasis processing |
 | O | Cycle the overscan: 0 % (EDGES HIDDEN on MUSE) → 2.5 % → 5 % → full image (see `--overscan`) |
 | Z | Cycle the magnifier: 1× → 2× → 4× (arrow keys pan when zoomed) |
 | S | Export the displayed frame to a timestamped PNG in the current directory (without OSD text and subtitles) |
@@ -698,7 +697,6 @@ DTS: EFM stereo samples → DTS sync detection → byte stream → libavcodec dc
 - **Motion vectors**: MUSE specifies motion compensation in control data (3+4 bits), but these bits are
   always zero on every disc tested, so the decoder does not use them. Computing motion vectors on the
   decoder's side instead was tried (2026-10) and gained nothing over the still/moving decision.
-- **Baseband input levels**: a player's baseband output carries the MUSE signal as transmitted, both emphases intact (checked against the RF of the same disc), so the de-emphasis stages apply to it as to RF. The 16.2 MHz reader (`muse-16`) scales its input by a crude fit of the extremes, which puts the non-linear stage's knee at the wrong level on such input; the L key toggles that stage.
 - **Direct USB input**: Currently requires an external capture program writing to a pipe or a FIFO (e.g., picostream).
 - **Picture filters**: Most filters were computed early in the project; picture quality could probably be improved by spending more time on them.
 - **Motion detection**: The algorithm is quite simplistic and could probably be improved.

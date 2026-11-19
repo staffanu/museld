@@ -111,10 +111,11 @@ Last revised 2026-11-14.
   single-frame noise), not with the RF after the linear de-emphasis (10.3; the edge profiles
   show it: both have the pre-edge dip and the overshoot of the emphasis, the de-emphasised
   RF neither), and where the non-linear stage acts (2500 of 35000 samples, by 11 codes rms)
-  the RF before it matches better than after it (9.2 against 12.9).  The muse-16 reader's
-  level fit (the 500th sample from each end of two frames to 16 and 239) is the open part: it
-  put the same picture at 0.59 of the RF path's gain, which is where the non-linear stage's knee
-  is set in absolute codes; the reader is legacy, so noted rather than fixed.
+  the RF before it matches better than after it (9.2 against 12.9).  The reader's crude
+  level fit on such input (the 500th sample from each end of two frames to 16 and 239) does not
+  matter: the decoder rescales every frame from the signal's own reference lines, and the two
+  decoded pictures agree within 8 %.  The L key and the menu's non-linear de-emphasis toggle,
+  which existed for this question, are gone.
 - 2026-11-05: picture and sound regression harness (`tests/regression/`).
 - 2026-11-06: live NTSC/PAL/MUSE type switching on a live input.
 - 2026-11-09: `--write` keeps one file across the inputs that name it (the sides of a disc).

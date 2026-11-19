@@ -121,7 +121,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             Size(MUSE_TOTAL_WIDTH * MUSE_TOTAL_HEIGHT, 1, 1)));
     m_apply_rescale_and_non_linear_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "apply_rescale_and_non_linear",
-            {eBuffer, eBuffer}, sizeof(float) * 3,
+            {eBuffer, eBuffer}, sizeof(float) * 2,
             VulkanUtil::loadSpirv(executable_dir, "apply_rescale_and_non_linear.comp"), Size(MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)));
     m_apply_dropout_compensation_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "apply_dropout_compensation",
@@ -207,10 +207,9 @@ void Shaders::applyRescaleAndDeemphasisAndGamma(
         shared_ptr<musevk::VulkanBuffer> const &video_input,
         shared_ptr<musevk::VulkanBuffer> const &dropout_input,
         shared_ptr<musevk::VulkanBuffer> const &buffer,
-        pair<float, float> const &rescale, bool enable_non_linear,  DropoutMode dropout_mode) {
+        pair<float, float> const &rescale, DropoutMode dropout_mode) {
     m_apply_rescale_and_non_linear_algo->updateBufferDescriptorsInSet(0, {video_input, m_non_linear_processed_buffer});
-    sq.enqueueComputeShader<float>(m_apply_rescale_and_non_linear_algo,
-                            {rescale.first, rescale.second, enable_non_linear ? 1.0f : 0.0f});
+    sq.enqueueComputeShader<float>(m_apply_rescale_and_non_linear_algo, {rescale.first, rescale.second});
 
     if (dropout_mode != DropoutMode::eDisabled) {
         m_apply_dropout_compensation_algo->

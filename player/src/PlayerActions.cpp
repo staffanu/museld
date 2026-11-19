@@ -201,12 +201,6 @@ void cycleDropoutMode(PlayerState &state, DropoutMode &dropout_mode, int directi
     redoIfPaused(state);
 }
 
-void toggleNonLinear(PlayerState &state) {
-    state.enable_non_linear = !state.enable_non_linear;
-    redoIfPaused(state);
-    state.osd_text = state.enable_non_linear ? "NON-LINEAR DE-EMPH ON" : "NON-LINEAR DE-EMPH OFF";
-}
-
 void toggleCursor(PlayerState &state) {
     state.enable_cursor = !state.enable_cursor;
     if (state.enable_cursor)

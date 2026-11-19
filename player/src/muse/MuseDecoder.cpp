@@ -96,7 +96,6 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
     const bool both_tracks = (efm_audio && listed(AudioTrack::eDefault)) || (!efm_audio && listed(AudioTrack::eEfm));
     const FieldInterpolationMode field_interpolation_mode = controls.field_interpolation_mode;
     const bool redo_last_field = controls.redo_last_field;
-    const bool enable_non_linear = controls.enable_non_linear;
     const DropoutMode dropout_mode = controls.dropout_mode;
     const bool output_yuv = controls.output_yuv;
 
@@ -285,7 +284,7 @@ bool MuseDecoder::next(const DecodeControls &controls, DecodedField &out) {
                                                     m_shaders.getEqualizedInputBuffer(),
                                                     input_block->dropout_data,
                                                     frame_buffer->data(),
-                                                    m_rescale, enable_non_linear, dropout_mode);
+                                                    m_rescale, dropout_mode);
         frame_buffer->data()->synchronizeForHostRead(*m_first_stage_command_buffer); // for disc code processing
         m_shaders.convertAudioSampleRate(*m_first_stage_command_buffer, frame_buffer->data());
 

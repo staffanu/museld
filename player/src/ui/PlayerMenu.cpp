@@ -144,8 +144,6 @@ MenuPage *buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b, MenuPage *ope
                                               : b.dropout_mode == DropoutMode::eDisabled ? "SHOWN" : "HIGHLIGHTED";
                                      },
                                      [b](int d) { cycleDropoutMode(b.state, b.dropout_mode, d); }));
-    picture->items.push_back(setting("Non-linear de-emphasis", "L", [&s] { return onOff(s.enable_non_linear); },
-                                     [&s](int) { toggleNonLinear(s); }, [muse] { return muse; }));
     picture->items.push_back(setting("Equaliser", "7", [&r] { return r.eqMode ? r.eqMode() : std::string(); },
                                      [&s, &r, &log](int) { cycleEqMode(s, r, log); }, [&r] { return (bool)r.cycleEqMode; }));
     picture->items.push_back(action("Reset equaliser", "8", [&s, &r, &log] { resetEq(s, r, log); },
