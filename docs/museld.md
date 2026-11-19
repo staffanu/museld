@@ -42,12 +42,7 @@ The input types:
 
 - `muse-rf` — RF from the disc surface (or a player's RF tap) of a MUSE Hi-Vision laserdisc, typically captured at 62.5 MHz.
 - `ntsc-rf` — RF of a standard NTSC laserdisc, typically a DomesDay Duplicator capture at 40 MHz.
-- `pal-rf` — RF of a PAL laserdisc, decoded in colour (spatial and temporal combs, as NTSC),
-  with the Philips code (chapter, CLV time, picture number), the analog or EFM track
-  (PAL discs carry one or the other: a disc without analog carriers switches to the EFM
-  track by itself, `--efm` and `--analog` choose) and `--write`
-  (colour metadata tagged BT.470BG; 50 frames/s, one per field, or 25 with `--full-frames-only`,
-  as 59.94/29.97 for NTSC). See `docs/pal-decoding.md`.
+- `pal-rf` — RF of a PAL laserdisc, decoded in colour (see the PAL notes below).
 - `muse-16` — MUSE baseband resampled to exactly one sample per pixel at 16.2 MHz, phase locked to the line structure (480 samples per line). This is museld's own intermediate format, produced with `--write-muse16` (see below); `--sample-freq` does not apply.
 - `muse-os` — MUSE baseband (a player's output, before any resampling) captured at an arbitrary rate, e.g. an oscilloscope capture at 50 MHz. The reader's timebase locks to it like to RF, but skips the FM demodulation.
 
@@ -64,8 +59,7 @@ Detection works on live input too (a pipe, a fifo, the `udp://` stream): the sam
 window after window until the verdict is clear, so museld can be started before the disc plays
 and waits through whatever comes before. A weak verdict is waited out: black pictures or a
 player seeking give the line period little to lock on, and its estimate then wanders a few
-percent per window (the GGV1011's capture opens that way, and a verdict taken there missed the
-sample rate by 6 %), so detection goes on until the structure is clear or the line period has
+percent per window, so detection goes on until the structure is clear or the line period has
 held still for eight windows, and after some 150 windows (about 20 s) it warns and takes the
 best it saw. What detection reads
 from a live input is not played; it is at most a second of a clear signal that keeps coming (a
@@ -80,12 +74,10 @@ The input can be a URL instead of a file:
 | Input | What it is |
 |---|---|
 | `http://host[:port]/path/capture.ldf` | A capture on a web server. The bytes are fetched with HTTP range requests, so seeking and content detection work as for a local file. The server has to honour `Range` (nginx, Apache and Synology's Web Station do; Python's `http.server` does not). Plain http only. |
-| `udp://[address]:port` | The live [ethadc](https://github.com/staffanu/ethadc) capture stream, received on that port (bound on all interfaces unless an address is given). The sample format and rate come from the stream's packets; the input type is detected from the first samples unless `--input-type` says. Packets that never arrive are concealed by holding the last sample; the losses are reported in the input log (`--log I3`). `ethadc-tx` from that repository replays a capture file as such a stream, for testing without the hardware. |
+| `udp://[address]:port` | A live capture stream over UDP, received on that port (bound on all interfaces unless an address is given), from a network-attached capture device still under development. Experimental; the stream format will be documented when the device is. The sample format and rate come from the stream itself, and the input type is detected from the first samples unless `--input-type` says. |
 
 A network stream is live like a fifo: `--seek` does not apply, and the player has to keep up.
-Its packets say what it carries, so an `--input-format` or `--sample-freq` that disagrees with
-them is refused rather than applied. A file over http is not live: it plays like a local file,
-including seeking with the arrow keys.
+A file over http is not live: it plays like a local file, including seeking with the arrow keys.
 
 Detection reads a few short stretches spread across the file
 and takes well under a second: the sample format is whichever interpretation of the bytes looks
@@ -113,9 +105,7 @@ options when reusing long command lines.
 
 Because the options in effect are the ones seen so far, **every option must come before the file
 it applies to**. An option placed after a filename applies only to later files, and options after
-the last filename have no effect at all. That cannot be an error, since it is the same syntax that
-gives a second file different settings, so museld plays the files and warns about the leftovers
-afterwards:
+the last filename have no effect, which museld warns about:
 
 ```console
 # both files play with --no-dropout; the second one is also NTSC at 40 MHz
@@ -125,8 +115,6 @@ museld --no-dropout muse.ldf --input-type ntsc-rf --sample-freq 40e6 ntsc.ldf
 museld muse.ldf --no-dropout
 #   Warning: this option came after the last input file and had no effect: --no-dropout
 ```
-
-An argument disabled with a leading `!` is not reported, since ignoring it is the point.
 
 ### Piped input
 
@@ -289,6 +277,13 @@ cue that appeared late is kept up correspondingly longer. Translating into a
 language whose script the bundled font does not cover may need
 `--subtitle-font`.
 
+**PAL discs** (`pal-rf`) are decoded with spatial and temporal combs as NTSC is, with the
+Philips code (chapter, CLV time, picture number) and the analog or EFM track: PAL discs carry one
+or the other, so a disc without analog carriers switches to the EFM track by itself (`--efm` and
+`--analog` choose). `--write` tags the colour metadata BT.470BG and writes 50 frames/s, one per
+field, or 25 with `--full-frames-only`, as 59.94/29.97 for NTSC. `docs/pal-decoding.md` describes
+the decoder and what it was calibrated against.
+
 **Dropouts** (RF input): the default is to conceal detected dropouts. `--no-dropout` leaves them
 untouched; `--highlight-dropout` paints them red (dropout in the luminance area) or green
 (dropout in the color area). The D key cycles between the three modes during playback.
@@ -399,7 +394,7 @@ search does.  A position past the end of the capture says NOT FOUND, one before 
 start lands at the start.  The searches need the input's length, and work on files and http
 input, not on live streams or the 16.2 MHz baseband reader.
 
-**Stop code**: The picture stop code of NTSC
+**Stop code**: the picture stop code of NTSC and PAL
 CAV discs (`82CFFF`, IEC 60857 10.1.4) pauses playback on the frame it marks, once per stop;
 the P key turns that off.  If `--write`, `--export-frame` or `--no-keys` was given, picture
 stops are ignored.  On a live input (a pipe, fifo or udp:// stream) they start off, since
@@ -489,66 +484,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | ] | Cycle the secondary subtitle track (top of the frame) through the available tracks and off |
 | Print Screen | Copy the displayed cursor/offset text to the clipboard |
 
-### The on-screen menu
-
-M opens a menu over the picture with the same settings as the keys, for a remote
-control or a game controller as much as for the keyboard: the arrow keys move in
-it, Left and Right step a setting, Space or Return steps it forward or runs an
-action or opens a page, Escape (or Backspace) goes back a page and closes the menu
-from its root, and M closes it from anywhere.  While the menu is open the arrows
-and Space belong to it, so seeking and pausing wait until it is closed, and so
-does quitting with Escape.  Settings that mean nothing for the disc being played
-(the 3D comb on MUSE, the equaliser on NTSC) are left out of its pages.  On the
-Apple TV the remote's back button (the Siri Remote's Menu button; a TV remote
-over HDMI-CEC sends the arrows, OK and back, nothing else) opens it over the
-picture, and from its root page closes it again; select pauses, left and right
-seek, up and down find chapters, and select on the Playback page's Time, Frame and
-Chapter lines takes a number from the remote's arrows.  Playback ends through the menu's Stop item,
-which returns to the file browser, and back from the browser's page leaves the
-app, which starts there.  A PC started with `--browse` works the same way: the
-menu's last item is Stop and returns to the browser; started with a file on the
-command line it is Quit museld and ends the program.
-
-### The file browser
-
-The menu's Open page is a file browser: an address field, the directory the
-browser was last in, this computer's directories (not on the Apple TV), and the
-addresses opened recently.  It lists a directory on this machine or on a web
-server through the server's index page (Apache, nginx, Python's `http.server`
-and the like; the page is fetched in the background, the picture keeps playing
-meanwhile), directories first, with the sizes the listing gives; choosing a
-file plays it (a bar says what is being opened while the input starts; keys
-pressed meanwhile are dropped), and the player comes back to the browser when the input ends,
-or at once with the reason when the file cannot be played (not found, not a
-capture museld recognizes, a stream that does not arrive).
-The address field takes anything museld opens: a path, an `http://` location
-(a bare `host/path` gets the `http://`; a web address is listed as a directory
-unless its name has a capture's extension, and the server's redirects are
-followed, so the trailing slash is optional), or a `udp://` capture stream,
-which plays as it is.  The field opens with what was typed last, so a wrong
-address is corrected rather than retyped; the on-screen CLEAR key empties it to
-start over, and a held Backspace repeats.  A redirect to an `https://` address
-(what some servers answer a mistyped path with) is reported in the listing: only
-`http://` is read.  On the Apple TV the field's on-screen keyboard is driven by
-the remote, select typing the key under the cursor and Menu deleting; a
-keyboard types straight into it, Return accepts and Escape cancels (the space
-bar picks the on-screen key under the cursor, as a gamepad's select does; a
-space is typed with the on-screen SPACE key).
-
-`museld --browse` starts in the browser instead of with an input file; the Apple
-TV app always does, having no command line.  What the browser remembers -- the
-recent addresses and the last directory -- is written by the player to
-`state.txt` in its per-user preferences directory (the application container
-on tvOS; `MUSELD_STATE_FILE` names another file).  The same file remembers, per
-capture, what it was last played with where that belongs to the disc: the aspect
-mode, the overscan, the audio track, the subtitle tracks chosen (or turned
-off), the black level mode and the CX mode.  They come back when the capture is
-opened again, from the browser or the command line, over the command line's
-defaults.  Full screen and the other decode toggles (field interpolation, 3D
-comb, film mode, noise reduction, dropouts, the equaliser) are not remembered
-and start from their defaults every time.
-`--no-state` leaves all of it out of a run: nothing remembered is applied and
-nothing is recorded.
+### Cursor coordinates
 
 The C key overlay shows the cursor position both in single-field coordinates (374×516 for MUSE,
 764×240 for NTSC and 764×288 for PAL: the column over the whole decoded width, the line within
@@ -565,6 +501,50 @@ dropout detection — the offsets are off by something like a thousand samples f
 but usually close enough to find the dropout.  For NTSC the offsets are line-accurate (the frame
 start is tracked to the input sample), and Y, Cr, and Cb are the same offset since the composite
 carries no separate chroma samples.
+
+### The on-screen menu
+
+M opens a menu over the picture with the same settings as the keys, for a remote
+control or a game controller as much as for the keyboard: the arrow keys move in
+it, Left and Right step a setting, Space or Return steps it forward or runs an
+action or opens a page, Escape (or Backspace) goes back a page and closes the menu
+from its root, and M closes it from anywhere.  While the menu is open the arrows
+and Space belong to it, so seeking and pausing wait until it is closed, and so
+does quitting with Escape.  Settings that mean nothing for the disc being played
+(the 3D comb on MUSE, the equaliser on NTSC) are left out of its pages.  The
+menu's last item ends playback: Quit museld when a file was given on the command
+line, Stop when museld was started with `--browse`, which returns to the file
+browser.
+
+### The file browser
+
+The menu's Open page is a file browser: an address field, the directory the
+browser was last in, this computer's directories, and the addresses opened
+recently.  It lists a directory on this machine or on a web server through the
+server's index page (Apache, nginx, Python's `http.server` and the like),
+directories first, with the sizes the listing gives.  Choosing a file plays it,
+and the player comes back to the browser when the input ends, or at once with
+the reason when the file cannot be played.  The address field takes anything
+museld opens: a path, an `http://` location (a bare `host/path` gets the
+`http://`, a web address is listed as a directory unless its name has a
+capture's extension, and the server's redirects are followed) or a `udp://`
+capture stream.  Only `http://` is read; a redirect to `https://` is reported in
+the listing.  The field opens with what was typed last, so a wrong address is
+corrected rather than retyped; a keyboard types straight into it, Return accepts
+and Escape cancels, and a gamepad or the space bar picks keys on its on-screen
+keyboard.
+
+`museld --browse` starts in the browser instead of with an input file.  What the
+browser remembers -- the recent addresses and the last directory -- is written
+to `state.txt` in the player's per-user preferences directory
+(`MUSELD_STATE_FILE` names another file).  The same file remembers, per capture,
+what belongs to the disc: the aspect mode, the overscan, the audio track, the
+subtitle tracks chosen (or turned off), the black level mode and the CX mode.
+They come back when the capture is opened again, from the browser or the
+command line, over the command line's defaults.  Full screen and the decode
+toggles (field interpolation, 3D comb, film mode, noise reduction, dropouts, the
+equaliser) are not remembered.  `--no-state` leaves all of it out of a run:
+nothing remembered is applied and nothing is recorded.
 
 ### Picture shape
 
@@ -602,6 +582,19 @@ The same app also controls other equipment commonly used with museld — Pioneer
 Sony MSC-4000 MUSE decoder, and the Victor HR-W5 W-VHS player — either from the phone's own IR
 transmitter or through a Bluetooth-to-infrared bridge built from an Arduino Nano 33 BLE and a handful
 of components.
+
+### Apple TV
+
+museld also runs on the Apple TV (`docs/tvos-port.md` records the port and its state).  The app
+has no command line: it starts in the file browser, which lists web servers only, there being no
+local directories, and it keeps what it remembers in its application container.  The Siri Remote
+drives it (a TV remote over HDMI-CEC sends the arrows, select and back, nothing else): select
+pauses, left and right seek, up and down find chapters, and the Menu button opens the on-screen
+menu over the picture and, from its root page, closes it again.  The menu's Stop item ends playback
+and returns to the browser; back from the browser's page leaves the app.  Select on the Playback
+page's Time, Frame and Chapter lines opens a number entry set from the remote's arrows, and the
+address field's on-screen keyboard is typed with the remote too, select picking the key under the
+cursor and Menu deleting.
 
 ## Architecture
 
