@@ -2,13 +2,40 @@
 
 #include "muse.h"
 
-// This shader should be invoked with global invocation ids
-// from (0, 0) to (MUSE_TOTAL_WIDTH, MUSE_TOTAL_HEIGHT)
+// Motion detection for the still/moving mix of the combine shader, in four passes over
+// the field's luma grid (MUSE_Y_BUF_WIDTH x MUSE_BUF_HEIGHT), invoked with global
+// invocation ids from (0, 0) to (MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT).
+//
+// The primary detector is the NHK book's one-frame detection of the low band (its
+// section 4.14, figure 4.98): below about 4 MHz the frame-offset sub-sampling leaves
+// no alias, so the difference between frame N and frame N-1 there is a true temporal
+// change -- which is the question the still path asks, since it weaves exactly those
+// two frames.  The two frames' samples do not sit at the same positions: the
+// frame-offset pattern is a line-offset pattern within a field, so frame N-1's samples
+// lie half a sample to the right of frame N's on one line and half a sample to the left
+// on the next (the row term of copy_y_for_interpolation), the side set by the frame
+// phase.  Pass 1 therefore low-passes frame N with the odd polyphase of one 3 MHz
+// kernel designed at 32.4 MHz and frame N-1 with the even polyphase, read from the
+// side the row's phase says, so both see the same magnitude response and the half-sample
+// offset is undone exactly.  Pass 2 adds the vertical [1 2 1] of the book (the residual
+// alias alternates in phase line to line), rectifies, and cores with a ramp from 2 to 5
+// grey levels (the flat-area noise is 0.3, a still edge 1.2, a moving one 6-7, measured
+// on Ursa Minor Blue 2026-11-20 with the intra-field decode's own frame difference as
+// the reference).  The two-frame difference (frames N and N-2, the same sub-sampling
+// phase) that was the only detector until then stays as the book's supplement for small
+// objects made of high frequencies, which the low band cannot see, with a plain ramp
+// from 8 to 16: its edge-divided threshold used to miss most slowly panning outlines
+// (beaded, dashed lines where the still path was woven over motion), and on 2:3
+// pulldown film it calls two frames in five moving where frame N-2 is another film
+// frame but the weave partner N-1 is the same one, so it is only a supplement now.
+// Pass 3 widens the detected area by a pixel, pass 4 spreads it onto the output grid
+// and averages it with the previous field's map.
 
 layout(push_constant) uniform PushConstants {
     uint field_parity;
     uint use_prev_movement_info;
     uint processing_phase;
+    uint frame_phase_y;     // frame N's Y frame sub-sampling phase, as copy_y_for_interpolation takes it
 };
 
 layout(set = 0, binding = 0) buffer readonly frame0_buffer {
@@ -17,12 +44,12 @@ layout(set = 0, binding = 0) buffer readonly frame0_buffer {
 };
 
 layout(set = 0, binding = 1) buffer readonly frame1_buffer {
-    // one frame back for one frame frame difference; not currently used
+    // one frame back, for the one-frame low-band difference
     float16_t frame1[][MUSE_TOTAL_WIDTH];
 };
 
 layout(set = 0, binding = 2) buffer readonly frame2_buffer {
-    // two frames back for two frame frame difference
+    // two frames back, for the two-frame difference
     float16_t frame2[][MUSE_TOTAL_WIDTH];
 };
 
@@ -38,22 +65,55 @@ layout(set = 0, binding = 4) buffer writeonly movement_out_buffer {
     float16_t movement_out[][MUSE_Y_BUF_WIDTH * 3];
 };
 
-layout(set = 0, binding = 5) buffer edge_buffer {
-    // temporary storage: values are between 0 and 15
-    float16_t edge[][MUSE_Y_BUF_WIDTH];
+layout(set = 0, binding = 5) buffer diff1_buffer {
+    // pass 1 -> 2: the horizontally low-passed one-frame difference, signed
+    float16_t diff1[][MUSE_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 6) buffer core_out_buffer {
-    // temporary storage: movement values 0-15 before after coring (taking absolute level and edge info into account)
+    // pass 2 -> 3: movement values 0-15 after coring
     float16_t core_out[][MUSE_Y_BUF_WIDTH];
 };
 
 layout(set = 0, binding = 7) buffer enlarged_buffer {
-    // temporary storage: movement values 0-1 after enlarging the detected area slightly
+    // pass 1 -> 2: the horizontally low-passed two-frame difference, signed;
+    // pass 3 -> 4: movement values 0-1 after enlarging the detected area slightly
     float16_t enlarged[][MUSE_Y_BUF_WIDTH];
 };
 
-float16_t H[9] = { -0.024427hf, 0.000000hf, 0.037425hf, 0.070336hf, 0.083333hf, 0.070336hf, 0.037425hf, 0.000000hf, -0.024427hf };
+// The two polyphases of a 31-tap 3 MHz low-pass designed at 32.4 MHz (scipy firwin,
+// Hamming), each normalised to unit sum: the odd taps are centred on a sample, the even
+// ones half a sample off it.
+const float16_t k_aligned[15] = {
+    0.003916hf, 0.005713hf, -0.008841hf, -0.039006hf, -0.024708hf, 0.097961hf, 0.280127hf,
+    0.369675hf,
+    0.280127hf, 0.097961hf, -0.024708hf, -0.039006hf, -0.008841hf, 0.005713hf, 0.003916hf };
+const float16_t k_shifted[16] = {
+    0.002175hf, 0.005600hf, 0.001555hf, -0.024293hf, -0.042761hf, 0.022536hf, 0.190002hf, 0.345184hf,
+    0.345184hf, 0.190002hf, 0.022536hf, -0.042761hf, -0.024293hf, 0.001555hf, 0.005600hf, 0.002175hf };
+
+// The two-frame difference's horizontal low-pass (sums to 1/4; the four rows summed
+// in pass 2 bring the gain to one).
+const float16_t H[9] = { -0.024427hf, 0.000000hf, 0.037425hf, 0.070336hf, 0.083333hf, 0.070336hf, 0.037425hf, 0.000000hf, -0.024427hf };
+
+const float16_t c_one_frame_none = 2.hf;
+const float16_t c_one_frame_full = 5.hf;
+const float16_t c_two_frame_none = 8.hf;
+const float16_t c_two_frame_full = 16.hf;
+
+const uint h_offset = 106;
+
+uint clamp_col(int c) {
+    return uint(clamp(c, 0, int(MUSE_Y_BUF_WIDTH) - 1));
+}
+
+uint clamp_row(int r) {
+    return uint(clamp(r, 0, int(MUSE_BUF_HEIGHT) - 1));
+}
+
+float16_t ramp(float16_t x, float16_t none, float16_t full) {
+    return clamp((x - none) / (full - none), 0.hf, 1.hf);
+}
 
 void main() {
     uint row = gl_GlobalInvocationID.y;
@@ -62,52 +122,44 @@ void main() {
     if (row >= MUSE_BUF_HEIGHT || col >= MUSE_Y_BUF_WIDTH)
         return;
 
-    uint v_offset = field_parity == 0 ? 46 : 608;
-    uint h_offset = 106;
+    uint v_offset = (field_parity == 0 ? 46 : 608) + row;
 
     switch (processing_phase) {
-    case 1:
-        // Compute a high-pass filtered image to indicate edges in the picture
+    case 1: {
+        // The horizontally low-passed differences.  Frame N-1's samples sit half a sample
+        // to the right of frame N's where the row's phase is 1 (measured: the other side
+        // gives a still edge a residual of 2.9 instead of 1.2), so the shifted kernel's tap
+        // j, at offset j - 7.5 from the centre, reads sample col + j - 7 there and
+        // col + j - 8 on the other rows.
+        float16_t a = 0.hf;
+        for (int j = 0; j < 15; j++)
+            a += k_aligned[j] * frame0[v_offset][h_offset + clamp_col(int(col) + j - 7)];
+        int base = int(col) - ((frame_phase_y + row + 1) % 2 == 1 ? 7 : 8);
+        float16_t b = 0.hf;
+        for (int j = 0; j < 16; j++)
+            b += k_shifted[j] * frame1[v_offset][h_offset + clamp_col(base + j)];
+        diff1[row][col] = a - b;
 
-        float16_t hipass_out;
-        if (row == 0 || col == 0 || row == MUSE_BUF_HEIGHT - 1 || col == MUSE_Y_BUF_WIDTH - 1)
-            hipass_out = 0.hf;
-        else
-            hipass_out = frame0[row + v_offset][col + h_offset] * 4.hf
-            - frame0[row + v_offset - 1][col + h_offset]
-            - frame0[row + v_offset][col + h_offset - 1]
-            - frame0[row + v_offset][col + h_offset + 1]
-            - frame0[row + v_offset + 1][col + h_offset];
-
-        edge[row][col] = clamp(abs(hipass_out) / 13.3hf, 0.hf, 15.hf);
-
+        float16_t d2 = 0.hf;
+        for (int i = -4; i <= 4; i++) {
+            uint c = h_offset + clamp_col(int(col) + i);
+            d2 += H[i + 4] * (frame0[v_offset][c] - frame2[v_offset][c]);
+        }
+        enlarged[row][col] = d2;
         break;
-    case 2:
-        // The actual edge level used is a maximum calculation for the surrounding pixels
-        float16_t edge_level =
-            max(edge[row][col],
-                max((row > 0 ? edge[row-1][col] : 0.hf) + (row < MUSE_BUF_HEIGHT - 1 ? edge[row+1][col] : 0.hf),
-                    (col > 0 ? edge[row][col-1] : 0.hf) + (col < MUSE_Y_BUF_WIDTH - 1 ? edge[row][col+1] : 0.hf)));
-
-        // Compute the low-pass filtered difference signal
-        // TODO: think about not using surrounding pixels
-        float16_t diff2 = 0.hf;
+    }
+    case 2: {
+        // Vertical [1 2 1] of the one-frame difference, the four-row sum of the two-frame
+        // one, rectify and core; the larger of the two is the movement value, 0 to 15.
+        float16_t d1 = abs(0.25hf * (diff1[clamp_row(int(row) - 1)][col] + 2.hf * diff1[row][col] + diff1[clamp_row(int(row) + 1)][col]));
+        float16_t d2 = 0.hf;
         for (int j = -2; j <= 1; j++)
-            for (int i = -4; i <= 4; i++)
-                if (row + j >= 0 && col + i >= 0 && row + j < MUSE_BUF_HEIGHT && col + i < MUSE_Y_BUF_WIDTH) {
-                    float16_t d = frame0[row + v_offset + j][col + h_offset + i] - frame2[row + v_offset + j][col + h_offset + i];
-                    diff2 += d * H[i + 4];
-                }
-        diff2 = abs(diff2);
-
-        // Use coring to compute a movement value -- edges and bright areas naturally have
-        // higher difference values, so this is compensated for. Values are between 0 and 15.
-        float16_t level = (frame0[row + v_offset][col + h_offset] + frame2[row + v_offset][col + h_offset]) / 2.hf;
-        float16_t motion_none = 3.hf + edge_level / 15.hf;
-        float16_t motion_full = 5.hf + edge_level + level / 16.hf;
-        core_out[row][col] = clamp((diff2 - motion_none) / (motion_full - motion_none), 0.hf, 1.hf) * 15.hf;
+            d2 += enlarged[clamp_row(int(row) + j)][col];
+        d2 = abs(d2);
+        core_out[row][col] = 15.hf * max(ramp(d1, c_one_frame_none, c_one_frame_full),
+                                         ramp(d2, c_two_frame_none, c_two_frame_full));
         break;
-
+    }
     case 3:
         // Enlarge the detected area -- output values are between 0 and 1
         enlarged[row][col] = clamp(
@@ -117,7 +169,7 @@ void main() {
             0.hf, 15.hf) / 15.hf;
         break;
 
-    case 4:
+    case 4: {
         // Use linear interpolation to cover the entire output area
         float16_t e00 = enlarged[row][col];
         float16_t e01 = col < MUSE_Y_BUF_WIDTH - 1 ? enlarged[row][col+1] : 0.hf;
@@ -144,7 +196,7 @@ void main() {
             movement_out[row * 2 + 1][col * 3 + 2] = 0.333hf * x0 + 0.667hf * x1;
         }
         break;
-
+    }
     default:
         break;
     }

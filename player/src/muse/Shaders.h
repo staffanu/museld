@@ -126,7 +126,7 @@ private:
 
     int m_current_movement_buffer_index;
     std::vector<std::shared_ptr<musevk::VulkanBuffer>> m_movement_buffers; // MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3
-    std::shared_ptr<musevk::VulkanBuffer> m_movement_edge_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
+    std::shared_ptr<musevk::VulkanBuffer> m_movement_diff1_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH, the one-frame difference between the detector passes
     std::shared_ptr<musevk::VulkanBuffer> m_movement_coring_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
     std::shared_ptr<musevk::VulkanBuffer> m_movement_enlarged_buffer; // MUSE_BUF_HEIGHT * MUSE_BUF_Y_WIDTH
 

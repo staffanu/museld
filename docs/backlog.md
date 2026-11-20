@@ -27,14 +27,6 @@ Last revised 2026-11-14.
 
 ## Picture quality
 
-- **MUSE motion detection.**  Done early and simple; MUSE quality is dominated by the
-  still/moving decision far more than NTSC is.  The reconstruction filters were revisited
-  2026-11-20 (see Done: luma and chroma, both paths); the motion detection has not been.  The
-  motion-vector investigation (2026-10) closed off the other avenue: a client-side recompute
-  gives no gain.  The regression set has two MUSE clips to iterate against, and the Sony test
-  disc's resolution wedges with the sine-fit contrast measurement of that session are the
-  instrument for luma, the written file's own U/V planes (point-sampled from the decoder's
-  chroma) for the chroma's edge widths.
 - **MUSE impulse noise (FM clicks) concealment.**  White-on-black titles on a weak-carrier
   capture (a Top Gun side from an HLD-X9, 2026-11-19) show black breaks across the white strokes:
   one- or two-sample impulses of either polarity in the demodulated baseband, about 40 per frame
@@ -107,6 +99,34 @@ Last revised 2026-11-14.
 
 ## Done since this list was started
 
+- 2026-11-20: the MUSE motion detection.  The detector was the two-frame difference alone
+  (frames N and N-2, the same sub-sampling phase), cored by a threshold that grew with the edge
+  signal and the brightness.  Judged offline against the decoder's own intra-field decode (the
+  difference between consecutive intra-field decodes of the same parity is alias-free, so it is
+  a true change between the two frames the still path weaves; a candidate map's picture is the
+  linear mix of the intra and inter-frame decodes, which is what the combine shader does), it
+  missed most slowly panning outlines on Ursa Minor Blue -- beaded, dashed lines where the still
+  path was woven over motion -- and on that 2:3 pulldown film called two frames in five moving
+  where frame N-2 is another film frame but the weave partner N-1 is the same one.  The
+  detector is now the NHK book's one-frame low-band detection (section 4.14): a 3 MHz
+  low-pass of frame N minus that of frame N-1, the vertical [1 2 1] over the field's lines,
+  rectified and cored from 2 to 5 grey levels, with the two-frame difference kept as the
+  book's supplement for small high-frequency objects at a plain ramp from 8 to 16.  The two
+  frames' samples are offset by half a sample whose side alternates line by line (the
+  frame-offset pattern is a line-offset pattern within a field) and flips with the frame phase,
+  so frame N-1 is read through the other polyphase of the same kernel from the side the row's
+  phase says; without that the vertical [1 2 1] alone cancels the offset to first order (a
+  still edge's residual 1.4 instead of 1.2 grey levels at 3 MHz; without the vertical filter
+  5), which is why the book insists on it.  Measured on Ursa Minor Blue per field, pixels of
+  the field grid where the reference sees a change of 3 or more grey levels: missed 23800 to
+  14100, falsely moving 3400 to 3800; the normal decode's distance from the intra decode in
+  moving regions 118k to 80k grey levels summed, from the inter-frame decode in still regions
+  13.5k to 16.7k.  On the Sony test disc's still pattern the new detector gives a partial mix
+  on 0.5 % of the pixels, along the colour bars' hard vertical edges, invisible.  Cost on the
+  M2: the four passes 560 to about 310 us per field (the 9x4 difference window of the old
+  pass 2 became a horizontal pass); on the Apple TV's A10X about 0.4 ms more per field of the
+  decoder's 10 and 7.7 (fields 0 and 1, Sony test disc) at an unchanged 29.96 frames/s, and
+  an interior path without the column clamps changed nothing measurable, so it was not kept.
 - 2026-11-20: the MUSE chroma reconstruction filters.  The still path gathers four fields into
   row pairs, two adjacent frame lines from the two fields, whose rows hold complementary
   columns; `filter_c` filled each row's missing columns from the row's own neighbours, which

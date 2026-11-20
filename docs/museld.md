@@ -698,7 +698,6 @@ DTS: EFM stereo samples → DTS sync detection → byte stream → libavcodec dc
   always zero on every disc tested, so the decoder does not use them. Computing motion vectors on the
   decoder's side instead was tried (2026-10) and gained nothing over the still/moving decision.
 - **Direct USB input**: Currently requires an external capture program writing to a pipe or a FIFO (e.g., picostream).
-- **Motion detection**: The algorithm is quite simplistic and could probably be improved.
 - **LD MUSE vs BS MUSE**: Available documentation describes the satellite broadcasting standard. MUSE decoders have separate inputs for the two signals, so presumably there is some difference, but it is unknown what it is.
 - **Subtitle OCR** (experimental; see the option section above):
   - The full release packages include ONNX Runtime but not the PP-OCR models, which have to be downloaded separately (see above); the minimal packages are built without OCR (see docs/packaging.md).

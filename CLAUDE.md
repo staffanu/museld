@@ -368,7 +368,17 @@ alias (a checkerboard), so a kernel is judged by its stopband texture as much as
 path was found there to fill each row's missing columns from the row itself where the other
 field's adjacent line holds them (`filter_c.comp`): judge chroma changes on the written file's
 U/V planes, which the combine shader point-samples from its own chroma, by edge widths and by
-the line-pair sawtooth on Ursa Minor Blue's outlines that the old fill produced.
+the line-pair sawtooth on Ursa Minor Blue's outlines that the old fill produced.  The motion detection
+(`detect_motion.comp`, 2026-11-20) is the book's one-frame low-band difference with the
+two-frame difference as its supplement; the two frames' samples are offset by half a sample
+on alternating sides line by line, undone by reading frame N-1 through the other polyphase of
+the kernel.  Judge detector changes offline, not by eye: render the clip with `--write-muse16`
+and lossless `--write` in intra-field, inter-frame and normal modes (output field k is m16
+frame k/2, parity k%2), take the difference between consecutive intra-field decodes of the
+same parity as the reference for a true change between the weave partners, synthesise a
+candidate map's picture as the mix of the intra and inter-frame decodes, and count the pixels
+missed and falsely flagged against the reference; the combine shader's written luma carries
+an output gamma and the 24.6..206.6 range mapping that have to be undone first.
 
 **MUSE timebase**: the two dumps exist for MUSE too: `MUSELD_DUMP_DEMOD` writes
 the demodulated 31.25 MHz baseband (MUSE levels, plateaus of the HD sync at about 57 and 178;

@@ -31,7 +31,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_current_movement_buffer_index(0),
   m_movement_buffers({ createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3),
                        createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3) }),
-  m_movement_edge_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
+  m_movement_diff1_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_movement_coring_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_movement_enlarged_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH)),
   m_image_out(make_unique<VulkanImage>(m_vulkan_manager,
@@ -161,7 +161,7 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
                                                                                Size(MUSE_C_BUF_WIDTH, MUSE_BUF_HEIGHT / 2), 5));
     m_detect_motion_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "detect_motion",
-            {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 3,
+            {eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t) * 4,
             VulkanUtil::loadSpirv(executable_dir, "detect_motion.comp"), Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT)));
     m_combine_still_and_moving_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "combine_still_and_moving",
@@ -364,14 +364,12 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
             fields[4].get().getVulkanBuffer(),
             m_movement_buffers[1 - m_current_movement_buffer_index],
             m_movement_buffers[m_current_movement_buffer_index],
-            m_movement_edge_buffer,
+            m_movement_diff1_buffer,
             m_movement_coring_buffer,
             m_movement_enlarged_buffer,
     });
-    sq.enqueueComputeShader(m_detect_motion_algo, vector{fields[0].get().m_field_parity, use_prev_motion_info ? 1 : 0, 1});
-    sq.enqueueComputeShader(m_detect_motion_algo, vector{fields[0].get().m_field_parity, use_prev_motion_info ? 1 : 0, 2});
-    sq.enqueueComputeShader(m_detect_motion_algo, vector{fields[0].get().m_field_parity, use_prev_motion_info ? 1 : 0, 3});
-    sq.enqueueComputeShader(m_detect_motion_algo, vector{fields[0].get().m_field_parity, use_prev_motion_info ? 1 : 0, 4});
+    for (int stage = 1; stage <= 4; stage++)
+        sq.enqueueComputeShader(m_detect_motion_algo, vector{fields[0].get().m_field_parity, use_prev_motion_info ? 1 : 0, stage, frame_phases_y[0]});
 
     return true;
 }
