@@ -364,7 +364,11 @@ whatever the mode): `filter_diamond.comp` is the windowed ideal quincunx interpo
 Kaiser 3) and the moving path's vertical interpolation in the combine shader a cubic; the
 details and the numbers are in the shader's header and the backlog's Done entry.  The point
 of a half-band quincunx interpolator is what it does not pass comes back as the detail's own
-alias (a checkerboard), so a kernel is judged by its stopband texture as much as its passband.
+alias (a checkerboard), so a kernel is judged by its stopband texture as much as its passband.  The chroma's still
+path was found there to fill each row's missing columns from the row itself where the other
+field's adjacent line holds them (`filter_c.comp`): judge chroma changes on the written file's
+U/V planes, which the combine shader point-samples from its own chroma, by edge widths and by
+the line-pair sawtooth on Ursa Minor Blue's outlines that the old fill produced.
 
 **MUSE timebase**: the two dumps exist for MUSE too: `MUSELD_DUMP_DEMOD` writes
 the demodulated 31.25 MHz baseband (MUSE levels, plateaus of the HD sync at about 57 and 178;

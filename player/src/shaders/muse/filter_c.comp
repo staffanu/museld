@@ -3,20 +3,21 @@
 // This shader should be invoked with global invocation ids
 // from (0, 0) until (MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT).
 //
-// Filters the chroma information in place.
-// The is_red flag tells whether to filter the R och B color information -- the difference is
-// that the first red signal is on rows 0 and 1, while the first blue signal is on rows 2 and 3.
-// The phase input says whether the first two rows of information are aligned to the left (1)
-// or top the right (0).
-// If filter_stage is 0, the rows containing color informatation (2 out of 4 rows) are filtered
-// horizontally.  If filter_stage is 1, the other two rows are filled in.
+// Completes the chroma of the still path in place.  decode_c has spread the samples of
+// four fields over a row grid where a colour difference occupies a pair of adjacent
+// frame rows (rows 0 and 1 for red, 2 and 3 for blue, and so on), each row holding
+// the samples of one field of two frames: every other column, and the two rows of a
+// pair hold complementary columns.  The is_red flag says which colour the buffer
+// holds.  filter_stage 0 completes the rows that have samples with the other row of
+// the pair: the other field's adjacent line, whose sample at that column is as good
+// as the row's own, since the line-sequential chroma is band-limited vertically to an
+// eighth of a cycle per line (the NHK book's 1125/4 TV lines; its section 4.2 describes
+// this inter-field interpolation).  Until 2026-11-20 each row was interpolated from
+// its own neighbours, which halved the horizontal chroma resolution and quantised an
+// edge's position a column apart in the two rows: a line-alternating sawtooth on every
+// vertical chroma edge.  filter_stage 1 fills the other colour's rows vertically.
 
 #include "muse.h"
-
-// With this filter we could clearly simplify the code...
-#define HORIZ_FILTER_SIZE 3
-float16_t filter_coeffs[HORIZ_FILTER_SIZE] = { 0.25hf, 0.5hf, 0.25hf };
-//float16_t filter_coeffs[HORIZ_FILTER_SIZE] = { 0.0086207hf, 0.068966hf, 0.24138hf, 0.36207hf, 0.24138hf, 0.068966hf, 0.00086207hf };
 
 layout(push_constant) uniform PushConstants {
     uint is_red;
@@ -35,24 +36,12 @@ void main() {
         return;
 
     switch (filter_stage) {
-        case 0: // Fill in the missing samples in the rows that do have samples (rows 0, 1 for red, 2, 3 for blue, and so on) by filtering horizontally
+        case 0: // the columns without a sample in the rows that have samples: from the other row of the pair
         {
             uint y = row / 2 * 4 + (row & 1u) + (is_red != 0 ? 0 : 2);
             uint known_pixels_phase = 1 - (row & 1u);
-            if (col % 2 != known_pixels_phase) {
-                int W = HORIZ_FILTER_SIZE / 2;
-                int W_odd =  (W - 1) / 2 * 2 + 1; // rounded down to odd value
-                float16_t s = 0.hf;
-                for (int i = -W_odd; i <= W_odd; i += 2) {
-                    float16_t v;
-                    if (col + i >= 0 && col + i < MUSE_Y_BUF_WIDTH)
-                        v = c_data[y][col + i];
-                    else
-                        v = 128.hf;
-                    s += v * filter_coeffs[W + i];
-                }
-                c_data[y][col] = s * 2.hf; // * 2 since we need to amplify the signal to compensate for missing samples
-            }
+            if (col % 2 != known_pixels_phase)
+                c_data[y][col] = c_data[y ^ 1u][col];
         }
         break;
         case 1: // Fill in the missing samples in the rows without samples (rows 0, 1 for blue, 2, 3 for red, and so on) by filtering vertically

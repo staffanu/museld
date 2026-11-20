@@ -27,15 +27,14 @@ Last revised 2026-11-14.
 
 ## Picture quality
 
-- **MUSE motion detection and the chroma reconstruction filters.**  Both were done early and are
-  simple; MUSE quality is dominated by the still/moving decision and the reconstruction filters
-  far more than NTSC is.  The luma filters were revisited 2026-11-20 (see Done: the diamond
-  interpolator and the moving path's vertical interpolation changed, the 2:3 filter was tried
-  sharper and rejected); the chroma filters (`decode_c`, `filter_c`, the combine shader's
-  upsamplers) and the motion detection have not been.  The motion-vector investigation
-  (2026-10) closed off the other avenue: a client-side recompute gives no gain.  The regression
-  set has two MUSE clips to iterate against, and the Sony test disc's resolution wedges with
-  the sine-fit contrast measurement of that session are the instrument.
+- **MUSE motion detection.**  Done early and simple; MUSE quality is dominated by the
+  still/moving decision far more than NTSC is.  The reconstruction filters were revisited
+  2026-11-20 (see Done: luma and chroma, both paths); the motion detection has not been.  The
+  motion-vector investigation (2026-10) closed off the other avenue: a client-side recompute
+  gives no gain.  The regression set has two MUSE clips to iterate against, and the Sony test
+  disc's resolution wedges with the sine-fit contrast measurement of that session are the
+  instrument for luma, the written file's own U/V planes (point-sampled from the decoder's
+  chroma) for the chroma's edge widths.
 - **MUSE impulse noise (FM clicks) concealment.**  White-on-black titles on a weak-carrier
   capture (a Top Gun side from an HLD-X9, 2026-11-19) show black breaks across the white strokes:
   one- or two-sample impulses of either polarity in the demodulated baseband, about 40 per frame
@@ -108,6 +107,24 @@ Last revised 2026-11-14.
 
 ## Done since this list was started
 
+- 2026-11-20: the MUSE chroma reconstruction filters.  The still path gathers four fields into
+  row pairs, two adjacent frame lines from the two fields, whose rows hold complementary
+  columns; `filter_c` filled each row's missing columns from the row's own neighbours, which
+  halved the horizontal chroma resolution and quantised every vertical chroma edge a column
+  apart in the two rows, a line-alternating sawtooth on every such edge (the V plane of Ursa
+  Minor Blue shows it on every outline).  Now the missing column is the other row's sample, the
+  book's inter-field interpolation, which the line-sequential chroma's vertical band (an eighth
+  of a cycle per line) makes as good as the row's own.  The still path's 1:3 chroma upsampler
+  is a Catmull-Rom cubic (a triangle before) and the moving path's chroma upsampler a separable
+  cubic over 4x4 samples (bilinear).  Measured on the written file's U/V planes (point-sampled
+  from the decoder's chroma, so a chroma-plane pixel is two luma pixels): the still path's
+  horizontal edges 3.1-4.1 to 2.0-2.7 chroma pixels, which is 1.3-1.9 of the raw chroma
+  samples, the signal's own limit; the moving path's 2.7-5.1 to 2.7-4.8 horizontally and
+  2.6-3.1 to 2.1-2.65 vertically; a thin orange pole in Ursa Minor Blue keeps 29 units of
+  chroma amplitude instead of 22.5.  Cost: the partner-row fill and the cubic 1:3 nothing
+  measurable, the moving path's cubic about 15% of the combine shader (835 to 976 us per field
+  on the M2).  Left as it was: the vertical fill between the two colours' row pairs, a linear
+  interpolation the chroma's vertical band justifies.
 - 2026-11-20: the MUSE luma reconstruction filters, measured on the Sony test disc's wedges and
   sweep (the stripes' contrast at a known frequency, fitted as a sine, against the flat areas'
   black-to-white swing): the quincunx diamond interpolator is the windowed ideal interpolator,
