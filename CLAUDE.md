@@ -356,7 +356,15 @@ the "12 MHz filter including the 32.4 to 24.3 MHz conversion" on the 97.2 MHz cl
 `convert_horiz_sample_rate.comp`, 31 taps normalised to unity; it peaks +3 dB at 6-10 MHz as
 the encoder's matched filter expects, where the 37-tap least-squares design before it was flat
 and steeper).  The book standardises only that filter: the intra path's 2:3 filter, the audio's
-65-tap 4:3 and the field interpolations are the decoder's own choice.
+65-tap 4:3 and the field interpolations are the decoder's own choice.  Those were revisited
+2026-11-20 with the Sony test disc's wedges and sweep as the instrument (the contrast of the
+stripes at a known frequency, fitted as a sine, against the flat areas' swing; a frame written
+at least 1.5 s after a `--seek`, since the first second after a seek decodes intra-field
+whatever the mode): `filter_diamond.comp` is the windowed ideal quincunx interpolator (7x13,
+Kaiser 3) and the moving path's vertical interpolation in the combine shader a cubic; the
+details and the numbers are in the shader's header and the backlog's Done entry.  The point
+of a half-band quincunx interpolator is what it does not pass comes back as the detail's own
+alias (a checkerboard), so a kernel is judged by its stopband texture as much as its passband.
 
 **MUSE timebase**: the two dumps exist for MUSE too: `MUSELD_DUMP_DEMOD` writes
 the demodulated 31.25 MHz baseband (MUSE levels, plateaus of the HD sync at about 57 and 178;

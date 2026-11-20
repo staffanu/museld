@@ -27,10 +27,15 @@ Last revised 2026-11-14.
 
 ## Picture quality
 
-- **MUSE motion detection and reconstruction filters.**  Both were done early and are simple;
-  MUSE quality is dominated by the still/moving decision and the reconstruction filters far more
-  than NTSC is.  The motion-vector investigation (2026-10) closed off the other avenue: a
-  client-side recompute gives no gain.  The regression set has two MUSE clips to iterate against.
+- **MUSE motion detection and the chroma reconstruction filters.**  Both were done early and are
+  simple; MUSE quality is dominated by the still/moving decision and the reconstruction filters
+  far more than NTSC is.  The luma filters were revisited 2026-11-20 (see Done: the diamond
+  interpolator and the moving path's vertical interpolation changed, the 2:3 filter was tried
+  sharper and rejected); the chroma filters (`decode_c`, `filter_c`, the combine shader's
+  upsamplers) and the motion detection have not been.  The motion-vector investigation
+  (2026-10) closed off the other avenue: a client-side recompute gives no gain.  The regression
+  set has two MUSE clips to iterate against, and the Sony test disc's resolution wedges with
+  the sine-fit contrast measurement of that session are the instrument.
 - **MUSE impulse noise (FM clicks) concealment.**  White-on-black titles on a weak-carrier
   capture (a Top Gun side from an HLD-X9, 2026-11-19) show black breaks across the white strokes:
   one- or two-sample impulses of either polarity in the demodulated baseband, about 40 per frame
@@ -103,6 +108,21 @@ Last revised 2026-11-14.
 
 ## Done since this list was started
 
+- 2026-11-20: the MUSE luma reconstruction filters, measured on the Sony test disc's wedges and
+  sweep (the stripes' contrast at a known frequency, fitted as a sine, against the flat areas'
+  black-to-white swing): the quincunx diamond interpolator is the windowed ideal interpolator,
+  7 lines by 13 pixels, in place of the 7x7 kernel from Vetterli's paper, which passed 0.60 at
+  0.3 cycles per line and turned the rest into the stripes' alias -- a half-band interpolator
+  wastes nothing, what it does not pass comes back as a checkerboard on the detail, the beaded
+  texture on fine stripes and diagonals, 2.2 grey levels on the sweep's fine end and 0.06 after.
+  The resolution limit itself did not move (the encoder's), the contrast at the limit rose by
+  a tenth on the still path and a quarter on the moving one; the moving path's vertical
+  interpolation is a cubic in place of the two-line average.  Costs: 301 against 161 us per
+  still-path field on the M2, 1.0 ms per frame of the decoder's 16 on the Apple TV's A10X at an
+  unchanged 30 frames/s (measured there from the decoder's per-field log; MoltenVK's
+  per-dispatch timestamps read 40-60 us for every dispatch on that GPU and are no use).  Tried
+  and rejected: a sharper 2:3 filter for the moving path (cutoff 0.16 instead of 0.13), which
+  tripled the flat areas' texture.  Not touched: the chroma filters and the motion detection.
 - 2026-11-19: a player's baseband output carries the MUSE signal as transmitted, both emphases
   intact, so museld's de-emphasis stages apply to it as to RF: the HIL-C1's 16.2 MHz output and
   the X9's RF of the same disc (A River Runs Through It, the Pioneer title card, a static

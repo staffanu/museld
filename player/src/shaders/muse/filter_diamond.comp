@@ -8,24 +8,32 @@
 // pixel is filled in.  If phase == 1 the top left pixel is part of the
 // input lattice, so pixels with x + y being odd are filled in.
 //
-// The interpolation kernel is the 7x7 diamond from "Perfect reconstruction
-// filter banks for HDTV representation and coding", Martin Vetterli, Jelena
-// Kovacevic, Didier J. LeGall, Signal Processing: Image Communication 2
-// (1990) 349-363, applied at the missing lattice points, where only the taps
-// on known points matter: 16 of them, below, at odd Manhattan distance from
-// the centre (the kernel's centre 0.5 and its zeros never meet a known
-// point).  They are literals here: the kernel does not change, and reading
-// it from a shared tile behind a barrier, 24 taps a pixel with 8 of them
-// zero, each through a four-way edge reflection, cost 3.6 ms per field on
-// the Apple TV's A10X.  The reflection is only done on the three-pixel border.
+// The interpolation kernel is the ideal quincunx interpolator,
+// h(m, n) = sinc((m + n) / 2) sinc((m - n) / 2) / 2, whose passband is the
+// diamond the lattice can carry, cut to 7 lines by 13 pixels with a
+// separable Kaiser window (beta 3) and normalised so that the taps on
+// known points sum to one.  Only those taps exist (at odd Manhattan
+// distance from the centre: 46 of the 91), since a missing point is
+// computed from the known ones alone.  Its response along the horizontal
+// axis is 1.0 at 0.25, 0.96 at 0.30 and 0.78 at 0.35 cycles per pixel,
+// where the 7x7 kernel of Vetterli, Kovacevic and LeGall (Signal
+// Processing: Image Communication 2 (1990) 349-363) it replaced (2026-11-20)
+// had 0.78, 0.60 and 0.40: a half-band interpolator turns what it does not
+// pass into the stripes' quincunx alias, the beaded texture on fine detail
+// that the smaller kernel left on the Sony test disc's wedges (2.2 against
+// 0.06 grey levels on the sweep's fine end), while the resolution limit
+// itself is the encoder's.  Measured 301 against 161 us per still-path
+// field on an M2, 1.0 ms per frame of the decoder's 16 on the Apple TV's
+// A10X, which plays at the same rate.  The taps are literals; the four-way
+// edge reflection is only done on the border.
 //
-//           0.001953
-//        -0.017578  -0.017578
-//     -0.017578  0.158203  -0.017578
-//  0.001953  0.158203  [0.5]  0.158203  0.001953
-//     -0.017578  0.158203  -0.017578
-//        -0.017578  -0.017578
-//           0.001953
+//  -0.000629     .     -0.006550     .      0.014445     .      0.009211     .      0.014445     .     -0.006550     .     -0.000629
+//      .      0.003963     .      0.032534     .     -0.072104     .     -0.072104     .      0.032534     .      0.003963     .    
+//  -0.002064     .     -0.012998     .     -0.102378     .      0.352523     .     -0.102378     .     -0.012998     .     -0.002064
+//      .      0.006019     .      0.032681     .      0.391126    [.]     0.391126     .      0.032681     .      0.006019     .    
+//  -0.002064     .     -0.012998     .     -0.102378     .      0.352523     .     -0.102378     .     -0.012998     .     -0.002064
+//      .      0.003963     .      0.032534     .     -0.072104     .     -0.072104     .      0.032534     .      0.003963     .    
+//  -0.000629     .     -0.006550     .      0.014445     .      0.009211     .      0.014445     .     -0.006550     .     -0.000629
 
 #include "muse.h"
 
@@ -39,9 +47,17 @@ layout(set = 0, binding = 0) buffer framebuffer_inout {
     float16_t frame_buffer[];
 };
 
-const float16_t k1 = 0.158203hf;  // (+-1, 0), (0, +-1)
-const float16_t k3 = -0.017578hf; // (+-1, +-2), (+-2, +-1)
-const float16_t k5 = 0.001953hf;  // (+-3, 0), (0, +-3)
+#define N 46
+const int k_dy[N] = int[](-3,-3,-3,-3,-3,-3,-3,-2,-2,-2,-2,-2,-2,-1,-1,-1,-1,-1,-1,-1,0,0,0,0,0,0,1,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,3);
+const int k_dx[N] = int[](-6,-4,-2,0,2,4,6,-5,-3,-1,1,3,5,-6,-4,-2,0,2,4,6,-5,-3,-1,1,3,5,-6,-4,-2,0,2,4,6,-5,-3,-1,1,3,5,-6,-4,-2,0,2,4,6);
+const float16_t k_w[N] = float16_t[](
+    -0.000629hf, -0.006550hf, 0.014445hf, 0.009211hf, 0.014445hf, -0.006550hf, -0.000629hf,
+    0.003963hf, 0.032534hf, -0.072104hf, -0.072104hf, 0.032534hf, 0.003963hf, -0.002064hf,
+    -0.012998hf, -0.102378hf, 0.352523hf, -0.102378hf, -0.012998hf, -0.002064hf, 0.006019hf,
+    0.032681hf, 0.391126hf, 0.391126hf, 0.032681hf, 0.006019hf, -0.002064hf, -0.012998hf,
+    -0.102378hf, 0.352523hf, -0.102378hf, -0.012998hf, -0.002064hf, 0.003963hf, 0.032534hf,
+    -0.072104hf, -0.072104hf, 0.032534hf, 0.003963hf, -0.000629hf, -0.006550hf, 0.014445hf,
+    0.009211hf, 0.014445hf, -0.006550hf, -0.000629hf);
 
 // reflect reading coordinates at the edges
 float16_t read_reflected(int y, int x) {
@@ -63,20 +79,16 @@ void main() {
     if (row >= frame_buffer_height || col >= frame_buffer_width)
         return;
 
-    float16_t s;
-    if (row >= 3 && row < frame_buffer_height - 3 && col >= 3 && col < frame_buffer_width - 3) {
+    float16_t s = 0.hf;
+    if (row >= 3 && row < frame_buffer_height - 3 && col >= 6 && col < frame_buffer_width - 6) {
         const int w = frame_buffer_width;
         const int c = row * w + col;
-        s = k1 * (frame_buffer[c - 1] + frame_buffer[c + 1] + frame_buffer[c - w] + frame_buffer[c + w])
-          + k3 * (frame_buffer[c - w - 2] + frame_buffer[c - w + 2] + frame_buffer[c + w - 2] + frame_buffer[c + w + 2]
-                  + frame_buffer[c - 2 * w - 1] + frame_buffer[c - 2 * w + 1] + frame_buffer[c + 2 * w - 1] + frame_buffer[c + 2 * w + 1])
-          + k5 * (frame_buffer[c - 3] + frame_buffer[c + 3] + frame_buffer[c - 3 * w] + frame_buffer[c + 3 * w]);
+        for (int t = 0; t < N; t++)
+            s += k_w[t] * frame_buffer[c + k_dy[t] * w + k_dx[t]];
     } else {
-        s = k1 * (read_reflected(row, col - 1) + read_reflected(row, col + 1) + read_reflected(row - 1, col) + read_reflected(row + 1, col))
-          + k3 * (read_reflected(row - 1, col - 2) + read_reflected(row - 1, col + 2) + read_reflected(row + 1, col - 2) + read_reflected(row + 1, col + 2)
-                  + read_reflected(row - 2, col - 1) + read_reflected(row - 2, col + 1) + read_reflected(row + 2, col - 1) + read_reflected(row + 2, col + 1))
-          + k5 * (read_reflected(row, col - 3) + read_reflected(row, col + 3) + read_reflected(row - 3, col) + read_reflected(row + 3, col));
+        for (int t = 0; t < N; t++)
+            s += k_w[t] * read_reflected(row + k_dy[t], col + k_dx[t]);
     }
 
-    frame_buffer[row * frame_buffer_width + col] = clamp(s * 2.hf, 0.hf, 255.hf);
+    frame_buffer[row * frame_buffer_width + col] = clamp(s, 0.hf, 255.hf);
 }
