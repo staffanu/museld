@@ -87,6 +87,9 @@ public:
         // The picture signature of every frame read is wanted
         // (DecodedField::signature, for --signature-write)
         bool record_signature = false;
+        // SDTV: the chroma hue rotation added to the decoder's calibrated
+        // demodulation angle, a TV's tint control (--tint, the K and L keys)
+        float tint_degrees = 0.0f;
     };
 
     // One audio track's output of a field, for the file writer

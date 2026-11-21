@@ -348,6 +348,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                       bool initial_edge_directed,
                       Decoder::CxMode initial_cx_mode,
                       Decoder::BlackLevelMode initial_black_level_mode,
+                      float initial_tint_degrees,
                       DropoutMode dropout_mode,
                       AudioTrack audio_track, bool audio_fallback,
                       bool is_muse,
@@ -397,15 +398,16 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         state.edge_directed = initial_edge_directed;
         state.analog_cx_mode = initial_cx_mode;
         state.black_level_mode = initial_black_level_mode;
+        state.tint_degrees = initial_tint_degrees;
         state.aspect_mode = initial_aspect_mode;
         state.picture_format = picture_format;
         state.full_image = initial_full_image;
         state.overscan = initial_overscan;
         // What this disc was last played with, over the command line's defaults:
-        // the aspect, the overscan, the audio track, the black level and the CX
-        // mode belong to the disc (the subtitle choice below, once the tracks
-        // exist); the other decode toggles and full screen do not, and start
-        // from their defaults every time
+        // the aspect, the overscan, the audio track, the black level, the tint
+        // and the CX mode belong to the disc (the subtitle choice below, once
+        // the tracks exist); the other decode toggles and full screen do not,
+        // and start from their defaults every time
         const std::optional<DiscSettings> remembered = saved_state.discSettings(input_name);
         if (remembered) {
             static const std::pair<const char *, AspectMode> aspects[] = {
@@ -434,10 +436,12 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             if (remembered->cx == "auto") state.analog_cx_mode = Decoder::CxMode::eAuto;
             else if (remembered->cx == "off") state.analog_cx_mode = Decoder::CxMode::eOff;
             else if (remembered->cx == "on") state.analog_cx_mode = Decoder::CxMode::eOn;
-            log.info(eApplication, std::format("Remembered for this disc: aspect {}, overscan {}, audio {}, subtitles {} / {}, black level {}, CX {}",
+            if (!remembered->tint.empty())
+                state.tint_degrees = std::clamp((float)atof(remembered->tint.c_str()), -PlayerActions::c_tint_range, PlayerActions::c_tint_range);
+            log.info(eApplication, std::format("Remembered for this disc: aspect {}, overscan {}, audio {}, subtitles {} / {}, black level {}, CX {}, tint {}",
                                                remembered->aspect, remembered->overscan, remembered->audio,
                                                remembered->subtitle, remembered->subtitle2,
-                                               remembered->black_level, remembered->cx));
+                                               remembered->black_level, remembered->cx, remembered->tint));
         }
 
         OsdOverlay osd;
@@ -683,6 +687,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                     state.edge_directed,
                     extra_tracks,
                     signature_writer != nullptr,
+                    state.tint_degrees,
             };
         };
 
@@ -1309,6 +1314,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                             : state.black_level_mode == Decoder::BlackLevelMode::eJ ? "j" : "auto";
             now.cx = state.analog_cx_mode == Decoder::CxMode::eOff ? "off"
                    : state.analog_cx_mode == Decoder::CxMode::eOn ? "on" : "auto";
+            now.tint = std::format("{:g}", state.tint_degrees);
             if (!input_name.empty() && !inputIsLive(input_name) && saved_state.discSettings(input_name) != now)
                 saved_state.setDiscSettings(input_name, now);
         }
@@ -1873,7 +1879,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
             decoder = std::make_unique<SdtvDecoder>(log, (FrameReader<SdtvInputBlock> &)reader,
                                                     manager, command_pool, executable_dir,
                                                     decode_video, decode_all_fields, decode_audio,
-                                                    tint_degrees, saturation,
+                                                    saturation,
                                                     timestamp_query_pool.get(), *video_standard);
         }
 
@@ -1903,7 +1909,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
         switched = runPlayer(log, manager, *decoder, reader_controls, window, full_screen, no_keys, aspect_mode, picture_format,
                   full_image, overscan,
                   start_paused,
-                  field_interpolation_mode, use_3d_comb, film_mode, temporal_nr, edge_directed, cx_mode, black_level_mode, dropout_mode, audio_track, audio_fallback,
+                  field_interpolation_mode, use_3d_comb, film_mode, temporal_nr, edge_directed, cx_mode, black_level_mode, tint_degrees, dropout_mode, audio_track, audio_fallback,
                   std::is_same<InputBlock, MuseInputBlock>::value,
                   saved_state, input_name, open_next,
                   benchmark_shaders,
@@ -2303,7 +2309,7 @@ int main(int argc, char *argv[]) {
         }
     });
     options.option("--tint", "DEGREES", "NTSC/PAL: rotate the chroma hue, like a TV's tint control "
-                                        "(default 0)", [&] () -> void {
+                                        "(default 0; the K and L keys adjust it while playing)", [&] () -> void {
         tint_degrees = (float)stod(*(it++));
     });
     options.option("--saturation", "FACTOR", "NTSC/PAL: scale the chroma gain (default 1.0)", [&] () -> void {

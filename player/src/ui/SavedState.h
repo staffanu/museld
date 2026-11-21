@@ -26,6 +26,7 @@ struct DiscSettings {
     std::string subtitle2;
     std::string black_level; // auto, m, j (NTSC)
     std::string cx;          // auto, off, on (the analog audio's CX expansion)
+    std::string tint;        // the hue rotation in degrees (NTSC/PAL)
     bool operator==(const DiscSettings &) const = default;
 };
 

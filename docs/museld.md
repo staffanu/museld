@@ -192,7 +192,7 @@ a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at 
 | `--nr <level>` | NTSC/PAL: temporal noise reduction, `off` (default), `low` or `high` — same as key 6. A first-order recursion over the fields on the decoded luma and chroma, gated per pixel by the motion masks that also gate the de-interlacer's weave, so only the still parts of the picture are averaged and nothing that moves is smeared. Low keeps half of the previous output, high three quarters; on still parts that is about 5 and 8 dB less noise on top of the 3D comb's frame averaging. The price is a trail of a few fields behind anything the motion detector misses, such as a slow fade or very low-contrast motion in noise. |
 | `--no-film-mode` | NTSC: start with the film mode off instead of auto — same as key 5 |
 | `--black-level <mode>` | NTSC: where the disc puts black — `auto` (default) reads it off the picture, `m` forces NTSC-M (US discs: 7.5 IRE above blanking), `j` forces NTSC-J (Japanese discs: black at blanking). Same as the J key. Wrong in the M direction, a Japanese disc loses its darkest 7.5 IRE; wrong in the J direction, a US disc shows black as dark grey and slightly desaturated |
-| `--tint <degrees>` | NTSC: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control |
+| `--tint <degrees>` | NTSC/PAL: rotate the chroma hue. Added to the decoder's calibrated angle; compensates source-dependent differential phase (player and disc), like a TV's tint control. The K and L keys adjust it while playing, and the setting is remembered per disc |
 | `--saturation <factor>` | NTSC: scale the chroma gain (default 1.0, applied on top of the burst-referenced AGC) |
 | `--cx <mode>` | NTSC analog audio CX expansion: `auto` (default, follow the disc's VBI flag), `on`, or `off` — same as the X key. `off` is also how to record the un-expanded signal for comparisons |
 | `--subtitles-file <file.srt>` | Start with this file (a path or an `http://` address) as the primary subtitle track; it need not match the naming pattern below |
@@ -475,6 +475,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | X | Cycle CX noise reduction for the NTSC analog audio: auto (follow the VBI flag, the default) → off → on; `--cx` sets the initial mode. Shown in parentheses when the audio playing is not the analog track (the setting is remembered but inaudible). The V info line shows the CX status: the disc's flag in auto mode, or e.g. "CX off forced (disc on)" when overridden. |
 | V | Toggle disc code / chapter / frame display (while paused, the frame number is followed by the field on screen, 1 or 2), plus the NTSC film mode and black level status |
 | J | NTSC: cycle the black level: auto → NTSC-M (7.5 IRE) → NTSC-J (0 IRE), see `--black-level` |
+| K / L | NTSC/PAL: tint, a degree of hue rotation down / up (±45° at most), see `--tint`; the menu's Picture page has it as a line too |
 | C | Show cursor coordinates and input-file offsets (see below) |
 | O | Cycle the overscan: 0 % (EDGES HIDDEN on MUSE) → 2.5 % → 5 % → full image (see `--overscan`) |
 | Z | Cycle the magnifier: 1× → 2× → 4× (arrow keys pan when zoomed) |
@@ -538,7 +539,7 @@ browser remembers -- the recent addresses and the last directory -- is written
 to `state.txt` in the player's per-user preferences directory
 (`MUSELD_STATE_FILE` names another file).  The same file remembers, per capture,
 what belongs to the disc: the aspect mode, the overscan, the audio track, the
-subtitle tracks chosen (or turned off), the black level mode and the CX mode.
+subtitle tracks chosen (or turned off), the black level mode, the CX mode and the tint.
 They come back when the capture is opened again, from the browser or the
 command line, over the command line's defaults.  Full screen and the decode
 toggles (field interpolation, 3D comb, film mode, noise reduction, dropouts, the

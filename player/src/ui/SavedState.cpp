@@ -45,6 +45,7 @@ void SavedState::load() {
                     else if (name == "subtitle2") settings.subtitle2 = v;
                     else if (name == "black_level") settings.black_level = v;
                     else if (name == "cx") settings.cx = v;
+                    else if (name == "tint") settings.tint = v;
                 }
                 if (end == std::string::npos) break;
                 at = end + 1;
@@ -70,7 +71,7 @@ bool SavedState::save() const {
     for (const auto &[address, d] : m_discs)
         out << "disc=" << address << "\taspect=" << d.aspect << "\toverscan=" << d.overscan << "\taudio=" << d.audio
             << "\tsubtitle=" << d.subtitle << "\tsubtitle2=" << d.subtitle2
-            << "\tblack_level=" << d.black_level << "\tcx=" << d.cx << "\n";
+            << "\tblack_level=" << d.black_level << "\tcx=" << d.cx << "\ttint=" << d.tint << "\n";
     return (bool)out;
 }
 

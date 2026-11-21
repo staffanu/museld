@@ -326,6 +326,10 @@ bool InputController::poll(SDL_Window *window,
         PlayerActions::cycleCx(state, reader, audio_track, +1);
     if (checkKey(SDL_SCANCODE_J))
         PlayerActions::cycleBlackLevel(state, +1);
+    if (checkKey(SDL_SCANCODE_K))
+        PlayerActions::adjustTint(state, -1);
+    if (checkKey(SDL_SCANCODE_L))
+        PlayerActions::adjustTint(state, +1);
     if (checkKey(SDL_SCANCODE_D))
         PlayerActions::cycleDropoutMode(state, dropout_mode, +1);
     if (checkKey(SDL_SCANCODE_C))

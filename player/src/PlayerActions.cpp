@@ -2,6 +2,7 @@
 // This file is licensed under the provisions of the GNU General Public License v3 or later (see gpl-3.0.txt)
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 #include <SDL3/SDL.h>
 #include "PlayerActions.h"
@@ -190,6 +191,12 @@ void cycleBlackLevel(PlayerState &state, int direction) {
     redoIfPaused(state);
 }
 
+void adjustTint(PlayerState &state, int direction) {
+    state.tint_degrees = std::clamp(std::round(state.tint_degrees) + (float)direction, -c_tint_range, c_tint_range);
+    state.osd_text = "TINT " + tintName(state.tint_degrees);
+    redoIfPaused(state);
+}
+
 void cycleDropoutMode(PlayerState &state, DropoutMode &dropout_mode, int direction) {
     static constexpr DropoutMode modes[] = {DropoutMode::eNormal, DropoutMode::eDisabled, DropoutMode::eHighlight};
     int index = 0;
@@ -356,6 +363,11 @@ std::string cxName(const PlayerState &state, const ReaderControls &reader, Audio
     if (!reader.has_analog_audio || audio_track != AudioTrack::eDefault)
         name = "(" + name + ")";
     return name;
+}
+
+std::string tintName(float degrees) {
+    const int d = (int)std::lround(degrees);
+    return d == 0 ? std::string("0 DEG") : std::format("{:+d} DEG", d);
 }
 
 std::string blackLevelName(Decoder::BlackLevelMode mode) {

@@ -36,6 +36,9 @@ namespace PlayerActions {
     void cycleAudioChannels(PlayerState &state, int direction);
     void cycleCx(PlayerState &state, const ReaderControls &reader, AudioTrack audio_track, int direction);
     void cycleBlackLevel(PlayerState &state, int direction);
+    // The tint, a degree per step within +-c_tint_range
+    constexpr float c_tint_range = 45.0f;
+    void adjustTint(PlayerState &state, int direction);
     void cycleDropoutMode(PlayerState &state, DropoutMode &dropout_mode, int direction);
     void toggleCursor(PlayerState &state);
     void toggleDiscCode(PlayerState &state);
@@ -59,6 +62,7 @@ namespace PlayerActions {
     std::string audioChannelsName(const PlayerState &state);
     std::string cxName(const PlayerState &state, const ReaderControls &reader, AudioTrack audio_track);
     std::string blackLevelName(Decoder::BlackLevelMode mode);
+    std::string tintName(float degrees); // "+3 DEG", "0 DEG"
     std::string dropoutModeName(DropoutMode mode);
     std::string efmFilterName(const ReaderControls &reader);
     std::string subtitleSlotName(const PlayerState &state, int slot);

@@ -139,6 +139,8 @@ MenuPage *buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b, MenuPage *ope
                                               : s.black_level_mode == Decoder::BlackLevelMode::eM ? "7.5 IRE (NTSC-M)" : "0 IRE (NTSC-J)";
                                      },
                                      [&s](int d) { cycleBlackLevel(s, d); }, [sd] { return sd; }));
+    picture->items.push_back(setting("Tint", "K L", [&s] { return tintName(s.tint_degrees); },
+                                     [&s](int d) { adjustTint(s, d); }, [sd] { return sd; }));
     picture->items.push_back(setting("Dropouts", "D", [b] {
                                          return b.dropout_mode == DropoutMode::eNormal ? "CONCEALED"
                                               : b.dropout_mode == DropoutMode::eDisabled ? "SHOWN" : "HIGHLIGHTED";

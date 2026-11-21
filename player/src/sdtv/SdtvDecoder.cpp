@@ -22,7 +22,7 @@ SdtvDecoder::SdtvDecoder(
         Logger &log, FrameReader<SdtvInputBlock> &reader, musevk::VulkanManager &manager,
         musevk::CommandPool &command_pool, std::string const &executable_dir,
         bool decode_video, bool decode_all_fields, bool decode_audio,
-        float tint_degrees, float saturation,
+        float saturation,
         musevk::TimestampQueryPool *timestamp_query_pool,
         const VideoStandard &video_standard)
 : Decoder(),
@@ -36,6 +36,7 @@ SdtvDecoder::SdtvDecoder(
   m_decode_audio(decode_audio),
   m_timestamp_query_pool(timestamp_query_pool),
   m_eq{1, 0},
+  m_saturation(saturation),
   m_noise{-1, -1, -1, -1},
   m_blanking_avg(0),
   m_blanking_sq_avg(0),
@@ -76,14 +77,6 @@ SdtvDecoder::SdtvDecoder(
   m_analog_cx_from_vbi(false),
   m_temporal_distance(video_standard.ntsc_chroma ? 1 : 2),
   m_frames() {
-    // 185.8 degrees is the structural 180 (see sdtv_decode_single_field.comp)
-    // plus the offset calibrated against the Video Essentials colorbars
-    // (sRGB-linearized bar measurements null the mean hue error); the residual
-    // is source-dependent (differential phase of the player and disc), which
-    // is what --tint adjusts.
-    float a = ((float)video_standard.chroma_rotation_deg + tint_degrees) * (float)M_PI / 180.0f;
-    m_rot_re = saturation * sinf(a);
-    m_rot_im = saturation * cosf(a);
 }
 
 SdtvDecoder::~SdtvDecoder() {
@@ -600,6 +593,15 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
                                   ? std::format("{:.1f}", m_black_peak_min_v * m_level_scale * 100.0)
                                   : std::string("?"));
 
+        // The chroma demodulation angle: 185.8 degrees on NTSC is the
+        // structural 180 (see sdtv_decode_single_field.comp) plus the offset
+        // calibrated against the Video Essentials colour bars (sRGB-linearised
+        // bar measurements null the mean hue error); the residual is
+        // source-dependent (differential phase of the player and disc), which
+        // is what the tint control adjusts, live, and --saturation scales the
+        // magnitude.
+        const float a = ((float)m_standard.chroma_rotation_deg + controls.tint_degrees) * (float)M_PI / 180.0f;
+        const float rot_re = m_saturation * sinf(a), rot_im = m_saturation * cosf(a);
         // Selector noise floor: |cs - ct| accumulated over the 19-sample
         // window is ~sigma per sample for plain noise; 15 sigma keeps noise
         // from flipping the comb choice on flat areas.
@@ -607,7 +609,7 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
                                     m_frames[2 * d]->data(), m_frames[0]->data(),
                                     m_frames[2 * d]->burst_phase_data(), m_frames[0]->burst_phase_data(),
                                     m_frames[2 * d]->dropout_data(), m_frames[0]->dropout_data(),
-                                    dropout_mode, use_3d_comb, m_rot_re, m_rot_im, level_floor, level_ceiling,
+                                    dropout_mode, use_3d_comb, rot_re, rot_im, level_floor, level_ceiling,
                                     15.0f * sigma_out, m_pal_v_flip);
         m_field_buffer_frame_no[decoded_field_index] = m_frame_no - d;
         const float nr_feedback = temporalNrFeedback(controls.temporal_nr);

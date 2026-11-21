@@ -38,7 +38,7 @@ public:
             Logger &log, FrameReader<SdtvInputBlock> &reader, musevk::VulkanManager &manager,
             musevk::CommandPool &command_pool, std::string const &executable_dir,
             bool decode_video, bool decode_all_fields, bool decode_audio,
-            float tint_degrees, float saturation,
+            float saturation,
             musevk::TimestampQueryPool *timestamp_query_pool,
             const VideoStandard &video_standard);
     ~SdtvDecoder();
@@ -73,8 +73,8 @@ private:
     musevk::TimestampQueryPool *m_timestamp_query_pool; // if set we use it
 
     std::pair<float, float> m_eq;
-    float m_rot_re; // chroma rotation/gain for the decode shader; set in the constructor
-    float m_rot_im;
+    const float m_saturation; // the chroma gain (--saturation); the rotation itself is
+                              // computed per field from DecodeControls::tint_degrees
     SdtvFrame::NoiseEstimate m_noise; // EWMA-smoothed, reader voltage units
     double m_blanking_avg;            // EWMA of the per-frame blanking level ...
     double m_blanking_sq_avg;         // ... and of its square, for the wander σ
