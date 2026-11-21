@@ -85,11 +85,14 @@ Last revised 2026-11-21.
 ## Done since this list was started
 
 - 2026-11-21: the settings the keys change carry to the next input of the run (a disc's other
-  side, on the command line or chosen in the browser): what a run ends with -- the same
-  aspect, overscan, audio track, subtitle tracks, black level, CX and tint the state file
-  records for the disc -- is the starting point of the next input of the same standard, and
-  the next disc's own remembered settings win over it.  The tint became a live setting the
-  same day (K and L, the menu's Tint line, remembered per disc).
+  side, on the command line or chosen in the browser), and the disc settings -- aspect,
+  overscan, audio track, subtitle tracks, black level, CX, tint -- are applied by how recent
+  the intent is: over the defaults the disc's memory, then the options given on the command
+  line (before, the memory silently undid an option), then what the keys changed on the
+  previous input of the same standard.  The state file holds only what differs from the
+  defaults, so an untouched disc has no entry and nothing freezes the defaults of the day.
+  The tint became a live setting the same day (K and L, the menu's Tint line, remembered per
+  disc).
 - 2026-11-21: the PAL dropout detector threshold, measured and left alone.  The slew
   corroboration's threshold is in units of the standard's deviation and was calibrated on
   NTSC; on PAL (deviation 0.57 MHz against 0.85, video band 5.8 against 4.2 MHz) legal signal

@@ -17,7 +17,10 @@
 // another file, for tests and development.
 // What a disc (an address) was last played with: the settings that depend on
 // the disc rather than the viewer.  Strings as the file holds them; empty is
-// "not remembered" (the player's default then)
+// "not remembered", and only what differs from the player's defaults is held,
+// so the settings a run ends with at their defaults are not frozen for the
+// disc.  The same partial form carries a command line's explicit options and
+// the keys' changes from one input to the next (museld.cpp, runPlayer)
 struct DiscSettings {
     std::string aspect;    // normal, zoom, squeeze, stretch
     std::string overscan;  // full, or the fraction hidden (0, 0.025, 0.05)
@@ -28,6 +31,10 @@ struct DiscSettings {
     std::string cx;          // auto, off, on (the analog audio's CX expansion)
     std::string tint;        // the hue rotation in degrees (NTSC/PAL)
     bool operator==(const DiscSettings &) const = default;
+    bool empty() const {
+        return aspect.empty() && overscan.empty() && audio.empty() && subtitle.empty() && subtitle2.empty()
+               && black_level.empty() && cx.empty() && tint.empty();
+    }
 };
 
 class SavedState {
@@ -48,7 +55,8 @@ public:
     void setLastDirectory(const std::string &location);
     // The settings a disc was last played with, if it was
     std::optional<DiscSettings> discSettings(const std::string &address) const;
-    // Records them (first in the list, the oldest beyond c_max_discs dropped) and saves
+    // Records them (first in the list, the oldest beyond c_max_discs dropped) and saves;
+    // empty settings remove the disc's entry
     void setDiscSettings(const std::string &address, const DiscSettings &settings);
 
     // Forgets everything and stops saving: the run neither reads nor writes the file (--no-state)

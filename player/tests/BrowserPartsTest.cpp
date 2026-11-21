@@ -189,6 +189,18 @@ TEST_CASE("The saved state remembers what a disc was played with", "[Browser]") 
         const auto b = state.discSettings("/local/b.lds");
         REQUIRE(b);
         CHECK(*b == DiscSettings{"normal", "full", "ac3", "", "", "auto", "off"});
+        // only what is set is held: a partial entry comes back as it was, and an
+        // empty one removes the disc
+        state.setDiscSettings("/local/c.lds", DiscSettings{"", "", "", "", "", "", "", "-2"});
+        state.setDiscSettings("/local/b.lds", DiscSettings{});
+    }
+    {
+        SavedState state(path);
+        const auto c = state.discSettings("/local/c.lds");
+        REQUIRE(c);
+        CHECK(*c == DiscSettings{"", "", "", "", "", "", "", "-2"});
+        CHECK(!state.discSettings("/local/b.lds"));
+        REQUIRE(state.discSettings("http://nas/a.s8"));
         CHECK(!state.discSettings("nothing"));
     }
     std::filesystem::remove(path);

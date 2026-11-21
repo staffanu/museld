@@ -539,13 +539,16 @@ browser remembers -- the recent addresses and the last directory -- is written
 to `state.txt` in the player's per-user preferences directory
 (`MUSELD_STATE_FILE` names another file).  The same file remembers, per capture,
 what belongs to the disc: the aspect mode, the overscan, the audio track, the
-subtitle tracks chosen (or turned off), the black level mode, the CX mode and the tint.
-They come back when the capture is opened again, from the browser or the
-command line, over the command line's defaults.  Within one run they also carry
-from one input to the next of the same standard (NTSC, PAL or MUSE), so what
-the keys changed on a disc's first side holds on its second, played next on the
-command line or chosen in the browser; a disc's own remembered settings win
-over what was carried.  Full screen and the decode
+subtitle tracks chosen (or turned off), the black level mode, the CX mode and the tint,
+each only where it was left away from its default, so a disc played with everything
+at the defaults has no entry.  They come back when the capture is opened again, from
+the browser or the command line.  An option given on the command line beats what the
+disc remembers for that setting, and the settings the keys changed on the previous
+input of the run beat both: within one run they carry from one input to the next of
+the same standard (NTSC, PAL or MUSE), so what was set on a disc's first side holds on
+its second, played next on the command line or chosen in the browser.  Each input
+records what it ends with, so a change made on the first side is remembered for the
+second as well.  Full screen and the decode
 toggles (field interpolation, 3D comb, film mode, noise reduction, dropouts, the
 equaliser) are not remembered.  `--no-state` leaves all of it out of a run:
 nothing remembered is applied and nothing is recorded.

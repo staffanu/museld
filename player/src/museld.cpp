@@ -93,6 +93,7 @@ using namespace std;
 struct SubtitleSetup {
     std::vector<std::pair<std::string, std::string>> files; // {OSD label, path}, alphabetical
     int primary_index = -1; // initial primary track
+    bool primary_explicit = false; // ... named by --subtitles (else the discovery's choice)
     std::optional<std::string> font_path;
     double offset_seconds = 0.0; // delays the subtitles (negative shows them earlier)
     // Directory holding the PP-OCR detection and recognition .onnx models;
@@ -353,7 +354,8 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                       AudioTrack audio_track, bool audio_fallback,
                       bool is_muse,
                       SavedState &saved_state, const std::string &input_name,
-                      const std::optional<DiscSettings> &carried, std::optional<DiscSettings> &settings_at_end,
+                      const DiscSettings &given, const std::optional<DiscSettings> &carried,
+                      std::optional<DiscSettings> &settings_at_end,
                       std::optional<std::string> &open_next,
                       bool benchmark_shaders,
                       bool output_yuv,
@@ -404,14 +406,14 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         state.picture_format = picture_format;
         state.full_image = initial_full_image;
         state.overscan = initial_overscan;
-        // Over the command line's defaults, first what the previous input of
-        // this run ended with (a disc's other side is usually played next, with
-        // whatever the keys changed on the first), then what this disc was
-        // last played with, which wins: the aspect, the overscan, the audio
-        // track, the black level, the tint and the CX mode belong to the disc
-        // (the subtitle choice below, once the tracks exist); the other decode
-        // toggles and full screen do not, and start from their defaults every
-        // time
+        // The disc settings -- the aspect, the overscan, the audio track, the
+        // black level, the tint and the CX mode (the subtitle choice below, once
+        // the tracks exist) -- by how recent the intent is, each set a partial
+        // one that fills only the fields it holds: over the defaults, what the
+        // disc was last played with, then the options given on this command
+        // line, then what the keys changed on the previous input of this run (a
+        // disc's other side is usually played next).  The other decode toggles
+        // and full screen start from their defaults every time
         const auto apply_settings = [&](const DiscSettings &d, const char *why) {
             static const std::pair<const char *, AspectMode> aspects[] = {
                     {"normal", AspectMode::eNormal}, {"zoom", AspectMode::eZoom},
@@ -441,14 +443,60 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             else if (d.cx == "on") state.analog_cx_mode = Decoder::CxMode::eOn;
             if (!d.tint.empty())
                 state.tint_degrees = std::clamp((float)atof(d.tint.c_str()), -PlayerActions::c_tint_range, PlayerActions::c_tint_range);
-            log.info(eApplication, std::format("{}: aspect {}, overscan {}, audio {}, subtitles {} / {}, black level {}, CX {}, tint {}",
-                                               why, d.aspect, d.overscan, d.audio, d.subtitle, d.subtitle2, d.black_level, d.cx, d.tint));
+            std::string fields;
+            for (const auto &[name, value] : {std::pair{"aspect", &d.aspect}, std::pair{"overscan", &d.overscan},
+                                              std::pair{"audio", &d.audio}, std::pair{"subtitles", &d.subtitle},
+                                              std::pair{"second subtitles", &d.subtitle2}, std::pair{"black level", &d.black_level},
+                                              std::pair{"CX", &d.cx}, std::pair{"tint", &d.tint}})
+                if (!value->empty())
+                    fields += std::format("{}{} {}", fields.empty() ? "" : ", ", name, *value);
+            log.info(eApplication, std::format("{}: {}", why, fields));
         };
-        if (carried)
-            apply_settings(*carried, "Carried over from the previous input");
         const std::optional<DiscSettings> remembered = saved_state.discSettings(input_name);
         if (remembered)
             apply_settings(*remembered, "Remembered for this disc");
+        if (!given.empty())
+            apply_settings(given, "Given on the command line");
+        if (carried)
+            apply_settings(*carried, "Carried over from the previous input");
+        // The settings as they stand now and at the end, for recording what
+        // differs from the defaults and carrying what the keys change
+        const auto settings_now = [&] {
+            DiscSettings d;
+            d.aspect = state.aspect_mode == AspectMode::eZoom ? "zoom" : state.aspect_mode == AspectMode::eSqueeze ? "squeeze"
+                     : state.aspect_mode == AspectMode::eStretch ? "stretch" : "normal";
+            d.overscan = state.full_image ? "full" : std::format("{:g}", state.overscan);
+            d.audio = audio_track == AudioTrack::eEfm ? "efm" : audio_track == AudioTrack::eAc3 ? "ac3" : "default";
+            const auto slot_label = [&](int slot) {
+                return slot < 0 ? std::string("off")
+                     : slot < (int)state.subtitle_track_names.size() ? state.subtitle_track_names[(size_t)slot] : std::string();
+            };
+            if (!state.subtitle_track_names.empty()) {
+                d.subtitle = slot_label(state.subtitle_primary);
+                d.subtitle2 = slot_label(state.subtitle_secondary);
+            }
+            d.black_level = state.black_level_mode == Decoder::BlackLevelMode::eM ? "m"
+                          : state.black_level_mode == Decoder::BlackLevelMode::eJ ? "j" : "auto";
+            d.cx = state.analog_cx_mode == Decoder::CxMode::eOff ? "off"
+                 : state.analog_cx_mode == Decoder::CxMode::eOn ? "on" : "auto";
+            d.tint = std::format("{:g}", state.tint_degrees);
+            return d;
+        };
+        // The fields of a that differ from b
+        const auto settings_diff = [](const DiscSettings &a, const DiscSettings &b) {
+            DiscSettings d;
+            if (a.aspect != b.aspect) d.aspect = a.aspect;
+            if (a.overscan != b.overscan) d.overscan = a.overscan;
+            if (a.audio != b.audio) d.audio = a.audio;
+            if (a.subtitle != b.subtitle) d.subtitle = a.subtitle;
+            if (a.subtitle2 != b.subtitle2) d.subtitle2 = a.subtitle2;
+            if (a.black_level != b.black_level) d.black_level = a.black_level;
+            if (a.cx != b.cx) d.cx = a.cx;
+            if (a.tint != b.tint) d.tint = a.tint;
+            return d;
+        };
+        DiscSettings start_settings = settings_now();   // the subtitle fields are filled once the tracks exist
+        DiscSettings default_settings{"normal", "0", "default", "", "", "auto", "auto", "0"};
 
         OsdOverlay osd;
         FrameBlitter blitter;
@@ -558,11 +606,20 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                         if (state.subtitle_track_names[i] == label)
                             slot = (int)i;
                 };
-                for (const auto *d : {&carried, &remembered})
+                default_settings.subtitle = state.subtitle_primary >= 0 ? state.subtitle_track_names[(size_t)state.subtitle_primary] : "off";
+                default_settings.subtitle2 = "off";
+                const std::string given_label = subtitle_setup.primary_explicit && subtitle_setup.primary_index >= 0
+                                              ? state.subtitle_track_names[(size_t)subtitle_setup.primary_index] : std::string();
+                const std::optional<DiscSettings> given_slots = given_label.empty() ? std::nullopt
+                                                              : std::optional<DiscSettings>(DiscSettings{"", "", "", given_label, "", "", "", ""});
+                for (const auto *d : {&remembered, &given_slots, &carried})
                     if (*d) {
                         remembered_slot((*d)->subtitle, state.subtitle_primary);
                         remembered_slot((*d)->subtitle2, state.subtitle_secondary);
                     }
+                const DiscSettings at_start = settings_now();
+                start_settings.subtitle = at_start.subtitle;
+                start_settings.subtitle2 = at_start.subtitle2;
                 subtitle_tracks = std::move(tracks);
                 subtitle_font = std::move(font);
             } catch (const std::exception &x) {
@@ -1303,28 +1360,17 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         if (benchmark_shaders)
             decoder.outputBenchmarkResults();
         {
-            // What to play this disc with next time
-            DiscSettings now;
-            now.aspect = state.aspect_mode == AspectMode::eZoom ? "zoom" : state.aspect_mode == AspectMode::eSqueeze ? "squeeze"
-                       : state.aspect_mode == AspectMode::eStretch ? "stretch" : "normal";
-            now.overscan = state.full_image ? "full" : std::format("{:g}", state.overscan);
-            now.audio = audio_track == AudioTrack::eEfm ? "efm" : audio_track == AudioTrack::eAc3 ? "ac3" : "default";
-            const auto slot_label = [&](int slot) {
-                return slot < 0 ? std::string("off")
-                     : slot < (int)state.subtitle_track_names.size() ? state.subtitle_track_names[(size_t)slot] : std::string();
-            };
-            if (!state.subtitle_track_names.empty()) {
-                now.subtitle = slot_label(state.subtitle_primary);
-                now.subtitle2 = slot_label(state.subtitle_secondary);
+            // What to play this disc with next time: what differs from the
+            // defaults (an entry with nothing in it is removed); and for the
+            // next input of this run, what changed while this one played
+            const DiscSettings now = settings_now();
+            const DiscSettings to_remember = settings_diff(now, default_settings);
+            if (!input_name.empty() && !inputIsLive(input_name)) {
+                const std::optional<DiscSettings> before = saved_state.discSettings(input_name);
+                if (to_remember.empty() ? before.has_value() : before != to_remember)
+                    saved_state.setDiscSettings(input_name, to_remember);
             }
-            now.black_level = state.black_level_mode == Decoder::BlackLevelMode::eM ? "m"
-                            : state.black_level_mode == Decoder::BlackLevelMode::eJ ? "j" : "auto";
-            now.cx = state.analog_cx_mode == Decoder::CxMode::eOff ? "off"
-                   : state.analog_cx_mode == Decoder::CxMode::eOn ? "on" : "auto";
-            now.tint = std::format("{:g}", state.tint_degrees);
-            if (!input_name.empty() && !inputIsLive(input_name) && saved_state.discSettings(input_name) != now)
-                saved_state.setDiscSettings(input_name, now);
-            settings_at_end = now;
+            settings_at_end = settings_diff(now, start_settings);
         }
     }
     return switched;
@@ -1671,7 +1717,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   double write_duration_seconds,
                   double initial_seek_seconds,
                   std::optional<PositionSearch::Target> start_position, bool returns_to_browser,
-                  const std::optional<DiscSettings> &carried) {
+                  const DiscSettings &given, const std::optional<DiscSettings> &carried) {
     // The decoded image size (also the size of a written video file), where
     // the picture sits in it and the shape of its pixels, and a window of the
     // picture's shape that downscales it in neither direction
@@ -1924,7 +1970,7 @@ PlayOutcome process_file(Logger &log, const string &executable_dir, PlayerSurfac
                   start_paused,
                   field_interpolation_mode, use_3d_comb, film_mode, temporal_nr, edge_directed, cx_mode, black_level_mode, tint_degrees, dropout_mode, audio_track, audio_fallback,
                   std::is_same<InputBlock, MuseInputBlock>::value,
-                  saved_state, input_name, carried, settings_at_end, open_next,
+                  saved_state, input_name, given, carried, settings_at_end, open_next,
                   benchmark_shaders,
                   output_filename.has_value(),
                   vfw, audio_playback.get(), executable_dir,
@@ -2087,6 +2133,8 @@ int main(int argc, char *argv[]) {
     Decoder::BlackLevelMode black_level_mode = Decoder::BlackLevelMode::eAuto;
     float tint_degrees = 0.0f;
     float saturation = 1.0f;
+    // Which of the disc settings the command line gave (they beat a disc's memory)
+    bool aspect_given = false, overscan_given = false, audio_given = false, black_level_given = false, cx_given = false, tint_given = false;
     optional<string> subtitles_file;
     optional<string> subtitle_font_path;
     double subtitle_offset_seconds = 0.0;
@@ -2193,6 +2241,7 @@ int main(int argc, char *argv[]) {
                                       "(a 16:9 picture squeezed into the frame); stretch fills the window ignoring the shape",
                    [&] () -> void {
         const string mode = *(it++);
+        aspect_given = true;
         if (mode == "normal")
             aspect_mode = AspectMode::eNormal;
         else if (mode == "zoom")
@@ -2219,16 +2268,19 @@ int main(int argc, char *argv[]) {
                           "or of the analog audio for NTSC (RF input only).  A DTS bitstream "
                           "on the track is detected and decoded automatically", [&] () -> void {
         audio_track = AudioTrack::eEfm;
+        audio_given = true;
     });
     options.flag("--ac3", "NTSC: take the audio from the AC3-RF surround track, downmixed to "
                           "stereo (RF input only; decoding needs an FFmpeg build)", [&] () -> void {
         audio_track = AudioTrack::eAc3;
+        audio_given = true;
     });
     options.flag("--analog", "NTSC/PAL: keep the analog audio track even when no carrier is found.  "
                              "Without it a disc whose analog carriers are absent (a digital-only "
                              "PAL disc) switches to the EFM track after a second", [&] () -> void {
         audio_track = AudioTrack::eDefault;
         audio_fallback = false;
+        audio_given = true;
     });
     options.option("--efm-filter-size", "N",
                    "Adaptive FIR filter size in the EFM timing recovery (default 31, 0 disables it).  "
@@ -2296,9 +2348,11 @@ int main(int argc, char *argv[]) {
                                             "much more in each dimension, and full shows the whole decoded image",
                    [&] () -> void {
         const string value = *(it++);
+        overscan_given = true;
         if (value == "full") {
             full_image = true;
         } else {
+            full_image = false;
             overscan = stod(value) / 100.0;
             if (overscan < 0.0 || overscan > 0.25) {
                 cerr << "--overscan must be full or a percentage from 0 to 25" << endl;
@@ -2311,6 +2365,7 @@ int main(int argc, char *argv[]) {
                                             "NTSC-J (Japanese discs, black at blanking); also cycled with the J key",
                    [&] () -> void {
         const string mode = *(it++);
+        black_level_given = true;
         if (mode == "auto")
             black_level_mode = Decoder::BlackLevelMode::eAuto;
         else if (mode == "m" || mode == "M")
@@ -2325,6 +2380,7 @@ int main(int argc, char *argv[]) {
     options.option("--tint", "DEGREES", "NTSC/PAL: rotate the chroma hue, like a TV's tint control "
                                         "(default 0; the K and L keys adjust it while playing)", [&] () -> void {
         tint_degrees = (float)stod(*(it++));
+        tint_given = true;
     });
     options.option("--saturation", "FACTOR", "NTSC/PAL: scale the chroma gain (default 1.0)", [&] () -> void {
         saturation = (float)stod(*(it++));
@@ -2333,6 +2389,7 @@ int main(int argc, char *argv[]) {
                                    "flag (default), on/off force it (also toggled with the X key)",
                    [&] () -> void {
         const string mode = *(it++);
+        cx_given = true;
         if (mode == "auto")
             cx_mode = Decoder::CxMode::eAuto;
         else if (mode == "on")
@@ -2597,6 +2654,19 @@ int main(int argc, char *argv[]) {
         // disc settings then hold across the sides of a disc, as the options do
         std::optional<DiscSettings> carried_settings;
         std::optional<InputType> carried_type;
+        // The disc settings given as options, which beat a disc's memory
+        const auto given_settings = [&] {
+            DiscSettings g;
+            if (aspect_given) g.aspect = aspect_mode == AspectMode::eZoom ? "zoom" : aspect_mode == AspectMode::eSqueeze ? "squeeze"
+                                       : aspect_mode == AspectMode::eStretch ? "stretch" : "normal";
+            if (overscan_given) g.overscan = full_image ? "full" : std::format("{:g}", overscan);
+            if (audio_given) g.audio = audio_track == AudioTrack::eEfm ? "efm" : audio_track == AudioTrack::eAc3 ? "ac3" : "default";
+            if (black_level_given) g.black_level = black_level_mode == Decoder::BlackLevelMode::eM ? "m"
+                                                 : black_level_mode == Decoder::BlackLevelMode::eJ ? "j" : "auto";
+            if (cx_given) g.cx = cx_mode == Decoder::CxMode::eOff ? "off" : cx_mode == Decoder::CxMode::eOn ? "on" : "auto";
+            if (tint_given) g.tint = std::format("{:g}", tint_degrees);
+            return g;
+        };
         const auto decodes_alike = [](InputType a, InputType b) {
             const auto family = [](InputType t) { return t == eNtscRf ? 0 : t == ePalRf ? 1 : 2; };
             return family(a) == family(b);
@@ -2785,6 +2855,7 @@ int main(int argc, char *argv[]) {
                 const bool is_url = inputIsUrl(*subtitles_file);
                 std::error_code ec;
                 const auto canon = filesystem::weakly_canonical(*subtitles_file, ec);
+                subtitle_setup.primary_explicit = true;
                 for (size_t i = 0; i < subtitle_setup.files.size(); i++)
                     if (is_url ? subtitle_setup.files[i].second == *subtitles_file
                                : filesystem::weakly_canonical(subtitle_setup.files[i].second, ec) == canon)
@@ -2832,8 +2903,8 @@ int main(int argc, char *argv[]) {
                                                  benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, write_audio, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                 initial_seek_seconds, start_position, is_tvos || browse,
-                                 carried_type && decodes_alike(*carried_type, file_input_type) ? carried_settings : std::nullopt);
+                                 initial_seek_seconds, start_position, is_tvos || browse, given_settings(),
+                                 carried_type && decodes_alike(*carried_type, file_input_type) && !carried_settings->empty() ? carried_settings : std::nullopt);
                     break;
                 }
                 case eMuse16MHz: {
@@ -2846,8 +2917,8 @@ int main(int argc, char *argv[]) {
                                  audio_track, audio_fallback, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, write_audio, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                 initial_seek_seconds, start_position, is_tvos || browse,
-                                 carried_type && decodes_alike(*carried_type, file_input_type) ? carried_settings : std::nullopt);
+                                 initial_seek_seconds, start_position, is_tvos || browse, given_settings(),
+                                 carried_type && decodes_alike(*carried_type, file_input_type) && !carried_settings->empty() ? carried_settings : std::nullopt);
                     break;
                 }
                 case eMuseOversampled:
@@ -2863,15 +2934,26 @@ int main(int argc, char *argv[]) {
                                  audio_track, audio_fallback, benchmark_shaders, eq_mode, eq_alpha, tint_degrees, saturation, output_filename, write_preset, write_audio, video_out,
                                  subtitle_setup,
                                  export_frame_filename, export_frame_after_seconds, write_duration_seconds,
-                                 initial_seek_seconds, start_position, is_tvos || browse,
-                                 carried_type && decodes_alike(*carried_type, file_input_type) ? carried_settings : std::nullopt);
+                                 initial_seek_seconds, start_position, is_tvos || browse, given_settings(),
+                                 carried_type && decodes_alike(*carried_type, file_input_type) && !carried_settings->empty() ? carried_settings : std::nullopt);
                     break;
                 }
                 default:
                     throw std::runtime_error("Unknown input type: {}");
             }
             if (outcome.settings_at_end) {
-                carried_settings = outcome.settings_at_end;
+                // What the keys changed on this input, over what they changed on
+                // the ones before it in this run (a third side still gets what
+                // the first set), as long as the standard stays the same
+                if (!carried_settings || !carried_type || !decodes_alike(*carried_type, file_input_type))
+                    carried_settings = DiscSettings{};
+                const DiscSettings &d = *outcome.settings_at_end;
+                for (const auto &[from, to] : {std::pair{&d.aspect, &carried_settings->aspect}, std::pair{&d.overscan, &carried_settings->overscan},
+                                               std::pair{&d.audio, &carried_settings->audio}, std::pair{&d.subtitle, &carried_settings->subtitle},
+                                               std::pair{&d.subtitle2, &carried_settings->subtitle2}, std::pair{&d.black_level, &carried_settings->black_level},
+                                               std::pair{&d.cx, &carried_settings->cx}, std::pair{&d.tint, &carried_settings->tint}})
+                    if (!from->empty())
+                        *to = *from;
                 carried_type = file_input_type;
             }
             if (outcome.switch_to && output_filename) {

@@ -243,7 +243,7 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   scripted run.  The file browser (`ui/Browser` on `ui/DirectoryListing`, which lists a directory or
   a web server's index page, `ui/TextEntry` the address field with its on-screen keyboard,
   `ui/SavedState` the recent addresses, last directory and per-disc settings -- aspect, overscan,
-  audio track, subtitle tracks, black level, CX, tint, applied in `runPlayer` at start and recorded at its end, and carried to the next input of the same standard within a run, `PlayOutcome::settings_at_end`, under the next disc's own memory -- in SDL's
+  audio track, subtitle tracks, black level, CX, tint, applied in `runPlayer` at start and recorded at its end, only the fields away from the defaults; partial sets applied in order of recency, the disc's memory, then the command line's explicit options (`given_settings`), then what the keys changed on the previous input of the same standard within the run (`PlayOutcome::settings_at_end`, the diff of start and end) -- in SDL's
   pref path, `MUSELD_STATE_FILE` overriding) is the menu's Open page (its `fill_rect.comp` binds the image twice, read-only
   and write-only: a storage image both loaded and stored is a read-write texture to Metal, which
   the Apple TV's A10X has for single-channel formats only); `--browse` (always on tvOS) starts in it on a black frame

@@ -68,10 +68,16 @@ bool SavedState::save() const {
         out << "recent=" << r << "\n";
     if (!m_last_directory.empty())
         out << "last_directory=" << m_last_directory << "\n";
-    for (const auto &[address, d] : m_discs)
-        out << "disc=" << address << "\taspect=" << d.aspect << "\toverscan=" << d.overscan << "\taudio=" << d.audio
-            << "\tsubtitle=" << d.subtitle << "\tsubtitle2=" << d.subtitle2
-            << "\tblack_level=" << d.black_level << "\tcx=" << d.cx << "\ttint=" << d.tint << "\n";
+    for (const auto &[address, d] : m_discs) {
+        out << "disc=" << address;
+        for (const auto &[name, value] : {std::pair{"aspect", &d.aspect}, std::pair{"overscan", &d.overscan},
+                                          std::pair{"audio", &d.audio}, std::pair{"subtitle", &d.subtitle},
+                                          std::pair{"subtitle2", &d.subtitle2}, std::pair{"black_level", &d.black_level},
+                                          std::pair{"cx", &d.cx}, std::pair{"tint", &d.tint}})
+            if (!value->empty())
+                out << "\t" << name << "=" << *value;
+        out << "\n";
+    }
     return (bool)out;
 }
 
@@ -106,7 +112,8 @@ void SavedState::setDiscSettings(const std::string &address, const DiscSettings 
     if (address.empty() || address.find('\t') != std::string::npos)
         return;
     m_discs.erase(std::remove_if(m_discs.begin(), m_discs.end(), [&](const auto &e) { return e.first == address; }), m_discs.end());
-    m_discs.insert(m_discs.begin(), {address, settings});
+    if (!settings.empty())
+        m_discs.insert(m_discs.begin(), {address, settings});
     if (m_discs.size() > c_max_discs)
         m_discs.resize(c_max_discs);
     save();
