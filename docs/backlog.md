@@ -12,10 +12,6 @@ Last revised 2026-11-21.
   abseil" in `.github/workflows/ci.yml` prints "this workaround step can be removed" when that
   has happened.  Background: MSYS2 moved abseil-cpp on 2026-10-29 without rebuilding onnxruntime
   1.29.0-2, and the full Windows package's museld.exe failed to load.
-- **Try live type switching on the real udp:// ethadc stream.**  The stdin path is tested at 40
-  and 62.5 MHz (NTSC/PAL/MUSE in either direction, 1-3 s per switch); the decoder box is not.
-  Judge the "NO SIGNAL" pacing on a real disc change, and whether three agreeing chunks is the
-  right count.
 - **muse-16 (16.2 MHz baseband) input type** is legacy: keep it working for existing u16 files,
   no new formats or level work, remove when nothing needs it.
 ## Picture quality
@@ -84,6 +80,22 @@ Last revised 2026-11-21.
 
 ## Done since this list was started
 
+- 2026-11-21: live type switching tried on the ethadc UDP stream, from the desk: `ethadc-tx`
+  (the ethadc repository's stand-in for the hardware) streamed compound captures -- a disc,
+  8 s of no-carrier noise, another disc, made by `tools/compound-capture.py` -- to
+  `museld udp://`, NTSC to PAL and to NTSC at 40 MHz, NTSC to MUSE and MUSE to MUSE at
+  62.5 MHz.  Found and fixed: the SDTV reader stayed anchored through the gap (the sync
+  detector finds pulses in noise, so the no-pulses guard never fired), the picture showed
+  decoded noise instead of NO SIGNAL, and the next disc of the same standard took more than
+  ten seconds of drift corrections to settle; now a frame with most lines unsupported by a
+  pulse reports no signal, the lattice is dropped after half a second of it, and the next disc
+  is acquired within about a second.  The analog-to-EFM audio fallback no longer fires during
+  the gap.  Measured: a switch of standard comes 3 s after the first classifiable chunk (three
+  agreeing chunks a second apart), 5-6 s after a spinning-up disc appears since its first
+  seconds classify as nothing or at a line rate off the stream's; the three-chunk count is
+  kept, since noise never classified as a type and the count costs two seconds.  The MUSE
+  reader was right already.  On a Mac the loopback loses a tenth of 1440-byte packets at
+  40 MHz (kern.ipc.maxsockbuf caps the receive buffer at 8 MiB); `--jumbo` cures it.
 - 2026-11-21: the settings the keys change carry to the next input of the run (a disc's other
   side, on the command line or chosen in the browser), and the disc settings -- aspect,
   overscan, audio track, subtitle tracks, black level, CX, tint -- are applied by how recent

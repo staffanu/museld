@@ -1250,7 +1250,9 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 if (audio_track != AudioTrack::eDefault && fallback_verify_until < 0) {
                     audio_fallback = false; // chosen by hand or remembered
                 } else if (fallback_verify_until < 0) {
-                    if (reader_controls.analogSilentSeconds() >= c_analog_fallback_seconds) {
+                    // not while there is no signal at all (a disc change): the
+                    // next disc decides, once its carriers are there
+                    if (!state.no_signal && reader_controls.analogSilentSeconds() >= c_analog_fallback_seconds) {
                         audio_track = AudioTrack::eEfm;
                         reader_controls.setAudioTrack(audio_track);
                         fallback_verify_until = state.field_count + c_efm_lock_fields;

@@ -74,6 +74,8 @@ SdtvFrameReader::SdtvFrameReader(
           m_pilot_corr_next(0),
           m_pilot_corr_next_valid(false),
           m_anchored(false),
+          m_signal_lost(false),
+          m_lost_since(-1),
           m_timebase_restarted(false),
           m_seek_generation(0),
           m_frame_partial(true),
@@ -193,6 +195,7 @@ void SdtvFrameReader::resetTimebase(const char *why) {
     m_pilot_valid = false;
     m_pilot_corr_next_valid = false;
     m_anchored = false;
+    m_lost_since = -1;
     m_pending_drift = 0;
     m_frame_partial = true;
     m_log.info(eInput, std::format("SdtvFrameReader: timebase reset ({})", why));
@@ -357,8 +360,26 @@ bool SdtvFrameReader::readInputBlock(std::unique_ptr<SdtvInputBlock> const &outp
     }
     // No lock, or a lattice that keeps losing the pulses (the other SD
     // standard's line rate, 0.7 % off, does that without ever unanchoring):
-    // the content watch looks more often
-    m_demodulator->setSignalLost(!m_anchored || m_timebase.lastFrameUnsupportedFraction() > 0.25);
+    // the content watch looks more often, the picture is blanked as NO SIGNAL,
+    // and after half a second of it the lattice is dropped so that the next
+    // disc is acquired afresh.  A player with no disc feeds the detector
+    // noise it finds pulses in, so the guard above never fires on it, and the
+    // lattice would otherwise slip through the gap and take ten seconds and
+    // more of drift corrections to settle on the new disc (measured on an
+    // ethadc stream of two NTSC captures with 8 s of noise between, 2026-11-21).
+    const bool lost = !m_anchored || m_timebase.lastFrameUnsupportedFraction() > 0.25;
+    m_signal_lost = lost;
+    m_demodulator->setSignalLost(lost);
+    if (lost && m_anchored) {
+        if (m_lost_since < 0)
+            m_lost_since = m_stream_pos;
+        else if ((double)(m_stream_pos - m_lost_since) > 8000 * m_p_nominal) { // half a second
+            resetTimebase("most lines without a sync pulse");
+            m_timebase_restarted = true;
+        }
+    } else {
+        m_lost_since = -1;
+    }
 
     return true;
 }

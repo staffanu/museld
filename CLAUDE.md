@@ -583,6 +583,14 @@ on a thread of its own every 4 s, or every 1 s while the reader has no sync or a
 its pulses); three agreeing verdicts of another type end `runPlayer`, `process_file` returns a
 `PlayOutcome` with the type and the reader's released `InputReader`, and `main` calls
 `process_file` again for that type on the same `PlayerSurface` (window and Vulkan device).
+A disc change is tested without the hardware: `tools/compound-capture.py` joins raw s16
+captures with a no-carrier gap of noise, and the ethadc repository's `ethadc-tx` streams the
+result to `museld udp://127.0.0.1:5000` throttled to real time (`--jumbo` on a Mac, whose
+loopback loses a tenth of 1440-byte packets at 40 MHz; `--export-frame` ends the run, so judge
+a gap from a `--write` or the log).  Measured 2026-11-21: the SDTV reader anchors onto noise
+and must drop its lattice on a frame mostly without sync pulses (`m_signal_lost`,
+`signalPresent()`), or the next disc takes ten seconds and more to settle; a switch of
+standard comes 3 s after the first classifiable chunk, 5-6 s after a spinning-up disc appears.
 
 **Content-based input detection**: `src/InputProbe.{h,cpp}` (museld only, CPU-only, no GPU)
 detects sample format, MUSE/NTSC RF type and sample rate from short windows of samples: a file

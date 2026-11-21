@@ -53,7 +53,10 @@ public:
     [[nodiscard]] std::optional<InputProbeResult::Type> otherTypeDetected() override {
         return m_demodulator != nullptr ? m_demodulator->otherTypeDetected() : std::nullopt;
     }
-    [[nodiscard]] bool signalPresent() const override { return m_anchored; }
+    // Anchored, and the last frame's lines mostly supported by sync pulses: a
+    // player with no disc gives noise the sync detector finds pulses in, so the
+    // lattice alone does not say
+    [[nodiscard]] bool signalPresent() const override { return m_anchored && !m_signal_lost; }
     bool seek(double seconds) override;
     std::optional<uint32_t> seekToInputSample(int64_t sample) override;
     [[nodiscard]] double inputSampleRate() const override { return m_input_sample_rate; }
@@ -152,6 +155,8 @@ private:
     // (the group spans lines 4-6 on NTSC, 1-3 on PAL); starting half a line
     // in, field 2.
     std::atomic<bool> m_anchored;       // the reader thread's; read by signalPresent()
+    std::atomic<bool> m_signal_lost;    // most of the last frame's lines without a sync pulse (signalPresent())
+    int64_t m_lost_since;               // stream position where that began, -1 while it has not
     bool m_timebase_restarted;          // report the next frame as the first after a signal loss
     uint32_t m_seek_generation;         // of the demodulated blocks being consumed
     // Rows of the frame being filled come from before a timebase reset: the

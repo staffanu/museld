@@ -145,12 +145,19 @@ while it plays, for the decoder-box setup where the player is fed discs of any s
 demodulator hands every few seconds of samples to a content watch, which classifies them the
 way the probe does (carrier frequency, line period, field period); when three consecutive
 chunks agree on another type, the player is rebuilt for it on the same stream, keeping the
-window. While the reader has no sync the watch looks every second and the picture is blanked
-with `NO SIGNAL` in the OSD; a new disc of the same standard is simply re-acquired by the
-running decoder. The switch takes a second or two after the new disc's signal appears, and
+window. While the reader has no sync, or most of a frame's lines have no sync pulse (a
+player with no disc gives noise), the watch looks every second, the picture is blanked with
+`NO SIGNAL` in the OSD, the reader drops its lattice after half a second so the next disc is
+acquired afresh, and the analog-to-EFM audio fallback waits; a new disc of the same
+standard is re-acquired within about a second of its signal. A switch of standard comes
+three seconds after the first chunk that classifies as the new type, which on a disc
+spinning up is five or six seconds after its signal appears (the first seconds classify as
+nothing, or as the type at a line rate off the stream's, which is disregarded), and
 anything the old demodulator had buffered at that moment is skipped. The sample rate is the
 stream's and never changes, so for MUSE to be among the possibilities the capture must run at
 a rate that suits MUSE (62.5 MHz, say); `--write` records one type and stops at a switch.
+This was checked on the ethadc UDP stream with disc changes made from captures
+(`tools/compound-capture.py`, the tool's comment has the recipe).
 
 ## Playback options
 
