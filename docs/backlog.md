@@ -75,25 +75,6 @@ Last revised 2026-11-21.
   the lobe.  A joint non-linear fit of position, width and height per edge might, but not at
   real-time cost and not safely on noisy film; the practical lever stays a softer video lowpass
   as a per-disc option.  Parked.
-- **PAL dropout detector threshold.**  The detector's slew corroboration (a count of
-  sample-to-sample steps of the raw quadrature output above a fixed threshold, 1.0 at 40 MHz)
-  was calibrated on NTSC, and the raw output is in units of the standard's deviation: PAL's is
-  0.57 MHz against NTSC's 0.85 and its video band 5.8 MHz against 4.2, so both the legal signal
-  and the wideband noise slew faster in those units.  Measured 2026-11-21 on captures of equal
-  video-band SNR (29-30 dB): the steps above the threshold are 1.2-1.5 % of the samples on two
-  PAL discs against 0.03 % on an NTSC one, and the windows that pass the line condition's
-  eight exceedances 0.13-0.9 % against 0.014 %, so the second factor hardly discriminates on
-  PAL, and the envelope conditions flag 50-470 ppm of the samples against 5; what keeps the
-  picture clean is the later pinned-level corroboration in `sdtv_extend_dropouts`.  Scaling
-  the threshold by the standard's bandwidth over its deviation (about 2.1 for PAL) would put
-  the exceedance rates near NTSC's; the exact figure wants a PAL capture with known dropouts.
-  Hanover bars were checked the same day on a rotted PAL disc at 13 dB against a good copy of
-  the same programme: the line-alternating V component is below 0.0002 of full scale on both
-  and no line loses its V switch, so the five-line vote and the vertical chroma filter hold
-  under heavy noise and nothing is left to calibrate there.
-- **MUSE open questions:** the equaliser's reference could be verified against the Sony test
-  disc's patterns; the LD versus BS MUSE difference is unknown.
-
 ## Functionality
 
 - **Per-capture remembered settings:** a sidecar file next to the input, written on quit and
@@ -111,6 +92,29 @@ Last revised 2026-11-21.
 
 ## Done since this list was started
 
+- 2026-11-21: the PAL dropout detector threshold, measured and left alone.  The slew
+  corroboration's threshold is in units of the standard's deviation and was calibrated on
+  NTSC; on PAL (deviation 0.57 MHz against 0.85, video band 5.8 against 4.2 MHz) legal signal
+  crosses it 40 times as often, and the RF detector flags 390-490 ppm of the samples on clean
+  PAL discs against 5 on NTSC at equal video SNR.  A ground truth was built from three
+  independent masterings of one PAL programme (NYCSTM: two good copies at 27 dB and the
+  rotted one at 13 dB, 18 s aligned by disc code to the line, by cross-correlation of the
+  derivative to the sub-sample, compared after a 2 MHz low-pass with an edge mask, since the
+  masterings' edge responses differ, and each departure attributed by the RF envelope): the
+  good copies hold three real departures in 18 s, so their flags are false to within rounding;
+  the rotted copy's 126 departures are 116 cycle slips of the demodulation (one sample, 400
+  IRE after the low-pass, the envelope holding) and two carrier collapses of a microsecond.
+  Doubling the threshold (what the bandwidth-over-deviation ratio suggests) takes the false
+  flags from 494 to 18 ppm on the good copy and 391 to 1 on Big Day and keeps both collapses,
+  but the picture does not change: the pinned-level corroboration that follows already
+  discards the false RF flags, and the painted pixels per frame stay at 164 to 159 on the good
+  copy and 120 to 119 on Big Day.  So the threshold is miscalibrated on paper and harmless in
+  the picture, and is left as it is rather than re-recording the PAL goldens for nothing.
+  Hanover bars and the V switch were checked on the rotted copy at 13 dB against a good copy
+  the same day: below 0.0002 of full scale, no line loses its switch.  Reusable: the method,
+  independent copies of a programme as a dropout truth, works for false alarms; it cannot
+  label the defects a disc shares with no other copy, so a hit rate needs a disc known to be
+  scratched and a second pressing of it.
 - 2026-11-21: the SDTV black level sat 0.08 sigma of the blanking noise too high on every
   disc: `RobustNoise::median` returned the upper of the two middle values on an even count,
   and the porch windows it measures hold 16 samples, so each row's clamp level and the
