@@ -18,13 +18,6 @@ Last revised 2026-11-21.
   right count.
 - **muse-16 (16.2 MHz baseband) input type** is legacy: keep it working for existing u16 files,
   no new formats or level work, remove when nothing needs it.
-- **Settings changed with keys do not carry to the next input** on a multi-file command line
-  (black level, tint, audio track, subtitle track, CX).  Options do.  The per-disc memory does
-  not cover it either: it brings a setting back for the same capture, and the next input is
-  another file, usually the disc's other side.  A per-capture sidecar (below) would not cover
-  it either, for the same reason; what would is carrying the player state from one input to
-  the next within a run where the inputs decode alike.
-
 ## Picture quality
 
 - **MUSE impulse noise (FM clicks) concealment.**  White-on-black titles on a weak-carrier
@@ -91,6 +84,12 @@ Last revised 2026-11-21.
 
 ## Done since this list was started
 
+- 2026-11-21: the settings the keys change carry to the next input of the run (a disc's other
+  side, on the command line or chosen in the browser): what a run ends with -- the same
+  aspect, overscan, audio track, subtitle tracks, black level, CX and tint the state file
+  records for the disc -- is the starting point of the next input of the same standard, and
+  the next disc's own remembered settings win over it.  The tint became a live setting the
+  same day (K and L, the menu's Tint line, remembered per disc).
 - 2026-11-21: the PAL dropout detector threshold, measured and left alone.  The slew
   corroboration's threshold is in units of the standard's deviation and was calibrated on
   NTSC; on PAL (deviation 0.57 MHz against 0.85, video band 5.8 against 4.2 MHz) legal signal

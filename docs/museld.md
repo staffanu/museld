@@ -541,7 +541,11 @@ to `state.txt` in the player's per-user preferences directory
 what belongs to the disc: the aspect mode, the overscan, the audio track, the
 subtitle tracks chosen (or turned off), the black level mode, the CX mode and the tint.
 They come back when the capture is opened again, from the browser or the
-command line, over the command line's defaults.  Full screen and the decode
+command line, over the command line's defaults.  Within one run they also carry
+from one input to the next of the same standard (NTSC, PAL or MUSE), so what
+the keys changed on a disc's first side holds on its second, played next on the
+command line or chosen in the browser; a disc's own remembered settings win
+over what was carried.  Full screen and the decode
 toggles (field interpolation, 3D comb, film mode, noise reduction, dropouts, the
 equaliser) are not remembered.  `--no-state` leaves all of it out of a run:
 nothing remembered is applied and nothing is recorded.
