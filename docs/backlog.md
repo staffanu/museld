@@ -3,7 +3,7 @@
 Work worth doing, in rough order of value, with the reasoning behind each item so it can be
 picked up cold.  This is a working list for development, not the list of known limitations in
 `museld.md`: nothing here is promised, and items leave when done or when they stop making sense.
-Last revised 2026-11-14.
+Last revised 2026-11-21.
 
 ## Housekeeping
 
@@ -75,12 +75,24 @@ Last revised 2026-11-14.
   the lobe.  A joint non-linear fit of position, width and height per edge might, but not at
   real-time cost and not safely on noisy film; the practical lever stays a softer video lowpass
   as a per-disc option.  Parked.
-- **PAL calibration.**  Calibrated on the GGV1011 test disc and a handful of captures; the
-  dropout detector's thresholds were calibrated on NTSC; Hanover bars under heavy noise are worth
-  measuring with the pal-pilot tooling.
+- **PAL dropout detector threshold.**  The detector's slew corroboration (a count of
+  sample-to-sample steps of the raw quadrature output above a fixed threshold, 1.0 at 40 MHz)
+  was calibrated on NTSC, and the raw output is in units of the standard's deviation: PAL's is
+  0.57 MHz against NTSC's 0.85 and its video band 5.8 MHz against 4.2, so both the legal signal
+  and the wideband noise slew faster in those units.  Measured 2026-11-21 on captures of equal
+  video-band SNR (29-30 dB): the steps above the threshold are 1.2-1.5 % of the samples on two
+  PAL discs against 0.03 % on an NTSC one, and the windows that pass the line condition's
+  eight exceedances 0.13-0.9 % against 0.014 %, so the second factor hardly discriminates on
+  PAL, and the envelope conditions flag 50-470 ppm of the samples against 5; what keeps the
+  picture clean is the later pinned-level corroboration in `sdtv_extend_dropouts`.  Scaling
+  the threshold by the standard's bandwidth over its deviation (about 2.1 for PAL) would put
+  the exceedance rates near NTSC's; the exact figure wants a PAL capture with known dropouts.
+  Hanover bars were checked the same day on a rotted PAL disc at 13 dB against a good copy of
+  the same programme: the line-alternating V component is below 0.0002 of full scale on both
+  and no line loses its V switch, so the five-line vote and the vertical chroma filter hold
+  under heavy noise and nothing is left to calibrate there.
 - **MUSE open questions:** the equaliser's reference could be verified against the Sony test
-  disc's patterns; the LD versus BS MUSE difference is unknown.  (The de-emphasis on baseband
-  input was settled 2026-11-19, see below.)
+  disc's patterns; the LD versus BS MUSE difference is unknown.
 
 ## Functionality
 
@@ -99,6 +111,16 @@ Last revised 2026-11-14.
 
 ## Done since this list was started
 
+- 2026-11-21: the SDTV black level sat 0.08 sigma of the blanking noise too high on every
+  disc: `RobustNoise::median` returned the upper of the two middle values on an even count,
+  and the porch windows it measures hold 16 samples, so each row's clamp level and the
+  frame's blanking estimate were biased by that much (0.4 IRE on a 27 dB capture, 1.7 IRE on
+  a rotted PAL disc at 13 dB), and the white-flag gain on NTSC the other way.  Found while
+  comparing the decoder's rescaled frame against its own raw composite dump (a comparison
+  between copies of a disc is no use: three masterings of one PAL programme differ by 4 % of
+  range between themselves).  The median is the mean of the two middle values now; all 53
+  regression goldens re-recorded (NTSC 59-65 dB against the old ones, the WOW text clip 43.8
+  as its gain moved, PAL 50-56, MUSE 65-71).
 - 2026-11-20: the MUSE motion detection.  The detector was the two-frame difference alone
   (frames N and N-2, the same sub-sampling phase), cored by a threshold that grew with the edge
   signal and the brightness.  Judged offline against the decoder's own intra-field decode (the

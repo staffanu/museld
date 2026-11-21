@@ -15,12 +15,17 @@
 // video frame (used by the MUSE and NTSC noise measurements).
 class RobustNoise {
 public:
-    // Approximate median via nth_element; exact enough for noise estimation.
-    // Note: partially reorders v — pass a scratch copy if the order matters.
+    // The median; on an even count the mean of the two middle values.  Taking
+    // the upper one instead (as this did until 2026-11-21) biased every
+    // 16-sample porch window by +0.08 sigma, which set the SDTV black level
+    // that much too high: 0.4 IRE on a 27 dB capture, 1.7 IRE at 13 dB.
+    // Note: partially reorders v -- pass a scratch copy if the order matters.
     static float median(std::vector<float> &v) {
         auto mid = v.begin() + v.size() / 2;
         std::nth_element(v.begin(), mid, v.end());
-        return *mid;
+        if (v.size() % 2 == 1)
+            return *mid;
+        return 0.5f * (*mid + *std::max_element(v.begin(), mid));
     }
 
     // Robust level of a flat window: the value at the window centre after a
