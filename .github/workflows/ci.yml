@@ -35,14 +35,21 @@ jobs:
             libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
             catch2
 
-      # No Ubuntu package exists for ONNX Runtime (USE_OCR), so use the
-      # official release tarball.
+      # No Ubuntu package exists for ONNX Runtime (USE_OCR), and the release
+      # tarballs went with the microsoft/onnxruntime repository, which has
+      # returned 404 since 2026-11-17; the NuGet package on nuget.org carries
+      # the same headers and the Linux library, laid out here as the tarball was.
       - name: Install ONNX Runtime
         run: |
-          curl -fsSL -o onnxruntime.tgz \
-            https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-1.22.0.tgz
-          tar -xzf onnxruntime.tgz
-          mv onnxruntime-linux-x64-1.22.0 "$HOME/onnxruntime"
+          curl -fsSL -o onnxruntime.nupkg \
+            https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime/1.22.0
+          unzip -q onnxruntime.nupkg -d onnxruntime-nupkg
+          mkdir -p "$HOME/onnxruntime/lib"
+          cp -r onnxruntime-nupkg/build/native/include "$HOME/onnxruntime/include"
+          cp onnxruntime-nupkg/runtimes/linux-x64/native/libonnxruntime.so \
+            "$HOME/onnxruntime/lib/libonnxruntime.so.1.22.0"
+          ln -s libonnxruntime.so.1.22.0 "$HOME/onnxruntime/lib/libonnxruntime.so.1"
+          ln -s libonnxruntime.so.1.22.0 "$HOME/onnxruntime/lib/libonnxruntime.so"
 
       - name: Configure
         run: >
