@@ -3,7 +3,7 @@
 Work worth doing, in rough order of value, with the reasoning behind each item so it can be
 picked up cold.  This is a working list for development, not the list of known limitations in
 `museld.md`: nothing here is promised, and items leave when done or when they stop making sense.
-Last revised 2026-11-21.
+Last revised 2026-11-23.
 
 ## Housekeeping
 
@@ -35,6 +35,22 @@ Last revised 2026-11-21.
   samples off by half the black-white span, and the shift of the line against those neighbours
   by cross-correlation (none here).  Other discs show the same distortion; to be judged against
   the Sony MUSE decoder's picture of them first.
+- **Gate the SDTV sync measurements on RF dropouts.**  The sync pass finds pulses in the noise
+  of a carrier collapse, and a short burst of them unsettles the lattice: a clean PAL capture
+  with the RF replaced by 2 % noise for 1 ms twenty times a second (an experiment of
+  2026-11-22, the burst copies made offline) made the reader re-anchor on a vertical drift of
+  one to eight lines 35 times in 20 s, where the same capture undamaged does so never, and the
+  curve's local line period was off by up to 9 % around the bursts.  The same mechanism kept
+  the reader anchored through a no-disc gap (fixed 2026-11-21 by dropping the lattice on a
+  frame mostly without pulses), but a burst is far shorter than a frame and the lattice should
+  coast through it on its period instead of measuring in it: the dropout detector's envelope
+  already marks the stretch, so a measurement inside a flagged run can be refused, and the
+  period held, as the MUSE reader coasts its audio blocks.  Judge it by the re-anchor count and
+  the curve against the undamaged capture's, and on a scratched disc by the regression's
+  Abyss scratch clip.  Found while testing whether the video line clock could steer the EFM
+  bit clock -- the two are genlocked to 0.001 ppm and follow each other through 2000 ppm of
+  wow to 0.04 bits, but the EFM loop gained nothing from it on noise or rot, and through
+  bursts the unsettled curve made it worse, so that idea is dropped.
 - **Noise reduction, spatial.**  The temporal NR (`--nr`, key 6, 2026-11-11) averages still parts
   only; moving parts and PAL's 2.4x noise on them would need a spatial or motion-compensated
   stage, which is a different order of work.
