@@ -127,6 +127,7 @@ private:
     int64_t m_sync_dec_count;           // decimated samples produced
     float m_sync_filt[c_sync_filt_ring];
     double m_sync_delay;                // group delay, in demodulated samples
+    uint64_t m_pulses_in_dropouts = 0;  // sync pulses refused for lying in an RF dropout
     bool m_sync_below;                  // hysteresis slicer state
     int64_t m_sync_fall_idx;            // decimated index of the pending fall
     double m_sync_fall_frac;            // its crossing's fraction between the sample before and that one

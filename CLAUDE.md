@@ -448,7 +448,11 @@ exposed two such constants in 2026-10 -- a back-porch window that reached into t
 15 MHz demod rate, and pulse widths in whole decimated samples (0.53 µs there) that let
 equalizing pulses pass as hsync. Both showed as per-field sawtooth in `ntsc-burst-check.py`,
 vertical-interval missing-runs shorter than 9 in the timebase dump, and `vertical drift`/
-`lattice slipped` warnings. Re-run the 30, 40 and 62.5 MHz checks after touching that code. The slicer's 50% threshold must
+`lattice slipped` warnings. Re-run the 30, 40 and 62.5 MHz checks after touching that code.  A pulse with 0.4 us of the
+detector's dropout flags over its extent is refused (2026-11-23: the slicer finds pulses in the
+noise of a carrier collapse, and a burst of them pulled the lattice off the grid; the test is a
+clean capture with 1 ms of noise written in twenty times a second, judged by the re-anchor count
+and the curve against the undamaged capture's). The slicer's 50% threshold must
 come from the last pulse's own back porch, not a slow average: the WOW demo capture's baseband
 wanders ±4 IRE per rotation (eccentricity), and an averaged reference biased the crossings ±50 ns
 in step with it, which put the two fields a pixel apart (2026-10). `ntsc-sync-delta.py` slices at a

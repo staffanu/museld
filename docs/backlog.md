@@ -35,22 +35,6 @@ Last revised 2026-11-23.
   samples off by half the black-white span, and the shift of the line against those neighbours
   by cross-correlation (none here).  Other discs show the same distortion; to be judged against
   the Sony MUSE decoder's picture of them first.
-- **Gate the SDTV sync measurements on RF dropouts.**  The sync pass finds pulses in the noise
-  of a carrier collapse, and a short burst of them unsettles the lattice: a clean PAL capture
-  with the RF replaced by 2 % noise for 1 ms twenty times a second (an experiment of
-  2026-11-22, the burst copies made offline) made the reader re-anchor on a vertical drift of
-  one to eight lines 35 times in 20 s, where the same capture undamaged does so never, and the
-  curve's local line period was off by up to 9 % around the bursts.  The same mechanism kept
-  the reader anchored through a no-disc gap (fixed 2026-11-21 by dropping the lattice on a
-  frame mostly without pulses), but a burst is far shorter than a frame and the lattice should
-  coast through it on its period instead of measuring in it: the dropout detector's envelope
-  already marks the stretch, so a measurement inside a flagged run can be refused, and the
-  period held, as the MUSE reader coasts its audio blocks.  Judge it by the re-anchor count and
-  the curve against the undamaged capture's, and on a scratched disc by the regression's
-  Abyss scratch clip.  Found while testing whether the video line clock could steer the EFM
-  bit clock -- the two are genlocked to 0.001 ppm and follow each other through 2000 ppm of
-  wow to 0.04 bits, but the EFM loop gained nothing from it on noise or rot, and through
-  bursts the unsettled curve made it worse, so that idea is dropped.
 - **Noise reduction, spatial.**  The temporal NR (`--nr`, key 6, 2026-11-11) averages still parts
   only; moving parts and PAL's 2.4x noise on them would need a spatial or motion-compensated
   stage, which is a different order of work.
@@ -96,6 +80,25 @@ Last revised 2026-11-23.
 
 ## Done since this list was started
 
+- 2026-11-23: the SDTV sync pass refuses a pulse found in an RF dropout.  A burst of carrier
+  collapse had the slicer crossing its levels in the demodulated noise, and the false pulses
+  chained onto the lattice pulled it off the grid: a clean PAL capture with the RF replaced by
+  2 % noise for 1 ms twenty times a second (made offline) made the reader re-anchor on a
+  vertical drift 18 times and re-label the lattice 17 times in 20 s, with the curve 456
+  samples rms from the undamaged capture's and its local line period off by up to 9 %; at
+  0.5 ms a hundred times a second, 10 and 21.  Now a pulse with 0.4 us of flagged samples over
+  its extent and a microsecond either side is not a measurement and the lattice coasts on its
+  period: no events on either burst copy, the curve within 0.16 samples rms of the undamaged
+  one and the local period within 161 ppm.  Not any flagged sample: the detector flags about
+  half of a collapse's samples in short runs, but a clean PAL disc carries isolated flags of
+  one to three samples (the slew test, false on PAL) at 440 ppm, and refusing on any of them
+  took 1.5 % of the real pulses (the unsupported lines per frame 15 to 24, the lattice none
+  the worse); the count keeps that to 0.2 %, the curve within 0.01 samples of before.  The
+  flag runs of a real scratch (the Abyss clip) are 8 to 15 samples, which the count refuses.
+  Found while testing the video line clock as the EFM bit clock reference: the two are
+  genlocked to 0.001 ppm and follow each other through 2000 ppm of wow to 0.04 bits, but the
+  EFM loop gained nothing from it on noise or rot and lost through bursts, so that idea is
+  dropped.
 - 2026-11-21: live type switching tried on the ethadc UDP stream, from the desk: `ethadc-tx`
   (the ethadc repository's stand-in for the hardware) streamed compound captures -- a disc,
   8 s of no-carrier noise, another disc, made by `tools/compound-capture.py` -- to

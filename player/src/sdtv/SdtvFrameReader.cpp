@@ -348,7 +348,11 @@ bool SdtvFrameReader::readInputBlock(std::unique_ptr<SdtvInputBlock> const &outp
             m_log.info(eInput, std::format("Demodulated video dump complete: {}", dump_path));
     }
 
+    const uint64_t refused_before = m_pulses_in_dropouts;
     syncPass(dst, m_blocks_fetched * B, (int)c_input_sub_buffer_size);
+    if (m_pulses_in_dropouts != refused_before)
+        m_log.debug(eInput, std::format("SdtvFrameReader: {} sync pulses in dropouts refused ({} so far)",
+                                        m_pulses_in_dropouts - refused_before, m_pulses_in_dropouts));
     m_blocks_fetched++;
     m_stream_pos += B;
 
@@ -452,7 +456,34 @@ void SdtvFrameReader::syncPass(const float *data, int64_t stream_base, int count
                 m_blank_local = std::abs(level - m_blank_level) < 0.07f ? level : m_blank_level;
             }
             m_sync_rise_idx = m_sync_dec_count;
-            if ((is_hsync || is_broad) && m_sync_dec_count - m_sync_fall_idx < c_sync_filt_ring - 24) {
+            // A pulse found inside an RF dropout is not a measurement: the
+            // demodulated noise of a carrier collapse crosses the slicing
+            // levels at random, and a burst of such pulses chained onto the
+            // lattice pulled it off the grid (a clean PAL capture with the RF
+            // replaced by noise for 1 ms twenty times a second re-anchored on
+            // a vertical drift 35 times in 20 s, 2026-11-23).  The detector
+            // flags about half the samples of a collapse, in short runs, so a
+            // pulse with 0.4 us of flagged samples over its extent (and a
+            // microsecond either side, the flags being a few samples late) is
+            // refused, and the lattice coasts on its period as across any
+            // gap.  Not any flagged sample: a clean PAL disc carries isolated
+            // flags of one to three samples (the slew test, false on PAL) at
+            // 440 ppm, which touched 1.5 % of its pulses; the 0.4 us keep
+            // that to a fifth of a percent and still refuse a scratch's run
+            bool in_dropout = false;
+            if (is_hsync || is_broad) {
+                const int64_t margin = (int64_t)lround(1e-6 * m_sample_rate);
+                const int64_t first = m_sync_fall_idx * c_sync_decim + (c_sync_decim - 1) - (int64_t)m_sync_delay - margin;
+                const int64_t last = full_ix - (int64_t)m_sync_delay + margin;
+                const int64_t needed = (int64_t)lround(0.4e-6 * m_sample_rate);
+                int64_t flagged = 0;
+                for (int64_t q = max<int64_t>(first, full_ix - (int64_t)c_input_buffer_size + 1); q <= last && flagged < needed; q++)
+                    flagged += m_input_dropout_buffer[(size_t)q & c_input_buffer_size_mask] != 0;
+                in_dropout = flagged >= needed;
+                if (in_dropout)
+                    m_pulses_in_dropouts++;
+            }
+            if ((is_hsync || is_broad) && !in_dropout && m_sync_dec_count - m_sync_fall_idx < c_sync_filt_ring - 24) {
                 // 50% crossing between the measured tip and the blanking level
                 float tip_buf[40];
                 int tn = (int)min<int64_t>(40, m_sync_dec_count - m_sync_fall_idx - 1);
