@@ -43,6 +43,11 @@ required*: no.
 >
 > The app requires an Apple TV 4K (2017 or later); on an Apple TV HD it shows a
 > message saying so.
+>
+> RF capture is an established hobbyist format: the open-source ld-decode
+> project (https://github.com/happycube/ld-decode) and the Domesday Duplicator
+> capture hardware (https://www.domesday86.com/) are its tools, and public
+> sample captures are at https://madeye.org/ld-captures/public/.
 
 ## Per build: What to Test
 
