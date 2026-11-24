@@ -62,5 +62,9 @@ required*: no.
 - Screenshots: 1920x1080 frames of the sample playing, the menu over the
   picture, and the browser's first screen (`--export-frame` with
   `MUSELD_EXPORT_OVERLAYS=1` on the desktop build renders the same picture).
-- Copyright: Staffan Ulfberg.  The app is GPLv3; the App Store exception the
-  author grants as the sole copyright holder is in the repository's README.
+- Copyright: Staffan Ulfberg.  The app is GPLv3, and Apple's terms are held to
+  conflict with it, so before an App Store submission the author, as the sole
+  copyright holder of museld's own code, should add an App Store exception to
+  the license notice in the README (the libraries in the tvOS build -- SDL,
+  MoltenVK, libFLAC, stb, miniaudio, cpp-httplib, Noto Sans -- are permissive).
+  Not needed for TestFlight.
