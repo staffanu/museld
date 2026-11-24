@@ -512,6 +512,11 @@ if(BUILD_MUSE)
             XCODE_ATTRIBUTE_CODE_SIGN_STYLE Automatic
             XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${MUSELD_DEVELOPMENT_TEAM}"
             "XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED[sdk=appletvsimulator*]" NO
+            # An xcodebuild archive for App Store Connect installs the app into
+            # the archive's Products/Applications; CMake's project skips the
+            # install, which makes a "generic" archive that cannot be uploaded
+            XCODE_ATTRIBUTE_SKIP_INSTALL NO
+            XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
             # The icon and the top-shelf image (tvos/Assets.xcassets, drawn by
             # tvos/make-icons.py)
             XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "App Icon & Top Shelf Image"

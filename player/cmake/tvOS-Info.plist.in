@@ -34,6 +34,10 @@
 	<array>
 		<string>arm64</string>
 	</array>
+	<!-- No encryption of its own (plain http:// and udp://), so App Store Connect
+	     need not ask about export compliance for every build -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<!-- The http:// and udp:// inputs: a NAS or the ethadc capture box on the LAN -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>museld plays laserdisc captures from a server or capture device on your local network.</string>

@@ -6,7 +6,8 @@ inputs are the `http://` reader (a capture on a NAS) and the `udp://` reader (th
 see docs/museld.md, *Network input*.  Test device: an Apple TV 4K 2017 (A1842, A10X),
 enough to find the bottlenecks; a 2021+ model (A12/A15) is the realistic target for
 MUSE.  Development needs a Mac with Xcode; a free Apple ID suffices to run on your own
-Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight.
+Apple TV (7-day signing, re-deploy weekly), the paid program for one-year signing and
+TestFlight (the *TestFlight* entry under Done).
 
 ## Done
 
@@ -580,6 +581,26 @@ Apple TV (7-day signing, re-deploy weekly), the paid program only for TestFlight
   and the top shelf to look at.  CMake adds the catalog to the bundle and names it with
   `ASSETCATALOG_COMPILER_APPICON_NAME`; Xcode's actool writes `Assets.car` and the
   `CFBundleIcons`/`TVTopShelfImage` keys into the Info.plist.
+- **TestFlight** (2026-11-24, the first build uploaded): the paid membership upgraded
+  the Apple ID's Personal Team in place, so the team ID, the bundle identifier and the
+  device registration stayed, and the development profile became a one-year one.  The
+  upload is an `xcodebuild archive` of the generated project (scheme `museld`,
+  `-destination 'generic/platform=tvOS'`, `-allowProvisioningUpdates`), then
+  `xcodebuild -exportArchive` with an options plist of `method app-store-connect` and
+  `destination upload` (`export` writes the .ipa instead), signed with the Apple
+  Distribution certificate Xcode makes for the team on the first export, into an app
+  record that must exist in App Store Connect first (tvOS, the bundle identifier, any
+  SKU).  Two things the project needed: the target sets `SKIP_INSTALL NO` and an
+  `INSTALL_PATH`, since CMake's project skips the install and the archive then has no
+  Products/Applications and is "generic", which cannot be uploaded; and
+  `ITSAppUsesNonExemptEncryption` false in the Info.plist (no encryption of its own),
+  or App Store Connect asks about export compliance on every build.  Run xcodebuild
+  with the system PATH only: its openrsync forks a helper by name, finds Homebrew's
+  rsync 3.4.4, and the export fails with "Copy failed".  The archive carries no dSYM
+  (the Release configuration has no debug info), so TestFlight crash reports are not
+  symbolicated.  Internal testers (App Store Connect users of the team) get a build as
+  soon as it is processed; external testers and the public link wait on Beta App
+  Review.
 
 ### 2. Measure the rest
 
