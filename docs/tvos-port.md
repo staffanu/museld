@@ -601,6 +601,23 @@ TestFlight (the *TestFlight* entry under Done).
   symbolicated.  Internal testers (App Store Connect users of the team) get a build as
   soon as it is processed; external testers and the public link wait on Beta App
   Review.
+- **The bundled sample and build 3** (2026-11-24): a reviewer, or a new user, meets an empty
+  browser otherwise, and a clip served over the internet would stall (a 40 MHz capture is
+  240 Mbit/s as 16-bit FLAC, 120 at 30 MHz and 8 bits), so the app carries one: ten seconds
+  of a Space Shuttle launch from the SpaceDisc vol. 1 laserdisc (SS098-0001, NASA's mission
+  report footage, a US government work; the disc's own additions, a Japanese narration on the
+  left analog channel and the publisher's titles, are kept out by playing the right channel
+  alone and cutting inside the report), captured on the fx3usbadc at 33.33 MHz, 8 bits,
+  frames 2842 on of side 1, 211 MB as FLAC in Ogg (`SampleCapture.h` names it; CMake
+  downloads it from madeye.org by hash, or `MUSELD_SAMPLE_CAPTURE` names a local copy).  The
+  browser's Open page offers it after the address field, on any build that has the file under
+  `samples/` beside the executable, and the player applies the sample's own settings (the
+  right channel) before any memory of it.  SDL is built without hidapi on tvOS: its Steam
+  Controller support referenced CoreBluetooth, which made App Store Connect ask for a
+  Bluetooth purpose string (ITMS-90683) the app has no use for.  Trap: an archive leaves
+  broken symlinks named museld.app and libac3rf.a in build-tvos-device/src/Release-appletvos
+  (to its own intermediates), and the next ordinary build fails with "unable to create
+  directory ... museld.app" until they are removed.
 
 ### 2. Measure the rest
 

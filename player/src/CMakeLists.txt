@@ -228,6 +228,13 @@ if(BUILD_MUSE)
         set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
         set(SDL_TESTS OFF CACHE BOOL "" FORCE)
         set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+        if(MUSELD_TVOS)
+            # SDL's hidapi is for the Steam Controller over CoreBluetooth there;
+            # the Siri Remote and game controllers come through GameController,
+            # and a CoreBluetooth reference makes App Store Connect ask for a
+            # Bluetooth purpose string (ITMS-90683)
+            set(SDL_HIDAPI OFF CACHE BOOL "" FORCE)
+        endif()
         FetchContent_Declare(SDL3
             URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz
             DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
@@ -505,7 +512,7 @@ if(BUILD_MUSE)
             MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/tvOS-Info.plist.in"
             MACOSX_BUNDLE_GUI_IDENTIFIER "${MUSELD_BUNDLE_IDENTIFIER}"
             MACOSX_BUNDLE_BUNDLE_NAME museld
-            MACOSX_BUNDLE_BUNDLE_VERSION 2
+            MACOSX_BUNDLE_BUNDLE_VERSION 3
             MACOSX_BUNDLE_SHORT_VERSION_STRING 0.6.0
             XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${MUSELD_BUNDLE_IDENTIFIER}"
             XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY 3
@@ -535,6 +542,32 @@ if(BUILD_MUSE)
             GENERATED TRUE MACOSX_PACKAGE_LOCATION Resources/shaders)
         set_source_files_properties(${MUSELD_FONT_DST} PROPERTIES
             GENERATED TRUE MACOSX_PACKAGE_LOCATION Resources/fonts)
+
+        # The sample capture (ten seconds of a Space Shuttle launch from the
+        # SpaceDisc vol. 1 laserdisc, NASA's mission report footage, 33.33 MHz
+        # 8-bit FLAC): the browser's first screen offers it, so the app plays
+        # something before any server is set up.  Fetched from the project's
+        # server unless a local copy is named; the player looks for it by
+        # this name under samples/ beside the executable (SampleCapture.h)
+        set(MUSELD_SAMPLE_CAPTURE "" CACHE FILEPATH
+            "A local copy of samples/spacedisc-sts-launch-10s.ldf to bundle instead of downloading it")
+        set(sample_file "${MUSELD_SAMPLE_CAPTURE}")
+        if(sample_file STREQUAL "")
+            set(sample_file "${CMAKE_BINARY_DIR}/spacedisc-sts-launch-10s.ldf")
+            if(NOT EXISTS "${sample_file}")
+                message(STATUS "Downloading the sample capture (211 MB)")
+                file(DOWNLOAD https://madeye.org/ld-captures/public/museld-sample/spacedisc-sts-launch-10s.ldf
+                    "${sample_file}" EXPECTED_HASH SHA256=dc961ef38362965360afacdf93c66be1136feea88ddb7c8a65e42a2f4c655bac
+                    SHOW_PROGRESS STATUS sample_status)
+                list(GET sample_status 0 sample_code)
+                if(NOT sample_code EQUAL 0)
+                    file(REMOVE "${sample_file}")
+                    message(FATAL_ERROR "The sample capture could not be downloaded: ${sample_status} (or name a local copy in MUSELD_SAMPLE_CAPTURE)")
+                endif()
+            endif()
+        endif()
+        target_sources(museld PRIVATE "${sample_file}")
+        set_source_files_properties("${sample_file}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources/samples)
     endif()
 endif()
 

@@ -27,6 +27,9 @@ public:
     MenuPage *openPage() const { return m_open_page; }
     // Lists a directory (pushing the listing page)
     void browse(const std::string &location) { showListing(location); }
+    // A capture shipped with the player: an item on the Open page, after the
+    // address field, that plays it (the tvOS app's bundled sample)
+    void setSample(const std::string &label, const std::string &location);
     // A web server's listing is fetched in the background: this applies it
     // once it has arrived.  Call it every frame while the menu is up.
     void poll();
@@ -52,6 +55,7 @@ private:
     MenuPage *m_listing_page;
     std::string m_location;
     std::string m_last_typed; // the address field's last text, prefilled next time
+    std::string m_sample_label, m_sample_location;
     // A fetch of an index page under way, on a thread of its own that also
     // owns this (detached: a fetch that is no longer wanted finishes alone)
     struct Fetch {

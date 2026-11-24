@@ -538,8 +538,10 @@ browser.
 
 The menu's Open page is a file browser: an address field, the directory the
 browser was last in, this computer's directories, and the addresses opened
-recently.  It lists a directory on this machine or on a web server through the
-server's index page (Apache, nginx, Python's `http.server` and the like),
+recently.  A player with a sample capture beside it (the Apple TV app ships one,
+see below; a desktop build finds the same file under `samples/` next to the
+executable) offers "Play the sample capture" as well.  It lists a directory on
+this machine or on a web server through the server's index page (Apache, nginx, Python's `http.server` and the like),
 directories first, with the sizes the listing gives.  Choosing a file plays it,
 and the player comes back to the browser when the input ends, or at once with
 the reason when the file cannot be played.  The address field takes anything
@@ -616,6 +618,11 @@ Mac and an Apple ID (a free one signs the app for your own Apple TV for a week a
 e-mail staffan@ulfberg.se to be added as a TestFlight tester and install it from the TestFlight
 app.  The app has no command line: it starts in the file browser, which lists web servers only,
 there being no local directories, and it keeps what it remembers in its application container.
+The browser's first screen offers the sample capture bundled with the app, ten seconds of a Space
+Shuttle launch: NASA's mission report footage from the SpaceDisc vol. 1 laserdisc, which is a US
+government work and so free of copyright, captured at 33.33 MHz and played with the disc's
+English (right) analog channel alone, the left one carrying the publisher's Japanese narration.
+It plays at once, before any server is set up, and is what to try first.
 The Siri Remote drives it (a TV remote over HDMI-CEC sends the arrows, select and back, nothing
 else): select pauses, left and right seek, up and down find chapters, and the Menu button opens
 the on-screen menu over the picture and, from its root page, closes it again.  The menu's Stop

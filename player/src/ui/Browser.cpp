@@ -76,6 +76,12 @@ void Browser::rebuildOpenPage() {
     enter.label = "Enter an address...";
     enter.activate = [this] { enterAddress(); };
     items.push_back(std::move(enter));
+    if (!m_sample_location.empty()) {
+        MenuItem sample;
+        sample.label = m_sample_label;
+        sample.activate = [this, location = m_sample_location] { go(location); };
+        items.push_back(std::move(sample));
+    }
     if (!m_state.lastDirectory().empty()) {
         MenuItem last;
         last.label = "Browse " + shortLocation(m_state.lastDirectory(), 40);
@@ -95,6 +101,12 @@ void Browser::rebuildOpenPage() {
         items.push_back(std::move(item));
     }
     m_menu.setItems(m_open_page, std::move(items));
+}
+
+void Browser::setSample(const std::string &label, const std::string &location) {
+    m_sample_label = label;
+    m_sample_location = location;
+    rebuildOpenPage();
 }
 
 void Browser::enterAddress() {

@@ -51,6 +51,7 @@
 #include "ui/Browser.h"
 #include "ui/DirectoryListing.h"
 #include "ui/SavedState.h"
+#include "SampleCapture.h"
 #include "subtitles/Eia608Decoder.h"
 #include "subtitles/SrtParser.h"
 #include "subtitles/SubtitleDiscovery.h"
@@ -456,6 +457,8 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                     fields += std::format("{}{} {}", fields.empty() ? "" : ", ", name, *value);
             log.info(eApplication, std::format("{}: {}", why, fields));
         };
+        if (sample_capture::isSample(input_name))
+            apply_settings(sample_capture::settings(), "The sample capture's own settings");
         const std::optional<DiscSettings> remembered = saved_state.discSettings(input_name);
         if (remembered)
             apply_settings(*remembered, "Remembered for this disc");
@@ -523,6 +526,8 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             open_next = location;
             menu.close();
         });
+        if (const auto sample = sample_capture::locate(executable_dir))
+            browser.setSample(sample_capture::c_label, *sample);
         buildPlayerMenu(menu, PlayerMenuBindings{state, reader_controls, dropout_mode, audio_track, full_screen, window,
                                                  log, is_muse, is_tvos, returns_to_browser, &menu_quit}, browser.openPage());
         input.setMenu(&menu);
@@ -1551,6 +1556,8 @@ static std::optional<std::string> browseForInput(Logger &log, const string &exec
     Menu menu;
     MenuOverlay menu_overlay;
     Browser browser(menu, saved_state, !is_tvos, [&](const std::string &location) { chosen = location; });
+    if (const auto sample = sample_capture::locate(executable_dir))
+        browser.setSample(sample_capture::c_label, *sample);
     menu.setRoot(browser.openPage()); // the root here: Back from it leaves
     menu.open();
     static bool hooks_done = false; // the scripted checks apply to the first screen only
