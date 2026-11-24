@@ -36,10 +36,13 @@ namespace sample_capture {
         return input_name.size() >= name.size() && input_name.compare(input_name.size() - name.size(), name.size(), name) == 0;
     }
 
-    // What the sample is played with before any memory of it: the English channel
+    // What the sample is played with before any memory of it: the English
+    // channel, and again from the start when it ends, so ten seconds are
+    // long enough to look at the menus while it plays
     inline DiscSettings settings() {
         DiscSettings d;
         d.channels = "right";
+        d.repeat = "on";
         return d;
     }
 }

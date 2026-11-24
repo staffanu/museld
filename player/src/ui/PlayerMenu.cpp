@@ -219,6 +219,8 @@ MenuPage *buildPlayerMenu(Menu &menu, const PlayerMenuBindings &b, MenuPage *ope
                                [&s, &r, &log](int d) { chapterOrPan(s, r, log, d > 0); });
     chapter.activate = [&menu, &s, &r, &log] { openGoToChapterEntry(menu, s, r, log); };
     playback->items.push_back(std::move(chapter));
+    playback->items.push_back(setting("Repeat", "R", [&s] { return onOff(s.repeat); },
+                                      [&s](int) { toggleRepeat(s); }, [&r] { return !r.input_is_live; }));
     playback->items.push_back(setting("Picture stops", "P", [&s] { return onOff(s.honor_picture_stops); },
                                       [&s](int) { togglePictureStops(s); }));
 

@@ -450,12 +450,14 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             if (d.channels == "stereo") state.audio_channel_mode = AudioChannelMode::eStereo;
             else if (d.channels == "left") state.audio_channel_mode = AudioChannelMode::eLeft;
             else if (d.channels == "right") state.audio_channel_mode = AudioChannelMode::eRight;
+            if (d.repeat == "on") state.repeat = !reader_controls.input_is_live;
+            else if (d.repeat == "off") state.repeat = false;
             std::string fields;
             for (const auto &[name, value] : {std::pair{"aspect", &d.aspect}, std::pair{"overscan", &d.overscan},
                                               std::pair{"audio", &d.audio}, std::pair{"subtitles", &d.subtitle},
                                               std::pair{"second subtitles", &d.subtitle2}, std::pair{"black level", &d.black_level},
                                               std::pair{"CX", &d.cx}, std::pair{"tint", &d.tint},
-                                              std::pair{"channels", &d.channels}})
+                                              std::pair{"channels", &d.channels}, std::pair{"repeat", &d.repeat}})
                 if (!value->empty())
                     fields += std::format("{}{} {}", fields.empty() ? "" : ", ", name, *value);
             log.info(eApplication, std::format("{}: {}", why, fields));
@@ -492,6 +494,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             d.tint = std::format("{:g}", state.tint_degrees);
             d.channels = state.audio_channel_mode == AudioChannelMode::eLeft ? "left"
                        : state.audio_channel_mode == AudioChannelMode::eRight ? "right" : "stereo";
+            d.repeat = state.repeat ? "on" : "off";
             return d;
         };
         // The fields of a that differ from b
@@ -506,10 +509,11 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             if (a.cx != b.cx) d.cx = a.cx;
             if (a.tint != b.tint) d.tint = a.tint;
             if (a.channels != b.channels) d.channels = a.channels;
+            if (a.repeat != b.repeat) d.repeat = a.repeat;
             return d;
         };
         DiscSettings start_settings = settings_now();   // the subtitle fields are filled once the tracks exist
-        DiscSettings default_settings{"normal", "0", "default", "", "", "auto", "auto", "0", "stereo"};
+        DiscSettings default_settings{"normal", "0", "default", "", "", "auto", "auto", "0", "stereo", "off"};
 
         OsdOverlay osd;
         FrameBlitter blitter;
@@ -855,9 +859,19 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             // A probe near the end of a capture may find no signal there and
             // run into the end of the input, which would finish the reader:
             // it waits there instead while a search is on
-            if (searching != search_holds_input_end && reader_controls.holdAtInputEnd) {
-                reader_controls.holdAtInputEnd(searching);
-                search_holds_input_end = searching;
+            // Repeat holds it there too, and seeks back to the start once the
+            // reader waits at the end with nothing more decoded; turning
+            // repeat off at the end releases the hold, and the input ends
+            const bool hold_input_end = searching || (state.repeat && !reader_controls.input_is_live);
+            if (hold_input_end != search_holds_input_end && reader_controls.holdAtInputEnd) {
+                reader_controls.holdAtInputEnd(hold_input_end);
+                search_holds_input_end = hold_input_end;
+            }
+            if (!searching && state.repeat && !state.last_decoded.decoded
+                && reader_controls.atInputEnd && reader_controls.atInputEnd()) {
+                log.info(eApplication, "Repeat: the input ended, playing it again from the start");
+                if (!PlayerActions::seekBy(state, reader_controls, -1e12))
+                    state.repeat = false; // an input that cannot seek ends as it would
             }
 
             // A live input that now carries another type: this player is
@@ -2169,6 +2183,7 @@ int main(int argc, char *argv[]) {
     // Which of the disc settings the command line gave (they beat a disc's memory)
     bool aspect_given = false, overscan_given = false, audio_given = false, black_level_given = false, cx_given = false, tint_given = false;
     string audio_channels; // --audio-channels, empty when not given
+    bool repeat_given = false;
     optional<string> subtitles_file;
     optional<string> subtitle_font_path;
     double subtitle_offset_seconds = 0.0;
@@ -2410,6 +2425,10 @@ int main(int argc, char *argv[]) {
             cerr << "--black-level must be auto, m or j" << endl;
             exit(1);
         }
+    });
+    options.flag("--repeat", "Play the file again from its start when it ends (the R key toggles "
+                             "it; remembered per disc)", [&] () -> void {
+        repeat_given = true;
     });
     options.option("--audio-channels", "MODE", "The channels heard of two-channel audio: stereo (default), "
                                                 "left or right, for a bilingual disc (the B key cycles them; "
@@ -2715,6 +2734,7 @@ int main(int argc, char *argv[]) {
             if (cx_given) g.cx = cx_mode == Decoder::CxMode::eOff ? "off" : cx_mode == Decoder::CxMode::eOn ? "on" : "auto";
             if (tint_given) g.tint = std::format("{:g}", tint_degrees);
             g.channels = audio_channels;
+            if (repeat_given) g.repeat = "on";
             return g;
         };
         const auto decodes_alike = [](InputType a, InputType b) {
@@ -3002,7 +3022,8 @@ int main(int argc, char *argv[]) {
                                                std::pair{&d.audio, &carried_settings->audio}, std::pair{&d.subtitle, &carried_settings->subtitle},
                                                std::pair{&d.subtitle2, &carried_settings->subtitle2}, std::pair{&d.black_level, &carried_settings->black_level},
                                                std::pair{&d.cx, &carried_settings->cx}, std::pair{&d.tint, &carried_settings->tint},
-                                               std::pair{&d.channels, &carried_settings->channels}})
+                                               std::pair{&d.channels, &carried_settings->channels},
+                                               std::pair{&d.repeat, &carried_settings->repeat}})
                     if (!from->empty())
                         *to = *from;
                 carried_type = file_input_type;

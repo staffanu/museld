@@ -43,19 +43,10 @@ void seekOrPan(PlayerState &state, ReaderControls &reader, double seconds) {
                                              0.5 / state.zoom_factor, 1.0 - 0.5 / state.zoom_factor);
         return;
     }
-    if (!reader.seek(seconds)) {
+    if (!seekBy(state, reader, seconds)) {
         state.osd_text = "SEEK FAILED"; // a live input, or past the end of the file
         return;
     }
-    // Keep the stream clock (subtitle fallback time base) in step.  The
-    // input readers clamp backward seeks at the start of the input, so
-    // clamp the clock the same way; stream_seconds goes negative when
-    // seeking back across the initial --seek position, matching the file.
-    if (seconds < 0)
-        state.stream_seek_offset_seconds +=
-                std::max(seconds, -(state.stream_start_seconds + state.stream_seconds));
-    else
-        state.stream_seek_offset_seconds += seconds;
     if (state.paused) {
         state.paused = false;
         state.paused_countdown = 5;
@@ -71,6 +62,26 @@ void chapterOrPan(PlayerState &state, ReaderControls &reader, Logger &log, bool 
         return;
     }
     startPositionSearch(state, reader, log, next ? PositionSearch::Target::nextChapter() : PositionSearch::Target::previousChapter());
+}
+
+bool seekBy(PlayerState &state, ReaderControls &reader, double seconds) {
+    if (!reader.seek(seconds))
+        return false;
+    // Keep the stream clock (subtitle fallback time base) in step.  The
+    // input readers clamp backward seeks at the start of the input, so
+    // clamp the clock the same way; stream_seconds goes negative when
+    // seeking back across the initial --seek position, matching the file.
+    if (seconds < 0)
+        state.stream_seek_offset_seconds +=
+                std::max(seconds, -(state.stream_start_seconds + state.stream_seconds));
+    else
+        state.stream_seek_offset_seconds += seconds;
+    return true;
+}
+
+void toggleRepeat(PlayerState &state) {
+    state.repeat = !state.repeat;
+    state.osd_text = state.repeat ? "REPEAT ON" : "REPEAT OFF";
 }
 
 void togglePictureStops(PlayerState &state) {

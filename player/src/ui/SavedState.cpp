@@ -47,6 +47,7 @@ void SavedState::load() {
                     else if (name == "cx") settings.cx = v;
                     else if (name == "tint") settings.tint = v;
                     else if (name == "channels") settings.channels = v;
+                    else if (name == "repeat") settings.repeat = v;
                 }
                 if (end == std::string::npos) break;
                 at = end + 1;
@@ -75,7 +76,7 @@ bool SavedState::save() const {
                                           std::pair{"audio", &d.audio}, std::pair{"subtitle", &d.subtitle},
                                           std::pair{"subtitle2", &d.subtitle2}, std::pair{"black_level", &d.black_level},
                                           std::pair{"cx", &d.cx}, std::pair{"tint", &d.tint},
-                                          std::pair{"channels", &d.channels}})
+                                          std::pair{"channels", &d.channels}, std::pair{"repeat", &d.repeat}})
             if (!value->empty())
                 out << "\t" << name << "=" << *value;
         out << "\n";

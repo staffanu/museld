@@ -81,6 +81,7 @@ struct PlayerState {
     // user turns it off with the P key; each stop pauses once.  Off from
     // the start on a live input, whose source stops by itself (runPlayer)
     bool honor_picture_stops = true;
+    bool repeat = false; // play the input again from its start when it ends (files only)
     std::optional<int64_t> last_picture_stop_offset;
 
     // A position search in progress (the Up/Down keys, the menu's go-to):

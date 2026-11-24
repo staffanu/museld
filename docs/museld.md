@@ -192,6 +192,7 @@ This was checked on the ethadc UDP stream with disc changes made from captures
 | `--time <h:mm:ss>` | Start playing at this time of the disc's time code (CLV discs; `mm:ss` also accepted), found like a chapter |
 | `--frame <n>` | Start playing at frame `n` of a CAV disc, or of a MUSE CLV disc (whose disc code numbers its frames too), found like a chapter |
 | `--pause` | Start paused |
+| `--repeat` | Play the file again from its start when it ends, until stopped; the R key toggles it, and the choice is remembered per disc. Not for a live input |
 | `--export-frame <file>` | Save one decoded frame as PNG to `<file>` and quit. Combine with `--export-frame-at` to give the decoder (sync lock, adaptive equaliser, motion detection) a warm-up run from the `--seek` position. |
 | `--export-frame-at <seconds>` | Stream position of the frame saved by `--export-frame` (absolute, same units as `--seek` — not a delay after it). Default: the first decoded frame. |
 | `--no-dropout` / `--highlight-dropout` | Disable dropout concealment, or highlight dropouts instead of concealing them (see below) |
@@ -480,6 +481,7 @@ All of these are off with `--no-keys`, which also keeps the window from taking t
 | G | Go to a time (CLV) or frame (CAV): a number entry over the picture (see Chapters above) |
 | H | Go to a chapter by its number: the same number entry (see Chapters above) |
 | P | Toggle honouring the picture stop codes (on by default for files, off for live input) |
+| R | Toggle repeat: the file plays again from its start when it ends (`--repeat` sets it; remembered per disc) |
 | 1 | Normal field interpolation (motion detection) |
 | 2 | Force intra-field interpolation (treat everything as motion) |
 | 3 | Force inter-frame interpolation (treat everything as still) |
@@ -559,8 +561,8 @@ browser remembers -- the recent addresses and the last directory -- is written
 to `state.txt` in the player's per-user preferences directory
 (`MUSELD_STATE_FILE` names another file).  The same file remembers, per capture,
 what belongs to the disc: the aspect mode, the overscan, the audio track, the
-subtitle tracks chosen (or turned off), the black level mode, the CX mode, the tint and
-the channels heard, each only where it was left away from its default, so a disc played with everything
+subtitle tracks chosen (or turned off), the black level mode, the CX mode, the tint, the
+channels heard and repeat, each only where it was left away from its default, so a disc played with everything
 at the defaults has no entry.  They come back when the capture is opened again, from
 the browser or the command line.  An option given on the command line beats what the
 disc remembers for that setting, and the settings the keys changed on the previous
@@ -621,8 +623,9 @@ there being no local directories, and it keeps what it remembers in its applicat
 The browser's first screen offers the sample capture bundled with the app, ten seconds of a Space
 Shuttle launch: NASA's mission report footage from the SpaceDisc vol. 1 laserdisc, which is a US
 government work and so free of copyright, captured at 33.33 MHz and played with the disc's
-English (right) analog channel alone, the left one carrying the publisher's Japanese narration.
-It plays at once, before any server is set up, and is what to try first.  The app needs an
+English (right) analog channel alone, the left one carrying the publisher's Japanese narration,
+and repeating until stopped.  It plays at once, before any server is set up, and is what to
+try first.  The app needs an
 Apple TV 4K (2017 or later): the Apple TV HD's GPU is below what the video pipeline uses, and
 the app says so at start instead of showing a black picture.
 The Siri Remote drives it (a TV remote over HDMI-CEC sends the arrows, select and back, nothing

@@ -615,7 +615,8 @@ TestFlight (the *TestFlight* entry under Done).
   downloads it from madeye.org by hash, or `MUSELD_SAMPLE_CAPTURE` names a local copy).  The
   browser's Open page offers it after the address field, on any build that has the file under
   `samples/` beside the executable, and the player applies the sample's own settings (the
-  right channel) before any memory of it.  SDL is built without hidapi on tvOS: its Steam
+  right channel, and repeat, a new per-disc setting with the R key and `--repeat`, so ten
+  seconds last as long as a look at the menus) before any memory of it.  SDL is built without hidapi on tvOS: its Steam
   Controller support referenced CoreBluetooth, which made App Store Connect ask for a
   Bluetooth purpose string (ITMS-90683) the app has no use for.  Build 4 adds the GPU check:
   the Info.plist can require tvOS 17 and arm64 but not a model, so the Apple TV HD (A8, Metal's

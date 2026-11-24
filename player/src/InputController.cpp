@@ -306,6 +306,8 @@ bool InputController::poll(SDL_Window *window,
         openGoToChapterEntry(*m_menu, state, reader, m_log);
     if (checkKey(SDL_SCANCODE_P))
         PlayerActions::togglePictureStops(state);
+    if (checkKey(SDL_SCANCODE_R))
+        PlayerActions::toggleRepeat(state);
     if (checkKey(SDL_SCANCODE_1))
         PlayerActions::setFieldInterpolation(state, m_log, Decoder::FieldInterpolationMode::eNormal);
     if (checkKey(SDL_SCANCODE_2))

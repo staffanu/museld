@@ -36,7 +36,8 @@ required*: no.
 > the source, the documentation and the desktop releases are.
 >
 > To try the app: open it, choose "Play the sample capture (a Space Shuttle
-> launch)" on the first screen, and the clip plays with sound.  The sample is
+> launch)" on the first screen, and the clip plays with sound, repeating until
+> stopped from the menu.  The sample is
 > inside the app: ten seconds of NASA mission report footage, a US government
 > work, from a laserdisc.  Select on the remote pauses, left and right seek, up
 > and down move between chapters, and the Menu button opens the settings over
@@ -55,8 +56,9 @@ required*: no.
 ## Per build: What to Test
 
 > Open the app and choose "Play the sample capture" on the first screen.  The
-> launch should play at once, with sound (the English narration).  Then press
-> Menu to look at the settings, and select to pause.  If you have captures on a
+> launch should play at once, with sound (the English narration), and repeat
+> until stopped.  Then press Menu to look at the settings, and select to
+> pause.  If you have captures on a
 > web server, "Enter an address..." takes its address.
 
 ## The App Store listing, when it comes to that

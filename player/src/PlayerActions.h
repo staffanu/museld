@@ -26,6 +26,10 @@ namespace PlayerActions {
     // Up/Down: pan while zoomed, else the next or previous chapter
     void chapterOrPan(PlayerState &state, ReaderControls &reader, Logger &log, bool next);
     void togglePictureStops(PlayerState &state);
+    void toggleRepeat(PlayerState &state);
+    // The player's seek by `seconds`, clamped at the input's start, keeping
+    // the stream clock in step; false when the input refused
+    bool seekBy(PlayerState &state, ReaderControls &reader, double seconds);
     void setFieldInterpolation(PlayerState &state, Logger &log, Decoder::FieldInterpolationMode mode);
     void cycleFieldInterpolation(PlayerState &state, Logger &log, int direction);
     void toggle3dComb(PlayerState &state, Logger &log);
