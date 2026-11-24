@@ -30,7 +30,10 @@ required*: no.
 **Review Notes**
 
 > museld decodes RF captures that users make of their own laserdiscs.  Nothing
-> is downloaded from or shared with anyone, and there is no account.
+> is downloaded from or shared with anyone, and there is no account.  The app is
+> the Apple TV port of the open-source museld player for Linux, macOS and
+> Windows, developed since 2021 at https://github.com/staffanu/museld, where
+> the source, the documentation and the desktop releases are.
 >
 > To try the app: open it, choose "Play the sample capture (a Space Shuttle
 > launch)" on the first screen, and the clip plays with sound.  The sample is
