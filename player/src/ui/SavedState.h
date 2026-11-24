@@ -30,10 +30,11 @@ struct DiscSettings {
     std::string black_level; // auto, m, j (NTSC)
     std::string cx;          // auto, off, on (the analog audio's CX expansion)
     std::string tint;        // the hue rotation in degrees (NTSC/PAL)
+    std::string channels;    // stereo, left, right (the channels heard of two-channel audio)
     bool operator==(const DiscSettings &) const = default;
     bool empty() const {
         return aspect.empty() && overscan.empty() && audio.empty() && subtitle.empty() && subtitle2.empty()
-               && black_level.empty() && cx.empty() && tint.empty();
+               && black_level.empty() && cx.empty() && tint.empty() && channels.empty();
     }
 };
 

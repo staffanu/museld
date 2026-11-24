@@ -174,7 +174,7 @@ TEST_CASE("The saved state remembers what a disc was played with", "[Browser]") 
         REQUIRE(!state.discSettings("http://nas/a.s8"));
         state.setDiscSettings("http://nas/a.s8", DiscSettings{"zoom", "0.05", "efm", "FILE: a.srt", "off", "j", "on"});
         state.setDiscSettings("/local/b.lds", DiscSettings{"normal", "full", "ac3", "", "", "auto", "off"});
-        state.setDiscSettings("http://nas/a.s8", DiscSettings{"squeeze", "0", "default", "", "", "m", "auto", "-3"}); // replaces
+        state.setDiscSettings("http://nas/a.s8", DiscSettings{"squeeze", "0", "default", "", "", "m", "auto", "-3", "left"}); // replaces
     }
     {
         SavedState state(path);
@@ -186,6 +186,7 @@ TEST_CASE("The saved state remembers what a disc was played with", "[Browser]") 
         CHECK(a->black_level == "m");
         CHECK(a->cx == "auto");
         CHECK(a->tint == "-3");
+        CHECK(a->channels == "left");
         const auto b = state.discSettings("/local/b.lds");
         REQUIRE(b);
         CHECK(*b == DiscSettings{"normal", "full", "ac3", "", "", "auto", "off"});

@@ -407,7 +407,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
         state.full_image = initial_full_image;
         state.overscan = initial_overscan;
         // The disc settings -- the aspect, the overscan, the audio track, the
-        // black level, the tint and the CX mode (the subtitle choice below, once
+        // black level, the tint, the CX mode and the channels heard (the subtitle choice below, once
         // the tracks exist) -- by how recent the intent is, each set a partial
         // one that fills only the fields it holds: over the defaults, what the
         // disc was last played with, then the options given on this command
@@ -443,11 +443,15 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             else if (d.cx == "on") state.analog_cx_mode = Decoder::CxMode::eOn;
             if (!d.tint.empty())
                 state.tint_degrees = std::clamp((float)atof(d.tint.c_str()), -PlayerActions::c_tint_range, PlayerActions::c_tint_range);
+            if (d.channels == "stereo") state.audio_channel_mode = AudioChannelMode::eStereo;
+            else if (d.channels == "left") state.audio_channel_mode = AudioChannelMode::eLeft;
+            else if (d.channels == "right") state.audio_channel_mode = AudioChannelMode::eRight;
             std::string fields;
             for (const auto &[name, value] : {std::pair{"aspect", &d.aspect}, std::pair{"overscan", &d.overscan},
                                               std::pair{"audio", &d.audio}, std::pair{"subtitles", &d.subtitle},
                                               std::pair{"second subtitles", &d.subtitle2}, std::pair{"black level", &d.black_level},
-                                              std::pair{"CX", &d.cx}, std::pair{"tint", &d.tint}})
+                                              std::pair{"CX", &d.cx}, std::pair{"tint", &d.tint},
+                                              std::pair{"channels", &d.channels}})
                 if (!value->empty())
                     fields += std::format("{}{} {}", fields.empty() ? "" : ", ", name, *value);
             log.info(eApplication, std::format("{}: {}", why, fields));
@@ -480,6 +484,8 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             d.cx = state.analog_cx_mode == Decoder::CxMode::eOff ? "off"
                  : state.analog_cx_mode == Decoder::CxMode::eOn ? "on" : "auto";
             d.tint = std::format("{:g}", state.tint_degrees);
+            d.channels = state.audio_channel_mode == AudioChannelMode::eLeft ? "left"
+                       : state.audio_channel_mode == AudioChannelMode::eRight ? "right" : "stereo";
             return d;
         };
         // The fields of a that differ from b
@@ -493,10 +499,11 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
             if (a.black_level != b.black_level) d.black_level = a.black_level;
             if (a.cx != b.cx) d.cx = a.cx;
             if (a.tint != b.tint) d.tint = a.tint;
+            if (a.channels != b.channels) d.channels = a.channels;
             return d;
         };
         DiscSettings start_settings = settings_now();   // the subtitle fields are filled once the tracks exist
-        DiscSettings default_settings{"normal", "0", "default", "", "", "auto", "auto", "0"};
+        DiscSettings default_settings{"normal", "0", "default", "", "", "auto", "auto", "0", "stereo"};
 
         OsdOverlay osd;
         FrameBlitter blitter;
@@ -2137,6 +2144,7 @@ int main(int argc, char *argv[]) {
     float saturation = 1.0f;
     // Which of the disc settings the command line gave (they beat a disc's memory)
     bool aspect_given = false, overscan_given = false, audio_given = false, black_level_given = false, cx_given = false, tint_given = false;
+    string audio_channels; // --audio-channels, empty when not given
     optional<string> subtitles_file;
     optional<string> subtitle_font_path;
     double subtitle_offset_seconds = 0.0;
@@ -2376,6 +2384,15 @@ int main(int argc, char *argv[]) {
             black_level_mode = Decoder::BlackLevelMode::eJ;
         else {
             cerr << "--black-level must be auto, m or j" << endl;
+            exit(1);
+        }
+    });
+    options.option("--audio-channels", "MODE", "The channels heard of two-channel audio: stereo (default), "
+                                                "left or right, for a bilingual disc (the B key cycles them; "
+                                                "remembered per disc; --write keeps both channels)", [&] () -> void {
+        audio_channels = *(it++);
+        if (audio_channels != "stereo" && audio_channels != "left" && audio_channels != "right") {
+            cerr << "--audio-channels must be stereo, left or right" << endl;
             exit(1);
         }
     });
@@ -2667,6 +2684,7 @@ int main(int argc, char *argv[]) {
                                                  : black_level_mode == Decoder::BlackLevelMode::eJ ? "j" : "auto";
             if (cx_given) g.cx = cx_mode == Decoder::CxMode::eOff ? "off" : cx_mode == Decoder::CxMode::eOn ? "on" : "auto";
             if (tint_given) g.tint = std::format("{:g}", tint_degrees);
+            g.channels = audio_channels;
             return g;
         };
         const auto decodes_alike = [](InputType a, InputType b) {
@@ -2953,7 +2971,8 @@ int main(int argc, char *argv[]) {
                 for (const auto &[from, to] : {std::pair{&d.aspect, &carried_settings->aspect}, std::pair{&d.overscan, &carried_settings->overscan},
                                                std::pair{&d.audio, &carried_settings->audio}, std::pair{&d.subtitle, &carried_settings->subtitle},
                                                std::pair{&d.subtitle2, &carried_settings->subtitle2}, std::pair{&d.black_level, &carried_settings->black_level},
-                                               std::pair{&d.cx, &carried_settings->cx}, std::pair{&d.tint, &carried_settings->tint}})
+                                               std::pair{&d.cx, &carried_settings->cx}, std::pair{&d.tint, &carried_settings->tint},
+                                               std::pair{&d.channels, &carried_settings->channels}})
                     if (!from->empty())
                         *to = *from;
                 carried_type = file_input_type;

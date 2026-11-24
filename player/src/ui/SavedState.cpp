@@ -46,6 +46,7 @@ void SavedState::load() {
                     else if (name == "black_level") settings.black_level = v;
                     else if (name == "cx") settings.cx = v;
                     else if (name == "tint") settings.tint = v;
+                    else if (name == "channels") settings.channels = v;
                 }
                 if (end == std::string::npos) break;
                 at = end + 1;
@@ -73,7 +74,8 @@ bool SavedState::save() const {
         for (const auto &[name, value] : {std::pair{"aspect", &d.aspect}, std::pair{"overscan", &d.overscan},
                                           std::pair{"audio", &d.audio}, std::pair{"subtitle", &d.subtitle},
                                           std::pair{"subtitle2", &d.subtitle2}, std::pair{"black_level", &d.black_level},
-                                          std::pair{"cx", &d.cx}, std::pair{"tint", &d.tint}})
+                                          std::pair{"cx", &d.cx}, std::pair{"tint", &d.tint},
+                                          std::pair{"channels", &d.channels}})
             if (!value->empty())
                 out << "\t" << name << "=" << *value;
         out << "\n";
