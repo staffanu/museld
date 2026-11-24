@@ -131,10 +131,12 @@ sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan.list \
 sudo apt update && sudo apt install vulkan-sdk
 ```
 
-Ubuntu 24.04 has no `libsdl3-dev` either; when CMake finds no SDL3 it builds one from a
-release tarball into museld, which needs the X11 and Wayland development headers
+Ubuntu 24.04 has no `libsdl3-dev` either; on Linux, when CMake finds no SDL3 it builds one
+from a release tarball into museld, which needs the X11 and Wayland development headers
 (`libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxfixes-dev
-libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev`).
+libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev`).  On macOS and
+Windows a missing SDL3 package stops the configure instead, since the package managers
+there have it (`-DMUSELD_FETCH_SDL3=ON` forces the build from source anywhere).
 
 macOS (Homebrew):
 

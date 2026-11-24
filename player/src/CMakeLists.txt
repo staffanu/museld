@@ -212,14 +212,24 @@ endif()
 
 if(BUILD_MUSE)
     # SDL3 for the window, the Vulkan surface and the keyboard (GLFW has no
-    # tvOS, which is where museld is headed).  Distributions older than 2025
-    # have no package for it, so fall back to building it into museld from a
-    # release tarball; that needs the X11/Wayland development headers.
-    if(NOT MUSELD_TVOS)
+    # tvOS, which is where museld is headed).  The installed package where
+    # the platform has one (Homebrew, MSYS2, the BSD ports, a 2025 or later
+    # Linux distribution); built into museld from a release tarball on tvOS,
+    # and on a Linux distribution too old to package it, which needs the
+    # X11/Wayland development headers.  On macOS and Windows a missing
+    # package is an error rather than a silent build from source: two ways
+    # of getting SDL on one platform made for surprises (an iMac without the
+    # Homebrew package spent minutes building SDL and ran a different one).
+    option(MUSELD_FETCH_SDL3 "Build SDL3 from its release tarball into museld even where a package is expected" OFF)
+    if(NOT MUSELD_TVOS AND NOT MUSELD_FETCH_SDL3)
         find_package(SDL3 CONFIG QUIET)
     endif()
     if(SDL3_FOUND)
         message(STATUS "Using the installed SDL3 ${SDL3_VERSION}")
+    elseif(NOT MUSELD_TVOS AND NOT MUSELD_FETCH_SDL3 AND (APPLE OR WIN32))
+        message(FATAL_ERROR "SDL3 was not found.  Install the package (Homebrew: brew install sdl3; "
+                            "MSYS2 UCRT64: pacman -S mingw-w64-ucrt-x86_64-sdl3), or pass "
+                            "-DMUSELD_FETCH_SDL3=ON to build SDL3 from source into museld")
     else()
         message(STATUS "No SDL3 package found; building SDL3 from source into museld")
         include(FetchContent)
