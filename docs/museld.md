@@ -23,8 +23,8 @@ cost almost nothing -- and the reader's timebase, about a millisecond per frame.
 In practice any laptop or desktop of the last few years with a reasonable integrated GPU plays
 NTSC and PAL, and MUSE wants an Apple M-series machine, a recent Intel or AMD integrated GPU, or
 a discrete GPU of any vintage.  The 2017 Apple TV 4K plays NTSC and PAL with margin and MUSE at
-real time from raw captures (s8 or lds; FLAC decoding on its three cores falls just short),
-which makes a later Apple TV the comfortable choice.
+real time, from FLAC as well as raw captures (its libFLAC is patched with a NEON prediction
+routine to get there), with a later Apple TV the comfortable choice.
 
 Machines measured on MUSE, where 30 frames per second is real time (`--no-sync` lifts the pacing
 and the performance log reports the rate the machine reaches):
@@ -35,7 +35,7 @@ and the performance log reports the rate the machine reaches):
 | Apple iMac 27" 2017 (Radeon Pro 580) | 80+ fps |
 | Lenovo ThinkPad X1 Carbon Gen 9 (i7-1185G7) | 70+ fps cold, drops near 30 fps when throttling |
 | Asus PN51 Mini PC (Ryzen 3 5300U) | real time (the author's playback machine) |
-| Apple TV 4K 2017 (A10X) | real time from raw captures |
+| Apple TV 4K 2017 (A10X) | real time |
 
 Too slow for MUSE: NVIDIA Jetson Nano, Raspberry Pi 5 (1–5 fps).
 
