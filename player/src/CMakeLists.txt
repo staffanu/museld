@@ -509,6 +509,8 @@ if(BUILD_MUSE)
     if(MUSELD_TVOS)
         # miniaudio's AVAudioSession code is Objective-C
         set_source_files_properties(AudioPlayback.cpp PROPERTIES LANGUAGE OBJCXX)
+        # The GPU family check at start (tvos/GpuCheck.h): Metal, so Objective-C++
+        target_sources(museld PRIVATE tvos/GpuCheck.mm tvos/GpuCheck.h)
 
         # The app bundle.  Signing: a free Apple ID's team suffices to run on
         # your own Apple TV (CMakeUserPresets.json is the place for the team
@@ -522,7 +524,7 @@ if(BUILD_MUSE)
             MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/tvOS-Info.plist.in"
             MACOSX_BUNDLE_GUI_IDENTIFIER "${MUSELD_BUNDLE_IDENTIFIER}"
             MACOSX_BUNDLE_BUNDLE_NAME museld
-            MACOSX_BUNDLE_BUNDLE_VERSION 3
+            MACOSX_BUNDLE_BUNDLE_VERSION 4
             MACOSX_BUNDLE_SHORT_VERSION_STRING 0.6.0
             XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${MUSELD_BUNDLE_IDENTIFIER}"
             XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY 3

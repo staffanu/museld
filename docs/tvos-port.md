@@ -617,7 +617,11 @@ TestFlight (the *TestFlight* entry under Done).
   `samples/` beside the executable, and the player applies the sample's own settings (the
   right channel) before any memory of it.  SDL is built without hidapi on tvOS: its Steam
   Controller support referenced CoreBluetooth, which made App Store Connect ask for a
-  Bluetooth purpose string (ITMS-90683) the app has no use for.  Trap: an archive leaves
+  Bluetooth purpose string (ITMS-90683) the app has no use for.  Build 4 adds the GPU check:
+  the Info.plist can require tvOS 17 and arm64 but not a model, so the Apple TV HD (A8, Metal's
+  Apple 2 family, which gave the simulator its black picture) would be offered the app; at
+  start `tvos/GpuCheck.mm` asks Metal for the Apple 3 family and shows "museld needs an Apple
+  TV 4K" in an alert, then leaves (`MUSELD_FAKE_OLD_GPU=1` shows it on any box).  Trap: an archive leaves
   broken symlinks named museld.app and libac3rf.a in build-tvos-device/src/Release-appletvos
   (to its own intermediates), and the next ordinary build fails with "unable to create
   directory ... museld.app" until they are removed.

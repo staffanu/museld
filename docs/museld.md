@@ -622,7 +622,9 @@ The browser's first screen offers the sample capture bundled with the app, ten s
 Shuttle launch: NASA's mission report footage from the SpaceDisc vol. 1 laserdisc, which is a US
 government work and so free of copyright, captured at 33.33 MHz and played with the disc's
 English (right) analog channel alone, the left one carrying the publisher's Japanese narration.
-It plays at once, before any server is set up, and is what to try first.
+It plays at once, before any server is set up, and is what to try first.  The app needs an
+Apple TV 4K (2017 or later): the Apple TV HD's GPU is below what the video pipeline uses, and
+the app says so at start instead of showing a black picture.
 The Siri Remote drives it (a TV remote over HDMI-CEC sends the arrows, select and back, nothing
 else): select pauses, left and right seek, up and down find chapters, and the Menu button opens
 the on-screen menu over the picture and, from its root page, closes it again.  The menu's Stop

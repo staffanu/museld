@@ -52,6 +52,9 @@
 #include "ui/DirectoryListing.h"
 #include "ui/SavedState.h"
 #include "SampleCapture.h"
+#if defined(__APPLE__) && TARGET_OS_TV
+#include "tvos/GpuCheck.h"
+#endif
 #include "subtitles/Eia608Decoder.h"
 #include "subtitles/SrtParser.h"
 #include "subtitles/SubtitleDiscovery.h"
@@ -1475,6 +1478,20 @@ static musevk::VulkanManager &ensureSurface(PlayerSurface &surface, Logger &log,
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
             throw runtime_error(std::format("SDL_Init: {}", SDL_GetError()));
         surface.sdl.initialized = true;
+#if defined(__APPLE__) && TARGET_OS_TV
+        // An Apple TV HD (A8) would show a black picture: say so instead (an
+        // alert the viewer dismisses with the remote), before any window exists
+        {
+            std::string gpu;
+            if (!tvos::gpuCanRunMuseld(gpu)) {
+                log.error(eApplication, std::format("This Apple TV's GPU ({}) cannot run museld", gpu));
+                SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "museld needs an Apple TV 4K",
+                                         "This Apple TV's graphics processor cannot run museld's video pipeline. "
+                                         "An Apple TV 4K (2017 or later) is needed.", nullptr);
+                throw runtime_error(std::format("the GPU ({}) is below Metal's Apple 3 family", gpu));
+            }
+        }
+#endif
         if (trace_events)
             SDL_AddEventWatch([](void *, SDL_Event *e) {
                 if (e->type < SDL_EVENT_KEY_DOWN)
