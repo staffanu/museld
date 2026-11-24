@@ -594,9 +594,12 @@ TestFlight (the *TestFlight* entry under Done).
   `INSTALL_PATH`, since CMake's project skips the install and the archive then has no
   Products/Applications and is "generic", which cannot be uploaded; and
   `ITSAppUsesNonExemptEncryption` false in the Info.plist (no encryption of its own),
-  or App Store Connect asks about export compliance on every build.  Run xcodebuild
+  or App Store Connect asks about export compliance on every build.  Run the export
   with the system PATH only: its openrsync forks a helper by name, finds Homebrew's
-  rsync 3.4.4, and the export fails with "Copy failed".  The archive carries no dSYM
+  rsync 3.4.4, and the export fails with "Copy failed"; the archive, on the other hand,
+  needs the full PATH for Homebrew's glslc.  A reboot ends Xcode's Apple ID session, and
+  the export then stops with "Failed to find an account with App Store Connect access"
+  until Xcode > Settings > Accounts is signed in again.  The archive carries no dSYM
   (the Release configuration has no debug info), so TestFlight crash reports are not
   symbolicated.  Internal testers (App Store Connect users of the team) get a build as
   soon as it is processed; external testers and the public link wait on Beta App
