@@ -377,7 +377,8 @@ TestFlight (the *TestFlight* entry under Done).
   The three blue1 clips total 9.2 GB against about 5.5 GB of cache, so alternating
   runs read cold.  Now: `/ld-local` serves `/scratch0/ld-captures` (the HDD; the three
   clips copied there) and `/ld-ssd` the SSD (the s8 clip so far), both LAN-only
-  (`Require ip 10.0.2.0/24`, the port 80 vhost; nullfs into the jail, fstab).
+  (`Require ip 10.0.2.0/24`, the port 80 vhost; nullfs into the jail, fstab).  Both
+  were removed 2026-11-25 with the measurements settled; `/ld-captures` is the server.
   EnableSendfile made the 4 MiB-range pattern slower (65 against 84 MB/s on loopback),
   so the default mmap stays.  The remaining per-chunk cost is on the box's side: a cold
   SSD file is 94 MB/s to the box in 4 MiB range requests one at a time, about 12 ms of
