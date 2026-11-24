@@ -13,21 +13,31 @@ wget --directory-prefix ../data/muse https://madeye.org/muse-demo/makeup-muse-rf
 
 ## Hardware compatibility
 
-Performance is measured as MUSE frames per second; 30 fps is required for real-time playback. The picture
-is updated 60 times per second (once per field) unless `--full-frames-only` is used.
+museld needs a GPU with Vulkan support and current drivers (on macOS and tvOS it reaches the GPU
+through the bundled MoltenVK).  The decode is bound by the GPU, in the RF demodulation of the
+input blocks, and that cost grows with the square of the sample rate: MUSE captures at 62.5 MHz
+are the demanding case, and NTSC and PAL captures at 40 MHz take well under half the GPU work.
+The CPU side is the input -- decoding FLAC (`.ldf`) is the one expensive part, the raw formats
+cost almost nothing -- and the reader's timebase, about a millisecond per frame.
 
-| Machine | Performance |
+In practice any laptop or desktop of the last few years with a reasonable integrated GPU plays
+NTSC and PAL, and MUSE wants an Apple M-series machine, a recent Intel or AMD integrated GPU, or
+a discrete GPU of any vintage.  The 2017 Apple TV 4K plays NTSC and PAL with margin and MUSE at
+real time from raw captures (s8 or lds; FLAC decoding on its three cores falls just short),
+which makes a later Apple TV the comfortable choice.
+
+Machines measured on MUSE, where 30 frames per second is real time (`--no-sync` lifts the pacing
+and the performance log reports the rate the machine reaches):
+
+| Machine | MUSE performance |
 |---|---|
-| Apple MacBook Pro M2 (8/10 core) | 40+ fps, works fine |
-| Lenovo ThinkPad X1 Carbon Gen 9 (i7-1185G7) | 70+ fps cold, drops near 30 fps when throttling |
-| Asus PN51 Mini PC (Ryzen 3 5300U) | works fine (main playback machine) |
+| Apple MacBook Pro M2 (8/10 core) | 40+ fps |
 | Apple iMac 27" 2017 (Radeon Pro 580) | 80+ fps |
+| Lenovo ThinkPad X1 Carbon Gen 9 (i7-1185G7) | 70+ fps cold, drops near 30 fps when throttling |
+| Asus PN51 Mini PC (Ryzen 3 5300U) | real time (the author's playback machine) |
+| Apple TV 4K 2017 (A10X) | real time from raw captures |
 
-Machines tested and found too slow: NVIDIA Jetson Nano, Raspberry Pi 5 (1–5 fps).
-
-The numbers were obtained by playing an RF capture with `--no-sync --log P4`. The bottleneck is
-GPU performance: the RF demodulation per block. The resampling to 16.2 MHz (the reader thread's
-feed-forward timebase) costs about 1 ms per frame.
+Too slow for MUSE: NVIDIA Jetson Nano, Raspberry Pi 5 (1–5 fps).
 
 ## Input options
 
@@ -600,15 +610,18 @@ of components.
 ### Apple TV
 
 museld also runs on the Apple TV (`docs/tvos-port.md` records the port and its state).  The app
-has no command line: it starts in the file browser, which lists web servers only, there being no
-local directories, and it keeps what it remembers in its application container.  The Siri Remote
-drives it (a TV remote over HDMI-CEC sends the arrows, select and back, nothing else): select
-pauses, left and right seek, up and down find chapters, and the Menu button opens the on-screen
-menu over the picture and, from its root page, closes it again.  The menu's Stop item ends playback
-and returns to the browser; back from the browser's page leaves the app.  Select on the Playback
-page's Time, Frame and Chapter lines opens a number entry set from the remote's arrows, and the
-address field's on-screen keyboard is typed with the remote too, select picking the key under the
-cursor and Menu deleting.
+is not on the App Store: build it yourself with Xcode and the `tvos-device` preset, which needs a
+Mac and an Apple ID (a free one signs the app for your own Apple TV for a week at a time), or
+e-mail staffan@ulfberg.se to be added as a TestFlight tester and install it from the TestFlight
+app.  The app has no command line: it starts in the file browser, which lists web servers only,
+there being no local directories, and it keeps what it remembers in its application container.
+The Siri Remote drives it (a TV remote over HDMI-CEC sends the arrows, select and back, nothing
+else): select pauses, left and right seek, up and down find chapters, and the Menu button opens
+the on-screen menu over the picture and, from its root page, closes it again.  The menu's Stop
+item ends playback and returns to the browser; back from the browser's page leaves the app.
+Select on the Playback page's Time, Frame and Chapter lines opens a number entry set from the
+remote's arrows, and the address field's on-screen keyboard is typed with the remote too, select
+picking the key under the cursor and Menu deleting.
 
 ## Architecture
 
@@ -710,8 +723,8 @@ DTS: EFM stereo samples → DTS sync detection → byte stream → libavcodec dc
 ## Known limitations and future work
 
 - **Motion vectors**: MUSE specifies motion compensation in control data (3+4 bits), but these bits are
-  always zero on every disc tested, so the decoder does not use them. Computing motion vectors on the
-  decoder's side instead was tried (2026-10) and gained nothing over the still/moving decision.
+  always zero on every disc tested, so the decoder does not use them. Initial experiments with
+  decoder-side motion estimation gained nothing over the still/moving decision.
 - **Direct USB input**: Currently requires an external capture program writing to a pipe or a FIFO (e.g., picostream).
 - **LD MUSE vs BS MUSE**: Available documentation describes the satellite broadcasting standard. MUSE decoders have separate inputs for the two signals, so presumably there is some difference, but it is unknown what it is.
 - **Subtitle OCR** (experimental; see the option section above):
