@@ -46,8 +46,15 @@ constexpr double c_muse_line_hz = 33750.0;
 // discs drop only the right carrier) and absent from MUSE.
 constexpr double c_ntsc_audio_cycles_per_line = 2.301e6 / c_ntsc_line_hz;
 
-// Common capture rates to snap the line-rate estimate to (DdD, cxadc, FX3).
-constexpr double c_known_rates[] = {28.63636e6, 35.79545e6, 40e6, 46.08e6, 50e6, 62.5e6, 64e6, 80e6, 100e6};
+// Common capture rates to snap the line-rate estimate to: the Domesday
+// Duplicator's 40 MHz, the cxadc rates, and the fx3usbadc's external-clock
+// settings (the NB3N3020's 25 to 100 MHz; its unofficial 125 to 158.33 MHz
+// are left out, 156.25 and 158.33 being closer than the snap tolerance).
+// Not 30 MHz: the one 30 MHz capture in the regression set measures 29.98,
+// and snapping it would change its render.
+constexpr double c_known_rates[] = {25e6, 28.63636e6, 100e6 / 3, 35.79545e6, 37.5e6, 40e6, 46.08e6, 50e6,
+                                    175e6 / 3, 60e6, 62.5e6, 64e6, 200e6 / 3, 75e6, 80e6, 250e6 / 3,
+                                    93.75e6, 100e6};
 
 // The field period test: the lines between consecutive vertical sync
 // groups, 262.5 on NTSC and 312.5 on PAL.  A vertical sync group is a run of
