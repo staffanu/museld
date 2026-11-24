@@ -2638,15 +2638,13 @@ int main(int argc, char *argv[]) {
     });
 
     options.section("Diagnostics:");
-    options.option("--log", "SPEC",
-                   "Log level per category, e.g. A3V4.  Categories are MPAVDIO (Main, "
-                   "Performance, Audio, Video, Decoder, Input, Output) and levels 0-4 "
-                   "(off, error, warn, info, debug; default 2)", [&] () -> void {
-        // Logging is specified with a string with a letter corresponding to the category
-        // (MPAVDIO for Main(Application), Performance, Audio, Video, Decoder, Input, and Output, respectively,
-        // and a number corresponding to the amount of logging. 0-4 imples Off, Error, Warn, Info, Debug.
-        // Default is Warn for all categories.
-        if (it->length() %2)
+    // The log specification: a letter per category (MPAVDIO for Main(Application),
+    // Performance, Audio, Video, Decoder, Input, and Output) followed by a level
+    // 0-4 (Off, Error, Warn, Info, Debug).  Default is Warn for all categories.
+    // Applied from MUSELD_LOG at start (the tvOS app has no command line) and
+    // from --log, in that order
+    const auto apply_log_spec = [&log_selection](const string &spec) {
+        if (spec.length() % 2)
             throw runtime_error("Log specification should have even length");
         auto parseLevel = [](char c) -> LogPriority {
             switch (c) {
@@ -2658,19 +2656,27 @@ int main(int argc, char *argv[]) {
                 default: throw runtime_error("Invalid log level");
             }
         };
-        for (int i = 0; i < it->length(); i += 2) {
-            switch ((*it)[i]) {
-                case 'M': log_selection[eApplication] = parseLevel((*it)[i + 1]); break;
-                case 'P': log_selection[ePerformance] = parseLevel((*it)[i + 1]); break;
-                case 'A': log_selection[eAudio] = parseLevel((*it)[i + 1]); break;
-                case 'V': log_selection[eVideo] = parseLevel((*it)[i + 1]); break;
-                case 'D': log_selection[eDecoder] = parseLevel((*it)[i + 1]); break;
-                case 'I': log_selection[eInput] = parseLevel((*it)[i + 1]); break;
-                case 'O': log_selection[eOutput] = parseLevel((*it)[i + 1]); break;
+        for (size_t i = 0; i < spec.length(); i += 2) {
+            switch (spec[i]) {
+                case 'M': log_selection[eApplication] = parseLevel(spec[i + 1]); break;
+                case 'P': log_selection[ePerformance] = parseLevel(spec[i + 1]); break;
+                case 'A': log_selection[eAudio] = parseLevel(spec[i + 1]); break;
+                case 'V': log_selection[eVideo] = parseLevel(spec[i + 1]); break;
+                case 'D': log_selection[eDecoder] = parseLevel(spec[i + 1]); break;
+                case 'I': log_selection[eInput] = parseLevel(spec[i + 1]); break;
+                case 'O': log_selection[eOutput] = parseLevel(spec[i + 1]); break;
                 default: throw runtime_error("Unknown log category");
             }
         }
-        it++;
+    };
+    if (const char *spec = getenv("MUSELD_LOG"); spec != nullptr && *spec)
+        apply_log_spec(spec);
+    options.option("--log", "SPEC",
+                   "Log level per category, e.g. A3V4.  Categories are MPAVDIO (Main, "
+                   "Performance, Audio, Video, Decoder, Input, Output) and levels 0-4 "
+                   "(off, error, warn, info, debug; default 2); MUSELD_LOG in the environment "
+                   "is the same", [&] () -> void {
+        apply_log_spec(*(it++));
     });
     options.flag("--benchmark-shaders", "Print GPU shader timing statistics when playback ends",
                  [&] () -> void {
