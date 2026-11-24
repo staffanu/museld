@@ -5,8 +5,8 @@
 Download a sample RF capture and play it:
 
 ```console
-wget --directory-prefix ../data/muse https://madeye.org/muse-demo/makeup-muse-rf-62.5MHz-nofilter.raw
-./player/build-release/src/museld ../data/muse/makeup-muse-rf-62.5MHz-nofilter.raw
+wget https://madeye.org/ld-captures/public/MUSE-sony-test-disc-makeup-62.5MHz.rf.s16
+./player/build-release/src/museld MUSE-sony-test-disc-makeup-62.5MHz.rf.s16
 ```
 
 ![MUSE test picture](../test-picture.png)
@@ -337,7 +337,7 @@ concealed white-on-black titles away as if they were dropouts.
 
 There is a lot of room between the two cases, so the thresholds are not a compromise: content
 takes the envelope down to about 0.16 of the local median at worst, while the real dropouts in
-`makeup-muse-rf-62.5MHz-nofilter.raw` (around 55.5–56.1 s) reach 0.0036. That capture is the one
+the quick start's sample capture (around 55.5–56.1 s) reach 0.0036. That capture is the one
 to reach for when working on dropout handling — it has a disc blemish that is struck once per
 revolution for about 18 frames.
 
