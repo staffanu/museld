@@ -54,6 +54,7 @@
 #include "SampleCapture.h"
 #if defined(__APPLE__) && TARGET_OS_TV
 #include "tvos/GpuCheck.h"
+#include "tvos/ThermalState.h"
 #endif
 #include "subtitles/Eia608Decoder.h"
 #include "subtitles/SrtParser.h"
@@ -1275,6 +1276,20 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 }
             }
 
+#if defined(__APPLE__) && TARGET_OS_TV
+            // The thermal state beside the timing log: the box slows its GPU when hot
+            {
+                static std::string thermal_state;
+                static auto thermal_checked = chrono::steady_clock::now();
+                if (const auto now = chrono::steady_clock::now(); now - thermal_checked >= chrono::seconds(1)) {
+                    thermal_checked = now;
+                    if (const char *name = tvos::thermalStateName(); thermal_state != name) {
+                        log.info(ePerformance, std::format("Thermal state: {}", name));
+                        thermal_state = name;
+                    }
+                }
+            }
+#endif
             if (state.paused_countdown != 0 && --state.paused_countdown == 0) {
                 state.paused = true;
                 // A text still showing (a search's result, which this pause

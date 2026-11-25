@@ -510,7 +510,7 @@ if(BUILD_MUSE)
         # miniaudio's AVAudioSession code is Objective-C
         set_source_files_properties(AudioPlayback.cpp PROPERTIES LANGUAGE OBJCXX)
         # The GPU family check at start (tvos/GpuCheck.h): Metal, so Objective-C++
-        target_sources(museld PRIVATE tvos/GpuCheck.mm tvos/GpuCheck.h)
+        target_sources(museld PRIVATE tvos/GpuCheck.mm tvos/GpuCheck.h tvos/ThermalState.mm tvos/ThermalState.h)
 
         # The app bundle.  Signing: a free Apple ID's team suffices to run on
         # your own Apple TV (CMakeUserPresets.json is the place for the team
