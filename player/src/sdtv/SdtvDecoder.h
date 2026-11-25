@@ -125,8 +125,15 @@ private:
     std::array<int, 2> m_field_buffer_frame_no;
     // The temporal noise reduction's state buffers hold the previous field's
     // output of this seek generation (false: off last field, or just started)
-    bool m_nr_primed = false;
-    uint32_t m_nr_seek_generation = 0;
+    // The noise reduction's state buffers hold a row's filtered output per
+    // field parity; the recursion may read them only once both parities
+    // were written, in the picture the frame belongs to (its seek
+    // generation).  One flag for both let a paused redo of one field, with
+    // the reduction just switched on, weave the other parity's rows from
+    // buffers never written (2026-11-25), and the second field after a seek
+    // blend its own rows with the picture from before it
+    bool m_nr_written[2] = {false, false};
+    uint32_t m_nr_written_generation[2] = {0, 0};
     EfmDecoder m_efm_decoder;
     EfmPcmProcessor m_efm_pcm_processor;
     bool m_pal_v_flip;

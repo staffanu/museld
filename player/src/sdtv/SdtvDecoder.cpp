@@ -614,7 +614,8 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
         m_field_buffer_frame_no[decoded_field_index] = m_frame_no - d;
         const float nr_feedback = temporalNrFeedback(controls.temporal_nr);
         const uint32_t generation = m_frame_seek_generation[d];
-        const bool nr_valid = m_nr_primed && m_nr_seek_generation == generation;
+        const bool nr_valid = m_nr_written[0] && m_nr_written[1]
+                              && m_nr_written_generation[0] == generation && m_nr_written_generation[1] == generation;
         if (action == NtscCadenceTracker::FieldAction::eHold) {
             // Re-show the previous film frame from the held copy of the last
             // combine output.  The YUV buffers are left as they are, so
@@ -639,8 +640,12 @@ bool SdtvDecoder::next(const DecodeControls &controls, DecodedField &out) {
             // following hold to re-show
             m_shaders.saveCombinedOutput(*m_second_stage_command_buffer);
         }
-        m_nr_primed = nr_feedback > 0;
-        m_nr_seek_generation = generation;
+        if (nr_feedback > 0) {
+            m_nr_written[decoded_field_index] = true;
+            m_nr_written_generation[decoded_field_index] = generation;
+        } else {
+            m_nr_written[0] = m_nr_written[1] = false;
+        }
     }
 
     m_second_stage_command_buffer->submit({m_first_stage_complete_semaphore}, {vk::PipelineStageFlagBits::eComputeShader}, {});
