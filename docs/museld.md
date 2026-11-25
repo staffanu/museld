@@ -84,7 +84,7 @@ The input can be a URL instead of a file:
 | Input | What it is |
 |---|---|
 | `http://host[:port]/path/capture.ldf` | A capture on a web server. The bytes are fetched with HTTP range requests, so seeking and content detection work as for a local file. The server has to honour `Range` (nginx, Apache and Synology's Web Station do; Python's `http.server` does not). Plain http only. |
-| `udp://[address]:port` | A live capture stream over UDP, received on that port (bound on all interfaces unless an address is given), from a network-attached capture device still under development. Experimental; the stream format will be documented when the device is. The sample format and rate come from the stream itself, and the input type is detected from the first samples unless `--input-type` says. |
+| `udp://[address]:port` | A live capture stream over UDP, received on that port (bound on all interfaces unless an address is given), from a network-attached capture device still under development. Experimental; the stream format is a proposal, described in `docs/udp-capture-stream.md`. The sample format and rate come from the stream itself, and the input type is detected from the first samples unless `--input-type` says. |
 
 A network stream is live like a fifo: `--seek` does not apply, and the player has to keep up.
 A file over http is not live: it plays like a local file, including seeking with the arrow keys.

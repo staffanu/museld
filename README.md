@@ -64,7 +64,9 @@ Playback is controlled entirely with keyboard shortcuts, so it can be driven fro
 any Bluetooth keyboard, or [BridgedIrRemote](https://bitbucket.org/staffanulfberg/bridgedirremote/src/master/), an Android
 remote control app that pairs with the computer.
 
-See **[docs/museld.md](docs/museld.md)** for the full player reference.
+See **[docs/museld.md](docs/museld.md)** for the full player reference, and
+**[docs/udp-capture-stream.md](docs/udp-capture-stream.md)** for the UDP stream a
+network-attached capture device sends it (a proposal, open for comment).
 
 ### ac3rf-efm-decode
 
