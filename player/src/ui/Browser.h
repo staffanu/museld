@@ -42,7 +42,8 @@ public:
 private:
     void rebuildOpenPage();
     void enterAddress();
-    void go(const std::string &location);
+    // remember: put the location in the recent list (not for the sample)
+    void go(const std::string &location, bool remember = true);
     void showListing(const std::string &location);
     void applyListing(const DirListing &listing);
     void pushListingPage();

@@ -37,10 +37,15 @@ namespace sample_capture {
     }
 
     // What the sample is played with before any memory of it: the English
-    // channel, and again from the start when it ends, so ten seconds are
-    // long enough to look at the menus while it plays
+    // channel; again from the start when it ends, so ten seconds are long
+    // enough to look at the menus while it plays; and a television's 2.5 %
+    // overscan, which hides the tape master's head-switching tear in the
+    // last three lines of each field (the sync is intact there and the
+    // picture content shifted 1.4 us: in the disc, not the decode).  The
+    // browser keeps the sample out of the recent list, too
     inline DiscSettings settings() {
         DiscSettings d;
+        d.overscan = "0.025";
         d.channels = "right";
         d.repeat = "on";
         return d;

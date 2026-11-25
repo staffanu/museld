@@ -79,7 +79,7 @@ void Browser::rebuildOpenPage() {
     if (!m_sample_location.empty()) {
         MenuItem sample;
         sample.label = m_sample_label;
-        sample.activate = [this, location = m_sample_location] { go(location); };
+        sample.activate = [this, location = m_sample_location] { go(location, false); };
         items.push_back(std::move(sample));
     }
     if (!m_state.lastDirectory().empty()) {
@@ -130,11 +130,13 @@ void Browser::enterAddress() {
 // capture of the item's lambda that is running, and both pages are rebuilt
 // below, which destroys that item: the location is copied before anything
 // else.
-void Browser::go(const std::string &location_of_item) {
+void Browser::go(const std::string &location_of_item, bool remember) {
     const std::string location = location_of_item;
     if (location.rfind("udp://", 0) == 0 || !looksLikeDirectory(location)) {
-        m_state.addRecent(location);
-        rebuildOpenPage();
+        if (remember) {
+            m_state.addRecent(location);
+            rebuildOpenPage();
+        }
         if (m_on_open)
             m_on_open(location);
         return;
