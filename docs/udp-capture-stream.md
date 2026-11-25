@@ -5,8 +5,8 @@ what museld's `udp://` input expects.  **This is a proposal, not a standard.**  
 the ethadc capture box (an FPGA with an ADC and an Ethernet port, in development) and
 museld agree on today, written down so that anyone else sending laserdisc RF over UDP can
 look at it before choosing something incompatible, and so that the format can be changed
-while nothing much depends on it.  Comments and better ideas are welcome; the place for
-them is the museld repository's issue tracker.  The header files that are the format as
+while nothing much depends on it.  Comments and better ideas are welcome: mail them to
+staffan@ulfberg.se.  The header files that are the format as
 code live in the ethadc repository and are copied into museld under
 `player/third_party/ethadc/` (`Protocol.h` is the wire format, `StreamReassembler.h` what a
 receiver does with it); until that repository is public, the copy in museld is the
@@ -14,8 +14,10 @@ reference.
 
 ## What it is for
 
-A laserdisc RF capture is one channel of samples at 28 to 100 MHz, 8 to 16 bits each: 40
-to 125 MB/s, for as long as a disc side plays.  The sender is hardware (or a program
+A laserdisc RF capture is one channel of samples, 8 to 16 bits each, at whatever rate the
+capture device runs: 40 MHz is usual, 30 MHz captures decode fine, MUSE wants 62.5 MHz, and
+a CD's EFM is covered by 10 MHz.  That is 10 to 125 MB/s, for as long as a disc side
+plays.  The sender is hardware (or a program
 standing in for it), the receiver a PC, a NAS or a TV box on the same network, decoding
 live or writing a file.  The design follows from that:
 
