@@ -861,7 +861,9 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 log.debug(eApplication, std::format("Position search: landed, the frame at input sample {} is shown",
                                                     state.last_decoded.disc_info_input_offset));
                 if (state.search_resume_paused) {
-                    state.paused_countdown = 5;
+                    // This field and the frame's other one, then the pause: on
+                    // the frame searched for (five fields paused two frames past it)
+                    state.paused_countdown = 2;
                     state.search_resume_paused = false;
                 }
             }
