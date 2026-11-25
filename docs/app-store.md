@@ -55,11 +55,22 @@ required*: no.
 
 ## Per build: What to Test
 
-> Open the app and choose "Play the sample capture" on the first screen.  The
-> launch should play at once, with sound (the English narration), and repeat
-> until stopped.  Then press Menu to look at the settings, and select to
-> pause.  If you have captures on a
-> web server, "Enter an address..." takes its address.
+> 1. The sample: open the app and choose "Play the sample capture" on the first
+> screen.  The launch should play at once, with sound (the English narration),
+> and repeat until stopped.  Press Menu to see the settings over the picture;
+> select pauses, left and right seek, up and down move between chapters.
+>
+> 2. Your own captures, if you have a Domesday Duplicator or similar: put a
+> capture file (.ldf, .lds, .s8 or .s16) on any web server on your local
+> network that lists its directories (Apache, nginx, Python's http.server),
+> choose "Enter an address..." and type the server's address.  The app asks for
+> local network access the first time; allow it.  The directory is listed, and
+> choosing a file plays it.  NTSC and PAL play in real time; MUSE needs an Apple
+> TV 4K from 2021 or later for full speed.  The address is kept in the list on
+> the first screen for next time.
+>
+> The sample alone shows the app working; part 2 needs capture hardware and is
+> for testers who have it.
 
 ## The App Store listing, when it comes to that
 
