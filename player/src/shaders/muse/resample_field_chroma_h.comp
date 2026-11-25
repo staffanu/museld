@@ -1,0 +1,60 @@
+#version 450
+// The horizontal half of the combine shader's cubic interpolation of the
+// single-field chroma, done once per chroma row instead of once per output
+// pixel (2026-11-25).  The field's chroma samples sit 6 columns apart on the
+// output grid and 4 rows apart; the combine shader evaluated the separable
+// 4x4 Catmull-Rom in full for every output pixel, 16 loads and eight weight
+// polynomials per channel, which was 4 ms of the Apple TV's 16.7 per field.
+// This pass writes each chroma row interpolated to the output grid's columns
+// (MUSE_BUF_HEIGHT / 2 rows by MUSE_Y_BUF_WIDTH * 3), with the same weights,
+// clamps and accumulation order as the combine shader had, so the combine
+// shader's vertical cubic over four of these rows gives the same result.
+// Invoked with global invocation ids from (0, 0) to
+// (MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT / 2).
+#include "muse.h"
+
+layout(push_constant) uniform PushConstants {
+    int field_parity; // 0 for the first field (lower), 1 for the second (upper)
+};
+
+layout(set = 0, binding = 0) buffer readonly restrict field_r_buffer {
+    float16_t field_r[MUSE_BUF_HEIGHT / 2][MUSE_Y_BUF_WIDTH / 2];
+};
+
+layout(set = 0, binding = 1) buffer readonly restrict field_b_buffer {
+    float16_t field_b[MUSE_BUF_HEIGHT / 2][MUSE_Y_BUF_WIDTH / 2];
+};
+
+layout(set = 0, binding = 2) buffer writeonly restrict field_r_h_buffer {
+    float16_t field_r_h[MUSE_BUF_HEIGHT / 2][MUSE_Y_BUF_WIDTH * 3];
+};
+
+layout(set = 0, binding = 3) buffer writeonly restrict field_b_h_buffer {
+    float16_t field_b_h[MUSE_BUF_HEIGHT / 2][MUSE_Y_BUF_WIDTH * 3];
+};
+
+// The chroma grid's placement against the luma: see the combine shader
+const int c_chroma_shift = 2 + 1;
+
+void main() {
+    uint crow = gl_GlobalInvocationID.y;
+    uint col = gl_GlobalInvocationID.x;
+    if (crow >= MUSE_BUF_HEIGHT / 2 || col >= MUSE_Y_BUF_WIDTH * 3)
+        return;
+
+    int top_left_x = 3 * field_parity;
+    const int cc = int(col) + c_chroma_shift - 1 - top_left_x;
+    int c0 = cc >= 0 ? cc / 6 : -1;
+    float16_t tx = float16_t(cc - 6 * c0) / 6.hf;
+    const int CM = MUSE_Y_BUF_WIDTH / 2 - 1;
+    int cs[4] = int[](clamp(c0 - 1, 0, CM), clamp(c0, 0, CM), clamp(c0 + 1, 0, CM), clamp(c0 + 2, 0, CM));
+    float16_t wx[4] = float16_t[](0.5hf * (-tx + 2.hf * tx * tx - tx * tx * tx), 0.5hf * (2.hf - 5.hf * tx * tx + 3.hf * tx * tx * tx),
+                                  0.5hf * (tx + 4.hf * tx * tx - 3.hf * tx * tx * tx), 0.5hf * (-tx * tx + tx * tx * tx));
+    float16_t hr = 0.hf, hb = 0.hf;
+    for (int j = 0; j < 4; j++) {
+        hr += wx[j] * field_r[crow][cs[j]];
+        hb += wx[j] * field_b[crow][cs[j]];
+    }
+    field_r_h[crow][col] = hr;
+    field_b_h[crow][col] = hb;
+}

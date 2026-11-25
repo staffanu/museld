@@ -17,12 +17,14 @@ layout(set = 0, binding = 0) buffer readonly restrict field_Y_buffer {
     float16_t field_y[MUSE_BUF_HEIGHT][MUSE_Y_BUF_WIDTH * 3];
 };
 
+// The field chroma interpolated to the output grid's columns by
+// resample_field_chroma_h.comp (the horizontal half of the cubic below)
 layout(set = 0, binding = 1) buffer readonly restrict field_r_buffer {
-    float16_t field_r[MUSE_BUF_HEIGHT / 2][MUSE_Y_BUF_WIDTH / 2];
+    float16_t field_r_h[MUSE_BUF_HEIGHT / 2][MUSE_Y_BUF_WIDTH * 3];
 };
 
 layout(set = 0, binding = 2) buffer readonly restrict field_b_buffer {
-    float16_t field_b[MUSE_BUF_HEIGHT / 2][MUSE_Y_BUF_WIDTH / 2];
+    float16_t field_b_h[MUSE_BUF_HEIGHT / 2][MUSE_Y_BUF_WIDTH * 3];
 };
 
 layout(set = 0, binding = 3) buffer readonly restrict inter_frame_Y_buffer {
@@ -130,60 +132,41 @@ float16_t resample_field_y(uint row, uint col) {
     }
 }
 
-// For the intra field color interpolation we just do linear interpolation
+// The field chroma: a separable Catmull-Rom cubic over the 4x4 nearest field
+// chroma samples, which sit 4 rows and 6 columns apart on the output grid
+// (bilinear before, 2026-11-20; the edges are held as they were).  The
+// horizontal half is done once per chroma row by resample_field_chroma_h.comp
+// (2026-11-25: it was evaluated here in full for every output pixel, 4 ms of
+// the Apple TV's 16.7 per field); the vertical half over its four rows is here,
+// with the same weights and order, so the result is the one the full
+// evaluation gave.
 float16_t resample_field_r(uint row, uint col) {
-    // a separable Catmull-Rom cubic over the 4x4 nearest field chroma samples, which sit 4 rows and
-    // 6 columns apart on the output grid (bilinear before, 2026-11-20; the edges are held as they were)
     int top_left_y = 1 - field_parity;
-    int top_left_x = 3 * field_parity;
     int ry = int(row) - top_left_y;
     int r0 = ry >= 0 ? ry / 4 : -1;
     float16_t ty = float16_t(ry - 4 * r0) / 4.hf;
-    const int cc = int(col) + c_chroma_shift - 1 - top_left_x;
-    int c0 = cc >= 0 ? cc / 6 : -1;
-    float16_t tx = float16_t(cc - 6 * c0) / 6.hf;
-    const int RM = MUSE_BUF_HEIGHT / 2 - 1, CM = MUSE_Y_BUF_WIDTH / 2 - 1;
+    const int RM = MUSE_BUF_HEIGHT / 2 - 1;
     int rr[4] = int[](clamp(r0 - 1, 0, RM), clamp(r0, 0, RM), clamp(r0 + 1, 0, RM), clamp(r0 + 2, 0, RM));
-    int cs[4] = int[](clamp(c0 - 1, 0, CM), clamp(c0, 0, CM), clamp(c0 + 1, 0, CM), clamp(c0 + 2, 0, CM));
-    float16_t wx[4] = float16_t[](0.5hf * (-tx + 2.hf * tx * tx - tx * tx * tx), 0.5hf * (2.hf - 5.hf * tx * tx + 3.hf * tx * tx * tx),
-                                  0.5hf * (tx + 4.hf * tx * tx - 3.hf * tx * tx * tx), 0.5hf * (-tx * tx + tx * tx * tx));
     float16_t wy[4] = float16_t[](0.5hf * (-ty + 2.hf * ty * ty - ty * ty * ty), 0.5hf * (2.hf - 5.hf * ty * ty + 3.hf * ty * ty * ty),
                                   0.5hf * (ty + 4.hf * ty * ty - 3.hf * ty * ty * ty), 0.5hf * (-ty * ty + ty * ty * ty));
     float16_t s = 0.hf;
-    for (int i = 0; i < 4; i++) {
-        float16_t h = 0.hf;
-        for (int j = 0; j < 4; j++)
-            h += wx[j] * field_r[rr[i]][cs[j]];
-        s += wy[i] * h;
-    }
+    for (int i = 0; i < 4; i++)
+        s += wy[i] * field_r_h[rr[i]][col];
     return s;
 }
 
 float16_t resample_field_b(uint row, uint col) {
-    // a separable Catmull-Rom cubic over the 4x4 nearest field chroma samples, which sit 4 rows and
-    // 6 columns apart on the output grid (bilinear before, 2026-11-20; the edges are held as they were)
     int top_left_y = 1 - field_parity;
-    int top_left_x = 3 * field_parity;
     int ry = int(row) - top_left_y;
     int r0 = ry >= 0 ? ry / 4 : -1;
     float16_t ty = float16_t(ry - 4 * r0) / 4.hf;
-    const int cc = int(col) + c_chroma_shift - 1 - top_left_x;
-    int c0 = cc >= 0 ? cc / 6 : -1;
-    float16_t tx = float16_t(cc - 6 * c0) / 6.hf;
-    const int RM = MUSE_BUF_HEIGHT / 2 - 1, CM = MUSE_Y_BUF_WIDTH / 2 - 1;
+    const int RM = MUSE_BUF_HEIGHT / 2 - 1;
     int rr[4] = int[](clamp(r0 - 1, 0, RM), clamp(r0, 0, RM), clamp(r0 + 1, 0, RM), clamp(r0 + 2, 0, RM));
-    int cs[4] = int[](clamp(c0 - 1, 0, CM), clamp(c0, 0, CM), clamp(c0 + 1, 0, CM), clamp(c0 + 2, 0, CM));
-    float16_t wx[4] = float16_t[](0.5hf * (-tx + 2.hf * tx * tx - tx * tx * tx), 0.5hf * (2.hf - 5.hf * tx * tx + 3.hf * tx * tx * tx),
-                                  0.5hf * (tx + 4.hf * tx * tx - 3.hf * tx * tx * tx), 0.5hf * (-tx * tx + tx * tx * tx));
     float16_t wy[4] = float16_t[](0.5hf * (-ty + 2.hf * ty * ty - ty * ty * ty), 0.5hf * (2.hf - 5.hf * ty * ty + 3.hf * ty * ty * ty),
                                   0.5hf * (ty + 4.hf * ty * ty - 3.hf * ty * ty * ty), 0.5hf * (-ty * ty + ty * ty * ty));
     float16_t s = 0.hf;
-    for (int i = 0; i < 4; i++) {
-        float16_t h = 0.hf;
-        for (int j = 0; j < 4; j++)
-            h += wx[j] * field_b[rr[i]][cs[j]];
-        s += wy[i] * h;
-    }
+    for (int i = 0; i < 4; i++)
+        s += wy[i] * field_b_h[rr[i]][col];
     return s;
 }
 

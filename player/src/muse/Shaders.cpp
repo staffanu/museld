@@ -25,6 +25,8 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
   m_field_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT, MUSE_Y_BUF_WIDTH * 3)),
   m_field_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT / 2, MUSE_Y_BUF_WIDTH / 2)),
   m_field_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT / 2, MUSE_Y_BUF_WIDTH / 2)),
+  m_field_r_h_buffer(createMuseBuffer(MUSE_BUF_HEIGHT / 2, MUSE_Y_BUF_WIDTH * 3)),
+  m_field_b_h_buffer(createMuseBuffer(MUSE_BUF_HEIGHT / 2, MUSE_Y_BUF_WIDTH * 3)),
   m_inter_frame_Y_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH * 3)),
   m_inter_frame_r_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH)),
   m_inter_frame_b_buffer(createMuseBuffer(MUSE_BUF_HEIGHT * 2, MUSE_Y_BUF_WIDTH)),
@@ -135,6 +137,10 @@ Shaders::Shaders(Logger &log, std::string const &executable_dir, VulkanManager &
             "copy_y_for_interpolation",
             {eBuffer, eBuffer}, sizeof(uint32_t) * 3,
             VulkanUtil::loadSpirv(executable_dir, "copy_y_for_interpolation.comp"), Size(MUSE_Y_BUF_WIDTH, MUSE_BUF_HEIGHT), 8));
+    m_resample_field_chroma_h_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
+            "resample_field_chroma_h",
+            {eBuffer, eBuffer, eBuffer, eBuffer}, sizeof(uint32_t),
+            VulkanUtil::loadSpirv(executable_dir, "resample_field_chroma_h.comp"), Size(MUSE_Y_BUF_WIDTH * 3, MUSE_BUF_HEIGHT / 2)));
     m_diamond_algo = shared_ptr<ComputeShader>(new ComputeShader(m_vulkan_manager,
             "diamond",
             vector<MemoryObjectType>{eBuffer}, sizeof(uint32_t) * 3, // spelt out: a one-element list is ambiguous to GCC
@@ -248,6 +254,10 @@ void Shaders::decodeIntraField(CommandBuffer &sq, FieldBufferView &field) {
 
     filterImageDiamond(sq, 2, frame_phase_c ^ field_parity, m_field_r_buffer);
     filterImageDiamond(sq, 3, 1 - frame_phase_c ^ field_parity, m_field_b_buffer);
+
+    // The horizontal half of the combine shader's chroma cubic, once per chroma row
+    m_resample_field_chroma_h_algo->updateBufferDescriptorsInSet(0, {m_field_r_buffer, m_field_b_buffer, m_field_r_h_buffer, m_field_b_h_buffer});
+    sq.enqueueComputeShader(m_resample_field_chroma_h_algo, vector{(unsigned)field_parity});
 }
 
 void Shaders::copyYForInterpolation(CommandBuffer &sq, int descriptor_set_index,
@@ -269,8 +279,8 @@ void Shaders::combineStillAndMovingParts(CommandBuffer &sq, bool force_field_onl
                                          vk::AccessFlags(), vk::AccessFlagBits::eShaderWrite);
     m_combine_still_and_moving_algo->updateBufferDescriptorsInSet(
             0,
-            {m_field_Y_buffer, m_field_r_buffer,
-             m_field_b_buffer, m_inter_frame_Y_buffer,
+            {m_field_Y_buffer, m_field_r_h_buffer,
+             m_field_b_h_buffer, m_inter_frame_Y_buffer,
              m_inter_frame_r_buffer, m_inter_frame_b_buffer,
              m_movement_buffers[m_current_movement_buffer_index], m_image_out,
              m_image_Y_out, m_image_U_out, m_image_V_out});
