@@ -1275,7 +1275,10 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
 
             if (state.paused_countdown != 0 && --state.paused_countdown == 0) {
                 state.paused = true;
-                state.osd_text = "PAUSE";
+                // A text still showing (a search's result, which this pause
+                // follows by five fields) stays, with the pause after it
+                state.osd_text = state.osd_text_remaining_frames > 0 && !state.displayed_osd_text.empty()
+                               ? state.displayed_osd_text + "   PAUSE" : "PAUSE";
             }
             if (!input.poll(window, state, reader_controls, dropout_mode, audio_track, full_screen) || menu_quit)
                 break;
