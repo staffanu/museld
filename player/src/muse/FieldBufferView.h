@@ -16,6 +16,7 @@ public:
     FieldBufferView(Logger &log, int frame_no, std::shared_ptr<musevk::VulkanBuffer> const &data, int field_parity);
 
     void set_frame_no(int frame_no);
+    int frame_no() const { return m_frame_no; }
 
     // Called when initializing the chain of 3 frames (6 fields) that are used in
     // round-robin order, so that we can easily access the control data for the field.

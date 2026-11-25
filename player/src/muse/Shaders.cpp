@@ -349,10 +349,23 @@ bool Shaders::decodeInterFrameAndDetectMotion(CommandBuffer &sq,
         return false;
     }
 
+    // The five fields are consecutive in time, so this call's second pair
+    // (fields 1 and 3, the previous field and its frame-mate) is the previous
+    // call's first pair (its fields 0 and 2), converted then into the rows of
+    // the parity this call's second pair goes to: those rows still hold it,
+    // since the first pair's conversion writes the other parity's rows and the
+    // diamond rewrites only the missing lattice points, from the known ones.
+    // So the second pair is made again only when the buffer does not hold it
+    // (the first inter-frame field after an intra-only stretch or a seek, a
+    // redo of the same field), which saves two copies and a 4:3 conversion
+    // per field, about 2 ms of the Apple TV's 16.7 (2026-11-25)
+    const ConvertedPair second{fields[1].get().frame_no(), fields[3].get().frame_no(), field_parities[1], field_phases_y[1]};
+    if (!(m_inter_frame_pair == second))
+        makeFieldFromConsecutiveFrames(sq, 3, 2, fields[1], frame_phases_y[1], fields[3], frame_phases_y[3], field_parities[1],
+                                       field_phases_y[1]);
     makeFieldFromConsecutiveFrames(sq, 1, 1, fields[0], frame_phases_y[0], fields[2], frame_phases_y[2], field_parities[0],
                                    field_phases_y[0]);
-    makeFieldFromConsecutiveFrames(sq, 3, 2, fields[1], frame_phases_y[1], fields[3], frame_phases_y[3], field_parities[1],
-                                   field_phases_y[1]);
+    m_inter_frame_pair = ConvertedPair{fields[0].get().frame_no(), fields[2].get().frame_no(), field_parities[0], field_phases_y[0]};
     filterImageDiamond(sq, 1, field_parities[0] ^ field_phases_y[0], m_inter_frame_Y_buffer);
 
     for (int i = 0; i < 4; i++) {

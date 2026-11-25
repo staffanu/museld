@@ -80,6 +80,15 @@ private:
     void filterImageDiamond(musevk::CommandBuffer &sq, int descriptor_set_index,
                             int phase, std::shared_ptr<musevk::VulkanBuffer> const &buffer);
 
+    // The pair of fields whose 4:3 conversion the inter-frame luma buffer's
+    // rows of one parity hold from the previous call (see
+    // decodeInterFrameAndDetectMotion): the next call's second pair is the
+    // previous call's first, so it is not made again
+    struct ConvertedPair {
+        int frame_a = -1, frame_b = -1, parity = -1, phase = -1;
+        bool operator==(const ConvertedPair &) const = default;
+    };
+    ConvertedPair m_inter_frame_pair;
     void makeFieldFromConsecutiveFrames(musevk::CommandBuffer &sq,
                                         int copy_y_descriptor_set_first_index,
                                         int convert_sample_rate_descriptor_set_index,
