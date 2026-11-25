@@ -820,13 +820,22 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                                            name, action.offset, state.position_search->probes())
                              : std::format("Position search: {} after {} probes, returning to input sample {}",
                                            action.reason, state.position_search->probes(), destination));
-                    if (seekToInputSample(destination))
+                    if (seekToInputSample(destination)) {
                         state.search_landing_generation = state.search_generation;
-                    // Shown with the first frame from there, not on the probe image
+                    } else if (state.search_resume_paused) {
+                        // Nothing to wait for: back to the pause from here
+                        state.paused_countdown = 5;
+                        state.search_resume_paused = false;
+                    }
+                    // Shown with the first frame from there, not on the probe image.
+                    // A search begun paused goes back to the pause once that frame
+                    // is shown (below), not now: a countdown from here ran out
+                    // before the landing frame was decoded on the Apple TV, whose
+                    // serial FLAC reader takes longer over a seek, and the paused
+                    // loop then decoded nothing more -- SEARCH stayed on the
+                    // screen until the viewer resumed by hand (2026-11-25)
                     state.osd_text_pending = found ? name : action.reason;
                     state.osd_text_pending_generation = state.search_generation;
-                    if (state.search_resume_paused)
-                        state.paused_countdown = 5;
                     state.position_search.reset();
                     break;
                 }
@@ -851,6 +860,10 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
                 state.search_landing_generation.reset();
                 log.debug(eApplication, std::format("Position search: landed, the frame at input sample {} is shown",
                                                     state.last_decoded.disc_info_input_offset));
+                if (state.search_resume_paused) {
+                    state.paused_countdown = 5;
+                    state.search_resume_paused = false;
+                }
             }
             // The picture, sound and everything that follows them are held
             // back while a search runs and until its landing frame is the
