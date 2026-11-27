@@ -615,10 +615,12 @@ of components.
 ### Apple TV
 
 museld also runs on the Apple TV (`docs/tvos-port.md` records the port and its state).  The app
-is not on the App Store: build it yourself with Xcode and the `tvos-device` preset, which needs a
-Mac and an Apple ID (a free one signs the app for your own Apple TV for a week at a time), or
-e-mail staffan@ulfberg.se to be added as a TestFlight tester and install it from the TestFlight
-app.  The app has no command line: it starts in the file browser, which lists web servers only,
+is in public beta on TestFlight rather than on the App Store: install the TestFlight app on the
+Apple TV, open https://testflight.apple.com/join/sY1EABfd on a phone or computer signed in to
+the same Apple ID and accept the invitation, and the TestFlight app on the box installs museld
+and its updates.  Or build it yourself with Xcode and the `tvos-device` preset, which needs a
+Mac and an Apple ID (a free one signs the app for your own Apple TV for a week at a time).
+The app has no command line: it starts in the file browser, which lists web servers only,
 there being no local directories, and it keeps what it remembers in its application container.
 The browser's first screen offers the sample capture bundled with the app, ten seconds of a Space
 Shuttle launch: NASA's mission report footage from the SpaceDisc vol. 1 laserdisc, which is a US

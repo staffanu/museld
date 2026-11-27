@@ -604,7 +604,8 @@ TestFlight (the *TestFlight* entry under Done).
   (the Release configuration has no debug info), so TestFlight crash reports are not
   symbolicated.  Internal testers (App Store Connect users of the team) get a build as
   soon as it is processed; external testers and the public link wait on Beta App
-  Review.
+  Review.  Build 4 passed that review on 2026-11-27, and the app is in public beta since:
+  https://testflight.apple.com/join/sY1EABfd (the README and docs/museld.md point there).
 - **The bundled sample and build 3** (2026-11-24): a reviewer, or a new user, meets an empty
   browser otherwise, and a clip served over the internet would stall (a 40 MHz capture is
   240 Mbit/s as 16-bit FLAC, 120 at 30 MHz and 8 bits), so the app carries one: ten seconds

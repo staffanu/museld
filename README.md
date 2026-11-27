@@ -48,6 +48,13 @@ signed in to GitHub. On Linux, build from source as described below.
 See **[docs/packaging.md](docs/packaging.md)** for what is inside the packages, how CI
 builds them, and how to make a release.
 
+The Apple TV app is in public beta on TestFlight: install the TestFlight app on the Apple TV,
+then open [testflight.apple.com/join/sY1EABfd](https://testflight.apple.com/join/sY1EABfd)
+on a phone or computer signed in to the same Apple ID and accept the invitation. It needs an
+Apple TV 4K (2017 or later) and plays captures from a web server on the local network, see
+*Apple TV* in [docs/museld.md](docs/museld.md). The port and its state are recorded in
+[docs/tvos-port.md](docs/tvos-port.md).
+
 ## Components
 
 ### museld
