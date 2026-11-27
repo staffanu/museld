@@ -31,6 +31,8 @@ struct PushBlock {
     float bg_g;
     float bg_b;
     float bg_a;
+    uint32_t origin_x;
+    uint32_t origin_y;
 };
 } // namespace
 
@@ -211,7 +213,11 @@ void SubtitleOverlay::render(musevk::CommandBuffer &command_buffer,
             {m_quad_buffer, m_font->atlasBuffer(), img, img});
     }
 
-    m_shader->updateWorkgroup(musevk::Size(max_x, max_y));
+    // The grid covers the box alone, offset by its corner in the shader: sized from the
+    // image's origin it was 1.7 M invocations for a line at the bottom of a 1080p frame,
+    // which cost the A10X 4.4 ms per frame and, the queue being one, the demodulator its
+    // margin -- the Apple TV's audio dropouts at every longer subtitle (2026-11-27)
+    m_shader->updateWorkgroup(musevk::Size(max_x - min_x, max_y - min_y));
 
     PushBlock pc{};
     pc.n_rect = n_rect;
@@ -222,6 +228,8 @@ void SubtitleOverlay::render(musevk::CommandBuffer &command_buffer,
     pc.bg_g = 0.10f;
     pc.bg_b = 0.10f;
     pc.bg_a = 0.55f;
+    pc.origin_x = min_x;
+    pc.origin_y = min_y;
 
     std::vector<PushBlock> push{pc};
     command_buffer.enqueueComputeShader(m_shader, push);

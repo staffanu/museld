@@ -629,6 +629,24 @@ TestFlight (the *TestFlight* entry under Done).
   (to its own intermediates), and the next ordinary build fails with "unable to create
   directory ... museld.app" until they are removed.
 
+- **The subtitle overlay's dispatch** (2026-11-27): MUSE from the NAS dropped audio at fixed
+  positions (167 and 224 s into Ursa Minor Blue) and not when the same bytes came from another
+  server, which sent the search through the input path for days: NFS stalls, injected stalls,
+  a copy on multivac's own disk, a tcpdump through a dip -- none of it marked those seconds.
+  A GPU timeline (one line per command buffer from every thread: CPU submit, wait and return,
+  the GPU's own start and end, `MUSELD_GPU_TIMELINE=1`) showed the queue 82 % busy all along
+  (the demodulator 3.0 ms per 8.39 ms block, the decoder 1.0 + 6.2 ms per field, the display's
+  blit 0.4 ms per frame) and 96 % at the dips, where the display's command buffer took 4.4 ms
+  per frame and the demodulator, behind it on the one FIFO queue, fell to 102 blocks a second.
+  The display was drawing a subtitle: the capture's directory on the NAS holds .srt files, the
+  other servers' did not, and `render_subtitle.comp` was dispatched from the image's origin to
+  the far corner of the text's box, 1.7 M invocations for a line at the bottom of a 1080p
+  frame, each scanning every glyph quad.  The grid now covers the box alone (its corner in the
+  push constants): 0.35 ms per frame on the A10X, the same run clean, and the pixels identical.
+  So the one queue is where to look when the box stutters at some content and not other: the
+  summary of a timeline is the per-second occupancy by label, and a label that grows is the
+  culprit.
+
 ### 2. Measure the rest
 
 `--log P3` per-stage timing.  Still to do: the UDP receive thread alone with
