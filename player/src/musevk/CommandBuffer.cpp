@@ -9,6 +9,7 @@
 #include "CommandBuffer.h"
 #include "VulkanBuffer.h"
 #include "TimestampQueryPool.h"
+#include "GpuTimeline.h"
 
 namespace musevk {
     CommandBuffer::CommandBuffer(vk::CommandPool &command_pool,
@@ -25,6 +26,12 @@ namespace musevk {
         vk::CommandBufferAllocateInfo commandBufferAllocateInfo(m_command_pool, vk::CommandBufferLevel::ePrimary, 1);
         m_command_buffer = m_device.allocateCommandBuffers(commandBufferAllocateInfo)[0];
         m_fence = m_device.createFence(vk::FenceCreateInfo());
+        if (GpuTimeline::enabled() && m_limits.timestampComputeAndGraphics) {
+            vk::QueryPoolCreateInfo query_pool_info;
+            query_pool_info.setQueryCount(2);
+            query_pool_info.setQueryType(vk::QueryType::eTimestamp);
+            m_timeline_query_pool = m_device.createQueryPool(query_pool_info);
+        }
     }
 
     CommandBuffer::~CommandBuffer() {
@@ -35,6 +42,8 @@ namespace musevk {
         if (m_is_running)
             (void)m_device.waitForFences(1, &m_fence, VK_TRUE, UINT64_MAX);
         m_device.destroy(m_fence);
+        if (m_timeline_query_pool)
+            m_device.destroy(m_timeline_query_pool);
         m_device.freeCommandBuffers(m_command_pool, m_command_buffer);
     }
 
@@ -190,6 +199,10 @@ namespace musevk {
         assert(!m_recording);
         m_command_buffer.begin(vk::CommandBufferBeginInfo());
         m_recording = true;
+        if (m_timeline_query_pool) {
+            m_command_buffer.resetQueryPool(m_timeline_query_pool, 0, 2);
+            m_command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, m_timeline_query_pool, 0);
+        }
     }
 
     void CommandBuffer::submit(std::vector<vk::Semaphore> const &wait_semaphores,
@@ -197,6 +210,8 @@ namespace musevk {
                                std::vector<vk::Semaphore> const &signal_semaphores) {
         assert(!m_is_running);
         assert(m_recording);
+        if (m_timeline_query_pool)
+            m_command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, m_timeline_query_pool, 1);
         m_command_buffer.end();
         m_recording = false;
         m_is_running = true;
@@ -210,6 +225,8 @@ namespace musevk {
         auto result = m_queue.submit(submitInfo, m_fence);
         if (result != vk::Result::eSuccess)
             throw std::runtime_error(std::format("queue submit returned with result {}", (uint32_t)result));
+        if (m_timeline_query_pool)
+            m_timeline_submit_ns = GpuTimeline::nowNs();
     }
 
     bool CommandBuffer::isSubmitted() const {
@@ -218,6 +235,7 @@ namespace musevk {
 
     void CommandBuffer::wait() {
         assert(m_is_running);
+        const int64_t wait_ns = m_timeline_query_pool ? GpuTimeline::nowNs() : 0;
         // It returned a result *and* threw because the enhanced overload does
         // both: the result told eSuccess from eTimeout, its two success codes,
         // while anything else -- eErrorDeviceLost and friends -- came back as an
@@ -225,6 +243,14 @@ namespace musevk {
         auto result = m_device.waitForFences(1, &m_fence, VK_TRUE, UINT64_MAX);
         if (result != vk::Result::eSuccess)
             throw std::runtime_error(std::format("waitForFences returned with result {}", (uint32_t)result));
+        if (m_timeline_query_pool) {
+            const int64_t done_ns = GpuTimeline::nowNs();
+            uint64_t ticks[2] = {0, 0};
+            if (m_device.getQueryPoolResults(m_timeline_query_pool, 0, 2, sizeof(ticks), ticks, sizeof(uint64_t),
+                                             vk::QueryResultFlagBits::e64 | vk::QueryResultFlagBits::eWait) == vk::Result::eSuccess)
+                GpuTimeline::record(m_timeline_label, m_timeline_submit_ns, wait_ns, done_ns, ticks[0], ticks[1],
+                                    m_limits.timestampPeriod);
+        }
         m_device.resetFences(m_fence);
         m_is_running = false;
         if (!m_memory_ranges_to_invalidate.empty()) {

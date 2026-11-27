@@ -104,6 +104,9 @@ namespace musevk {
 
         void enqueueWriteTimestamp(vk::PipelineStageFlagBits stage, vk::QueryPool const &pool, unsigned int query);
 
+        // The name this buffer's submissions carry in the GPU timeline (GpuTimeline.h)
+        void setTimelineLabel(std::string label) { m_timeline_label = std::move(label); }
+
         void submit(std::vector<vk::Semaphore> const &wait_semaphores,
                     std::vector<vk::PipelineStageFlags> const &wait_dst_stage_masks,
                     std::vector<vk::Semaphore> const &signal_semaphores);
@@ -127,6 +130,12 @@ namespace musevk {
 
         bool m_recording = false;
         bool m_is_running = false;
+
+        // MUSELD_GPU_TIMELINE: two timestamps (start, end) of every submission and the CPU
+        // times around it, see GpuTimeline.h
+        vk::QueryPool m_timeline_query_pool;
+        std::string m_timeline_label = "-";
+        int64_t m_timeline_submit_ns = 0;
         std::vector<vk::MappedMemoryRange> m_memory_ranges_to_invalidate;
         std::vector<vk::MappedMemoryRange> m_memory_ranges_to_flush;
     };

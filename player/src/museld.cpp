@@ -386,6 +386,7 @@ static std::optional<InputProbeResult::Type> runPlayer(Logger &log,
     {
         musevk::CommandPool command_pool(manager);
         auto command_buffer = command_pool.createCommandBuffer();
+        command_buffer->setTimelineLabel("show");
         TextRenderer text_renderer(executable_dir, manager, command_pool);
 
         auto images = decoder.getResultImages();

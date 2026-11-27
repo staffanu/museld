@@ -396,6 +396,7 @@ if(BUILD_MUSE)
         musevk/VulkanBuffer.cpp musevk/VulkanBuffer.h
         musevk/TimestampStatistics.cpp musevk/TimestampStatistics.h
         musevk/TimestampQueryPool.cpp musevk/TimestampQueryPool.h
+        musevk/GpuTimeline.cpp musevk/GpuTimeline.h
         musevk/MemoryAllocator.cpp musevk/MemoryAllocator.h
         musevk/VulkanUtil.cpp musevk/VulkanUtil.h
         musevk/HalfFloatUtil.h

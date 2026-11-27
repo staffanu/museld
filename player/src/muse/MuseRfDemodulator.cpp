@@ -48,6 +48,7 @@ void MuseRfDemodulator::demodulate() {
             : nullptr;
     musevk::TimestampStatistics timestamp_statistics;
     auto command_buffer = command_pool.createCommandBuffer(timestamp_query_pool.get());
+    command_buffer->setTimelineLabel("demod");
 
     vk::BufferUsageFlags buffer_usage_flags =
             vk::BufferUsageFlagBits::eStorageBuffer

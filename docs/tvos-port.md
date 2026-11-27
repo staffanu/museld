@@ -644,8 +644,9 @@ TestFlight (the *TestFlight* entry under Done).
   frame, each scanning every glyph quad.  The grid now covers the box alone (its corner in the
   push constants): 0.35 ms per frame on the A10X, the same run clean, and the pixels identical.
   So the one queue is where to look when the box stutters at some content and not other: the
-  summary of a timeline is the per-second occupancy by label, and a label that grows is the
-  culprit.
+  timeline is kept (`MUSELD_GPU_TIMELINE=1`, `musevk/GpuTimeline.h`, read with
+  `tools/gpu-timeline.py`), its summary is the per-second occupancy by label, and a label that
+  grows is the culprit.
 
 ### 2. Measure the rest
 

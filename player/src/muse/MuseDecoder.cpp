@@ -53,6 +53,8 @@ MuseDecoder::MuseDecoder(
   m_efm_pcm_processor(log),
   m_equalizer(log, eq_mode, eq_alpha),
   m_frame_buffers() {
+    m_first_stage_command_buffer->setTimelineLabel("dec1");
+    m_second_stage_command_buffer->setTimelineLabel("dec2");
 }
 
 MuseDecoder::~MuseDecoder() {

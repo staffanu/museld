@@ -224,6 +224,12 @@ Audio, Video, Decoder, Input, Output; levels 0–4 = off, error, warn, info, deb
   offset it was read at, to find a disc frame in a capture.
 - `P3` — per-stage timing (demodulator per block, reader and decoder per frame) and
   the final frames/s; the frame rate is set by the slowest stage, the demodulator.
+- `MUSELD_GPU_TIMELINE=1` (an environment variable, not a log category) prints to stderr one
+  line per command buffer from every thread with the CPU's submit, wait and return times and
+  the GPU's own start and end (labels demod, dec1, dec2, show; `musevk/GpuTimeline.h`), and
+  `tools/gpu-timeline.py LOG summary` turns a run's output together with its `P3` log into the
+  queue's occupancy per second and per label: the way to see who is starving whom on the one
+  queue that all stages share (on the 2017 Apple TV it runs about 82 % busy during MUSE).
 - `I3` — timebase: anchoring, resets, lattice slips, re-anchors. `I4` adds one line
   per frame, `N of M lines unsupported by a nearby sync pulse`; exactly 18 per
   frame (the two vertical intervals) means every hsync was found.
